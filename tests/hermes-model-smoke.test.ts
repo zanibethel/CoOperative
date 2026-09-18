@@ -21,10 +21,9 @@ test("model smoke uses Vercel OIDC helper for AI Gateway", () => {
 });
 
 test("model smoke is single-turn and bounded", () => {
-  assert.match(workflowSource, /"--max-turns"/);
-  assert.match(workflowSource, /"1"/);
-  assert.match(workflowSource, /"--run-budget"/);
-  assert.match(workflowSource, /"60"/);
+  assert.match(workflowSource, /"-z"/);
+  assert.match(workflowSource, /exactly one scripted request/);
+  assert.match(workflowSource, /Do not call tools/);
   assert.match(workflowSource, /timeout 75s/);
   assert.match(workflowSource, /"--safe-mode"/);
   assert.match(workflowSource, /"--ignore-user-config"/);
