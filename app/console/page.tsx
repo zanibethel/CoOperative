@@ -88,11 +88,22 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
-function isDetachedRunningTask(task: Task) {
+function asyncExecutionMode(task: Task): "detached" | "workflow" | null {
   if (task.status !== "executing" || !task.result || typeof task.result !== "object") {
-    return false;
+    return null;
   }
-  return (task.result as { executionMode?: unknown }).executionMode === "detached";
+
+  const mode = (task.result as { executionMode?: unknown }).executionMode;
+  return mode === "detached" || mode === "workflow" ? mode : null;
+}
+
+function taskProgressLabel(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null;
+  const progress = (result as { progress?: unknown }).progress;
+  if (!progress || typeof progress !== "object") return null;
+  const stage = (progress as { stage?: unknown }).stage;
+  if (typeof stage !== "string") return null;
+  return stage.replaceAll("_", " ");
 }
 
 function taskFindings(result: unknown): Array<{ priority?: string; title: string; why?: string }> {
@@ -154,12 +165,23 @@ export default function OwnerConsolePage() {
   );
 
   const detachedTaskIds = useMemo(
-    () => overview.tasks.filter(isDetachedRunningTask).map((task) => task.id),
+    () =>
+      overview.tasks
+        .filter((task) => asyncExecutionMode(task) === "detached")
+        .map((task) => task.id),
+    [overview.tasks],
+  );
+
+  const asyncTaskIds = useMemo(
+    () =>
+      overview.tasks
+        .filter((task) => asyncExecutionMode(task) !== null)
+        .map((task) => task.id),
     [overview.tasks],
   );
 
   useEffect(() => {
-    if (detachedTaskIds.length === 0) return;
+    if (asyncTaskIds.length === 0) return;
 
     let cancelled = false;
     let polling = false;
@@ -169,14 +191,16 @@ export default function OwnerConsolePage() {
       polling = true;
 
       try {
-        await Promise.all(
-          detachedTaskIds.map(async (taskId) => {
-            await fetch("/api/operative/tasks/" + taskId + "/poll", {
-              method: "GET",
-              cache: "no-store",
-            }).catch(() => undefined);
-          }),
-        );
+        if (detachedTaskIds.length > 0) {
+          await Promise.all(
+            detachedTaskIds.map(async (taskId) => {
+              await fetch("/api/operative/tasks/" + taskId + "/poll", {
+                method: "GET",
+                cache: "no-store",
+              }).catch(() => undefined);
+            }),
+          );
+        }
 
         if (cancelled) return;
 
@@ -186,7 +210,7 @@ export default function OwnerConsolePage() {
         if (!cancelled) setOverview(payload);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Unable to refresh detached task");
+          setError(err instanceof Error ? err.message : "Unable to refresh active cloud task");
         }
       } finally {
         polling = false;
@@ -200,7 +224,7 @@ export default function OwnerConsolePage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [detachedTaskIds.join(",")]);
+  }, [asyncTaskIds.join(","), detachedTaskIds.join(",")]);
 
   async function persistMessage(messageText: string) {
     const response = await fetch("/api/console/messages", {
