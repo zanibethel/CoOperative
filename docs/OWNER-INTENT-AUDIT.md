@@ -728,3 +728,29 @@ Each entry should contain:
 **Why:** Existing schema contracts should be reused rather than widened when the mismatch is in application naming. This keeps executor policy tighter and avoids an unnecessary database migration.
 
 **Status:** FIXED. Model-backed Cloud Hermes smoke test ready for retry.
+
+
+---
+
+## 2026-09-18 — Workflow AI Gateway auth switched to Vercel OIDC helper
+
+**Scope:** Cloud Hermes / Vercel Workflow / AI Gateway authentication
+
+**Observed live result:**
+- The corrected `hermes-cloud-operative` smoke task reached Vercel Workflow successfully.
+- Workflow run `wrun_01M2T7BJKYBAGTW7WME5SK8G8D` failed before any model request because `process.env.VERCEL_OIDC_TOKEN` was unavailable inside the Workflow step runtime.
+- No AI Gateway/model call occurred and task spend remained 0 microunits.
+
+**Changes / decisions:**
+- Replaced direct environment-variable access with Vercel's supported `getVercelOidcToken()` helper from `@vercel/oidc`.
+- Added `@vercel/oidc@3.2.0` as an explicit pinned dependency, matching the already-present locked package version.
+- The short-lived token returned by the helper is injected only into the disposable Hermes Sandbox as `AI_GATEWAY_API_KEY`.
+- No long-lived Nous/API Gateway provider credential was added.
+- Structured Workflow error serialization was improved to preserve object/cause messages when future failures occur.
+- Regression tests now require the OIDC helper path and reject direct `process.env.VERCEL_OIDC_TOKEN` access.
+- Final head `7c99b9424c956c07accb8f0fd01de8e06adfbd98` passed unit tests, TypeScript, lint, and build.
+- Preview deployment `dpl_HpRECPfBabPBumRH8zAMsWSxZWS2` is READY at `co-operative-r7rfoqxa4-zanibethels-projects.vercel.app`.
+
+**Why:** Workflow steps are not guaranteed to expose the deployment OIDC token as a plain environment variable. The supported helper preserves short-lived Vercel identity without introducing a permanent provider secret.
+
+**Status:** FIXED. Model-backed Cloud Hermes smoke test ready for retry.
