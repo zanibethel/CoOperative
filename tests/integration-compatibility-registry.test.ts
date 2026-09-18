@@ -41,6 +41,9 @@ test("initial Cloud Hermes roadblocks are preserved as reusable rules", () => {
     "ai-gateway-unknown-cost-must-not-equal-zero",
     "hermes-prompt-size-diagnostic-must-be-bounded",
     "prepared-hermes-runtime-reuse",
+    "linked-project-use-own-revision",
+    "provider-auth-use-human-handoff",
+    "provider-secrets-never-enter-agent-context",
     "supabase-trusted-writes-preserve-owner-gates",
   ]) {
     assert.ok(ids.has(id), `missing compatibility rule: ${id}`);
