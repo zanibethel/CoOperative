@@ -14,21 +14,101 @@ Move the platform-operating role currently performed by a Hermes installation on
 
 The end state should not require the owner's MacBook to remain awake or online.
 
+## Primary owner experience: Owner Console
+
+The primary control surface should be a CoOperative **Owner Console**, not Telegram.
+
+The Owner Console is a conversational dashboard where the business/platform owner can:
+
+- talk naturally with an integrated AI advisor;
+- ask what is happening across the business/platform;
+- review Hermes/Cloud Operative proposals;
+- understand technical decisions in plain language;
+- see expected cost, savings, revenue impact, risk, and confidence;
+- approve, reject, edit, pause, or cancel work;
+- inspect pending owner decisions;
+- see task progress and completed outcomes;
+- review cost usage and plan margin;
+- continue a decision thread without copy/pasting between tools.
+
+Telegram is secondary: useful for alerts, urgent approvals, and lightweight mobile interaction, but not the canonical owner experience.
+
+### Decision Brief
+
+Any action that needs owner input should be normalized into a Decision Brief:
+
+- **What is being proposed**
+- **Why it is needed**
+- **What happens if approved**
+- **What happens if declined or delayed**
+- **Expected cost**
+- **Expected savings/revenue impact**, when applicable
+- **Risk level**
+- **Permissions/scopes required**
+- **Rollback/stop condition**
+- **Recommended next action**
+- **Approve / Reject / Modify / Ask a question**
+
+The AI advisor should explain the brief conversationally without changing the underlying policy or approval requirement.
+
+### AI advisor vs executor
+
+The conversational AI is an advisor/orchestrator, not an unrestricted executor.
+
+It may:
+
+- explain;
+- summarize;
+- compare;
+- ask clarifying questions;
+- translate technical details;
+- propose changes;
+- create governed operative tasks;
+- surface pending approvals.
+
+Execution still flows through:
+
+`policy -> playbook/script -> capability router -> operative task -> approval gates`
+
+No model may bypass the policy layer simply because it is embedded in the Owner Console.
+
+### Conversation continuity
+
+Owner conversations should persist as structured CoOperative state, not depend on a single model/provider's hidden memory.
+
+Store durable items such as:
+
+- owner decisions;
+- stated business goals;
+- approved policies;
+- rejected approaches;
+- decision rationale where useful;
+- open questions;
+- task references;
+- linked evidence.
+
+The AI model can change without losing the owner's operating context.
+
 ## Target experience
 
-The owner should be able to use CoOperative or Telegram from a phone:
+The owner should be able to use the Owner Console from phone or desktop:
 
 ```text
 Owner
-  -> CoOperative app / Telegram
+  -> CoOperative Owner Console
+  -> integrated AI advisor
+  -> durable conversation + business/platform context
   -> Cloud Operative task
   -> policy + cost + permission check
   -> playbook / script / connector
   -> AI only when reasoning is required
   -> cloud execution workspace when terminal/code work is required
   -> result + evidence + artifacts
-  -> owner approval only at genuine owner gates
+  -> Decision Brief only at genuine owner gates
+  -> owner approves/rejects/edits in the same conversation
 ```
+
+Telegram and future ChatGPT/plugin connections should enter the same task/approval system rather than creating separate authority paths.
 
 ## Existing infrastructure first
 
@@ -53,6 +133,7 @@ GitHub is source control, not the long-running execution environment.
 Use for:
 
 - CoOperative web application;
+- Owner Console UI and APIs;
 - authenticated APIs;
 - Telegram/webhook entry points;
 - orchestration endpoints;
@@ -68,6 +149,7 @@ The Cloud Operative should prefer on-demand execution over paying for an idle al
 Use for durable structured state:
 
 - organizations/businesses;
+- owner conversations and decisions;
 - operative tasks and task status;
 - approvals;
 - task events/audit trail;
@@ -83,18 +165,22 @@ Do not store secrets in normal database rows or storage objects.
 
 ## Cloud Operative components
 
-### 1. Task Intake
+### 1. Owner Console / Task Intake
 
-Sources may include:
+Primary source:
 
-- CoOperative chat/app;
+- CoOperative Owner Console conversation.
+
+Secondary sources may include:
+
 - Telegram webhook;
 - admin action;
 - scheduled research task;
 - Improvement Lab proposal;
-- GitHub issue explicitly approved for execution.
+- GitHub issue explicitly approved for execution;
+- future ChatGPT/CoOperative connector.
 
-Every task receives a durable task ID.
+Every task receives a durable task ID and links back to the decision/conversation that created it.
 
 ### 2. Task Policy Layer
 
@@ -177,7 +263,7 @@ or
 Initial storage plan:
 
 - GitHub: source-controlled durable knowledge;
-- Supabase Postgres: structured task/evidence data;
+- Supabase Postgres: structured task/evidence/conversation data;
 - Supabase Storage: task artifacts, reports, fixtures, generated files, backups that are appropriate for object storage;
 - Vercel Sandbox filesystem: temporary execution state only.
 
@@ -214,12 +300,33 @@ Target flow:
 ```text
 Telegram
   -> authenticated CoOperative webhook
-  -> create operative task
+  -> create/view operative task
+  -> receive Decision Brief or status
+  -> approve/reject if allowed
   -> execute asynchronously
-  -> post progress/approval request/result back to Telegram
+  -> post result back
 ```
 
 The Telegram identity must be allow-listed and mapped to the appropriate CoOperative owner account.
+
+Telegram does not have independent authority; it uses the same Owner Console/task policy.
+
+### 11. External ChatGPT bridge
+
+A future CoOperative connector/plugin may allow ChatGPT to use the same governed task interface.
+
+Expose only controlled operations such as:
+
+- create task;
+- read task status/result;
+- list pending approvals;
+- submit an explicit owner-approved decision;
+- cancel task;
+- read cost/usage summaries.
+
+Do not expose unrestricted shell access.
+
+This preserves the option for the owner to keep working with ChatGPT while CoOperative remains the authoritative task/policy system.
 
 ## Hermes migration strategy
 
@@ -246,14 +353,16 @@ No secret values should be placed in reports.
 
 Create:
 
+- Owner Console conversation/decision contracts;
 - operative task schema;
 - task-event/audit schema;
 - approval schema;
+- Decision Brief contract;
 - cost ledger integration;
-- Telegram webhook;
 - cloud execution adapter;
 - artifact-storage abstraction;
-- Cloud Operative service/interface.
+- Cloud Operative service/interface;
+- Telegram webhook as secondary interface.
 
 ### Phase C — self-bootstrap
 
@@ -266,20 +375,22 @@ Examples:
 - make a low-risk code/config change;
 - run tests;
 - save report/evidence;
-- pause for approval;
-- continue after approval.
+- pause with a Decision Brief;
+- continue after owner approval.
 
 ### Phase D — cut over phone control
 
-Telegram points to CoOperative's cloud webhook rather than the Mac gateway.
+Owner Console becomes the primary mobile control surface.
 
 Verify:
 
-- request arrives;
+- owner conversation creates a task;
 - task persists;
 - execution runs while Mac is offline;
-- owner receives progress/result;
-- approval/resume works.
+- owner receives understandable status/Decision Brief;
+- approval/resume works from the same dashboard.
+
+Telegram can then be connected as an optional notification/backup interface.
 
 ### Phase E — retire Mac dependency
 
@@ -294,17 +405,20 @@ Once cloud operation is stable:
 
 The Cloud Operative pilot is successful when:
 
-1. the owner can initiate a task from phone/Telegram;
+1. the owner can initiate a task from the CoOperative Owner Console on a phone;
 2. the Mac can be offline;
 3. the task is durably recorded in Supabase;
-4. the system selects an existing playbook/script first;
-5. a cloud execution workspace is created only when required;
-6. AI is used only for genuinely reasoning-dependent steps;
-7. cost is measured;
-8. high-risk actions pause for owner approval;
-9. artifacts/evidence are persisted intentionally;
-10. the task completes and reports back to the phone;
-11. the resulting procedure is reusable for the next task.
+4. the conversation/decision that created it is preserved;
+5. the system selects an existing playbook/script first;
+6. a cloud execution workspace is created only when required;
+7. AI is used only for genuinely reasoning-dependent steps;
+8. cost is measured;
+9. high-risk actions pause with a clear Decision Brief;
+10. the owner can ask questions before approving;
+11. approve/reject/modify resumes the same task safely;
+12. artifacts/evidence are persisted intentionally;
+13. the task completes and reports back in the Owner Console;
+14. the resulting procedure is reusable for the next task.
 
 ## Cost rule
 
@@ -321,6 +435,8 @@ Do not attempt to:
 - move secrets into the database;
 - create a permanent always-on VM without demonstrated need;
 - migrate every piece of local Hermes state;
-- auto-merge high-risk platform changes.
+- auto-merge high-risk platform changes;
+- make Telegram the primary owner interface;
+- bind Owner Console intelligence to one model provider.
 
-The first goal is a safe, durable, phone-controlled cloud operative that can progressively replace manual platform glue work.
+The first goal is a safe, durable, conversational, phone-controlled cloud operative that can progressively replace manual platform glue work.
