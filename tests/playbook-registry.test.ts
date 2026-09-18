@@ -7,7 +7,13 @@ import {
 } from "../lib/operative/playbook-registry.ts";
 
 test("Cloud Operative exposes only reviewed playbook keys", () => {
-  assert.deepEqual(cloudPlaybookKeys(), ["cloud-self-check", "hermes-runtime-check", "hermes-model-smoke"]);
+  assert.deepEqual(cloudPlaybookKeys(), [
+    "cloud-self-check",
+    "hermes-runtime-check",
+    "hermes-model-smoke",
+    "creatorhub-health-check",
+    "raisehub-health-check",
+  ]);
   assert.equal(getCloudPlaybook("unknown-playbook"), null);
 });
 
@@ -46,4 +52,27 @@ test("model-backed Hermes smoke uses the governed hermes-cloud-operative executo
   assert.equal(playbook.executor, "hermes-cloud-operative");
   assert.equal(playbook.executionMode, "workflow");
   assert.deepEqual(playbook.buildCommands(), []);
+});
+
+
+test("linked-project playbooks pin their own repositories and refs", () => {
+  const creatorhub = getCloudPlaybook("creatorhub-health-check");
+  const raisehub = getCloudPlaybook("raisehub-health-check");
+
+  assert.ok(creatorhub);
+  assert.equal(creatorhub.repoSlug, "zanibethel/CreatorHub");
+  assert.equal(creatorhub.gitRef, "main");
+  assert.equal(creatorhub.executor, "deterministic-code");
+  assert.equal(creatorhub.executionMode, "detached");
+  assert.match(JSON.stringify(creatorhub.buildCommands()), /tsc/);
+  assert.match(JSON.stringify(creatorhub.buildCommands()), /lint/);
+  assert.match(JSON.stringify(creatorhub.buildCommands()), /build/);
+
+  assert.ok(raisehub);
+  assert.equal(raisehub.repoSlug, "zanibethel/raisehub");
+  assert.equal(raisehub.gitRef, "main");
+  assert.equal(raisehub.executor, "deterministic-code");
+  assert.equal(raisehub.executionMode, "detached");
+  assert.match(JSON.stringify(raisehub.buildCommands()), /npm/);
+  assert.match(JSON.stringify(raisehub.buildCommands()), /test/);
 });
