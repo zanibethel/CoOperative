@@ -16,6 +16,7 @@ export const OwnerTaskIntentSchema = z.object({
   conversationId: z.string().uuid().nullable().optional(),
   title: z.string().trim().min(2).max(200),
   description: z.string().trim().max(4000).default(""),
+  playbookKey: z.string().regex(/^[a-z0-9-]+$/).nullable().default(null),
   maxSpendUsd: z.number().finite().min(0).max(1000).default(0),
   flags: TaskSafetyFlagsSchema.optional(),
 });
