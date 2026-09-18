@@ -106,7 +106,7 @@ export async function POST(
     .from("operative_tasks")
     .update({
       status: "executing",
-      selected_executor: "hermes-cloud-operative",
+      selected_executor: "deterministic-code",
       error: null,
       updated_at: new Date().toISOString(),
     })
@@ -134,7 +134,7 @@ export async function POST(
       event_type: "executor_selected",
       actor: "system",
       detail: {
-        executor: "hermes-cloud-operative",
+        executor: "deterministic-code",
         runtime: "vercel-sandbox",
         playbookKey: playbook.key,
         marginalCashCostMicrounits: 0,
