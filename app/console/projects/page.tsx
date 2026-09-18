@@ -33,6 +33,11 @@ export default function LinkedProjectsPage() {
   const [health, setHealth] = useState<Record<string, HealthResult>>({});
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [hermesRequests, setHermesRequests] = useState<Record<string, string>>({});
+  const [hermesBudgets, setHermesBudgets] = useState<Record<string, string>>({
+    creatorhub: "0.02",
+    raisehub: "0.02",
+  });
 
   const activeSecrets = useMemo(
     () => activeHandoff?.project.secretRequirements ?? [],
@@ -201,6 +206,80 @@ export default function LinkedProjectsPage() {
     }
   }
 
+  async function runHermesProjectTask(project: LinkedProjectManifest) {
+    const request = (hermesRequests[project.key] ?? "").trim();
+    const budget = Number(hermesBudgets[project.key] ?? "0");
+
+    if (request.length < 2) {
+      setError("Describe the change you want Hermes to prepare first.");
+      return;
+    }
+    if (!Number.isFinite(budget) || budget <= 0 || budget > 1) {
+      setError("Set a positive Hermes spend cap of $1.00 or less for this governed patch run.");
+      return;
+    }
+
+    setWorkingProject(project.key);
+    setError("");
+    setNotice("");
+
+    try {
+      const overviewResponse = await fetch("/api/operative/overview", { cache: "no-store" });
+      const overview = await overviewResponse.json();
+      if (!overviewResponse.ok) {
+        throw new Error(overview.error ?? "Unable to load CoOperative workspace.");
+      }
+
+      const messageResponse = await fetch("/api/console/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: overview.conversation?.id ?? null,
+          text: `Linked-project Hermes request for ${project.name}: ${request}`,
+        }),
+      });
+      const message = await messageResponse.json();
+      if (!messageResponse.ok) {
+        throw new Error(message.error ?? "Unable to save Hermes project request.");
+      }
+
+      const createResponse = await fetch("/api/operative/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: message.conversationId,
+          title: `${project.name} · Hermes patch`,
+          description: request,
+          playbookKey: project.hermesPlaybookKey,
+          maxSpendUsd: budget,
+          flags: { requiresShell: true },
+        }),
+      });
+      const created = await createResponse.json();
+      if (!createResponse.ok) {
+        throw new Error(created.error ?? "Unable to create governed Hermes project task.");
+      }
+
+      const executeResponse = await fetch(
+        `/api/operative/tasks/${created.task.id}/execute`,
+        { method: "POST" },
+      );
+      const executed = await executeResponse.json();
+      if (!executeResponse.ok) {
+        throw new Error(executed.error ?? "Unable to start governed Hermes project task.");
+      }
+
+      setNotice(
+        `${project.name} Hermes patch run started with a ${budget.toFixed(2)} cap. ` +
+          "Hermes can edit only the isolated clone with file tools; CoOperative will collect the patch and verify it without writing to GitHub.",
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to start Hermes project task.");
+    } finally {
+      setWorkingProject(null);
+    }
+  }
+
   return (
     <main className="shell operative-shell">
       <nav className="nav">
@@ -303,6 +382,64 @@ export default function LinkedProjectsPage() {
                 </pre>
               </details>
             ) : null}
+
+            <section className="project-hermes-workspace">
+              <div className="eyebrow">Cloud Hermes workspace</div>
+              <p>
+                Ask Hermes to inspect this project's source and prepare a reviewable patch.
+                It receives file tools only: no provider credentials, no shell tools, no GitHub write,
+                no database mutation, and no deployment.
+              </p>
+              <textarea
+                className="project-hermes-request"
+                placeholder={`What should Hermes change in ${project.name}?`}
+                value={hermesRequests[project.key] ?? ""}
+                onChange={(event) =>
+                  setHermesRequests((current) => ({
+                    ...current,
+                    [project.key]: event.target.value,
+                  }))
+                }
+                disabled={workingProject === project.key}
+              />
+              <div className="project-hermes-controls">
+                <label>
+                  Maximum model spend
+                  <input
+                    type="number"
+                    min="0.001"
+                    max="1"
+                    step="0.001"
+                    value={hermesBudgets[project.key] ?? "0.02"}
+                    onChange={(event) =>
+                      setHermesBudgets((current) => ({
+                        ...current,
+                        [project.key]: event.target.value,
+                      }))
+                    }
+                    disabled={workingProject === project.key}
+                  />
+                </label>
+                <button
+                  className="primary"
+                  type="button"
+                  disabled={
+                    workingProject === project.key ||
+                    (hermesRequests[project.key] ?? "").trim().length < 2
+                  }
+                  onClick={() => void runHermesProjectTask(project)}
+                >
+                  {workingProject === project.key
+                    ? "Starting…"
+                    : "Run governed Hermes patch"}
+                </button>
+              </div>
+              <small className="console-helper">
+                This spends only up to the cap you set. A successful run stores the model usage,
+                cost, changed-file list, patch, and deterministic verification evidence in Mission Control.
+                Applying that patch to GitHub remains a separate reviewed action.
+              </small>
+            </section>
 
             <div className="linked-project-actions">
               <button
