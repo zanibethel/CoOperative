@@ -59,12 +59,19 @@ export async function runSandboxTask(spec: SandboxTaskSpec): Promise<SandboxRunR
 
   const steps: SandboxRunResult["steps"] = [];
   let succeeded = true;
+  const repoDirectory = spec.repoSlug.split("/").filter(Boolean).at(-1);
+
+  if (!repoDirectory) {
+    await sandbox.stop();
+    throw new Error("Unable to derive Sandbox repository directory from repoSlug.");
+  }
 
   try {
     for (const step of spec.commands) {
       const result = await sandbox.runCommand({
         cmd: step.cmd,
         args: step.args ?? [],
+        cwd: repoDirectory,
       });
       const stdout = await result.stdout();
       const stderr = await result.stderr();
