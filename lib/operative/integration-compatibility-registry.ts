@@ -160,6 +160,22 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "ai-gateway-unknown-cost-must-not-equal-zero",
+    targets: ["vercel-ai-gateway", "hermes-agent"],
+    component: "Hermes / AI Gateway cost accounting",
+    appliesTo: "Governed model calls using Hermes usage-file accounting",
+    symptom: "A real model call consumes tokens but the usage report says cost_status=unknown, cost_source=none, and estimated_cost_usd=0.",
+    rootCause: "A zero estimate from an unknown/unpriced usage report is not proof that the provider call was free.",
+    knownGoodPattern: "If Hermes cost is not authoritative, resolve cost deterministically from the AI Gateway model catalog pricing snapshot and actual token usage; fail closed if exact pricing cannot be resolved.",
+    avoidPatterns: ["recording unknown model cost as $0", "treating cost_source=none as free usage"],
+    enforcementPaths: [
+      "lib/workflow/hermes-model-smoke.ts",
+      "tests/hermes-model-smoke.test.ts",
+    ],
+    learnedAt: "2026-09-18",
+    status: "active",
+  },
+  {
     id: "hermes-prompt-size-diagnostic-must-be-bounded",
     targets: ["hermes-agent", "vercel-sandbox"],
     component: "Hermes Agent diagnostics",
