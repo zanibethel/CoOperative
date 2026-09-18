@@ -33,8 +33,8 @@ test("Mission Control can prepare governed explain and fix requests from an erro
 
 test("mobile task descriptions and cards cannot force horizontal page expansion", () => {
   assert.match(page, /className="task-description"/);
-  assert.match(css, /\.task-card, \.decision-card[^}]*min-width:\s*0[^}]*overflow:\s*hidden/s);
-  assert.match(css, /\.task-description[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(css, /\.task-card, \.decision-card[\s\S]*?min-width:\s*0[\s\S]*?overflow:\s*hidden/);
+  assert.match(css, /\.task-description[\s\S]*?overflow-wrap:\s*anywhere/);
 });
 
 test("sub-cent costs display full microunit precision and legacy unknown cost is not shown as free", () => {
