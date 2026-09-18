@@ -516,7 +516,7 @@ export default function LinkedProjectsPage() {
                   Register callback: <code>{activeHandoff.action.callbackUrl}</code>
                 </p>
               ) : null}
-              {activeSecrets.length > 0 ? (
+              {activeHandoff.action.relatedSecretKeys.length > 0 ? (
                 <p>
                   Expected variables: {activeHandoff.action.relatedSecretKeys.join(", ")}.
                   Values remain behind the secret broker gate.
