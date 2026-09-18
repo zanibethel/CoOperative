@@ -37,6 +37,7 @@ export interface LinkedProjectManifest {
   supabaseProjectRef: string | null;
   integrationHealthUrl: string | null;
   healthPlaybookKey: string;
+  hermesPlaybookKey: string;
   compatibilityTargets: readonly CompatibilityTarget[];
   executorPreference: readonly (
     | "deterministic-code"
@@ -64,6 +65,7 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
     integrationHealthUrl:
       "https://creatorhub-gray.vercel.app/api/system/integration-health",
     healthPlaybookKey: "creatorhub-health-check",
+    hermesPlaybookKey: "creatorhub-hermes-patch",
     compatibilityTargets: [
       "linked-project",
       "provider-auth-handoff",
@@ -213,6 +215,7 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
     supabaseProjectRef: null,
     integrationHealthUrl: null,
     healthPlaybookKey: "raisehub-health-check",
+    hermesPlaybookKey: "raisehub-hermes-patch",
     compatibilityTargets: [
       "linked-project",
       "provider-secret-broker",
