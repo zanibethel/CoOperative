@@ -702,3 +702,29 @@ Each entry should contain:
 **Source:** Owner approval ("OK go"), Vercel AI Gateway/Hermes integration guidance, current AI Gateway model catalog, and ChatGPT implementation/CI verification.
 
 **Status:** Model-backed Cloud Hermes smoke path DEPLOYED TO PREVIEW; live owner-triggered test pending.
+
+
+---
+
+## 2026-09-18 — Cloud Hermes executor naming corrected to existing database contract
+
+**Scope:** Cloud Hermes / executor routing / task state recovery
+
+**Observed live result:**
+- First model-backed smoke attempt was rejected before execution by `operative_tasks_selected_executor_check`.
+- The database already had the canonical executor value `hermes-cloud-operative`; the new code incorrectly introduced `cloud-hermes`.
+- No Hermes model call occurred and actual task spend remained 0 microunits.
+
+**Changes / decisions:**
+- No database migration was applied.
+- Model-backed Hermes playbook now uses the existing canonical executor `hermes-cloud-operative`.
+- Cost-ledger entries for Hermes model usage use the same canonical executor value, which is already allowed by `cost_ledger_entries_executor_check`.
+- Added regression tests to prevent reintroduction of the non-canonical executor name.
+- Executor-claim failures now transition the task to `failed` and persist an audit event instead of leaving a stranded `planning` task.
+- The failed live task `968798b3-7e09-4c6f-8c49-507568521626` was finalized as `failed` with explicit evidence that no model call occurred and $0 was spent.
+- Final head `07fc04803fac72f23f9cb2e87e3d5a230fca47f5` passed unit tests, TypeScript, lint, and build.
+- Corrected Preview deployment `dpl_GxhsxTPs7W5PHwY2wKKmtyH95LKP` is READY.
+
+**Why:** Existing schema contracts should be reused rather than widened when the mismatch is in application naming. This keeps executor policy tighter and avoids an unnecessary database migration.
+
+**Status:** FIXED. Model-backed Cloud Hermes smoke test ready for retry.
