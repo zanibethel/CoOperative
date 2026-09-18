@@ -97,3 +97,22 @@ test("linked-project UI exposes a bounded Hermes patch workspace", () => {
   assert.match(page, /maxSpendUsd: budget/);
   assert.match(page, /Applying that patch to GitHub remains a separate reviewed action/);
 });
+
+
+test("Vercel Connect setup uses a top-level provider window instead of a blank iframe", () => {
+  const creatorhub = getLinkedProject("creatorhub");
+  assert.ok(creatorhub);
+  const action = creatorhub.humanActions.find(
+    (item) => item.key === "cooperative-secret-broker-connect",
+  );
+  assert.ok(action);
+  assert.equal(action.mode, "popup-only");
+
+  const page = fs.readFileSync(
+    path.join(process.cwd(), "app/console/projects/page.tsx"),
+    "utf8",
+  );
+  assert.match(page, /action\.mode === "popup-only"/);
+  assert.match(page, /requires a full browser window/);
+  assert.match(page, /Reopen provider/);
+});
