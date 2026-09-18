@@ -669,3 +669,36 @@ Each entry should contain:
 **Source:** Supabase canonical task/event/cost evidence plus Owner Console live run.
 
 **Status:** Reusable Cloud Hermes runtime proof COMPLETE. Next gate: Preview-only provider authentication + first governed model-backed Hermes task.
+
+
+---
+
+## 2026-09-18 — First governed model-backed Cloud Hermes path prepared using Vercel OIDC
+
+**Scope:** Cloud Hermes / AI Gateway / executor routing / Cost Governor / Owner Console
+
+**Owner intent:** Prove real model-backed Hermes execution in the cloud while minimizing cost and avoiding duplicated long-lived provider credentials.
+
+**Changes / decisions:**
+- Added reviewed playbook `hermes-model-smoke`.
+- Added `cloud-hermes` as an explicit executor identity separate from `deterministic-code`.
+- The model smoke test reuses the already prepared Hermes runtime snapshot; it does not cold-install Hermes again.
+- Provider route is Vercel AI Gateway using the deployment's short-lived `VERCEL_OIDC_TOKEN`, injected into the disposable Sandbox only as `AI_GATEWAY_API_KEY`.
+- No Nous API key or other long-lived provider credential is stored in CoOperative, Vercel environment variables, the repository, or the prepared Hermes snapshot for this path.
+- The smoke test uses `alibaba/qwen-3-14b` as a low-cost, tool-capable language model available through AI Gateway.
+- The task is fixed and single-turn: `--max-turns 1`, 60-second Hermes run budget, 75-second process timeout, safe mode, user-config/rules disabled, no arbitrary owner shell input.
+- The fixed reasoning proof asks the model to compute 17 × 23 and explain briefly why deterministic code is normally preferable for arithmetic; successful verification requires the response to contain 391.
+- Owner Console exposes this as a dedicated explicit paid action with a maximum incremental task spend of **$0.02**.
+- Hermes `--usage-file` output is required; CoOperative reads grand-total model usage/cost, converts the reported USD estimate to microunits, enforces the task cap, persists actual task spend, and writes AI-token and Sandbox entries to the cost ledger.
+- Mission Control renders the returned model/provider/output/token/cost evidence.
+- The existing generic task path is not granted arbitrary Cloud Hermes shell authority by this change.
+- Final head `89103334e49f899a1670ee3718c66ae20eb3e224` passed unit tests, TypeScript, lint, and build.
+- Preview deployment `dpl_7siEGRdjUuYU165THYDNfxcSK4rw` is READY at `co-operative-8j4z5kpl9-zanibethels-projects.vercel.app`.
+
+**Why:** Vercel OIDC gives the cloud runtime temporary deployment identity and avoids copying the owner's local Hermes/Nous credential. A fixed low-cost smoke task proves the paid reasoning path before any broader autonomous model-backed execution is enabled.
+
+**Conflict / supersession notes:** This improves the earlier plan to configure a Preview-only long-lived provider secret. The active approach uses short-lived Vercel OIDC instead. Broader generic Cloud Hermes dispatch remains pending until this fixed smoke test succeeds.
+
+**Source:** Owner approval ("OK go"), Vercel AI Gateway/Hermes integration guidance, current AI Gateway model catalog, and ChatGPT implementation/CI verification.
+
+**Status:** Model-backed Cloud Hermes smoke path DEPLOYED TO PREVIEW; live owner-triggered test pending.
