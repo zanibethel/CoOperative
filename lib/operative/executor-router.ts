@@ -86,7 +86,7 @@ export function selectExecutor(candidates: ExecutorCandidate[]): ExecutorSelecti
   const reason =
     selected.estimatedMarginalCostMicrounits === 0
       ? `Selected ${selected.kind}: zero marginal cost (covered by deterministic code or an existing flat-rate/owner-paid connection).`
-      : `Selected ${selected.kind}: lowest marginal cost among qualified executors (${selected.estimatedMarginalCostMicrounits}\u00a2).`;
+      : `Selected ${selected.kind}: lowest marginal cost among qualified executors (${selected.estimatedMarginalCostMicrounits} microunits).`;
 
   return { selected, reason, ranked };
 }
