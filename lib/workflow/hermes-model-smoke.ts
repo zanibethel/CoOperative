@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 const HERMES_BASE_NAME = "cooperative-hermes-runtime-v2026-9-14";
 const MODEL = "alibaba/qwen3.5-flash";
 const PROVIDER = "ai-gateway";
+const MIN_HERMES_CONTEXT_WINDOW = 64_000;
 
 interface HermesModelSmokeInput {
   taskId: string;
@@ -133,6 +134,33 @@ async function runModelSmoke(
   }
 
   const startedAt = Date.now();
+
+  const catalogResponse = await fetch("https://ai-gateway.vercel.sh/v1/models", {
+    cache: "no-store",
+  });
+  if (!catalogResponse.ok) {
+    throw new Error("Unable to verify AI Gateway model metadata before Hermes execution.");
+  }
+
+  const catalog = (await catalogResponse.json()) as {
+    data?: Array<{ id?: string; context_window?: number }>;
+  };
+  const selectedModel = catalog.data?.find((model) => model.id === MODEL);
+  if (!selectedModel) {
+    throw new Error("Selected AI Gateway model is not available: " + MODEL);
+  }
+  if (
+    typeof selectedModel.context_window !== "number" ||
+    selectedModel.context_window < MIN_HERMES_CONTEXT_WINDOW
+  ) {
+    throw new Error(
+      "Selected model " +
+        MODEL +
+        " reports a context window below Hermes minimum " +
+        MIN_HERMES_CONTEXT_WINDOW +
+        ".",
+    );
+  }
 
   // Fail fast if the prepared runtime disappeared instead of silently paying
   // for another cold installation in the model-backed smoke test.
