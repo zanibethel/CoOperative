@@ -71,11 +71,14 @@ const initialFlags: SafetyFlags = {
 };
 
 function moneyFromMicrounits(value: number) {
+  const absolute = Math.abs(value);
+  const fractionDigits = absolute < 10_000 ? 6 : absolute < 1_000_000 ? 4 : 2;
+
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: value < 10_000 ? 4 : 2,
-    maximumFractionDigits: value < 10_000 ? 6 : 2,
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: 6,
   }).format(value / 1_000_000);
 }
 
@@ -112,6 +115,10 @@ function taskHermesModelEvidence(result: unknown): {
   output?: string;
   costMicrounits?: number;
   totalTokens?: number;
+  costStatus?: string;
+  costSource?: string;
+  usageCostStatus?: string;
+  usageCostSource?: string;
 } | null {
   if (!result || typeof result !== "object") return null;
   const evidence = (result as { evidence?: unknown }).evidence;
@@ -122,8 +129,12 @@ function taskHermesModelEvidence(result: unknown): {
     provider?: unknown;
     output?: unknown;
     costMicrounits?: unknown;
+    costStatus?: unknown;
+    costSource?: unknown;
     usage?: {
       total_tokens?: unknown;
+      cost_status?: unknown;
+      cost_source?: unknown;
       total_including_auxiliary?: { total_tokens?: unknown };
     };
   };
@@ -144,7 +155,35 @@ function taskHermesModelEvidence(result: unknown): {
     costMicrounits:
       typeof record.costMicrounits === "number" ? record.costMicrounits : undefined,
     totalTokens,
+    costStatus: typeof record.costStatus === "string" ? record.costStatus : undefined,
+    costSource: typeof record.costSource === "string" ? record.costSource : undefined,
+    usageCostStatus:
+      typeof record.usage?.cost_status === "string" ? record.usage.cost_status : undefined,
+    usageCostSource:
+      typeof record.usage?.cost_source === "string" ? record.usage.cost_source : undefined,
   };
+}
+
+function hermesCostLabel(result: unknown): string {
+  const evidence = taskHermesModelEvidence(result);
+  if (!evidence) return "cost pending";
+
+  const unresolvedLegacyCost =
+    evidence.costStatus === undefined &&
+    (evidence.usageCostStatus === "unknown" || evidence.usageCostSource === "none");
+
+  if (unresolvedLegacyCost) return "cost unresolved";
+
+  if (typeof evidence.costMicrounits !== "number") return "cost pending";
+
+  const suffix =
+    evidence.costStatus === "estimated"
+      ? " estimated"
+      : evidence.costStatus === "reported"
+        ? " reported"
+        : "";
+
+  return moneyFromMicrounits(evidence.costMicrounits) + suffix;
 }
 
 function taskFindings(result: unknown): Array<{ priority?: string; title: string; why?: string }> {
@@ -171,6 +210,7 @@ export default function OwnerConsolePage() {
   const [notice, setNotice] = useState("");
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
   const [decisionWorkingId, setDecisionWorkingId] = useState<string | null>(null);
+  const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
 
   async function load() {
     const response = await fetch("/api/operative/overview", { cache: "no-store" });
@@ -409,6 +449,55 @@ export default function OwnerConsolePage() {
     } finally {
       setDecisionWorkingId(null);
     }
+  }
+
+  async function copyTaskError(task: Task) {
+    if (!task.error) return;
+
+    try {
+      await navigator.clipboard.writeText(task.error);
+      setCopiedTaskId(task.id);
+      window.setTimeout(() => {
+        setCopiedTaskId((current) => (current === task.id ? null : current));
+      }, 1800);
+    } catch {
+      setError("Unable to copy the error on this device.");
+    }
+  }
+
+  function prepareErrorRequest(task: Task, mode: "explain" | "fix") {
+    if (!task.error) return;
+
+    const instruction =
+      mode === "fix"
+        ? "Investigate and prepare a safe fix for this failed CoOperative task."
+        : "Explain this failed CoOperative task error in plain language and identify the likely root cause.";
+
+    setText(
+      [
+        instruction,
+        "Review the Integration Compatibility Registry and existing regression coverage before using code, shell, Hermes, or another AI.",
+        "Do not bypass owner gates for secrets, money, destructive actions, production changes, auth/RLS, or database migrations.",
+        "Prefer a deterministic known-good fix if this failure has already been learned.",
+        "",
+        "Task: " + task.title,
+        "Task ID: " + task.id,
+        "Error:",
+        task.error,
+      ].join("\n"),
+    );
+    setNotice(
+      mode === "fix"
+        ? "Fix request prepared in the composer. Review it, then queue the governed task when ready."
+        : "Explanation request prepared in the composer. Review it, then save or queue it when ready.",
+    );
+
+    window.setTimeout(() => {
+      document.querySelector<HTMLTextAreaElement>(".console-composer textarea")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 0);
   }
 
   async function runHermesRuntimeCheck() {
@@ -777,7 +866,7 @@ export default function OwnerConsolePage() {
                     {task.selected_executor ? <span>{task.selected_executor}</span> : <span>executor pending</span>}
                     {taskProgressLabel(task.result) ? <span>{taskProgressLabel(task.result)}</span> : null}
                   </div>
-                  <p>{task.description}</p>
+                  <p className="task-description">{task.description}</p>
                   <div className="task-cost">
                     <span>spent {moneyFromMicrounits(Number(task.actual_spend_microunits ?? 0))}</span>
                     <span>cap {moneyFromMicrounits(Number(task.max_spend_microunits ?? 0))}</span>
@@ -811,15 +900,46 @@ export default function OwnerConsolePage() {
                             {typeof taskHermesModelEvidence(task.result)?.totalTokens === "number"
                               ? taskHermesModelEvidence(task.result)?.totalTokens + " tokens · "
                               : ""}
-                            {typeof taskHermesModelEvidence(task.result)?.costMicrounits === "number"
-                              ? moneyFromMicrounits(taskHermesModelEvidence(task.result)?.costMicrounits ?? 0)
-                              : "cost pending"}
+                            {hermesCostLabel(task.result)}
                           </p>
                         </div>
                       </div>
                     </details>
                   ) : null}
-                  {task.error ? <p className="error">{task.error}</p> : null}
+                  {task.error ? (
+                    <details className="task-error">
+                      <summary>Error details</summary>
+                      <div className="task-error-panel">
+                        <div className="task-error-toolbar">
+                          <span>Captured failure</span>
+                          <button
+                            type="button"
+                            className="task-error-action"
+                            onClick={() => void copyTaskError(task)}
+                          >
+                            {copiedTaskId === task.id ? "Copied" : "Copy error"}
+                          </button>
+                        </div>
+                        <pre className="task-error-code"><code>{task.error}</code></pre>
+                        <div className="task-error-actions">
+                          <button
+                            type="button"
+                            className="task-error-action"
+                            onClick={() => prepareErrorRequest(task, "explain")}
+                          >
+                            Ask CoOperative to explain
+                          </button>
+                          <button
+                            type="button"
+                            className="task-error-action"
+                            onClick={() => prepareErrorRequest(task, "fix")}
+                          >
+                            Ask CoOperative to fix
+                          </button>
+                        </div>
+                      </div>
+                    </details>
+                  ) : null}
                 </article>
               ))}
             </div>
