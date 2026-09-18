@@ -576,3 +576,38 @@ Each entry should contain:
 **Source:** Owner agreement after live runtime test, current Vercel Workflow guidance, and persisted task evidence.
 
 **Status:** Active architecture decision. Next implementation target: prepared Hermes runtime + Vercel Workflow-backed execution.
+
+
+---
+
+## 2026-09-18 — Cloud Hermes runtime moved to durable Vercel Workflow with reusable prepared Sandbox
+
+**Scope:** Cloud Operative / Cloud Hermes / Vercel Workflow / prepared runtime
+
+**Owner intent:** Make long-running Hermes/cloud work durable, independent of the phone/browser, observable by stage, and faster after the first run by reusing a prepared runtime instead of reinstalling Hermes every task.
+
+**Changes / decisions:**
+- Added pinned `workflow@4.8.9` and enabled `withWorkflow()` in Next.js.
+- Excluded `/.well-known/workflow/` from the Supabase auth proxy so Workflow's internal transport is not intercepted.
+- Added a durable `hermesRuntimeWorkflow` using `"use workflow"` orchestration and `"use step"` Node-capable steps.
+- Hermes runtime preparation is versioned as `cooperative-hermes-runtime-v2026-9-14`.
+- First use creates a persistent named Vercel Sandbox with a 15-minute cold-install session, installs/verifies pinned Hermes, then stops it so Vercel snapshots the prepared filesystem.
+- Prepared runtime snapshots are configured with a 30-day expiration window.
+- A partially prepared runtime is deleted if setup fails so future work cannot accidentally reuse a broken base.
+- Later runtime checks fork an isolated non-persistent Sandbox from the prepared runtime instead of repeating the full install.
+- Workflow records durable progress stages in canonical task state: `preparing_runtime`, `starting_hermes`, `executing_check`, `verifying`, `completed`, or `failed`.
+- The Owner Console now refreshes Workflow-owned tasks from canonical state; browser polling is only a viewer/refresh mechanism and is no longer responsible for finalizing the execution.
+- The existing fast deterministic Cloud self-check remains a synchronous playbook.
+- Guardrail tests verify Workflow integration, version pinning, prepared-runtime reuse, progress stages, and that provider/Supabase secret names are not embedded in the prepared Hermes workflow.
+- Final branch validation passed unit tests, TypeScript, lint, and build.
+- Final Preview deployment `dpl_2UUTXGumgwKzbB39StsDNn1REyim` is READY at `co-operative-n9ber9sti-zanibethels-projects.vercel.app`.
+
+**Why:** A durable workflow plus a prepared runtime removes the two problems found in live testing: browser-owned finalization and repeated cold installation. It also gives Mission Control meaningful, durable progress rather than a generic `executing` state.
+
+**Affected areas:** Owner Console, Vercel Workflow, Vercel Sandbox persistence/forking, Cloud Hermes bootstrap, task evidence, Cost Governor, future long-running agents/migrations/builds.
+
+**Conflict / supersession notes:** Supersedes the custom detached Sandbox polling path for Cloud Hermes. The old detached implementation remains only as bootstrap compatibility/evidence until removed. Provider authentication/model execution remains a separate explicit owner gate.
+
+**Source:** Owner-approved ChatGPT implementation, Vercel Workflow/Sandbox documentation, GitHub CI, and Vercel Preview verification.
+
+**Status:** Durable prepared-runtime bootstrap deployed to Preview and ready for live retest.
