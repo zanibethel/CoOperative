@@ -172,3 +172,34 @@ Each entry should contain:
 **Source:** Post-Gate-1 ChatGPT review of live Supabase state and current PR #5 implementation.
 
 **Status:** Active current sequence.
+
+
+---
+
+## 2026-09-18T00:31:22-05:00 — First governed Owner Console / Mission Control slice built
+
+**Scope:** Cloud Operative / Owner Console / Issue #4 / PR #5
+
+**Owner intent:** Continue building the Mac-independent Cloud Operative primarily through ChatGPT/connected tooling, using Hermes only when shell/runtime/autonomous capability is genuinely required.
+
+**Changes / decisions:**
+- Added a phone-friendly Owner Console on the `cloud-operative-bootstrap` draft branch.
+- Added canonical conversation overview, recent operative tasks, pending Decision Briefs, task risk/cost state, and read-only evidence APIs.
+- Added deterministic task-safety policy flags for shell/runtime, production, secrets, database/RLS, money movement, and destructive actions.
+- Added governed task creation through a trusted server-only path; it fails closed until `SUPABASE_SECRET_KEY` is explicitly configured.
+- Owner-gated tasks now deterministically create a Decision Brief, move to `awaiting_approval`, append the brief to the canonical conversation, and do not execute.
+- Added authenticated approve/reject/modify/ask-question handling. Responses are written into canonical conversation/task audit state, but approval intentionally does **not** resume execution yet.
+- Expanded CI so every PR now runs unit tests, explicit TypeScript checking, lint, and build rather than relying on Hermes/manual verification for those basics.
+- Final branch verification passed all four checks.
+
+**Why:** The owner wants CoOperative to become the persistent control surface between ChatGPT, cloud execution/Hermes, projects, decisions, and memory without requiring the Mac. Building canonical task/decision state and self-verifying CI first reduces paid-agent rediscovery and preserves owner gates before cloud execution is connected.
+
+**Affected areas:** Owner Console, task policy, operative task API, Decision Brief flow, audit trail, CI, future Cloud Operative executor and ChatGPT bridge.
+
+**Conflict / supersession notes:** Consistent with the prior decision to finish Owner Console self-bootstrap before Telegram cutover. Telegram remains deferred. This also preserves the ChatGPT-first / Hermes-only-when-needed executor split.
+
+**Current boundary:** No production secret was set, no production authority was expanded, no Telegram cutover occurred, and no cloud executor was connected. `SUPABASE_SECRET_KEY` remains the next explicit owner gate required to exercise trusted task/decision writes in the deployed Cloud Operative.
+
+**Source:** Owner-authorized ChatGPT implementation and GitHub/Vercel CI verification.
+
+**Status:** Repo-side Phase C control-surface slice complete on draft PR #5; trusted runtime/executor connection pending.
