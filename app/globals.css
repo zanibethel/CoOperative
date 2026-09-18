@@ -346,13 +346,22 @@ b { color: var(--text); }
 .provider-browser-frame-wrap { min-height: 0; background: #fff; }
 .provider-browser-frame { width: 100%; height: 100%; border: 0; background: #fff; }
 .provider-browser-guidance {
-  padding: 10px 14px;
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: .76rem;
   line-height: 1.45;
+}
+.provider-browser-guidance summary {
+  cursor: pointer;
+  padding: 9px 14px;
+  color: var(--muted);
+  font-weight: 800;
+}
+.provider-browser-guidance-body {
+  padding: 0 14px 10px;
   max-height: 150px;
   overflow: auto;
+  overscroll-behavior: contain;
 }
 .provider-browser-guidance p { margin: 5px 0; }
 .provider-browser-guidance code { overflow-wrap: anywhere; color: var(--text); }
@@ -367,6 +376,40 @@ b { color: var(--text); }
     border-radius: 0;
     border-left: 0;
     border-right: 0;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+  .provider-browser-location { display: none; }
+  .provider-browser-head {
+    padding: 9px 12px;
+    align-items: start;
+  }
+  .provider-browser-head .eyebrow {
+    font-size: .66rem;
+    letter-spacing: .08em;
+  }
+  .provider-browser-head strong {
+    display: block;
+    margin-top: 3px;
+    font-size: .94rem;
+    line-height: 1.25;
+  }
+  .provider-browser-frame-wrap { min-height: 0; }
+  .provider-browser-guidance summary { padding: 7px 12px; }
+  .provider-browser-guidance-body {
+    padding: 0 12px 8px;
+    max-height: 120px;
+  }
+  .provider-browser-actions {
+    padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+    display: grid;
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+    gap: 8px;
+  }
+  .provider-browser-actions > button {
+    width: 100%;
+    min-height: 46px;
+    padding: 9px 10px;
+    font-size: .82rem;
   }
 }
 
@@ -375,8 +418,8 @@ b { color: var(--text); }
   .linked-project-actions > button,
   .human-action-row > button,
   .provider-browser-actions > button { width: 100%; }
-  .provider-browser-actions { align-items: stretch; flex-direction: column; }
-  .provider-browser-guidance { max-height: 180px; }
+  .provider-browser-actions { align-items: stretch; }
+  .provider-browser-guidance { max-height: none; }
   .project-hermes-controls { align-items: stretch; flex-direction: column; }
   .project-hermes-controls label,
   .project-hermes-controls button { width: 100%; }
