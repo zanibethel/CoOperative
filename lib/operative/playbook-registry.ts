@@ -106,7 +106,7 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     ],
     buildCommands: () => [
       { cmd: "test", args: ["-f", "package.json"] },
-      { cmd: "npm", args: ["ci", "--no-audit", "--no-fund"] },
+      { cmd: "npm", args: ["install", "--no-audit", "--no-fund"] },
       { cmd: "npx", args: ["tsc", "--noEmit"] },
       { cmd: "npm", args: ["run", "lint"] },
       { cmd: "npm", args: ["run", "build"] },
