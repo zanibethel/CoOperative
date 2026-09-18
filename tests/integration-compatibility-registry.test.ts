@@ -43,6 +43,7 @@ test("initial Cloud Hermes roadblocks are preserved as reusable rules", () => {
     "prepared-hermes-runtime-reuse",
     "linked-project-use-own-revision",
     "provider-auth-use-human-handoff",
+    "linked-hermes-patch-review-before-write",
     "provider-secrets-never-enter-agent-context",
     "supabase-trusted-writes-preserve-owner-gates",
   ]) {
