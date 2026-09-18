@@ -17,7 +17,8 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "zod": "4.6.5",
-    "workflow": "4.8.9"
+    "workflow": "4.8.9",
+    "@vercel/oidc": "3.2.0"
   },
   "devDependencies": {
     "@types/node": "20.17.30",
