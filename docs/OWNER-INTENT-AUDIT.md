@@ -401,3 +401,31 @@ Each entry should contain:
 **Source:** Owner phone test plus persisted task/event evidence and Vercel runtime verification.
 
 **Status:** Fix deployed to Preview; retest pending.
+
+
+---
+
+## 2026-09-18 — Vercel Sandbox seeded Git source requires repository cwd
+
+**Scope:** Cloud Operative / Vercel Sandbox adapter / bootstrap self-check
+
+**Owner intent:** Continue the phone-triggered Mac-independent cloud execution proof and retain runtime lessons so repeated tasks do not rediscover the same issue.
+
+**Changes / decisions:**
+- The corrected self-check reached Vercel Sandbox again but `test -f package.json` failed from the default Sandbox working directory.
+- Persisted task evidence confirmed the task pipeline itself remained healthy: task created, `queued -> planning -> executing`, deterministic executor selected, Sandbox started/stopped, failure evidence recorded.
+- Vercel's official Sandbox SDK example confirms that Git-seeded sources are checked out into a directory named for the repository and commands should specify that directory via `cwd`.
+- Updated the Sandbox adapter to derive the repository directory from `repoSlug` and run every allow-listed playbook command with that `cwd`.
+- This keeps repository-location knowledge inside the reusable Sandbox adapter rather than individual playbooks.
+- Corrected Preview deployment `dpl_7R1fcfifyFafHycHW5hEvnw2V7Vk` reached READY at `co-operative-h0zuftplg-zanibethels-projects.vercel.app`.
+- CI unit tests, typecheck, and lint passed; final build verification was still running when this entry was written.
+
+**Why:** A shared execution adapter should normalize provider-specific workspace layout so future playbooks can assume they execute from the project root.
+
+**Affected areas:** Vercel Sandbox adapter, deterministic playbooks, future cloud executors.
+
+**Conflict / supersession notes:** Supersedes the earlier assumption that seeded Git source executes from the Sandbox default working directory. The deterministic-playbook architecture remains unchanged.
+
+**Source:** Owner phone test, persisted task evidence, and current Vercel Sandbox SDK documentation.
+
+**Status:** Adapter fix deployed to Preview; final CI build check pending before retest.
