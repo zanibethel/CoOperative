@@ -2,24 +2,46 @@
 
 **Human + AI business operations.**
 
-CoOperative learns how a business works, maps its processes, identifies work that can be improved or automated, and helps deploy cost-effective solutions while keeping people in control.
+CoOperative learns how a business works, maps the services it already pays for, identifies work that can be improved or automated, and helps deploy cost-effective solutions while keeping people in control.
 
-The long-term product is not just an automation builder. It is a governed learning system:
+The long-term product is a conversational business operating system. CoOperative owns the experience; AI models and external providers are replaceable infrastructure underneath it.
 
-1. **Mission Briefing** — intake the business, goals, tools, constraints, and workflows.
-2. **Intel** — map processes and find high-value opportunities.
-3. **Capability Registry** — know which integrations, APIs, agents, and internal tools are currently available and what they cost.
-4. **Playbooks** — turn successful solutions into reusable, versioned patterns.
-5. **Missions** — deploy approved workflows and agents with explicit permissions.
-6. **Evidence** — measure failures, time saved, cost, conversion, and human interventions.
-7. **Improvement Lab** — research better options and propose platform/playbook improvements.
-8. **Approval Gate** — no AI-authored production code update merges without tests and human review.
+## Core doctrine
 
-## v0.1 scope
+**Playbooks and code first. AI only where reasoning is actually needed.**
 
-Business intake → validated analysis → process map → ranked automation opportunities.
+If CoOperative already knows how to perform a process, it should use the stored playbook, script, function, rule, or approved capability rather than paying an LLM to rediscover the same process.
 
-The first analyzer is intentionally deterministic. AI is added only after the application contract is stable and testable.
+The durable platform knowledge lives in:
+
+- versioned playbooks;
+- deterministic scripts/functions;
+- capability and connector contracts;
+- policies and approval rules;
+- cost controls;
+- tests and evaluation sets;
+- outcome/evidence history.
+
+See `docs/CORE-OPERATING-MODEL.md`.
+
+## Platform loop
+
+1. **Mission Briefing** — understand the business, goals, constraints, and workflows.
+2. **Connected Services Map** — understand what the business already pays for and actually uses.
+3. **Capability Registry** — know which native/external capabilities are approved and what they cost.
+4. **Playbook Engine** — choose the best known reusable process.
+5. **Script/Function Library** — perform deterministic work without AI.
+6. **AI Router** — use the cheapest qualified AI only for reasoning/generation steps.
+7. **Capability Router** — choose the approved native or connected service implementation.
+8. **Mission Control** — execute within permissions, approvals, and the customer's cost envelope.
+9. **Evidence** — measure failures, cost, time saved, conversion, and human interventions.
+10. **Improvement Lab / Hermes** — improve playbooks, connectors, provider choices, scripts, and platform code under governance.
+
+## Current scope
+
+Business intake → validated analysis → connected-service/cost mapping → process map → ranked automation opportunities → governed capability/playbook foundation.
+
+The first analyzer is intentionally deterministic. AI is added behind stable contracts so providers can be replaced without rewriting the application.
 
 ## Stack
 
@@ -42,37 +64,44 @@ Then visit `http://localhost:3000`.
 ## Architecture
 
 ```text
-Business + connected tools
+Business owner / conversation
         |
         v
-Mission Briefing / Intake
+Business state + policies + cost envelope
         |
         v
-Validated business model
+    Playbook Engine
         |
-        +-------------------+
-        |                   |
-        v                   v
-AI Analyst          Capability Registry
-        |                   |
-        +---------+---------+
-                  v
-          Proposed Playbook/Mission
-                  |
-                  v
-         Policy + Approval Gate
-                  |
-                  v
-            Execution Engine
-                  |
-                  v
-          Results + Evidence
-                  |
-                  v
-      Playbook Library / Improvement Lab
-                  |
-                  v
-       reviewed proposals / PRs only
+   +----+----+
+   |         |
+   v         v
+Scripts    AI Router
+   |         |
+   +----+----+
+        |
+        v
+ Capability Router
+        |
+   +----+----+
+   |         |
+ native    connected provider
+   |         |
+   +----+----+
+        |
+        v
+ Execution + Mission Control
+        |
+        v
+ Outcomes + Cost Ledger
+        |
+        v
+ Evidence / Improvement Lab
+        |
+        v
+       Hermes
+        |
+        v
+ governed playbook / connector / code improvements
 ```
 
-See `docs/WEEK-01.md`, `docs/PLATFORM-VISION.md`, and `docs/LEARNING-LOOP.md`.
+See `docs/CORE-OPERATING-MODEL.md`, `docs/PLATFORM-VISION.md`, `docs/LEARNING-LOOP.md`, and `docs/WEEK-01.md`.
