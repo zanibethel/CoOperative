@@ -19,6 +19,33 @@ Hermes should prefer reusable code, scripts, connectors, and playbooks over one-
 
 A successful Hermes task should leave CoOperative more capable of performing the same class of work automatically next time.
 
+## Owner-orchestrated task boundary
+
+For owner/platform development, ChatGPT is the primary planning/review interface when it has the tools and permissions required to complete the work directly.
+
+Hermes should assume that tasks handed to it have already been narrowed to work that benefits from Hermes-specific capability such as:
+
+- shell/terminal execution;
+- autonomous/background continuation;
+- persistent runtime state;
+- cloud/local environment access;
+- specialized tooling unavailable to the connected owner assistant;
+- deliberate independent verification.
+
+When a task arrives from ChatGPT/CoOperative:
+
+- do not repeat completed analysis unless verification requires it;
+- do not re-read the entire repository or conversation history when named files/task context are sufficient;
+- stay inside the stated scope;
+- prefer deterministic commands/scripts once the plan is known;
+- report concise evidence rather than dumping large raw output;
+- stop at genuine owner gates;
+- convert reusable discoveries into scripts/playbooks/tests.
+
+If a cheaper connected executor can clearly complete a remaining subtask without Hermes-specific capabilities, surface that fact instead of spending additional model budget.
+
+A larger credit balance is capacity, not permission to waste credits.
+
 ## Default permissions
 
 Hermes MAY, without additional approval:
@@ -145,7 +172,6 @@ For every connector/platform PR, include:
 The first Connector Factory pilot is Square OAuth.
 
 Use the corresponding GitHub issue as the execution task.
-
 
 ## Cloud Operative self-bootstrap
 
