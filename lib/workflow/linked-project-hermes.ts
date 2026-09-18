@@ -497,8 +497,66 @@ async function finalizeWithEvidence(
     evidence,
   };
 
-  const { error: ledgerError } = await admin.from("cost_ledger_entries").insert([
-    {
+  const { data: verifyingTask, error: verifyingError } = await admin
+    .from("operative_tasks")
+    .update({
+      status: "verifying",
+      result: {
+        ...result,
+        progress: {
+          stage: "verifying",
+          at: now,
+        },
+      },
+      actual_spend_microunits: evidence.costMicrounits,
+      updated_at: now,
+    })
+    .eq("id", input.taskId)
+    .eq("organization_id", input.organizationId)
+    .eq("status", "executing")
+    .select("id")
+    .maybeSingle();
+
+  if (verifyingError) throw verifyingError;
+
+  if (verifyingTask) {
+    const { error: verifyingEventError } = await admin.from("task_events").insert({
+      task_id: input.taskId,
+      organization_id: input.organizationId,
+      event_type: "status_changed",
+      from_status: "executing",
+      to_status: "verifying",
+      actor: "system",
+      detail: {
+        type: "linked_project_hermes_verification",
+        projectKey: input.projectKey,
+        hermesExitCode: evidence.hermesExitCode,
+        verificationSucceeded: evidence.verificationSucceeded,
+        changedFiles: evidence.changedFiles,
+        actualSpendMicrounits: evidence.costMicrounits,
+        repositoryWritePerformed: false,
+      },
+    });
+    if (verifyingEventError) throw verifyingEventError;
+  }
+
+  const { data: existingCosts, error: existingCostsError } = await admin
+    .from("cost_ledger_entries")
+    .select("id,executor,cost_category")
+    .eq("task_id", input.taskId)
+    .in("executor", ["hermes-cloud-operative", "vercel-sandbox"]);
+
+  if (existingCostsError) throw existingCostsError;
+
+  const existingKeys = new Set(
+    (existingCosts ?? []).map(
+      (entry) => entry.executor + ":" + entry.cost_category,
+    ),
+  );
+  const ledgerRows = [];
+
+  if (!existingKeys.has("hermes-cloud-operative:ai-tokens")) {
+    ledgerRows.push({
       organization_id: input.organizationId,
       task_id: input.taskId,
       executor: "hermes-cloud-operative",
@@ -508,8 +566,11 @@ async function finalizeWithEvidence(
       is_marginal_cost: true,
       notes:
         `Linked-project Hermes cost ${evidence.costStatus} from ${evidence.costSource}; project ${evidence.projectKey}; model ${evidence.model}; USD ${evidence.costUsd.toFixed(8)}.`,
-    },
-    {
+    });
+  }
+
+  if (!existingKeys.has("vercel-sandbox:sandbox-compute")) {
+    ledgerRows.push({
       organization_id: input.organizationId,
       task_id: input.taskId,
       executor: "vercel-sandbox",
@@ -519,29 +580,43 @@ async function finalizeWithEvidence(
       is_marginal_cost: true,
       notes:
         "Prepared Hermes runtime fork used for linked-project patch generation; allocated Vercel platform usage remains separate.",
-    },
-  ]);
+    });
+  }
 
-  if (ledgerError) throw ledgerError;
+  if (ledgerRows.length > 0) {
+    const { error: ledgerError } = await admin
+      .from("cost_ledger_entries")
+      .insert(ledgerRows);
+    if (ledgerError) throw ledgerError;
+  }
+
+  const finalError = overBudget
+    ? `Cost Governor violation: actual model cost ${evidence.costMicrounits} microunits exceeded the ${input.maxSpendMicrounits} microunit cap.`
+    : evidence.hermesError
+      ? evidence.hermesError +
+        " Usage/cost evidence and any partial patch were preserved; nothing was written to GitHub."
+      : evidence.verificationSucceeded
+        ? null
+        : "Hermes produced a patch, but deterministic project verification failed. The patch was preserved for review and was not written to GitHub.";
 
   const { error: updateError } = await admin
     .from("operative_tasks")
     .update({
       status: succeeded ? "completed" : "failed",
-      result,
+      result: {
+        ...result,
+        progress: {
+          stage: succeeded ? "completed" : "failed",
+          at: new Date().toISOString(),
+        },
+      },
       actual_spend_microunits: evidence.costMicrounits,
-      error: overBudget
-        ? `Cost Governor violation: actual model cost ${evidence.costMicrounits} microunits exceeded the ${input.maxSpendMicrounits} microunit cap.`
-        : evidence.hermesError
-          ? evidence.hermesError + " Usage/cost evidence and any partial patch were preserved; nothing was written to GitHub."
-          : evidence.verificationSucceeded
-            ? null
-            : "Hermes produced a patch, but deterministic project verification failed. The patch was preserved for review and was not written to GitHub.",
-      updated_at: now,
+      error: finalError,
+      updated_at: new Date().toISOString(),
     })
     .eq("id", input.taskId)
     .eq("organization_id", input.organizationId)
-    .eq("status", "executing");
+    .eq("status", "verifying");
 
   if (updateError) throw updateError;
 
@@ -549,7 +624,7 @@ async function finalizeWithEvidence(
     task_id: input.taskId,
     organization_id: input.organizationId,
     event_type: succeeded ? "status_changed" : "error",
-    from_status: succeeded ? "executing" : null,
+    from_status: succeeded ? "verifying" : null,
     to_status: succeeded ? "completed" : null,
     actor: "system",
     detail: {
@@ -560,6 +635,7 @@ async function finalizeWithEvidence(
       changedFiles: evidence.changedFiles,
       actualSpendMicrounits: evidence.costMicrounits,
       overBudget,
+      costLedgerReplaySafe: true,
       repositoryWritePerformed: false,
       productionChangePerformed: false,
       secretAccessPerformed: false,
