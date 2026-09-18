@@ -12,6 +12,10 @@ interface HermesModelSmokeInput {
   taskId: string;
   organizationId: string;
   maxSpendMicrounits: number;
+  compatibilityReview: {
+    ruleIds: string[];
+    brief: string;
+  };
 }
 
 interface HermesUsageReport {
@@ -128,6 +132,16 @@ async function runModelSmoke(
 ): Promise<ModelSmokeEvidence> {
   "use step";
 
+  if (
+    !input.compatibilityReview ||
+    input.compatibilityReview.ruleIds.length === 0 ||
+    !input.compatibilityReview.brief.trim()
+  ) {
+    throw new Error(
+      "Compatibility knowledge review is required before Hermes model execution.",
+    );
+  }
+
   const oidcToken = (await getVercelOidcToken())?.trim();
   if (!oidcToken) {
     throw new Error("Vercel OIDC helper did not return a token in this Workflow step.");
@@ -179,6 +193,9 @@ async function runModelSmoke(
 
   const prompt = [
     "You are running a governed Cloud Hermes model smoke test.",
+    "The following version-aware compatibility knowledge was reviewed before execution:",
+    input.compatibilityReview.brief,
+    "Apply those known-good patterns and do not retry any listed avoid-pattern.",
     "Do not call tools. Do not modify files. Do not access the network beyond the model request.",
     "Return one compact JSON object only, with these keys:",
     'runtime: "hermes-cloud-operative",',
@@ -480,6 +497,7 @@ export async function hermesModelSmokeWorkflow(
     await recordProgress(input, "reasoning", {
       maxTurns: 1,
       maxSpendMicrounits: input.maxSpendMicrounits,
+      compatibilityRuleIds: input.compatibilityReview.ruleIds,
     });
 
     const evidence = await runModelSmoke(input);
