@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
-import { deriveDemoAssessment } from "@/lib/analysis/derive-demo-assessment";
-import { BusinessIntakeSchema } from "@/lib/domain/schemas";
+import { getBusinessAnalyst } from "@/lib/analysis/business-analyst";
+import {
+  BusinessIntakeSchema,
+  CapabilitySchema,
+  PlaybookSchema,
+} from "@/lib/domain/schemas";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
@@ -42,7 +46,63 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = deriveDemoAssessment(parsed.data);
+    const [capabilityResponse, playbookResponse] = await Promise.all([
+      supabase
+        .from("capabilities")
+        .select("capability_key,name,provider,category,delivery,auth_mode,estimated_cost_model,actions,risk_level,status")
+        .order("name"),
+      supabase
+        .from("playbooks")
+        .select("playbook_key,version,name,problem_pattern,prerequisites,required_capability_keys,human_approval_required,status")
+        .order("name"),
+    ]);
+
+    if (capabilityResponse.error) {
+      return NextResponse.json({ error: capabilityResponse.error.message }, { status: 500 });
+    }
+
+    if (playbookResponse.error) {
+      return NextResponse.json({ error: playbookResponse.error.message }, { status: 500 });
+    }
+
+    const capabilities = (capabilityResponse.data ?? []).flatMap((row) => {
+      const result = CapabilitySchema.safeParse({
+        key: row.capability_key,
+        name: row.name,
+        provider: row.provider,
+        category: row.category,
+        delivery: row.delivery,
+        authMode: row.auth_mode,
+        estimatedCostModel: row.estimated_cost_model,
+        actions: row.actions,
+        riskLevel: row.risk_level,
+        status: row.status,
+      });
+
+      return result.success ? [result.data] : [];
+    });
+
+    const playbooks = (playbookResponse.data ?? []).flatMap((row) => {
+      const result = PlaybookSchema.safeParse({
+        key: row.playbook_key,
+        version: row.version,
+        name: row.name,
+        problemPattern: row.problem_pattern,
+        prerequisites: row.prerequisites,
+        requiredCapabilityKeys: row.required_capability_keys,
+        humanApprovalRequired: row.human_approval_required,
+        status: row.status,
+      });
+
+      return result.success ? [result.data] : [];
+    });
+
+    const analyst = getBusinessAnalyst();
+    const result = await analyst.analyze({
+      intake: parsed.data,
+      capabilities,
+      playbooks,
+    });
     const now = new Date().toISOString();
 
     const existingBusiness = await supabase
@@ -101,7 +161,7 @@ export async function POST(request: Request) {
         business_id: businessId,
         created_by: user.id,
         status: "completed",
-        analyzer_version: "deterministic-v0.1",
+        analyzer_version: analyst.version,
         intake: parsed.data,
         result,
       })
@@ -118,6 +178,9 @@ export async function POST(request: Request) {
         organizationId: organization.id,
         businessId,
         assessmentId: assessment.id,
+        analyzerVersion: analyst.version,
+        approvedCapabilitiesAvailable: capabilities.length,
+        publishedPlaybooksAvailable: playbooks.length,
       },
     });
   } catch {
