@@ -785,3 +785,28 @@ Each entry should contain:
 **Why:** The failure was local command assembly, not provider authentication or Hermes capability. Fixing the invocation preserves the OIDC/no-long-lived-secret design and avoids unnecessary provider/schema changes.
 
 **Status:** FIXED. Model-backed Cloud Hermes smoke test ready for retry.
+
+
+---
+
+## 2026-09-18 — Hermes CLI global/chat flag ordering corrected
+
+**Scope:** Cloud Hermes / model smoke / Hermes CLI invocation
+
+**Observed live result:**
+- Workflow run `wrun_01M2T8M7CJPRZYVM99A672XS5V` successfully launched the Hermes executable.
+- Hermes rejected the invocation with `unrecognized arguments: --usage-file /tmp/hermes-usage.json`.
+- The pinned Hermes CLI exposes `--usage-file` as a top-level flag, while query/run-budget flags belong to the `chat` subcommand.
+- No model call occurred and task spend remained 0 microunits.
+
+**Changes / decisions:**
+- Split the invocation into explicit `globalHermesArgs` and `chatHermesArgs`.
+- Top-level flags such as `--usage-file`, `--provider`, `--model`, `--reasoning`, and isolation flags are placed before the `chat` subcommand.
+- Chat-specific flags such as `--query-file`, `--oneshot`, `--max-turns`, `--run-budget`, `--quiet`, and `--source` are placed after `chat`.
+- Added regression coverage that verifies `--usage-file` stays out of the chat-only argument block and global arguments precede the subcommand.
+- Final head `6b01a800e3f4b80a4e7f864e45df81e6918a09c8` passed unit tests, TypeScript, lint, and build.
+- Preview deployment `dpl_N96SSAoMaFZz1vqbivRZhPcWw67c` is READY at `co-operative-6nin11ymr-zanibethels-projects.vercel.app`.
+
+**Why:** Hermes uses argparse with top-level and subcommand-specific option surfaces. Correct ordering is required even when individual flag names are valid.
+
+**Status:** FIXED. Model-backed Cloud Hermes smoke test ready for retry.
