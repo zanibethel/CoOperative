@@ -87,3 +87,24 @@ test("Hermes shell command uses explicit separators before timeout execution", (
   assert.match(workflowSource, /exec timeout 75s "\$HERMES_BIN"/);
   assert.equal(workflowSource.includes('].join(" ")'), false);
 });
+
+
+test("Hermes top-level flags precede the chat subcommand", () => {
+  const globalStart = workflowSource.indexOf("const globalHermesArgs");
+  const chatStart = workflowSource.indexOf("const chatHermesArgs");
+  assert.ok(globalStart >= 0);
+  assert.ok(chatStart > globalStart);
+
+  const globalBlock = workflowSource.slice(globalStart, chatStart);
+  const chatBlock = workflowSource.slice(chatStart, workflowSource.indexOf("const hermesArgs"));
+
+  assert.match(globalBlock, /"--usage-file"/);
+  assert.match(globalBlock, /"--provider"/);
+  assert.match(globalBlock, /"--model"/);
+  assert.match(globalBlock, /"--reasoning"/);
+  assert.match(chatBlock, /"chat"/);
+  assert.match(chatBlock, /"--query-file"/);
+  assert.match(chatBlock, /"--max-turns"/);
+  assert.match(chatBlock, /"--run-budget"/);
+  assert.equal(chatBlock.includes('"--usage-file"'), false);
+});
