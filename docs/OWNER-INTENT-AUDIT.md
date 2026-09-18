@@ -236,3 +236,31 @@ Each entry should contain:
 **Source:** Owner-authorized ChatGPT implementation, GitHub Actions verification, and Vercel preview verification.
 
 **Status:** Implementation ready on draft PR #5; live Mac-offline self-check pending server-secret approval/configuration.
+
+
+---
+
+## 2026-09-18 — Cloud Hermes model selection becomes a CoOperative routing concern
+
+**Scope:** Cloud Operative / Hermes / AI Router / ChatGPT + Telegram interfaces
+
+**Owner intent:** Avoid manually switching Hermes models on the Mac once cloud execution is operational. Model choice should be available through normal CoOperative interfaces and should usually happen automatically based on cost, capability, availability, and task requirements.
+
+**Changes / decisions:**
+- The current local Hermes model picker is treated as a temporary bootstrap control, not the desired production workflow.
+- CoOperative should select the model **before invoking Hermes** whenever possible, using the task's required capability, risk, quality floor, budget, latency, and currently available/priced models.
+- Known deterministic/playbook work should bypass Hermes/model selection entirely.
+- If the selected model is unavailable (for example HTTP 503 / provider pricing unavailable), the router should fall back to the next approved qualified model instead of repeatedly retrying the same unavailable model.
+- Hermes may request escalation when the assigned model cannot complete the task, but any material increase in cost/risk remains subject to Cost Governor and owner policy.
+- ChatGPT, Telegram, and Owner Console should all be able to express optional overrides such as "cheapest qualified model", "use a stronger model", or a task spend cap; these become task constraints in the same canonical system rather than channel-specific settings.
+- The default experience should hide provider/model details unless the owner asks to inspect or override them.
+
+**Why:** Model/provider choice is infrastructure. The owner should interact with tasks and business outcomes, while CoOperative minimizes cost and avoids failures caused by stale/unavailable model defaults.
+
+**Affected areas:** AI Router, Cost Governor, Cloud Operative task contract, Hermes invocation, Owner Console, Telegram adapter, future ChatGPT bridge.
+
+**Conflict / supersession notes:** Reinforces the existing provider-independent AI architecture and lowest-marginal-cost executor policy. It supersedes any assumption that a single Hermes-wide default model should control every cloud task.
+
+**Source:** Owner conversation in ChatGPT after local Hermes model availability failure.
+
+**Status:** Active architecture decision.
