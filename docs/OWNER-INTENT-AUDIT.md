@@ -115,3 +115,32 @@ Each entry should contain:
 **Source:** Owner conversation in ChatGPT.
 
 **Status:** Active pilot.
+
+
+---
+
+## 2026-09-18T00:12:00-05:00 — Cloud Operative Gate 1 database migration applied and independently verified
+
+**Scope:** Cloud Operative / Supabase / Issue #4
+
+**Owner intent:** Proceed with the reviewed Cloud Operative v0.2 database foundation, but stop before secret configuration, Telegram webhook cutover, or other later gates.
+
+**Changes / decisions:**
+- Owner explicitly approved Gate 1 only.
+- Versioned migration `20260918044018_cloud_operative_v0_2` was applied to the linked CoOperative Supabase project.
+- The 8 Cloud Operative tables now exist: conversations, conversation_messages, operative_tasks, task_events, decisions, cost_ledger_entries, memories, and channel_identities.
+- Independent post-apply verification confirmed RLS enabled on all 8 tables.
+- Supabase security advisor returned no lints.
+- Hermes stopped before Gate 2 and Gate 3 as instructed.
+
+**Why:** Establish the durable conversation/task/decision/memory/cost/channel foundation required for cloud execution while preserving owner control over secrets and live Telegram cutover.
+
+**Affected areas:** Supabase schema, Cloud Operative, canonical memory/conversation state, future ChatGPT/Telegram/Owner Console bridge.
+
+**Conflict / supersession notes:** No conflict. This advances the existing Cloud Operative self-bootstrap plan. Production secret configuration and Telegram `setWebhook` remain unapproved.
+
+**Verification notes:** Supabase performance advisor currently reports informational findings, including unindexed foreign-key coverage on several new composite relationships and unused indexes on newly created/unused tables. These are performance-tuning items, not current security failures, and should be addressed based on measured query patterns rather than by reflexively adding/removing indexes.
+
+**Source:** Owner-approved Hermes Gate 1 execution plus independent ChatGPT/Supabase verification.
+
+**Status:** Gate 1 complete. Gate 2 and Gate 3 pending.
