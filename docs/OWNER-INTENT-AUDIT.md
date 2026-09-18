@@ -203,3 +203,36 @@ Each entry should contain:
 **Source:** Owner-authorized ChatGPT implementation and GitHub/Vercel CI verification.
 
 **Status:** Repo-side Phase C control-surface slice complete on draft PR #5; trusted runtime/executor connection pending.
+
+
+---
+
+## 2026-09-18T00:37:38-05:00 — First cloud execution proof defined as deterministic playbook, not Hermes reasoning
+
+**Scope:** Cloud Operative / Vercel Sandbox / executor routing / Issue #4
+
+**Owner intent:** Keep ChatGPT as the primary planning/implementation connection, use paid Hermes reasoning only when genuinely necessary, and turn repeatable operations into code/playbooks so future execution becomes cheaper.
+
+**Changes / decisions:**
+- Added an allow-listed `cloud-self-check` playbook. Owner conversation text can never become arbitrary shell commands.
+- The playbook checks out the exact CoOperative revision in Vercel Sandbox, confirms the revision/runtime, installs dependencies, and runs the repository unit tests.
+- Added a governed execution endpoint that verifies owner scope, approved playbook, task state, and any required owner approval before execution.
+- The first cloud self-check records `deterministic-code` as the executor and `vercel-sandbox` separately as the execution runtime; Hermes/model reasoning is not used.
+- Execution follows the canonical task state machine: `queued -> planning -> executing -> verifying -> completed` for the safe self-check, with failures recorded as task/audit evidence.
+- Sandbox output persisted to task results is deliberately bounded to avoid storing excessive logs.
+- The cost ledger records direct per-task marginal cash cost separately from allocated platform/quota cost so included infrastructure is not confused with permanently free infrastructure.
+- Added a one-click Cloud self-check control to the Owner Console for the eventual Mac-offline proof.
+- CI initially caught a safety-flag type normalization issue; it was corrected before runtime.
+- Final CI passed unit tests, TypeScript, lint, and build; Vercel preview for the corrected head is READY.
+
+**Why:** The first proof of cloud execution should demonstrate the architecture itself: known work runs from a reviewed deterministic playbook in an isolated cloud workspace, with AI/Hermes reserved for problems that actually require reasoning.
+
+**Affected areas:** Playbook registry, Cost Governor evidence, executor selection, Vercel Sandbox adapter, Owner Console, operative task state machine, self-bootstrap test.
+
+**Conflict / supersession notes:** Clarifies earlier language that could imply Vercel Sandbox work should be labeled as `hermes-cloud-operative`. For deterministic reviewed commands, the executor is deterministic code; Sandbox is the runtime. Hermes remains available for reasoning/autonomous work that cannot be reduced to a known playbook.
+
+**Current boundary:** The self-check code is ready but has not been executed against live trusted task state because `SUPABASE_SECRET_KEY` is still unset and remains an explicit owner gate.
+
+**Source:** Owner-authorized ChatGPT implementation, GitHub Actions verification, and Vercel preview verification.
+
+**Status:** Implementation ready on draft PR #5; live Mac-offline self-check pending server-secret approval/configuration.
