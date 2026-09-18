@@ -95,6 +95,8 @@ export default function OwnerConsolePage() {
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
+  const [decisionWorkingId, setDecisionWorkingId] = useState<string | null>(null);
 
   async function load() {
     const response = await fetch("/api/operative/overview", { cache: "no-store" });
@@ -221,6 +223,56 @@ export default function OwnerConsolePage() {
 
   function setFlag(key: keyof SafetyFlags, value: boolean) {
     setFlags((current) => ({ ...current, [key]: value }));
+  }
+
+  async function respondToDecision(
+    decisionId: string,
+    action: "approve" | "reject" | "modify" | "ask_question",
+  ) {
+    const note = decisionNotes[decisionId]?.trim() ?? "";
+    if ((action === "modify" || action === "ask_question") && !note) {
+      setError("Add a note for a modification or a question before sending it.");
+      return;
+    }
+
+    setDecisionWorkingId(decisionId);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await fetch("/api/operative/decisions/" + decisionId, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action, note: note || undefined }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        if (payload.code === "SERVER_SECRET_NOT_CONFIGURED") {
+          throw new Error(
+            "Decision responses are ready, but trusted cloud writes remain disabled until SUPABASE_SECRET_KEY is explicitly configured.",
+          );
+        }
+        throw new Error(payload.error ?? "Unable to save decision response");
+      }
+
+      setDecisionNotes((current) => {
+        const next = { ...current };
+        delete next[decisionId];
+        return next;
+      });
+
+      setNotice(
+        action === "ask_question"
+          ? "Question saved. The decision remains pending."
+          : "Decision recorded. Execution remains paused until the governed resume layer is connected.",
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save decision response");
+    } finally {
+      setDecisionWorkingId(null);
+    }
   }
 
   return (
@@ -388,7 +440,57 @@ export default function OwnerConsolePage() {
                     <span>{"$" + (decision.estimated_cost_cents / 100).toFixed(2) + " estimated"}</span>
                   </div>
                   {decision.recommended_action ? <p><b>Recommended:</b> {decision.recommended_action}</p> : null}
-                  <small>Decision actions are the next controlled slice; this phase surfaces them read-only.</small>
+                  <div className="decision-response">
+                    <input
+                      placeholder="Optional note; required to modify or ask a question"
+                      value={decisionNotes[decision.id] ?? ""}
+                      onChange={(event) =>
+                        setDecisionNotes((current) => ({
+                          ...current,
+                          [decision.id]: event.target.value,
+                        }))
+                      }
+                      disabled={decisionWorkingId === decision.id}
+                    />
+                    <div className="decision-actions">
+                      <button
+                        type="button"
+                        className="decision-approve"
+                        disabled={decisionWorkingId === decision.id}
+                        onClick={() => void respondToDecision(decision.id, "approve")}
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="decision-button"
+                        disabled={decisionWorkingId === decision.id}
+                        onClick={() => void respondToDecision(decision.id, "reject")}
+                      >
+                        Reject
+                      </button>
+                      <button
+                        type="button"
+                        className="decision-button"
+                        disabled={decisionWorkingId === decision.id}
+                        onClick={() => void respondToDecision(decision.id, "modify")}
+                      >
+                        Modify
+                      </button>
+                      <button
+                        type="button"
+                        className="decision-button"
+                        disabled={decisionWorkingId === decision.id}
+                        onClick={() => void respondToDecision(decision.id, "ask_question")}
+                      >
+                        Ask question
+                      </button>
+                    </div>
+                    <small>
+                      Your response is written to the canonical conversation and task audit trail.
+                      Approval does not bypass the executor/policy layer.
+                    </small>
+                  </div>
                 </article>
               ))}
             </div>
