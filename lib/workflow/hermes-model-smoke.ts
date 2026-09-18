@@ -195,7 +195,10 @@ async function runModelSmoke(
       },
     ]);
 
-    const globalHermesArgs = [
+    // --usage-file is only honored by Hermes' top-level -z/--oneshot path.
+    // Keep the fixed smoke prompt as one safely quoted argv value so Hermes
+    // performs exactly one scripted request and always emits usage accounting.
+    const hermesArgs = [
       "--usage-file",
       "/tmp/hermes-usage.json",
       "--provider",
@@ -207,23 +210,9 @@ async function runModelSmoke(
       "--safe-mode",
       "--ignore-user-config",
       "--ignore-rules",
+      "-z",
+      prompt,
     ];
-
-    const chatHermesArgs = [
-      "chat",
-      "--oneshot",
-      "--query-file",
-      "/tmp/cooperative-model-smoke.md",
-      "--max-turns",
-      "1",
-      "--run-budget",
-      "60",
-      "--quiet",
-      "--source",
-      "tool",
-    ];
-
-    const hermesArgs = [...globalHermesArgs, ...chatHermesArgs];
 
     const quotedArgs = hermesArgs
       .map((value) => "'" + value.replaceAll("'", "'\\''") + "'")
