@@ -317,3 +317,32 @@ Each entry should contain:
 **Source:** Owner report from phone testing plus ChatGPT code review.
 
 **Status:** Fixed in Preview.
+
+
+---
+
+## 2026-09-18 — CoOperative Platform Owner Console will adopt RaiseHub's owner-operations pattern
+
+**Scope:** Platform owner access / Owner Console / Managed Projects / Support
+
+**Owner intent:** Reuse the successful RaiseHub Owner Dashboard/Platform Console approach for CoOperative so the platform owner has powerful direct operational tooling without confusing that access with ordinary customer/business Owner Console permissions.
+
+**Changes / decisions:**
+- CoOperative will distinguish a tenant/business Owner Console from a separate Platform Owner Console.
+- Platform-owner identity remains permanent while selecting organizations, customers, or managed projects; context switching must not impersonate the subject.
+- Platform support/inspection begins read-only.
+- Privileged editing/operations must be explicitly enabled, scoped, reasoned, policy-checked, and audited.
+- Platform Owner tooling should eventually include managed projects, organizations, Mission Control, AI/executor routing, connectors, costs/economics, audit/memory, support, deployments/incidents, and platform settings.
+- Platform authorization should be tied to authenticated user IDs/roles/capabilities rather than a hard-coded owner email.
+- High-risk production/auth/RLS/database/secrets/money/destructive actions retain stronger owner gates.
+- RaiseHub is the reference implementation pattern, not a codebase to merge into CoOperative.
+
+**Why:** RaiseHub has already demonstrated a useful model for permanent owner identity, workspace browsing, read-only support, explicit editing, role preview, and auditability. Reusing those principles reduces duplicate design work and keeps CoOperative's privileged access understandable and governable.
+
+**Affected areas:** Authentication/authorization roadmap, Owner Console architecture, Managed Projects, support tooling, audit, future internal roles.
+
+**Conflict / supersession notes:** Clarifies the earlier Owner Console work: `/console` remains the tenant/business operating surface. A separate platform-level owner surface should be introduced rather than giving all authenticated workspace owners platform-wide privileges.
+
+**Source:** Owner conversation in ChatGPT after reviewing the RaiseHub Owner Platform pattern.
+
+**Status:** Active architecture direction; auth/RLS/schema implementation still requires explicit owner approval.
