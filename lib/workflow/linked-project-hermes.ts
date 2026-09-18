@@ -112,7 +112,9 @@ function patchTouchesBlockedPath(patch: string): string | null {
     /(^|\/)node_modules\//,
   ];
 
-  const paths = [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]);
+  const addedPaths = [...patch.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((match) => match[1]);
+  const removedPaths = [...patch.matchAll(/^--- a\/(.+)$/gm)].map((match) => match[1]);
+  const paths = [...addedPaths, ...removedPaths];
   return paths.find((path) => blocked.some((pattern) => pattern.test(path))) ?? null;
 }
 
@@ -313,6 +315,9 @@ async function runLinkedProjectHermes(
       "file",
       "--max-turns",
       String(MAX_TURNS),
+      "--run-budget",
+      "240",
+      "--checkpoints",
       "--safe-mode",
       "--ignore-user-config",
       "--ignore-rules",
