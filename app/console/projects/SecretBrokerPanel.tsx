@@ -78,12 +78,34 @@ export default function SecretBrokerPanel({
   }, [projectKey, requirements.length]);
 
   useEffect(() => {
-    void refresh().catch((err) =>
-      setError(
-        err instanceof Error ? err.message : "Unable to load secret-broker status.",
-      ),
-    );
-  }, [refresh]);
+    if (requirements.length === 0) return;
+
+    let cancelled = false;
+    void fetch(
+      `/api/operative/projects/${encodeURIComponent(projectKey)}/secrets`,
+      { cache: "no-store" },
+    )
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Unable to load secret-broker status.");
+        }
+        if (!cancelled) setStatus(payload as StatusResponse);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Unable to load secret-broker status.",
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectKey, requirements.length]);
 
   const latestByScope = useMemo(() => {
     const map = new Map<string, SecretRequestRecord>();
