@@ -144,3 +144,31 @@ Each entry should contain:
 **Source:** Owner-approved Hermes Gate 1 execution plus independent ChatGPT/Supabase verification.
 
 **Status:** Gate 1 complete. Gate 2 and Gate 3 pending.
+
+
+---
+
+## 2026-09-18T00:16:29-05:00 — Telegram cutover deferred; Owner Console self-bootstrap remains next
+
+**Scope:** Cloud Operative / Issue #4 / Telegram
+
+**Owner intent:** Continue toward a Mac-independent Cloud Operative while minimizing Hermes spend and keeping ChatGPT as the primary orchestration/review layer.
+
+**Changes / decisions:**
+- Gate 1 remains complete.
+- Telegram `setWebhook` is explicitly deferred.
+- Review found the current webhook is inbound-only: it can authenticate and persist Telegram messages but cannot yet send advisor/task responses back.
+- No Telegram identity is currently linked/allow-listed in `channel_identities`.
+- The next functional target is Owner Console → durable task → policy/executor → cloud execution → Decision Brief/approval → resume → result/evidence, tested with the Mac offline.
+- `SUPABASE_SECRET_KEY` is the next relevant server-side secret for trusted Cloud Operative writes.
+- `TELEGRAM_WEBHOOK_SECRET` and future outbound `TELEGRAM_BOT_TOKEN` are deferred until the Telegram secondary-channel path is complete.
+
+**Why:** Cutting over Telegram now would replace a working long-polling bot with an inbound-only cloud path and would not satisfy Issue #4's actual success definition. Finishing the Owner Console cloud flow first avoids wasted effort and unnecessary Hermes/token spend.
+
+**Affected areas:** Cloud Operative sequencing, Vercel secrets, Telegram, Owner Console, Hermes usage, Issue #4 and PR #5.
+
+**Conflict / supersession notes:** Supersedes the earlier simplistic remaining-gates sequence that treated Telegram secret setup and `setWebhook` as the immediate next steps after Gate 1. It does not change Telegram's intended long-term role as a secondary interface.
+
+**Source:** Post-Gate-1 ChatGPT review of live Supabase state and current PR #5 implementation.
+
+**Status:** Active current sequence.
