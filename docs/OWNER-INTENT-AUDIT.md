@@ -264,3 +264,31 @@ Each entry should contain:
 **Source:** Owner conversation in ChatGPT after local Hermes model availability failure.
 
 **Status:** Active architecture decision.
+
+
+---
+
+## 2026-09-18 — Preview-only trusted Supabase server secret configured; Cloud self-check ready to run
+
+**Scope:** Cloud Operative / Vercel Preview / server-only Supabase access
+
+**Owner intent:** Enable the minimum trusted backend authority needed to exercise Cloud Operative task/audit writes without promoting the secret to Production or touching Telegram.
+
+**Changes / decisions:**
+- `SUPABASE_SECRET_KEY` was configured for the Vercel **Preview** environment only for the `cloud-operative-bootstrap` branch.
+- Production was not given the secret.
+- Telegram secrets were not configured and Telegram `setWebhook` was not called.
+- The latest `cloud-operative-bootstrap` preview was redeployed after the secret change.
+- Independent Vercel verification confirmed deployment `dpl_93QQpbtTAeDpzigszH6JSqxbfRPA` is READY at `co-operative-l4wqflb6h-zanibethels-projects.vercel.app`.
+- The deployment is tied to commit `6a370d59867494ab82c9feccca790b2829856ebc`, the corrected Cloud self-check/state-machine implementation.
+- The next intended action is to open the Owner Console from a phone and run the allow-listed Cloud self-check, proving the task can execute in Vercel Sandbox without the Mac participating in runtime.
+
+**Why:** This is the smallest live authority increase needed to test the trusted Cloud Operative path while keeping production and Telegram unchanged.
+
+**Affected areas:** Vercel Preview environment, trusted Supabase server writes, Owner Console, Cloud self-check, Mac-offline bootstrap proof.
+
+**Conflict / supersession notes:** Consistent with the prior Preview-only secret gate and Telegram deferral. Does not authorize Production secret promotion or broader Cloud Operative authority.
+
+**Source:** Owner-approved Hermes secret plumbing plus independent ChatGPT/Vercel deployment verification.
+
+**Status:** Preview runtime gate complete; first live Cloud self-check pending.
