@@ -1,6 +1,12 @@
 import type { CompatibilityTarget } from "./integration-compatibility-registry.ts";
 
-export const CLOUD_PLAYBOOK_KEYS = ["cloud-self-check", "hermes-runtime-check", "hermes-model-smoke"] as const;
+export const CLOUD_PLAYBOOK_KEYS = [
+  "cloud-self-check",
+  "hermes-runtime-check",
+  "hermes-model-smoke",
+  "creatorhub-health-check",
+  "raisehub-health-check",
+] as const;
 export type CloudPlaybookKey = (typeof CLOUD_PLAYBOOK_KEYS)[number];
 
 export interface CloudPlaybook {
@@ -11,6 +17,7 @@ export interface CloudPlaybook {
   executor: "deterministic-code" | "hermes-cloud-operative";
   executionMode?: "sync" | "detached" | "workflow";
   repoSlug: string;
+  gitRef?: string;
   compatibilityTargets: readonly CompatibilityTarget[];
   buildCommands: () => { cmd: string; args?: string[] }[];
 }
@@ -77,6 +84,57 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
           "HERMES_BIN=\"$HOME/.local/bin/hermes\"; [ -x \"$HERMES_BIN\" ] || HERMES_BIN=/usr/local/bin/hermes; timeout 30s \"$HERMES_BIN\" --help > /tmp/hermes-help.txt && grep -q \"prompt-size\" /tmp/hermes-help.txt",
         ],
       },
+    ],
+  },
+  "creatorhub-health-check": {
+    key: "creatorhub-health-check",
+    title: "CreatorHub deterministic health check",
+    description:
+      "Clone CreatorHub main, install dependencies, type-check, lint, and build without changing the repository, database, provider credentials, or production.",
+    requiresShell: true,
+    executor: "deterministic-code",
+    executionMode: "detached",
+    repoSlug: "zanibethel/CreatorHub",
+    gitRef: "main",
+    compatibilityTargets: [
+      "linked-project",
+      "provider-auth-handoff",
+      "provider-secret-broker",
+      "vercel-sandbox",
+      "vercel-ai-gateway",
+      "supabase",
+    ],
+    buildCommands: () => [
+      { cmd: "test", args: ["-f", "package.json"] },
+      { cmd: "npm", args: ["ci", "--no-audit", "--no-fund"] },
+      { cmd: "npx", args: ["tsc", "--noEmit"] },
+      { cmd: "npm", args: ["run", "lint"] },
+      { cmd: "npm", args: ["run", "build"] },
+    ],
+  },
+  "raisehub-health-check": {
+    key: "raisehub-health-check",
+    title: "RaiseHub deterministic health check",
+    description:
+      "Clone RaiseHub main, install dependencies, run tests, type-check, lint, and build without changing the repository, database, payments, or production.",
+    requiresShell: true,
+    executor: "deterministic-code",
+    executionMode: "detached",
+    repoSlug: "zanibethel/raisehub",
+    gitRef: "main",
+    compatibilityTargets: [
+      "linked-project",
+      "provider-secret-broker",
+      "vercel-sandbox",
+      "supabase",
+    ],
+    buildCommands: () => [
+      { cmd: "test", args: ["-f", "package.json"] },
+      { cmd: "npm", args: ["ci", "--no-audit", "--no-fund"] },
+      { cmd: "npm", args: ["test"] },
+      { cmd: "npx", args: ["tsc", "--noEmit"] },
+      { cmd: "npm", args: ["run", "lint"] },
+      { cmd: "npm", args: ["run", "build"] },
     ],
   },
   "hermes-model-smoke": {
