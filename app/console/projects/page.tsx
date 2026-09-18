@@ -478,8 +478,10 @@ export default function LinkedProjectsPage() {
           <section className="provider-browser" role="dialog" aria-modal="true">
             <header className="provider-browser-head">
               <div>
-                <div className="eyebrow">CoOperative secure handoff</div>
-                <strong>{activeHandoff.action.provider} · {activeHandoff.action.title}</strong>
+                <div className="eyebrow">
+                  CoOperative secure handoff · {activeHandoff.action.provider}
+                </div>
+                <strong>{activeHandoff.action.title}</strong>
               </div>
               <button
                 className="task-error-action"
@@ -505,24 +507,27 @@ export default function LinkedProjectsPage() {
               />
             </div>
 
-            <div className="provider-browser-guidance">
-              <p>
-                CoOperative cannot read this provider page, your password, MFA codes,
-                CAPTCHA, KYC details, or provider cookies. Some providers also refuse
-                to load login pages inside embedded frames.
-              </p>
-              {activeHandoff.action.callbackUrl ? (
+            <details className="provider-browser-guidance">
+              <summary>Security & setup notes</summary>
+              <div className="provider-browser-guidance-body">
                 <p>
-                  Register callback: <code>{activeHandoff.action.callbackUrl}</code>
+                  CoOperative cannot read this provider page, your password, MFA codes,
+                  CAPTCHA, KYC details, or provider cookies. Some providers also refuse
+                  to load login pages inside embedded frames.
                 </p>
-              ) : null}
-              {activeHandoff.action.relatedSecretKeys.length > 0 ? (
-                <p>
-                  Expected variables: {activeHandoff.action.relatedSecretKeys.join(", ")}.
-                  Values remain behind the secret broker gate.
-                </p>
-              ) : null}
-            </div>
+                {activeHandoff.action.callbackUrl ? (
+                  <p>
+                    Register callback: <code>{activeHandoff.action.callbackUrl}</code>
+                  </p>
+                ) : null}
+                {activeHandoff.action.relatedSecretKeys.length > 0 ? (
+                  <p>
+                    Expected variables: {activeHandoff.action.relatedSecretKeys.join(", ")}.
+                    Values remain behind the secret broker gate.
+                  </p>
+                ) : null}
+              </div>
+            </details>
 
             <div className="provider-browser-actions">
               <button
@@ -530,7 +535,7 @@ export default function LinkedProjectsPage() {
                 type="button"
                 onClick={() => openProviderWindow(activeHandoff.action)}
               >
-                Open secure provider window
+                Open external
               </button>
               <button
                 className="primary"
@@ -539,7 +544,7 @@ export default function LinkedProjectsPage() {
                   void persistHumanCompletion(activeHandoff.project, activeHandoff.action)
                 }
               >
-                I completed this step · return to CoOperative
+                Done · return
               </button>
             </div>
           </section>
