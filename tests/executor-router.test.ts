@@ -7,7 +7,7 @@ function candidate(overrides: Partial<ExecutorCandidate> & Pick<ExecutorCandidat
   return {
     available: true,
     qualified: true,
-    estimatedMarginalCostCents: 0,
+    estimatedMarginalCostMicrounits: 0,
     requiresAutonomousExecution: false,
     riskLevel: "low",
     ...overrides,
@@ -16,25 +16,25 @@ function candidate(overrides: Partial<ExecutorCandidate> & Pick<ExecutorCandidat
 
 test("prefers deterministic code when it is free and qualified", () => {
   const result = selectExecutor([
-    candidate({ kind: "deterministic-code", estimatedMarginalCostCents: 0 }),
-    candidate({ kind: "connected-chatgpt", estimatedMarginalCostCents: 0 }),
-    candidate({ kind: "external-ai-provider", estimatedMarginalCostCents: 50 }),
+    candidate({ kind: "deterministic-code", estimatedMarginalCostMicrounits: 0 }),
+    candidate({ kind: "connected-chatgpt", estimatedMarginalCostMicrounits: 0 }),
+    candidate({ kind: "external-ai-provider", estimatedMarginalCostMicrounits: 50 }),
   ]);
   assert.equal(result.selected?.kind, "deterministic-code");
 });
 
 test("prefers connected ChatGPT over paid external AI when both qualified and ChatGPT is free (flat-rate)", () => {
   const result = selectExecutor([
-    candidate({ kind: "connected-chatgpt", estimatedMarginalCostCents: 0 }),
-    candidate({ kind: "external-ai-provider", estimatedMarginalCostCents: 30 }),
+    candidate({ kind: "connected-chatgpt", estimatedMarginalCostMicrounits: 0 }),
+    candidate({ kind: "external-ai-provider", estimatedMarginalCostMicrounits: 30 }),
   ]);
   assert.equal(result.selected?.kind, "connected-chatgpt");
 });
 
 test("lowest marginal cost wins even if it is not the priority-first kind", () => {
   const result = selectExecutor([
-    candidate({ kind: "native-capability", estimatedMarginalCostCents: 5 }),
-    candidate({ kind: "connected-chatgpt", estimatedMarginalCostCents: 1 }),
+    candidate({ kind: "native-capability", estimatedMarginalCostMicrounits: 5 }),
+    candidate({ kind: "connected-chatgpt", estimatedMarginalCostMicrounits: 1 }),
   ]);
   assert.equal(result.selected?.kind, "connected-chatgpt");
 });
@@ -43,7 +43,7 @@ test("unavailable or unqualified candidates are never selected", () => {
   const result = selectExecutor([
     candidate({ kind: "deterministic-code", available: false }),
     candidate({ kind: "connected-chatgpt", qualified: false }),
-    candidate({ kind: "external-ai-provider", estimatedMarginalCostCents: 20 }),
+    candidate({ kind: "external-ai-provider", estimatedMarginalCostMicrounits: 20 }),
   ]);
   assert.equal(result.selected?.kind, "external-ai-provider");
 });
@@ -60,12 +60,12 @@ test("tasks requiring autonomous execution can only be satisfied by hermes-cloud
   const result = selectExecutor([
     candidate({
       kind: "connected-chatgpt",
-      estimatedMarginalCostCents: 0,
+      estimatedMarginalCostMicrounits: 0,
       requiresAutonomousExecution: true,
     }),
     candidate({
       kind: "hermes-cloud-operative",
-      estimatedMarginalCostCents: 10,
+      estimatedMarginalCostMicrounits: 10,
       requiresAutonomousExecution: true,
     }),
   ]);
@@ -76,7 +76,7 @@ test("autonomy requirement with no qualified hermes candidate yields no selectio
   const result = selectExecutor([
     candidate({
       kind: "connected-chatgpt",
-      estimatedMarginalCostCents: 0,
+      estimatedMarginalCostMicrounits: 0,
       requiresAutonomousExecution: true,
     }),
   ]);
