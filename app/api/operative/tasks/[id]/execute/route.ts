@@ -159,7 +159,32 @@ export async function POST(
     .maybeSingle();
 
   if (claimError) {
-    return NextResponse.json({ error: claimError.message }, { status: 500 });
+    const message = "Executor selection failed: " + claimError.message;
+
+    await admin
+      .from("operative_tasks")
+      .update({
+        status: "failed",
+        error: message,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", task.id)
+      .eq("organization_id", task.organization_id)
+      .eq("status", executionFromStatus);
+
+    await admin.from("task_events").insert({
+      task_id: task.id,
+      organization_id: task.organization_id,
+      event_type: "error",
+      actor: "system",
+      detail: {
+        stage: "executor_selection",
+        executor: playbook.executor,
+        message,
+      },
+    });
+
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   if (!claimed) {
