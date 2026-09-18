@@ -6,6 +6,7 @@ import { runSandboxTask, startDetachedSandboxTask } from "@/lib/operative/sandbo
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { hermesRuntimeWorkflow } from "@/lib/workflow/hermes-runtime";
+import { hermesModelSmokeWorkflow } from "@/lib/workflow/hermes-model-smoke";
 
 export const maxDuration = 300;
 
@@ -147,7 +148,7 @@ export async function POST(
     .from("operative_tasks")
     .update({
       status: "executing",
-      selected_executor: "deterministic-code",
+      selected_executor: playbook.executor,
       error: null,
       updated_at: new Date().toISOString(),
     })
@@ -175,8 +176,13 @@ export async function POST(
       event_type: "executor_selected",
       actor: "system",
       detail: {
-        executor: "deterministic-code",
-        runtime: playbook.executionMode === "workflow" ? "vercel-workflow+vercel-sandbox" : "vercel-sandbox",
+        executor: playbook.executor,
+        runtime:
+          playbook.key === "hermes-model-smoke"
+            ? "vercel-workflow+vercel-sandbox+ai-gateway"
+            : playbook.executionMode === "workflow"
+              ? "vercel-workflow+vercel-sandbox"
+              : "vercel-sandbox",
         playbookKey: playbook.key,
         marginalCashCostMicrounits: 0,
       },
@@ -219,12 +225,21 @@ export async function POST(
         throw initialResultError;
       }
 
-      const run = await start(hermesRuntimeWorkflow, [
-        {
-          taskId: task.id,
-          organizationId: task.organization_id,
-        },
-      ]);
+      const run =
+        playbook.key === "hermes-model-smoke"
+          ? await start(hermesModelSmokeWorkflow, [
+              {
+                taskId: task.id,
+                organizationId: task.organization_id,
+                maxSpendMicrounits: Number(task.max_spend_microunits ?? 0),
+              },
+            ])
+          : await start(hermesRuntimeWorkflow, [
+              {
+                taskId: task.id,
+                organizationId: task.organization_id,
+              },
+            ]);
 
       const { data: currentTask, error: currentTaskError } = await admin
         .from("operative_tasks")
