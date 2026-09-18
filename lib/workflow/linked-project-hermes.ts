@@ -468,14 +468,29 @@ async function runLinkedProjectHermes(
   }
 }
 
-async function writeCostLedger(
+async function finalizeWithEvidence(
   input: LinkedProjectHermesInput,
   evidence: LinkedProjectEvidence,
 ) {
   "use step";
 
   const admin = createAdminClient();
-  const { error } = await admin.from("cost_ledger_entries").insert([
+  const now = new Date().toISOString();
+  const overBudget = evidence.costMicrounits > input.maxSpendMicrounits;
+  const succeeded = evidence.verificationSucceeded && !overBudget;
+
+  const result = {
+    executionMode: "workflow",
+    workflow: "linked-project-hermes",
+    linkedProject: input.projectKey,
+    progress: {
+      stage: succeeded ? "completed" : "failed",
+      at: now,
+    },
+    evidence,
+  };
+
+  const { error: ledgerError } = await admin.from("cost_ledger_entries").insert([
     {
       organization_id: input.organizationId,
       task_id: input.taskId,
@@ -500,32 +515,7 @@ async function writeCostLedger(
     },
   ]);
 
-  if (error) throw error;
-}
-
-async function finalizeWithEvidence(
-  input: LinkedProjectHermesInput,
-  evidence: LinkedProjectEvidence,
-) {
-  "use step";
-
-  const admin = createAdminClient();
-  const now = new Date().toISOString();
-  const overBudget = evidence.costMicrounits > input.maxSpendMicrounits;
-  const succeeded = evidence.verificationSucceeded && !overBudget;
-
-  const result = {
-    executionMode: "workflow",
-    workflow: "linked-project-hermes",
-    linkedProject: input.projectKey,
-    progress: {
-      stage: succeeded ? "completed" : "failed",
-      at: now,
-    },
-    evidence,
-  };
-
-  await writeCostLedger(input, evidence);
+  if (ledgerError) throw ledgerError;
 
   const { error: updateError } = await admin
     .from("operative_tasks")
