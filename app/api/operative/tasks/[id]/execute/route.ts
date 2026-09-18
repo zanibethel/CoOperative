@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { start } from "workflow/api";
 
+import { reviewCompatibilityKnowledge } from "@/lib/operative/compatibility-review";
 import { getCloudPlaybook } from "@/lib/operative/playbook-registry";
 import { runSandboxTask, startDetachedSandboxTask } from "@/lib/operative/sandbox-adapter";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -65,6 +66,18 @@ export async function POST(
     );
   }
 
+  const compatibilityReview = reviewCompatibilityKnowledge(playbook.compatibilityTargets);
+  if (!compatibilityReview.ok) {
+    return NextResponse.json(
+      {
+        error: "Compatibility knowledge review is required before this playbook may execute.",
+        code: "COMPATIBILITY_REVIEW_REQUIRED",
+        uncoveredTargets: compatibilityReview.uncoveredTargets,
+      },
+      { status: 409 },
+    );
+  }
+
   if (task.requires_owner_approval) {
     const { data: decision, error: decisionError } = await supabase
       .from("decisions")
@@ -101,6 +114,25 @@ export async function POST(
       );
     }
     throw error;
+  }
+
+  const { error: compatibilityEventError } = await admin.from("task_events").insert({
+    task_id: task.id,
+    organization_id: task.organization_id,
+    event_type: "note",
+    actor: "system",
+    detail: {
+      type: "compatibility_review",
+      playbookKey: playbook.key,
+      targets: compatibilityReview.targets,
+      ruleIds: compatibilityReview.ruleIds,
+      uncoveredTargets: compatibilityReview.uncoveredTargets,
+      outcome: "passed",
+    },
+  });
+
+  if (compatibilityEventError) {
+    return NextResponse.json({ error: compatibilityEventError.message }, { status: 500 });
   }
 
   const fromStatus = task.status;
@@ -209,6 +241,7 @@ export async function POST(
               ? "vercel-workflow+vercel-sandbox"
               : "vercel-sandbox",
         playbookKey: playbook.key,
+        compatibilityRuleIds: compatibilityReview.ruleIds,
         marginalCashCostMicrounits: 0,
       },
     },
@@ -235,6 +268,10 @@ export async function POST(
           result: {
             playbookKey: playbook.key,
             executionMode: "workflow",
+            compatibilityReview: {
+              targets: compatibilityReview.targets,
+              ruleIds: compatibilityReview.ruleIds,
+            },
             progress: {
               stage: "starting_workflow",
               at: startedAt,
@@ -257,6 +294,10 @@ export async function POST(
                 taskId: task.id,
                 organizationId: task.organization_id,
                 maxSpendMicrounits: Number(task.max_spend_microunits ?? 0),
+                compatibilityReview: {
+                  ruleIds: compatibilityReview.ruleIds,
+                  brief: compatibilityReview.brief,
+                },
               },
             ])
           : await start(hermesRuntimeWorkflow, [
@@ -345,6 +386,10 @@ export async function POST(
         sandboxName: detached.sandboxName,
         startedAt: detached.startedAt,
         deadlineAt: detached.deadlineAt,
+        compatibilityReview: {
+          targets: compatibilityReview.targets,
+          ruleIds: compatibilityReview.ruleIds,
+        },
       };
 
       const { error: persistDetachedError } = await admin
@@ -399,6 +444,10 @@ export async function POST(
       sandboxName: result.sandboxName,
       succeeded: result.succeeded,
       durationMs: result.durationMs,
+      compatibilityReview: {
+        targets: compatibilityReview.targets,
+        ruleIds: compatibilityReview.ruleIds,
+      },
       steps: result.steps.map((step) => ({
         cmd: step.cmd,
         exitCode: step.exitCode,
