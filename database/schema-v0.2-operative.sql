@@ -29,7 +29,8 @@ create table if not exists public.conversations (
   status text not null default 'active'
     check (status in ('active', 'archived')),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint conversations_id_organization_id_unique unique (id, organization_id)
 );
 
 create index if not exists conversations_organization_id_idx
@@ -41,7 +42,7 @@ create index if not exists conversations_owner_user_id_idx
 -- { conversation_id, actor_id, channel, timestamp, message_type, text, attachments, reply_to, linked_task_id }
 create table if not exists public.conversation_messages (
   id uuid primary key default gen_random_uuid(),
-  conversation_id uuid not null references public.conversations(id) on delete cascade,
+  conversation_id uuid not null,
   organization_id uuid not null references public.organizations(id) on delete cascade,
   actor_id text not null,
   actor_type text not null default 'owner'
@@ -52,14 +53,21 @@ create table if not exists public.conversation_messages (
     check (message_type in ('text', 'decision_brief', 'approval_response', 'task_update', 'system_note')),
   text text not null default '',
   attachments jsonb not null default '[]'::jsonb check (jsonb_typeof(attachments) = 'array'),
-  reply_to_message_id uuid references public.conversation_messages(id) on delete set null,
+  reply_to_message_id uuid,
   linked_task_id uuid,
   linked_decision_id uuid,
   model_provider text,
   model_name text,
   idempotency_key text,
   created_at timestamptz not null default now(),
-  constraint conversation_messages_idempotency_unique unique (conversation_id, idempotency_key)
+  constraint conversation_messages_id_organization_id_unique unique (id, organization_id),
+  constraint conversation_messages_idempotency_unique unique (conversation_id, idempotency_key),
+  constraint conversation_messages_conversation_org_fk
+    foreign key (conversation_id, organization_id)
+    references public.conversations(id, organization_id) on delete cascade,
+  constraint conversation_messages_reply_org_fk
+    foreign key (reply_to_message_id, organization_id)
+    references public.conversation_messages(id, organization_id)
 );
 
 create index if not exists conversation_messages_conversation_id_idx
@@ -76,7 +84,7 @@ create index if not exists conversation_messages_linked_task_id_idx
 create table if not exists public.operative_tasks (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
-  conversation_id uuid references public.conversations(id) on delete set null,
+  conversation_id uuid,
   created_by uuid not null references auth.users(id) on delete cascade,
   source_channel text not null default 'owner-console'
     check (source_channel in ('owner-console', 'telegram', 'chatgpt', 'admin', 'scheduled', 'github-issue')),
@@ -95,12 +103,17 @@ create table if not exists public.operative_tasks (
       'deterministic-code', 'connected-chatgpt', 'native-capability',
       'hermes-cloud-operative', 'external-ai-provider'
     )),
-  max_spend_cents integer not null default 0 check (max_spend_cents >= 0),
-  actual_spend_cents integer not null default 0 check (actual_spend_cents >= 0),
+  -- 1 currency unit = 1,000,000 microunits. This preserves sub-cent AI/compute costs.
+  max_spend_microunits bigint not null default 0 check (max_spend_microunits >= 0),
+  actual_spend_microunits bigint not null default 0 check (actual_spend_microunits >= 0),
   result jsonb,
   error text,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint operative_tasks_id_organization_id_unique unique (id, organization_id),
+  constraint operative_tasks_conversation_org_fk
+    foreign key (conversation_id, organization_id)
+    references public.conversations(id, organization_id)
 );
 
 create index if not exists operative_tasks_organization_id_idx
@@ -116,7 +129,7 @@ create index if not exists operative_tasks_created_by_idx
 -- cost increment, etc). Append-only.
 create table if not exists public.task_events (
   id uuid primary key default gen_random_uuid(),
-  task_id uuid not null references public.operative_tasks(id) on delete cascade,
+  task_id uuid not null,
   organization_id uuid not null references public.organizations(id) on delete cascade,
   event_type text not null
     check (event_type in (
@@ -129,7 +142,10 @@ create table if not exists public.task_events (
   to_status text,
   actor text not null default 'system',
   detail jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint task_events_task_org_fk
+    foreign key (task_id, organization_id)
+    references public.operative_tasks(id, organization_id) on delete cascade
 );
 
 create index if not exists task_events_task_id_idx
@@ -144,8 +160,8 @@ create index if not exists task_events_organization_id_idx
 create table if not exists public.decisions (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
-  task_id uuid references public.operative_tasks(id) on delete cascade,
-  conversation_id uuid references public.conversations(id) on delete set null,
+  task_id uuid,
+  conversation_id uuid,
   -- Decision Brief contract per docs/CLOUD-OPERATIVE.md:
   -- what/why/if-approved/if-declined/cost/impact/risk/scopes/rollback/recommendation
   proposal_summary text not null,
@@ -167,7 +183,14 @@ create table if not exists public.decisions (
   idempotency_key text,
   created_at timestamptz not null default now(),
   resolved_at timestamptz,
-  constraint decisions_idempotency_unique unique (task_id, idempotency_key)
+  constraint decisions_id_organization_id_unique unique (id, organization_id),
+  constraint decisions_idempotency_unique unique (task_id, idempotency_key),
+  constraint decisions_task_org_fk
+    foreign key (task_id, organization_id)
+    references public.operative_tasks(id, organization_id) on delete cascade,
+  constraint decisions_conversation_org_fk
+    foreign key (conversation_id, organization_id)
+    references public.conversations(id, organization_id)
 );
 
 create index if not exists decisions_organization_id_idx
@@ -177,6 +200,16 @@ create index if not exists decisions_task_id_idx
 create index if not exists decisions_status_idx
   on public.decisions(status);
 
+alter table public.conversation_messages
+  add constraint conversation_messages_linked_task_org_fk
+  foreign key (linked_task_id, organization_id)
+  references public.operative_tasks(id, organization_id);
+
+alter table public.conversation_messages
+  add constraint conversation_messages_linked_decision_org_fk
+  foreign key (linked_decision_id, organization_id)
+  references public.decisions(id, organization_id);
+
 -- ---------------------------------------------------------------------------
 -- 4. Cost ledger
 -- ---------------------------------------------------------------------------
@@ -184,7 +217,7 @@ create index if not exists decisions_status_idx
 create table if not exists public.cost_ledger_entries (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
-  task_id uuid references public.operative_tasks(id) on delete set null,
+  task_id uuid,
   executor text not null
     check (executor in (
       'deterministic-code', 'connected-chatgpt', 'native-capability',
@@ -192,11 +225,15 @@ create table if not exists public.cost_ledger_entries (
     )),
   cost_category text not null
     check (cost_category in ('ai-tokens', 'sandbox-compute', 'storage', 'network', 'other')),
-  amount_cents integer not null check (amount_cents >= 0),
+  -- 1 currency unit = 1,000,000 microunits (e.g. $0.000001 USD = 1 microunit).
+  amount_microunits bigint not null check (amount_microunits >= 0),
   currency text not null default 'USD' check (char_length(currency) = 3),
   is_marginal_cost boolean not null default true,
   notes text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint cost_ledger_entries_task_org_fk
+    foreign key (task_id, organization_id)
+    references public.operative_tasks(id, organization_id)
 );
 
 create index if not exists cost_ledger_entries_organization_id_idx
@@ -217,20 +254,33 @@ create table if not exists public.memories (
     check (memory_class in ('preference', 'policy', 'decision', 'goal', 'fact', 'lesson', 'open_question')),
   content text not null check (char_length(content) between 1 and 2000),
   -- Provenance: never invent an explanation for "why do you think I prefer this".
-  source_conversation_id uuid references public.conversations(id) on delete set null,
-  source_message_id uuid references public.conversation_messages(id) on delete set null,
-  source_task_id uuid references public.operative_tasks(id) on delete set null,
+  source_conversation_id uuid,
+  source_message_id uuid,
+  source_task_id uuid,
   extracted_by text not null default 'system'
     check (extracted_by in ('system', 'owner-confirmed', 'ai-advisor')),
   confidence numeric(3,2) not null default 0.50 check (confidence between 0 and 1),
   owner_confirmed boolean not null default false,
   status text not null default 'active'
     check (status in ('active', 'superseded', 'retired')),
-  supersedes_memory_id uuid references public.memories(id) on delete set null,
+  supersedes_memory_id uuid,
   pinned boolean not null default false,
   last_confirmed_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint memories_id_organization_id_unique unique (id, organization_id),
+  constraint memories_source_conversation_org_fk
+    foreign key (source_conversation_id, organization_id)
+    references public.conversations(id, organization_id),
+  constraint memories_source_message_org_fk
+    foreign key (source_message_id, organization_id)
+    references public.conversation_messages(id, organization_id),
+  constraint memories_source_task_org_fk
+    foreign key (source_task_id, organization_id)
+    references public.operative_tasks(id, organization_id),
+  constraint memories_supersedes_org_fk
+    foreign key (supersedes_memory_id, organization_id)
+    references public.memories(id, organization_id)
 );
 
 create index if not exists memories_organization_id_idx
@@ -284,14 +334,26 @@ revoke all on public.cost_ledger_entries from anon;
 revoke all on public.memories from anon;
 revoke all on public.channel_identities from anon;
 
-grant select, insert, update, delete on public.conversations to authenticated;
-grant select, insert, update, delete on public.conversation_messages to authenticated;
-grant select, insert, update, delete on public.operative_tasks to authenticated;
-grant select, insert on public.task_events to authenticated;
-grant select, insert, update on public.decisions to authenticated;
-grant select, insert on public.cost_ledger_entries to authenticated;
-grant select, insert, update on public.memories to authenticated;
-grant select, insert, update on public.channel_identities to authenticated;
+-- Authenticated browser clients may create/manage their own conversation shell and
+-- append OWNER messages only. Canonical system/audit mutations go through trusted
+-- server routes using SUPABASE_SECRET_KEY and are not directly writable by clients.
+grant select, insert, update on public.conversations to authenticated;
+grant select, insert on public.conversation_messages to authenticated;
+grant select on public.operative_tasks to authenticated;
+grant select on public.task_events to authenticated;
+grant select on public.decisions to authenticated;
+grant select on public.cost_ledger_entries to authenticated;
+grant select on public.memories to authenticated;
+grant select on public.channel_identities to authenticated;
+
+grant all on public.conversations to service_role;
+grant all on public.conversation_messages to service_role;
+grant all on public.operative_tasks to service_role;
+grant all on public.task_events to service_role;
+grant all on public.decisions to service_role;
+grant all on public.cost_ledger_entries to service_role;
+grant all on public.memories to service_role;
+grant all on public.channel_identities to service_role;
 
 -- conversations
 create policy "owners_select_conversations"
@@ -320,10 +382,13 @@ using (exists (
   select 1 from public.organizations o
   where o.id = organization_id and o.owner_user_id = (select auth.uid())
 ))
-with check (exists (
-  select 1 from public.organizations o
-  where o.id = organization_id and o.owner_user_id = (select auth.uid())
-));
+with check (
+  owner_user_id = (select auth.uid())
+  and exists (
+    select 1 from public.organizations o
+    where o.id = organization_id and o.owner_user_id = (select auth.uid())
+  )
+);
 
 create policy "owners_delete_conversations"
 on public.conversations for delete
@@ -345,10 +410,18 @@ using (exists (
 create policy "owners_insert_conversation_messages"
 on public.conversation_messages for insert
 to authenticated
-with check (exists (
-  select 1 from public.organizations o
-  where o.id = organization_id and o.owner_user_id = (select auth.uid())
-));
+with check (
+  actor_type = 'owner'
+  and actor_id = (select auth.uid())::text
+  and channel = 'owner-console'
+  and message_type = 'text'
+  and model_provider is null
+  and model_name is null
+  and exists (
+    select 1 from public.organizations o
+    where o.id = organization_id and o.owner_user_id = (select auth.uid())
+  )
+);
 
 create policy "owners_update_conversation_messages"
 on public.conversation_messages for update
@@ -529,7 +602,10 @@ using (exists (
   select 1 from public.organizations o
   where o.id = organization_id and o.owner_user_id = (select auth.uid())
 ))
-with check (exists (
-  select 1 from public.organizations o
-  where o.id = organization_id and o.owner_user_id = (select auth.uid())
-));
+with check (
+  owner_user_id = (select auth.uid())
+  and exists (
+    select 1 from public.organizations o
+    where o.id = organization_id and o.owner_user_id = (select auth.uid())
+  )
+);
