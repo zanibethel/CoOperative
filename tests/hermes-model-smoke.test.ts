@@ -108,3 +108,11 @@ test("Hermes top-level flags precede the chat subcommand", () => {
   assert.match(chatBlock, /"--run-budget"/);
   assert.equal(chatBlock.includes('"--usage-file"'), false);
 });
+
+
+test("Hermes smoke model satisfies the minimum context contract", () => {
+  assert.match(workflowSource, /alibaba\/qwen3\.5-flash/);
+  assert.match(workflowSource, /MIN_HERMES_CONTEXT_WINDOW = 64_000/);
+  assert.match(workflowSource, /context_window/);
+  assert.match(workflowSource, /Selected AI Gateway model is not available/);
+});
