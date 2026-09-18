@@ -754,3 +754,34 @@ Each entry should contain:
 **Why:** Workflow steps are not guaranteed to expose the deployment OIDC token as a plain environment variable. The supported helper preserves short-lived Vercel identity without introducing a permanent provider secret.
 
 **Status:** FIXED. Model-backed Cloud Hermes smoke test ready for retry.
+
+
+---
+
+## 2026-09-18 — Model smoke failure traced to shell command construction, not Hermes or AI Gateway
+
+**Scope:** Cloud Hermes / model smoke / Workflow shell execution
+
+**Observed live result:**
+- Workflow run `wrun_01M2T83D88WJAZ6A0DWXMCW5W2` reached the OIDC-backed model smoke step.
+- The task failed with `timeout: failed to execute process: No such file or directory (os error 2)`.
+- Hermes produced no usage report because the Hermes process never actually launched.
+- No model call occurred and task spend remained 0 microunits.
+
+**Root cause:**
+- The shell command was assembled by joining setup fragments with spaces.
+- `HERMES_BIN=...`, the fallback executable check, and `timeout ...` therefore did not become separate shell statements.
+- `$HERMES_BIN` expanded before the intended assignment took effect, leaving `timeout` with an empty executable path.
+
+**Changes / decisions:**
+- Rebuilt the Hermes CLI invocation from tokenized arguments.
+- Shell setup now uses explicit semicolon-separated statements, verifies the resolved Hermes executable with `test -x`, and only then executes the bounded command.
+- Added shell-safe quoting for each Hermes argument.
+- Added regression coverage requiring explicit separators and rejecting the old `].join(" ")` command-construction pattern.
+- Updated existing source-inspection tests to validate the tokenized argument form.
+- Final head `84431e73eca7129c28262785770d275e918f7738` passed unit tests, TypeScript, lint, and build.
+- Preview deployment `dpl_36v4XjjWyjxegp21dgexKXS7SCa8` is READY at `co-operative-numrkl1z0-zanibethels-projects.vercel.app`.
+
+**Why:** The failure was local command assembly, not provider authentication or Hermes capability. Fixing the invocation preserves the OIDC/no-long-lived-secret design and avoids unnecessary provider/schema changes.
+
+**Status:** FIXED. Model-backed Cloud Hermes smoke test ready for retry.
