@@ -238,3 +238,16 @@ The memory system is working when:
 8. memories have provenance;
 9. tenant/private information stays isolated;
 10. useful revelations continuously improve future conversations and decisions.
+
+
+## Omnichannel memory sync
+
+All approved conversation channels feed the same Memory & Preference Engine.
+
+A preference learned from Telegram should be available to the Owner Console and ChatGPT bridge.
+
+A decision made through ChatGPT should become part of the same owner/project context available to Telegram and the Owner Console.
+
+Do not create channel-specific memory silos.
+
+See `docs/OMNICHANNEL-CONVERSATIONS.md`.
