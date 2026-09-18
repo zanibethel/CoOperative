@@ -186,6 +186,51 @@ function hermesCostLabel(result: unknown): string {
   return moneyFromMicrounits(evidence.costMicrounits) + suffix;
 }
 
+function taskHermesProjectPatch(result: unknown): {
+  patch: string;
+  changedFiles: string[];
+  verificationSucceeded?: boolean;
+  verificationSteps: Array<{
+    cmd?: string;
+    exitCode?: number;
+    stdoutTail?: string;
+    stderrTail?: string;
+  }>;
+} | null {
+  if (!result || typeof result !== "object") return null;
+  const evidence = (result as { evidence?: unknown }).evidence;
+  if (!evidence || typeof evidence !== "object") return null;
+
+  const record = evidence as {
+    patch?: unknown;
+    changedFiles?: unknown;
+    verificationSucceeded?: unknown;
+    verificationSteps?: unknown;
+  };
+  if (typeof record.patch !== "string") return null;
+
+  return {
+    patch: record.patch,
+    changedFiles: Array.isArray(record.changedFiles)
+      ? record.changedFiles.filter((item): item is string => typeof item === "string")
+      : [],
+    verificationSucceeded:
+      typeof record.verificationSucceeded === "boolean"
+        ? record.verificationSucceeded
+        : undefined,
+    verificationSteps: Array.isArray(record.verificationSteps)
+      ? record.verificationSteps.filter(
+          (item): item is {
+            cmd?: string;
+            exitCode?: number;
+            stdoutTail?: string;
+            stderrTail?: string;
+          } => Boolean(item) && typeof item === "object",
+        )
+      : [],
+  };
+}
+
 function taskFindings(result: unknown): Array<{ priority?: string; title: string; why?: string }> {
   if (!result || typeof result !== "object" || !("findings" in result)) return [];
   const findings = (result as { findings?: unknown }).findings;
@@ -211,6 +256,7 @@ export default function OwnerConsolePage() {
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
   const [decisionWorkingId, setDecisionWorkingId] = useState<string | null>(null);
   const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
+  const [copiedPatchTaskId, setCopiedPatchTaskId] = useState<string | null>(null);
 
   async function load() {
     const response = await fetch("/api/operative/overview", { cache: "no-store" });
@@ -462,6 +508,21 @@ export default function OwnerConsolePage() {
       }, 1800);
     } catch {
       setError("Unable to copy the error on this device.");
+    }
+  }
+
+  async function copyTaskPatch(task: Task) {
+    const evidence = taskHermesProjectPatch(task.result);
+    if (!evidence) return;
+
+    try {
+      await navigator.clipboard.writeText(evidence.patch);
+      setCopiedPatchTaskId(task.id);
+      window.setTimeout(() => {
+        setCopiedPatchTaskId((current) => (current === task.id ? null : current));
+      }, 1800);
+    } catch {
+      setError("Unable to copy the Hermes patch on this device.");
     }
   }
 
@@ -904,6 +965,52 @@ export default function OwnerConsolePage() {
                             {hermesCostLabel(task.result)}
                           </p>
                         </div>
+                      </div>
+                    </details>
+                  ) : null}
+                  {taskHermesProjectPatch(task.result) ? (
+                    <details className="task-result">
+                      <summary>View linked-project patch</summary>
+                      <div className="task-findings">
+                        <div className="task-finding">
+                          <strong>
+                            {taskHermesProjectPatch(task.result)?.verificationSucceeded
+                              ? "Verification passed"
+                              : "Verification needs attention"}
+                          </strong>
+                          <p>
+                            {(taskHermesProjectPatch(task.result)?.changedFiles.length ?? 0) +
+                              " changed file(s) · repository write not performed"}
+                          </p>
+                        </div>
+                        {(taskHermesProjectPatch(task.result)?.verificationSteps ?? []).map(
+                          (step, index) => (
+                            <div className="task-finding" key={index}>
+                              <strong>
+                                {(step.exitCode === 0 ? "PASS · " : "FAIL · ") +
+                                  (step.cmd ?? "verification step")}
+                              </strong>
+                              {step.stderrTail ? <p>{step.stderrTail}</p> : null}
+                            </div>
+                          ),
+                        )}
+                        <div className="task-error-toolbar">
+                          <span>Reviewable patch</span>
+                          <button
+                            type="button"
+                            className="task-error-action"
+                            onClick={() => void copyTaskPatch(task)}
+                          >
+                            {copiedPatchTaskId === task.id ? "Copied" : "Copy patch"}
+                          </button>
+                        </div>
+                        {taskHermesProjectPatch(task.result)?.patch ? (
+                          <pre className="task-error-code">
+                            <code>{taskHermesProjectPatch(task.result)?.patch}</code>
+                          </pre>
+                        ) : (
+                          <p>Hermes completed without producing source changes.</p>
+                        )}
                       </div>
                     </details>
                   ) : null}
