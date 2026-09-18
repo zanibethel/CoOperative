@@ -4,7 +4,7 @@ import { getVercelOidcToken } from "@vercel/oidc";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const HERMES_BASE_NAME = "cooperative-hermes-runtime-v2026-9-14";
-const MODEL = "alibaba/qwen-3-14b";
+const MODEL = "alibaba/qwen3.5-flash";
 const PROVIDER = "ai-gateway";
 
 interface HermesModelSmokeInput {
