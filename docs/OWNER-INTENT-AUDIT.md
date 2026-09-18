@@ -546,3 +546,33 @@ Each entry should contain:
 **Source:** Owner phone test plus Supabase task evidence, Vercel runtime logs, current Vercel Sandbox async/persistent documentation, and ChatGPT implementation.
 
 **Status:** Detached long-running execution architecture deployed to Preview and CI-green; Cloud Hermes runtime retest pending.
+
+
+---
+
+## 2026-09-18 — Cloud Hermes orchestration moves to Vercel Workflow + prepared runtime
+
+**Scope:** Cloud Operative / Cloud Hermes / Vercel Workflow / runtime preparation
+
+**Owner intent:** Avoid cold-installing Hermes for every task, expose meaningful progress, and ensure cloud work completes/fails durably even if the phone/browser disconnects.
+
+**Changes / decisions:**
+- The detached Hermes runtime test exceeded its 10-minute deadline and remained `executing` after client polling stopped.
+- The stale task was explicitly finalized as `failed` with evidence preserved; no open-ended execution state was retained.
+- Client/browser polling is no longer considered authoritative for task completion.
+- CoOperative should use Vercel Workflow DevKit for long-running Cloud Operative/Hermes orchestration because it provides durable, crash-safe, step-based execution, retries, and state independent of the browser request.
+- The Owner Console remains a control plane and status viewer; it must not be responsible for keeping execution alive.
+- Cloud Hermes should use a prepared runtime snapshot/image containing pinned Hermes and dependencies rather than performing a full cold install per task.
+- Workflow steps should emit durable progress/heartbeat state such as `preparing runtime`, `starting Hermes`, `executing task`, `verifying`, and `finalizing`.
+- Fast deterministic playbooks may remain direct/synchronous where appropriate; long-running reasoning/migration/build/agent work should use durable Workflow orchestration.
+- Provider/model credentials remain separate owner-gated secrets and are not part of the prepared image.
+
+**Why:** Durable orchestration is a platform concern. Browser-driven polling and repeated cold installs add latency, cost, failure modes, and poor visibility.
+
+**Affected areas:** Cloud Hermes runtime, task lifecycle, Mission Control progress, Vercel Sandbox, future migrations/builds/research, Cost Governor.
+
+**Conflict / supersession notes:** Supersedes the custom client-driven detached-polling architecture as the long-term orchestration model. Existing detached code remains bootstrap evidence until replaced. The event-driven/no-always-on-server strategy remains unchanged.
+
+**Source:** Owner agreement after live runtime test, current Vercel Workflow guidance, and persisted task evidence.
+
+**Status:** Active architecture decision. Next implementation target: prepared Hermes runtime + Vercel Workflow-backed execution.
