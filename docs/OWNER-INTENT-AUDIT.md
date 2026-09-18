@@ -429,3 +429,34 @@ Each entry should contain:
 **Source:** Owner phone test, persisted task evidence, and current Vercel Sandbox SDK documentation.
 
 **Status:** Adapter fix deployed to Preview; final CI build check pending before retest.
+
+
+---
+
+## 2026-09-18 — First Mac-independent Cloud Operative self-check completed successfully
+
+**Scope:** Cloud Operative / Owner Console / Vercel Sandbox / Issue #4
+
+**Owner intent:** Prove that CoOperative can accept a task from the phone, execute reviewed work in the cloud, persist evidence/cost/state, and complete without the Mac or Hermes model reasoning participating in runtime.
+
+**Changes / decisions:**
+- The live `cloud-self-check` task completed successfully.
+- Task state progressed through `queued -> planning -> executing -> verifying -> completed`.
+- Executor was recorded as `deterministic-code`; runtime was Vercel Sandbox.
+- The Sandbox successfully verified the project artifact, reported Node `v24.21.0`, installed dependencies, and ran the full unit test suite.
+- All 39 unit tests passed in the cloud Sandbox.
+- Sandbox runtime was approximately 16.4 seconds.
+- Direct per-task marginal cash cost recorded in CoOperative was $0; allocated Vercel platform/quota cost remains a separate economics concern.
+- This constitutes the first successful proof that the Mac is not required for this deterministic cloud execution path.
+- Immediately afterward, the owner queued a real low-risk task: `Check out raisehub.app and let me know if there are any improvements I could make`.
+- That task has a maximum spend cap of $0.50, current actual spend $0, low risk, and remains `queued` with no executor/playbook selected yet.
+
+**Why:** This validates the core Cloud Operative architecture before adding broader autonomous routing: phone -> canonical task -> policy -> deterministic executor -> cloud Sandbox -> verification -> evidence/result.
+
+**Affected areas:** Owner Console, Cloud Operative, task state machine, Vercel Sandbox, Cost Governor, Managed Projects / RaiseHub pilot.
+
+**Conflict / supersession notes:** Supersedes the earlier bootstrap-test failures as the current validated state. It does not yet prove generic queued tasks can autonomously select an AI/Hermes executor; that routing layer remains the next capability gap.
+
+**Source:** Owner phone execution plus independently queried Supabase task/event/cost evidence.
+
+**Status:** First cloud execution proof COMPLETE. Generic task dispatch/routing remains pending.
