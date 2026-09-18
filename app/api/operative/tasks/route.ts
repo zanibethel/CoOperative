@@ -8,6 +8,7 @@ import {
 } from "@/lib/operative/decision-brief";
 import {
   OwnerTaskIntentSchema,
+  TaskSafetyFlagsSchema,
   evaluateOwnerTaskPolicy,
 } from "@/lib/operative/task-policy";
 
@@ -117,12 +118,14 @@ export async function POST(request: Request) {
     );
   }
 
+  const effectiveFlags = TaskSafetyFlagsSchema.parse({
+    ...(parsed.data.flags ?? {}),
+    requiresShell: parsed.data.flags?.requiresShell === true || playbook?.requiresShell === true,
+  });
+
   const effectiveIntent = {
     ...parsed.data,
-    flags: {
-      ...(parsed.data.flags ?? {}),
-      requiresShell: parsed.data.flags?.requiresShell === true || playbook?.requiresShell === true,
-    },
+    flags: effectiveFlags,
   };
 
   const policy = evaluateOwnerTaskPolicy(effectiveIntent);
