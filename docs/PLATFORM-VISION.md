@@ -150,3 +150,30 @@ CoOperative should accumulate structured operational knowledge in code, playbook
 The same evidence should improve the ability of future CoOperative-specific models to select profitable playbooks, capabilities, and business actions.
 
 Over time the platform should reduce external AI cost through cheaper models, open-weight options, self-hosted inference, and eventually specialized CoOperative models where evidence supports it.
+
+
+## Migration flywheel
+
+CoOperative should become progressively better and cheaper at moving businesses away from fragmented or expensive services.
+
+Every migration should produce reusable platform assets:
+
+```text
+connect existing provider
+  -> observe real usage
+  -> map source data/capabilities
+  -> mirror + shadow-test
+  -> migrate with rollback
+  -> validate/reconcile
+  -> record cost + outcome
+  -> convert successful process into migration playbook
+  -> reuse for the next business
+```
+
+As evidence accumulates, common migrations should require fewer AI calls and less engineering work.
+
+The long-term customer experience should approach:
+
+> Connect the services you use today. CoOperative will show what can be migrated, what it will cost, what you save, and handle the move with validation and rollback.
+
+Migration learning should improve future automation without treating raw tenant data as automatically available model-training data. Prefer de-identified/generalized mappings, tests, edge cases, and migration outcomes.
