@@ -87,3 +87,22 @@ export type AssessmentResult = z.infer<typeof AssessmentResultSchema>;
 export type Capability = z.infer<typeof CapabilitySchema>;
 export type Playbook = z.infer<typeof PlaybookSchema>;
 export type ImprovementProposal = z.infer<typeof ImprovementProposalSchema>;
+
+
+export const ConnectedServiceInputSchema = z.object({
+  providerKey: z.string().regex(/^[a-z0-9-]+$/).nullable().default(null),
+  serviceName: z.string().trim().min(2).max(160),
+  externalAccountLabel: z.string().trim().max(160).default(""),
+  connectionMethod: z.enum(["oauth", "api", "import", "guided", "browser", "manual"]).default("manual"),
+  monthlyCost: z.coerce.number().min(0).max(1000000).default(0),
+  billingFrequency: z.enum(["free", "monthly", "annual", "usage", "unknown"]).default("monthly"),
+  featuresUsed: z.array(z.string().trim().min(1).max(120)).max(50).default([]),
+  replacementGoal: z.enum(["keep", "optimize", "mirror", "replace", "unsure"]).default("unsure"),
+  notes: z.string().trim().max(2000).default(""),
+});
+
+export const ConnectedServiceUpdateSchema = ConnectedServiceInputSchema.partial().extend({
+  id: z.string().uuid(),
+});
+
+export type ConnectedServiceInput = z.infer<typeof ConnectedServiceInputSchema>;
