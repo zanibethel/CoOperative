@@ -12,6 +12,35 @@ The owner should not need to understand APIs, OAuth, webhooks, AI models, hostin
 
 CoOperative owns the experience. Providers are replaceable infrastructure underneath it.
 
+## Business economic mandate
+
+CoOperative exists to improve the economic health of the customer's business.
+
+Every meaningful recommendation, automation, integration, and improvement should support one or more of these outcomes:
+
+1. **Protect revenue** — reduce missed leads, failed follow-up, churn, no-shows, payment leakage, downtime, and other preventable loss.
+2. **Save money** — remove unnecessary subscriptions, reduce manual labor, lower infrastructure cost, replace expensive providers where safe, and eliminate waste.
+3. **Make more money** — improve conversion, retention, repeat purchases, utilization, average order value, marketing performance, and customer acquisition.
+4. **Create new revenue** — identify and help launch viable new products, services, packages, channels, partnerships, affiliate opportunities, digital offerings, or AI-enabled services.
+
+CoOperative should not stop at maintaining existing processes. It should continuously search for economically useful opportunities the business is not yet using.
+
+The system should be able to say, for example:
+
+> You have unused appointment capacity next week. I can prepare a reactivation campaign using customers who have not booked in 90 days.
+
+or:
+
+> Customers repeatedly ask for this adjacent service. I can model the economics, build the landing page, add booking/payment support, and prepare a limited launch for your approval.
+
+or:
+
+> This product/service has an affiliate or referral opportunity that fits your existing customer journey. Here is the expected value, cost, disclosure requirement, and implementation plan.
+
+Growth recommendations must be measurable. Prefer expected contribution margin, payback, conversion, retention, or other business outcomes over vanity metrics.
+
+Platform financial incentives must never silently override the customer's economic interest. If CoOperative or its operator receives an affiliate/referral benefit from a recommendation, that relationship should be disclosed and the system should still compare credible alternatives.
+
 ## Core principle
 
 > If CoOperative already knows how to do something, it should execute that knowledge from code, rules, scripts, and playbooks instead of paying an AI to figure it out again.
@@ -26,6 +55,7 @@ The durable intellectual property of CoOperative is:
 - connector contracts;
 - business policies and approval rules;
 - cost controls;
+- growth/revenue playbooks;
 - outcome/evidence history;
 - reusable schemas and tests.
 
@@ -45,7 +75,7 @@ Do not call an LLM to rediscover information or logic already encoded in the pla
 
 ## Playbook-first architecture
 
-A playbook is the best known reusable process for solving a business problem.
+A playbook is the best known reusable process for solving a business problem or capturing a business opportunity.
 
 A mature playbook may define:
 
@@ -61,6 +91,7 @@ A mature playbook may define:
 - provider-independent service actions;
 - approval requirements;
 - cost ceiling;
+- expected economic outcome;
 - fallback behavior;
 - tests;
 - metrics;
@@ -85,6 +116,60 @@ Customer Re-engagement v4
 ```
 
 The AI should not reinvent those steps.
+
+## Growth Opportunity Engine
+
+CoOperative should continuously evaluate whether there is a better economic action available than simply continuing the current process.
+
+Opportunity sources may include:
+
+- unfilled capacity;
+- stale leads;
+- dormant customers;
+- abandoned carts/quotes;
+- high-demand services;
+- frequently requested adjacent services;
+- repeat-purchase timing;
+- cross-sell and upsell patterns;
+- new geographic/channel opportunities;
+- ad campaign opportunities;
+- referral programs;
+- affiliate programs;
+- digital products;
+- subscriptions/memberships;
+- new AI-enabled services the business can offer;
+- new native CoOperative capabilities that unlock revenue.
+
+A growth opportunity should become a structured proposal containing, where possible:
+
+- opportunity type;
+- evidence;
+- target customer segment;
+- expected revenue or savings;
+- expected variable cost;
+- expected contribution margin;
+- implementation cost;
+- risk;
+- required capabilities;
+- required customer approvals;
+- measurement plan;
+- stop/rollback condition.
+
+The preferred loop is:
+
+```text
+observe opportunity
+  -> estimate economics
+  -> find existing playbook
+  -> build/adapt only what is missing
+  -> customer approval when required
+  -> limited launch/test
+  -> measure
+  -> expand, revise, or stop
+  -> promote proven pattern into a better playbook
+```
+
+CoOperative should prefer small measurable experiments before committing a business to large advertising spend or a major operational change.
 
 ## Small execution context
 
@@ -256,6 +341,8 @@ If projected cost exceeds the account's budget, CoOperative should:
 
 Never silently operate an account at a structurally losing cost.
 
+The customer's own growth initiatives should also be evaluated economically. A campaign that creates revenue but destroys contribution margin is not automatically a good recommendation.
+
 ## AI cost strategy
 
 Use the cheapest approved intelligence that meets the quality floor.
@@ -283,13 +370,15 @@ Hermes should spend its budget primarily on leverage that improves the platform 
 - connector creation;
 - connector maintenance;
 - playbook improvement;
+- growth-playbook discovery and validation;
+- identifying new revenue-capability patterns;
 - removing unnecessary AI steps;
 - replacing AI reasoning with deterministic code when possible;
 - discovering cheaper models/providers;
 - benchmarking replacements;
 - preparing isolated code changes;
 - running tests/evals;
-- measuring projected savings.
+- measuring projected savings and economic upside.
 
 Hermes should not be the expensive default engine for routine customer tasks when a cheaper model, playbook, or script can do the work.
 
@@ -325,10 +414,10 @@ CoOperative should improve its institutional knowledge, not merely create longer
 
 ```text
 observe outcome
-  -> identify better method
+  -> identify better method or economic opportunity
   -> modify/create playbook or script
   -> test/evaluate
-  -> compare cost + quality
+  -> compare cost + quality + business outcome
   -> approve
   -> publish new version
   -> monitor
@@ -347,6 +436,8 @@ Quality floor: maintained
 Tests: passed
 ```
 
+A valuable improvement can also create new revenue while remaining repeatable and measurable.
+
 ## Long-term CoOperative model strategy
 
 Do not begin by training a general-purpose foundation model from scratch.
@@ -356,8 +447,10 @@ First build proprietary operational assets:
 - structured business profiles;
 - accepted/rejected recommendations;
 - versioned playbooks;
+- revenue/growth playbooks;
 - execution outcomes;
 - cost/performance measurements;
+- economic outcome measurements;
 - evaluation sets;
 - connector knowledge;
 - policy decisions.
@@ -375,7 +468,7 @@ commercial models
 
 The goal is not necessarily to recreate a frontier general-purpose LLM.
 
-A smaller CoOperative model that is exceptionally good at selecting playbooks, capabilities, and business actions may provide much better economics.
+A smaller CoOperative model that is exceptionally good at selecting playbooks, capabilities, and profitable business actions may provide much better economics.
 
 ## Customer experience rule
 
@@ -387,6 +480,10 @@ The owner should be able to say:
 
 CoOperative should determine the appropriate approved playbook, business data, channels, budget, connectors, and AI capability underneath that request.
 
+CoOperative should also be able to proactively say:
+
+> I found a credible way to increase next month's revenue. Here is why, what it should cost, what I expect it to return, and what I need you to approve.
+
 The customer should care about the business result, not which API or model performed it.
 
 ## Architecture summary
@@ -395,22 +492,24 @@ The customer should care about the business result, not which API or model perfo
 Business Owner / CoOperative Conversation
                 |
                 v
-        Business State + Policies
+ Business State + Policies + Economic Goals
                 |
-                v
-           Playbook Engine
-                |
-       +--------+--------+
-       |                 |
-       v                 v
+                +----------------------+
+                |                      |
+                v                      v
+        Playbook Engine       Growth Opportunity Engine
+                |                      |
+       +--------+--------+             |
+       |                 |             |
+       v                 v             |
 Script / Function    Reasoning Required?
 Library                  |
                          v
                      AI Router
                          |
                  cheapest qualified AI
-       |
-       +-----------------+
+       |                 |
+       +--------+--------+
                 |
                 v
          Capability Router
@@ -426,7 +525,7 @@ capability             / API / connector
           Execution Engine
                 |
                 v
-          Outcome + Cost Ledger
+      Outcome + Revenue + Cost Ledger
                 |
                 v
        Evidence / Improvement Lab
@@ -435,7 +534,7 @@ capability             / API / connector
               Hermes
                 |
                 v
- reviewed playbook / connector / code improvements
+ reviewed playbook / connector / growth / code improvements
 ```
 
 ## Non-negotiable architectural tests
@@ -443,7 +542,7 @@ capability             / API / connector
 Before adding a feature, ask:
 
 1. Can deterministic code do this before AI is called?
-2. Is there already a playbook for this problem?
+2. Is there already a playbook for this problem or opportunity?
 3. Are we duplicating knowledge inside a prompt instead of storing it in CoOperative?
 4. Is the AI provider replaceable?
 5. Is the external provider replaceable?
@@ -451,6 +550,8 @@ Before adding a feature, ask:
 7. Does the customer understand/approve high-impact actions?
 8. Is customer data tenant-isolated?
 9. Does this fit the customer's cost envelope?
-10. Will the outcome create useful evidence for the next version?
+10. Does it protect revenue, save money, make more money, or create a credible new revenue path?
+11. Is the expected business outcome measurable?
+12. Will the outcome create useful evidence for the next version?
 
 If the implementation fails these tests without a strong reason, redesign it.
