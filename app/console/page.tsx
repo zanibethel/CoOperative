@@ -106,6 +106,47 @@ function taskProgressLabel(result: unknown): string | null {
   return stage.replaceAll("_", " ");
 }
 
+function taskHermesModelEvidence(result: unknown): {
+  model?: string;
+  provider?: string;
+  output?: string;
+  costMicrounits?: number;
+  totalTokens?: number;
+} | null {
+  if (!result || typeof result !== "object") return null;
+  const evidence = (result as { evidence?: unknown }).evidence;
+  if (!evidence || typeof evidence !== "object") return null;
+
+  const record = evidence as {
+    model?: unknown;
+    provider?: unknown;
+    output?: unknown;
+    costMicrounits?: unknown;
+    usage?: {
+      total_tokens?: unknown;
+      total_including_auxiliary?: { total_tokens?: unknown };
+    };
+  };
+
+  if (typeof record.output !== "string") return null;
+
+  const totalTokens =
+    typeof record.usage?.total_including_auxiliary?.total_tokens === "number"
+      ? record.usage.total_including_auxiliary.total_tokens
+      : typeof record.usage?.total_tokens === "number"
+        ? record.usage.total_tokens
+        : undefined;
+
+  return {
+    model: typeof record.model === "string" ? record.model : undefined,
+    provider: typeof record.provider === "string" ? record.provider : undefined,
+    output: record.output,
+    costMicrounits:
+      typeof record.costMicrounits === "number" ? record.costMicrounits : undefined,
+    totalTokens,
+  };
+}
+
 function taskFindings(result: unknown): Array<{ priority?: string; title: string; why?: string }> {
   if (!result || typeof result !== "object" || !("findings" in result)) return [];
   const findings = (result as { findings?: unknown }).findings;
@@ -427,6 +468,57 @@ export default function OwnerConsolePage() {
     }
   }
 
+  async function runHermesModelSmoke() {
+    setWorking(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const messageText =
+        "Run one governed model-backed Cloud Hermes smoke test through Vercel AI Gateway with a $0.02 maximum incremental spend.";
+      const message = await persistMessage(messageText);
+
+      const createResponse = await fetch("/api/operative/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: message.conversationId,
+          title: "Cloud Hermes model smoke test",
+          description:
+            "Reuse the prepared Hermes runtime for one single-turn reasoning check through Vercel AI Gateway using short-lived deployment OIDC. No persistent provider key, repository writes, production changes, database changes, or money movement. Maximum incremental spend: $0.02.",
+          playbookKey: "hermes-model-smoke",
+          maxSpendUsd: 0.02,
+          flags: { requiresShell: true },
+        }),
+      });
+
+      const created = await createResponse.json();
+      if (!createResponse.ok) {
+        throw new Error(created.error ?? "Unable to create Cloud Hermes model smoke task");
+      }
+
+      const executeResponse = await fetch(
+        "/api/operative/tasks/" + created.task.id + "/execute",
+        { method: "POST" },
+      );
+      const executed = await executeResponse.json();
+
+      if (!executeResponse.ok) {
+        throw new Error(executed.error ?? "Cloud Hermes model smoke test failed");
+      }
+
+      setNotice(
+        "Model-backed Cloud Hermes test started. Maximum incremental spend is $0.02; Mission Control will update automatically.",
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cloud Hermes model smoke test failed");
+      await load().catch(() => undefined);
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function runCloudSelfCheck() {
     setWorking(true);
     setError("");
@@ -647,6 +739,28 @@ export default function OwnerConsolePage() {
           </section>
 
           <section className="card">
+            <div className="eyebrow">Cloud Hermes · Model proof</div>
+            <h2>One governed reasoning turn</h2>
+            <p>
+              Reuse the prepared Hermes snapshot and make one bounded model call through
+              Vercel AI Gateway using short-lived deployment identity. No persistent provider
+              key is stored and the task cannot exceed the $0.02 configured spend cap.
+            </p>
+            <button
+              className="primary"
+              type="button"
+              disabled={working || !overview.organization}
+              onClick={() => void runHermesModelSmoke()}
+            >
+              {working ? "Working…" : "Run model-backed Hermes test · max $0.02"}
+            </button>
+            <small className="console-helper">
+              This smoke test is fixed and single-turn. It does not accept arbitrary shell instructions,
+              change production, modify the database, or write to the repository.
+            </small>
+          </section>
+
+          <section className="card">
             <div className="eyebrow">Mission Control</div>
             <h2>Recent tasks</h2>
             <div className="task-stack">
@@ -681,6 +795,27 @@ export default function OwnerConsolePage() {
                             {finding.why ? <p>{finding.why}</p> : null}
                           </div>
                         ))}
+                      </div>
+                    </details>
+                  ) : null}
+                  {taskHermesModelEvidence(task.result) ? (
+                    <details className="task-result">
+                      <summary>View Hermes model evidence</summary>
+                      <div className="task-findings">
+                        <div className="task-finding">
+                          <strong>
+                            {taskHermesModelEvidence(task.result)?.provider} · {taskHermesModelEvidence(task.result)?.model}
+                          </strong>
+                          <p>{taskHermesModelEvidence(task.result)?.output}</p>
+                          <p>
+                            {typeof taskHermesModelEvidence(task.result)?.totalTokens === "number"
+                              ? taskHermesModelEvidence(task.result)?.totalTokens + " tokens · "
+                              : ""}
+                            {typeof taskHermesModelEvidence(task.result)?.costMicrounits === "number"
+                              ? moneyFromMicrounits(taskHermesModelEvidence(task.result)?.costMicrounits ?? 0)
+                              : "cost pending"}
+                          </p>
+                        </div>
                       </div>
                     </details>
                   ) : null}
