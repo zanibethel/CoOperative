@@ -16,6 +16,7 @@ test("linked-project Hermes uses prepared cloud runtime and short-lived OIDC", (
   assert.match(source, /cooperative-hermes-runtime-v2026-9-14/);
   assert.match(source, /getVercelOidcToken/);
   assert.match(source, /AI_GATEWAY_API_KEY: oidcToken/);
+  assert.match(source, /HERMES_MAX_ITERATIONS: String\(MAX_TURNS\)/);
   assert.match(source, /Sandbox\.fork/);
   assert.match(source, /alibaba\/qwen3\.5-flash/);
 });
@@ -47,8 +48,11 @@ test("linked-project Hermes returns a bounded reviewable patch and blocks secret
   assert.match(source, /patchTouchesBlockedPath/);
   assert.match(source, /\.vercel/);
   assert.match(source, /\.env/);
-  assert.match(source, /"--run-budget"/);
-  assert.match(source, /"--checkpoints"/);
+  assert.equal(source.includes('"--max-turns"'), false);
+  assert.equal(source.includes('"--run-budget"'), false);
+  assert.equal(source.includes('"--checkpoints"'), false);
+  assert.equal(source.includes('"--source"'), false);
+  assert.match(source, /timeout 300s/);
 });
 
 test("task dispatcher sends project-scoped workflow requests to linked Hermes", () => {
@@ -57,4 +61,13 @@ test("task dispatcher sends project-scoped workflow requests to linked Hermes", 
   assert.match(route, /request: task\.description \|\| task\.title/);
   assert.match(route, /maxSpendMicrounits/);
   assert.match(route, /compatibilityReview/);
+  assert.match(route, /MODEL_SPEND_CAP_REQUIRED/);
+});
+
+
+test("failed Hermes execution still preserves metered evidence before final status", () => {
+  assert.match(source, /hermesExitCode/);
+  assert.match(source, /hermesError/);
+  assert.match(source, /Usage\/cost evidence and any partial patch were preserved/);
+  assert.match(source, /amount_microunits: evidence\.costMicrounits/);
 });
