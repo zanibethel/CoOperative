@@ -810,3 +810,28 @@ Each entry should contain:
 **Why:** Hermes uses argparse with top-level and subcommand-specific option surfaces. Correct ordering is required even when individual flag names are valid.
 
 **Status:** FIXED. Model-backed Cloud Hermes smoke test ready for retry.
+
+
+---
+
+## 2026-09-18 — Hermes model smoke switched to >=64K context with runtime catalog preflight
+
+**Scope:** Cloud Hermes / AI Gateway model selection / bootstrap validation
+
+**Observed live result:**
+- Workflow run `wrun_01M2T8YA96HZ5DECBCHEKN0RAR` reached Hermes Agent initialization successfully.
+- Hermes rejected `alibaba/qwen-3-14b` because AI Gateway reports a 40,960-token context window, below Hermes Agent's 64,000-token minimum.
+- No successful model call occurred and task spend remained $0.
+
+**Changes / decisions:**
+- Replaced the smoke-test model with `alibaba/qwen3.5-flash`.
+- Current Vercel AI Gateway catalog reports `alibaba/qwen3.5-flash` with a 1,000,000-token context window and lower listed per-token pricing than the previous Qwen3-14B selection.
+- Added a deterministic runtime preflight against `https://ai-gateway.vercel.sh/v1/models` before launching Hermes.
+- Preflight now rejects a missing model or any model reporting less than the Hermes minimum 64,000-token context window before Sandbox/model execution.
+- Added regression coverage for the selected model and context-window contract.
+- Final head `a28db61cdfefe858bbb08fc70722e3162b6868a3` passed unit tests, TypeScript, lint, and build.
+- Preview deployment `dpl_69ge5Z7mqpH7cY13euiRmpGHEUQs` is READY at `co-operative-nhizv43cm-zanibethels-projects.vercel.app`.
+
+**Why:** Model compatibility is deterministic metadata and should be validated before Hermes/model execution rather than discovered through paid or retried agent startup.
+
+**Status:** FIXED. Model-backed Cloud Hermes smoke test ready for retry.
