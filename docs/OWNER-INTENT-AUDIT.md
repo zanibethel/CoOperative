@@ -515,3 +515,34 @@ Each entry should contain:
 **Source:** Owner-authorized ChatGPT implementation after successful Mac-independent deterministic Cloud Operative proof.
 
 **Status:** Runtime/model-routing code prepared in Preview; credential-free Hermes runtime test and later provider-auth gate remain.
+
+
+---
+
+## 2026-09-18 — Long-running cloud tasks moved off synchronous Owner Console requests
+
+**Scope:** Cloud Operative / Vercel Sandbox / Cloud Hermes / Mission Control
+
+**Owner intent:** Long-running cloud/Hermes work should not leave the phone stuck on "Working…" or require the browser connection to remain open.
+
+**Changes / decisions:**
+- The first Cloud Hermes runtime check entered `executing` successfully but remained tied to the synchronous `/execute` request for roughly four minutes.
+- Vercel eventually closed the Sandbox stream; CoOperative recorded the task as `failed` with `Sandbox stream was closed and is not accepting commands.`
+- The failure was not a Supabase/auth/task-state problem; it exposed that Vercel `runCommand` waits for completion and is the wrong interaction model for long installs/agent work.
+- Added named persistent Vercel Sandbox execution for long-running playbooks.
+- Added a detached Node runner that executes the reviewed allow-listed commands inside the seeded repository, writes its own status/summary evidence, and remains bounded by a hard deadline.
+- The Owner Console execution API now returns HTTP 202 immediately for detached playbooks instead of keeping the phone request open.
+- Added a governed poll/finalize endpoint that reconnects to the named Sandbox, reads terminal evidence, records success/failure/cost/task events, and stops the Sandbox.
+- Owner Console now automatically polls active detached tasks and updates Mission Control without keeping the action button in a long-running pending state.
+- Synchronous playbooks such as the fast Cloud self-check remain synchronous; long-running playbooks such as the Hermes runtime check use detached execution.
+- Final branch validation passed unit tests, TypeScript, lint, and build; corrected Preview is READY.
+
+**Why:** Owner Console should be a control plane, not a terminal session. Cloud execution must survive independently of the phone/browser request and report durable state back to CoOperative.
+
+**Affected areas:** Vercel Sandbox adapter, task execution API, detached-task polling/finalization, Owner Console, Cloud Hermes, future long-running migrations/builds/research.
+
+**Conflict / supersession notes:** Supersedes the earlier synchronous Cloud Hermes runtime-check implementation. The earlier failed task remains preserved as evidence; it was not erased or retried in place.
+
+**Source:** Owner phone test plus Supabase task evidence, Vercel runtime logs, current Vercel Sandbox async/persistent documentation, and ChatGPT implementation.
+
+**Status:** Detached long-running execution architecture deployed to Preview and CI-green; Cloud Hermes runtime retest pending.
