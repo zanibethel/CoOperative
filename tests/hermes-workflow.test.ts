@@ -20,7 +20,10 @@ test("Workflow runtime is pinned and Next.js integration is enabled", () => {
 test("Cloud Hermes runtime workflow is durable and step-based", () => {
   assert.match(workflowSource, /"use workflow"/);
   assert.match(workflowSource, /"use step"/);
-  assert.match(workflowSource, /Sandbox\.getOrCreate/);
+  assert.match(workflowSource, /Sandbox\.get/);
+  assert.match(workflowSource, /Sandbox\.create/);
+  assert.match(workflowSource, /timeout:\s*15 \* 60 \* 1000/);
+  assert.match(workflowSource, /snapshotExpiration:\s*30 \* 24 \* 60 \* 60 \* 1000/);
   assert.match(workflowSource, /Sandbox\.fork/);
 });
 
