@@ -154,3 +154,5 @@ b { color: var(--text); }
 .decision-button { background: var(--panel-2); color: var(--text); }
 .decision-approve { background: var(--text); color: #090b10; }
 .decision-button:disabled, .decision-approve:disabled { opacity: .5; cursor: wait; }
+
+.console-helper { display: block; margin-top: 10px; color: var(--muted); line-height: 1.45; }
