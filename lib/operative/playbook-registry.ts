@@ -6,7 +6,7 @@ export interface CloudPlaybook {
   title: string;
   description: string;
   requiresShell: boolean;
-  executionMode?: "sync" | "detached";
+  executionMode?: "sync" | "detached" | "workflow";
   repoSlug: string;
   buildCommands: () => { cmd: string; args?: string[] }[];
 }
@@ -39,7 +39,7 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     description:
       "Install the pinned official Hermes Agent v0.21.3 release inside an isolated Vercel Sandbox, verify the CLI, and run an offline prompt-size check without provider credentials.",
     requiresShell: true,
-    executionMode: "detached",
+    executionMode: "workflow",
     repoSlug: "zanibethel/CoOperative",
     buildCommands: () => [
       {
