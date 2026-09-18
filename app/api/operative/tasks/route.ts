@@ -2,12 +2,32 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  buildDecisionBrief,
+  renderDecisionBriefText,
+} from "@/lib/operative/decision-brief";
+import {
   OwnerTaskIntentSchema,
   evaluateOwnerTaskPolicy,
 } from "@/lib/operative/task-policy";
 
 function adminUnavailable(error: unknown) {
   return error instanceof Error && error.message.includes("Missing server-only Supabase configuration");
+}
+
+function requiredScopes(flags: {
+  changesProduction?: boolean;
+  touchesSecrets?: boolean;
+  changesDatabase?: boolean;
+  movesMoney?: boolean;
+  destructive?: boolean;
+}) {
+  const scopes: string[] = [];
+  if (flags.changesProduction) scopes.push("production-change");
+  if (flags.touchesSecrets) scopes.push("secret-access");
+  if (flags.changesDatabase) scopes.push("database-or-rls-change");
+  if (flags.movesMoney) scopes.push("money-movement");
+  if (flags.destructive) scopes.push("destructive-action");
+  return scopes;
 }
 
 export async function GET() {
@@ -63,6 +83,7 @@ export async function POST(request: Request) {
   if (organizationError) {
     return NextResponse.json({ error: organizationError.message }, { status: 500 });
   }
+
   if (!organization) {
     return NextResponse.json(
       { error: "Create a workspace before creating an operative task.", code: "NO_ORGANIZATION" },
@@ -81,6 +102,7 @@ export async function POST(request: Request) {
     if (conversationError) {
       return NextResponse.json({ error: conversationError.message }, { status: 500 });
     }
+
     if (!conversation) {
       return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
     }
@@ -157,5 +179,174 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ task, policy }, { status: 201 });
+  let decisionId: string | null = null;
+
+  if (policy.requiresOwnerApproval) {
+    const now = new Date().toISOString();
+
+    const { error: planningError } = await admin
+      .from("operative_tasks")
+      .update({ status: "planning", updated_at: now })
+      .eq("id", task.id)
+      .eq("organization_id", organization.id)
+      .eq("status", "queued");
+
+    if (planningError) {
+      return NextResponse.json({ error: planningError.message }, { status: 500 });
+    }
+
+    await admin.from("task_events").insert({
+      task_id: task.id,
+      organization_id: organization.id,
+      event_type: "status_changed",
+      from_status: "queued",
+      to_status: "planning",
+      actor: "system",
+      detail: { reason: "owner-gated task requires a Decision Brief before execution" },
+    });
+
+    const maxSpendDollars = (policy.maxSpendMicrounits / 1_000_000).toFixed(2);
+    const brief = buildDecisionBrief({
+      taskId: task.id,
+      conversationId: parsed.data.conversationId ?? null,
+      proposalSummary: parsed.data.title,
+      rationale:
+        "CoOperative policy paused this task because it includes: " +
+        policy.reasons.join(", ") +
+        ". The maximum incremental spend authorized on the task is $" +
+        maxSpendDollars +
+        "; that value is a cap, not an estimated cost.",
+      expectedOutcomeIfApproved:
+        "The task becomes eligible for governed executor selection. Approval does not bypass later policy, permission, cost, verification, or rollback checks.",
+      expectedOutcomeIfDeclined:
+        "No guarded execution will begin. The task remains stopped unless the owner later creates or modifies a replacement task.",
+      estimatedCostCents: 0,
+      riskLevel: policy.riskLevel,
+      requiredScopes: requiredScopes(parsed.data.flags ?? {}),
+      rollbackPlan:
+        "No guarded execution has occurred yet. Rejecting at this gate prevents the protected action from starting.",
+      recommendedAction:
+        "Review the requested scope and spend cap. Approve, reject, modify, or ask a question from the same canonical thread.",
+    });
+
+    const { data: decision, error: decisionError } = await admin
+      .from("decisions")
+      .insert({
+        organization_id: organization.id,
+        task_id: task.id,
+        conversation_id: parsed.data.conversationId ?? null,
+        proposal_summary: brief.proposalSummary,
+        rationale: brief.rationale,
+        expected_outcome_if_approved: brief.expectedOutcomeIfApproved,
+        expected_outcome_if_declined: brief.expectedOutcomeIfDeclined,
+        estimated_cost_cents: brief.estimatedCostCents,
+        estimated_savings_cents: brief.estimatedSavingsCents,
+        risk_level: brief.riskLevel,
+        required_scopes: brief.requiredScopes,
+        rollback_plan: brief.rollbackPlan,
+        recommended_action: brief.recommendedAction,
+        status: "pending",
+        idempotency_key: "initial-owner-gate",
+      })
+      .select("id")
+      .single();
+
+    if (decisionError) {
+      await admin
+        .from("operative_tasks")
+        .update({
+          status: "blocked",
+          error: "Unable to create required Decision Brief.",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", task.id)
+        .eq("organization_id", organization.id);
+
+      await admin.from("task_events").insert({
+        task_id: task.id,
+        organization_id: organization.id,
+        event_type: "error",
+        actor: "system",
+        detail: { stage: "decision_brief", message: decisionError.message },
+      });
+
+      return NextResponse.json(
+        { error: "Task was created but its required Decision Brief could not be persisted." },
+        { status: 500 },
+      );
+    }
+
+    decisionId = decision.id;
+
+    const { error: awaitingError } = await admin
+      .from("operative_tasks")
+      .update({ status: "awaiting_approval", updated_at: new Date().toISOString() })
+      .eq("id", task.id)
+      .eq("organization_id", organization.id)
+      .eq("status", "planning");
+
+    if (awaitingError) {
+      return NextResponse.json({ error: awaitingError.message }, { status: 500 });
+    }
+
+    const { error: approvalEventError } = await admin.from("task_events").insert({
+      task_id: task.id,
+      organization_id: organization.id,
+      event_type: "approval_requested",
+      from_status: "planning",
+      to_status: "awaiting_approval",
+      actor: "system",
+      detail: { decisionId: decision.id, policyReasons: policy.reasons },
+    });
+
+    if (approvalEventError) {
+      return NextResponse.json(
+        { error: "Decision Brief exists but its approval audit event could not be persisted." },
+        { status: 500 },
+      );
+    }
+
+    if (parsed.data.conversationId) {
+      const { error: messageError } = await admin.from("conversation_messages").insert({
+        conversation_id: parsed.data.conversationId,
+        organization_id: organization.id,
+        actor_id: "system",
+        actor_type: "system",
+        channel: "system",
+        message_type: "decision_brief",
+        text: renderDecisionBriefText(brief),
+        linked_task_id: task.id,
+        linked_decision_id: decision.id,
+      });
+
+      if (messageError) {
+        return NextResponse.json(
+          { error: "Decision Brief exists but could not be appended to the canonical thread." },
+          { status: 500 },
+        );
+      }
+    }
+  }
+
+  const { data: finalTask, error: finalTaskError } = await admin
+    .from("operative_tasks")
+    .select(
+      "id, conversation_id, title, description, status, risk_level, requires_owner_approval, max_spend_microunits, actual_spend_microunits, created_at, updated_at",
+    )
+    .eq("id", task.id)
+    .eq("organization_id", organization.id)
+    .single();
+
+  if (finalTaskError) {
+    return NextResponse.json({ error: finalTaskError.message }, { status: 500 });
+  }
+
+  return NextResponse.json(
+    {
+      task: finalTask,
+      policy,
+      decisionId,
+    },
+    { status: 201 },
+  );
 }
