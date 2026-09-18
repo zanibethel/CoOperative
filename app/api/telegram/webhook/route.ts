@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   ChannelAuthorizationError,
   normalizeTelegramEvent,
@@ -53,7 +53,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  const supabase = await createClient();
+  // Telegram has no browser Supabase session. After validating Telegram's
+  // webhook secret and allow-listed chat identity, use the server-only Supabase
+  // secret-key client for canonical writes. Never expose this key to the client.
+  const supabase = createAdminClient();
 
   const { data: identity, error: identityError } = await supabase
     .from("channel_identities")
