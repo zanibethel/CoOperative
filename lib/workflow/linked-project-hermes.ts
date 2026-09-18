@@ -60,6 +60,8 @@ interface VerificationStep {
 
 interface LinkedProjectEvidence {
   projectKey: LinkedProjectKey;
+  hermesExitCode: number;
+  hermesError: string | null;
   repoSlug: string;
   gitRef: string;
   sandboxName: string;
@@ -257,6 +259,7 @@ async function runLinkedProjectHermes(
     timeout: 10 * 60 * 1000,
     env: {
       AI_GATEWAY_API_KEY: oidcToken,
+      HERMES_MAX_ITERATIONS: String(MAX_TURNS),
     },
   });
 
@@ -313,16 +316,9 @@ async function runLinkedProjectHermes(
       "low",
       "--toolsets",
       "file",
-      "--max-turns",
-      String(MAX_TURNS),
-      "--run-budget",
-      "240",
-      "--checkpoints",
       "--safe-mode",
       "--ignore-user-config",
       "--ignore-rules",
-      "--source",
-      "tool",
       "-z",
       prompt,
     ];
@@ -369,13 +365,13 @@ async function runLinkedProjectHermes(
     }
 
     const resolvedCost = resolveModelCost(usage, selectedModel.pricing);
-
-    if (hermes.exitCode !== 0) {
-      throw new Error(
-        "Linked-project Hermes command failed after producing usage evidence: " +
-          tail(stderr || stdout),
-      );
-    }
+    const hermesError =
+      hermes.exitCode === 0
+        ? null
+        : "Linked-project Hermes command exited " +
+          hermes.exitCode +
+          ": " +
+          tail(stderr || stdout);
 
     const intentToAdd = await sandbox.runCommand({
       cmd: "git",
@@ -426,9 +422,10 @@ async function runLinkedProjectHermes(
     }
 
     const verificationSteps: VerificationStep[] = [];
-    let verificationSucceeded = true;
+    let verificationSucceeded = hermes.exitCode === 0;
 
     for (const step of playbook.buildCommands()) {
+      if (!verificationSucceeded) break;
       const result = await sandbox.runCommand({
         cmd: step.cmd,
         args: step.args ?? [],
@@ -450,6 +447,8 @@ async function runLinkedProjectHermes(
 
     return {
       projectKey: project.key,
+      hermesExitCode: hermes.exitCode,
+      hermesError,
       repoSlug: project.repoSlug,
       gitRef: project.defaultRef,
       sandboxName: sandbox.name,
@@ -482,7 +481,10 @@ async function finalizeWithEvidence(
   const admin = createAdminClient();
   const now = new Date().toISOString();
   const overBudget = evidence.costMicrounits > input.maxSpendMicrounits;
-  const succeeded = evidence.verificationSucceeded && !overBudget;
+  const succeeded =
+    evidence.hermesExitCode === 0 &&
+    evidence.verificationSucceeded &&
+    !overBudget;
 
   const result = {
     executionMode: "workflow",
@@ -530,9 +532,11 @@ async function finalizeWithEvidence(
       actual_spend_microunits: evidence.costMicrounits,
       error: overBudget
         ? `Cost Governor violation: actual model cost ${evidence.costMicrounits} microunits exceeded the ${input.maxSpendMicrounits} microunit cap.`
-        : evidence.verificationSucceeded
-          ? null
-          : "Hermes produced a patch, but deterministic project verification failed. The patch was preserved for review and was not written to GitHub.",
+        : evidence.hermesError
+          ? evidence.hermesError + " Usage/cost evidence and any partial patch were preserved; nothing was written to GitHub."
+          : evidence.verificationSucceeded
+            ? null
+            : "Hermes produced a patch, but deterministic project verification failed. The patch was preserved for review and was not written to GitHub.",
       updated_at: now,
     })
     .eq("id", input.taskId)
@@ -551,6 +555,7 @@ async function finalizeWithEvidence(
     detail: {
       type: "linked_project_hermes_result",
       projectKey: input.projectKey,
+      hermesExitCode: evidence.hermesExitCode,
       verificationSucceeded: evidence.verificationSucceeded,
       changedFiles: evidence.changedFiles,
       actualSpendMicrounits: evidence.costMicrounits,
@@ -677,6 +682,7 @@ export async function linkedProjectHermesWorkflow(
 
     return {
       ok:
+        evidence.hermesExitCode === 0 &&
         evidence.verificationSucceeded &&
         evidence.costMicrounits <= input.maxSpendMicrounits,
       evidence,
