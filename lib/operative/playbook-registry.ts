@@ -25,7 +25,7 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     requiresShell: true,
     repoSlug: "zanibethel/CoOperative",
     buildCommands: () => [
-      { cmd: "git", args: ["rev-parse", "HEAD"] },
+      { cmd: "test", args: ["-f", "package.json"] },
       { cmd: "node", args: ["--version"] },
       { cmd: "npm", args: ["install", "--no-audit", "--no-fund"] },
       { cmd: "npm", args: ["test"] },
