@@ -89,24 +89,22 @@ test("Hermes shell command uses explicit separators before timeout execution", (
 });
 
 
-test("Hermes top-level flags precede the chat subcommand", () => {
-  const globalStart = workflowSource.indexOf("const globalHermesArgs");
-  const chatStart = workflowSource.indexOf("const chatHermesArgs");
-  assert.ok(globalStart >= 0);
-  assert.ok(chatStart > globalStart);
+test("Hermes smoke uses the top-level scripted oneshot path for usage accounting", () => {
+  const argsStart = workflowSource.indexOf("const hermesArgs = [");
+  const argsEnd = workflowSource.indexOf("];", argsStart);
+  assert.ok(argsStart >= 0);
+  assert.ok(argsEnd > argsStart);
 
-  const globalBlock = workflowSource.slice(globalStart, chatStart);
-  const chatBlock = workflowSource.slice(chatStart, workflowSource.indexOf("const hermesArgs"));
-
-  assert.match(globalBlock, /"--usage-file"/);
-  assert.match(globalBlock, /"--provider"/);
-  assert.match(globalBlock, /"--model"/);
-  assert.match(globalBlock, /"--reasoning"/);
-  assert.match(chatBlock, /"chat"/);
-  assert.match(chatBlock, /"--query-file"/);
-  assert.match(chatBlock, /"--max-turns"/);
-  assert.match(chatBlock, /"--run-budget"/);
-  assert.equal(chatBlock.includes('"--usage-file"'), false);
+  const argsBlock = workflowSource.slice(argsStart, argsEnd);
+  assert.match(argsBlock, /"--usage-file"/);
+  assert.match(argsBlock, /"--provider"/);
+  assert.match(argsBlock, /"--model"/);
+  assert.match(argsBlock, /"--reasoning"/);
+  assert.match(argsBlock, /"-z"/);
+  assert.match(argsBlock, /prompt/);
+  assert.equal(argsBlock.includes('"chat"'), false);
+  assert.equal(argsBlock.includes('"--query-file"'), false);
+  assert.equal(argsBlock.includes('"--max-turns"'), false);
 });
 
 
