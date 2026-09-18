@@ -1,3 +1,5 @@
+import type { CompatibilityTarget } from "./integration-compatibility-registry.ts";
+
 export const CLOUD_PLAYBOOK_KEYS = ["cloud-self-check", "hermes-runtime-check", "hermes-model-smoke"] as const;
 export type CloudPlaybookKey = (typeof CLOUD_PLAYBOOK_KEYS)[number];
 
@@ -9,6 +11,7 @@ export interface CloudPlaybook {
   executor: "deterministic-code" | "hermes-cloud-operative";
   executionMode?: "sync" | "detached" | "workflow";
   repoSlug: string;
+  compatibilityTargets: readonly CompatibilityTarget[];
   buildCommands: () => { cmd: string; args?: string[] }[];
 }
 
@@ -28,6 +31,7 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     executor: "deterministic-code",
     executionMode: "sync",
     repoSlug: "zanibethel/CoOperative",
+    compatibilityTargets: ["cooperative-executor-contract", "supabase", "vercel-sandbox"],
     buildCommands: () => [
       { cmd: "test", args: ["-f", "package.json"] },
       { cmd: "node", args: ["--version"] },
@@ -44,6 +48,13 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     executor: "deterministic-code",
     executionMode: "workflow",
     repoSlug: "zanibethel/CoOperative",
+    compatibilityTargets: [
+      "cooperative-executor-contract",
+      "supabase",
+      "vercel-workflow",
+      "vercel-sandbox",
+      "hermes-agent",
+    ],
     buildCommands: () => [
       {
         cmd: "bash",
@@ -77,6 +88,14 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     executor: "hermes-cloud-operative",
     executionMode: "workflow",
     repoSlug: "zanibethel/CoOperative",
+    compatibilityTargets: [
+      "cooperative-executor-contract",
+      "supabase",
+      "vercel-workflow",
+      "vercel-sandbox",
+      "vercel-ai-gateway",
+      "hermes-agent",
+    ],
     buildCommands: () => [],
   },
 };
