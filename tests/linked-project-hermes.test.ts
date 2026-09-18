@@ -71,3 +71,13 @@ test("failed Hermes execution still preserves metered evidence before final stat
   assert.match(source, /Usage\/cost evidence and any partial patch were preserved/);
   assert.match(source, /amount_microunits: evidence\.costMicrounits/);
 });
+
+
+test("linked-project Hermes finalization records verifying state and avoids duplicate cost rows on replay", () => {
+  assert.match(source, /status: "verifying"/);
+  assert.match(source, /from_status: "executing"/);
+  assert.match(source, /to_status: "verifying"/);
+  assert.match(source, /select\("id,executor,cost_category"\)/);
+  assert.match(source, /existingKeys\.has\("hermes-cloud-operative:ai-tokens"\)/);
+  assert.match(source, /existingKeys\.has\("vercel-sandbox:sandbox-compute"\)/);
+});
