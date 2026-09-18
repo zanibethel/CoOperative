@@ -1,0 +1,233 @@
+import type { CompatibilityTarget } from "./integration-compatibility-registry.ts";
+
+export type LinkedProjectKey = "creatorhub" | "raisehub";
+
+export type HumanActionMode = "embedded-or-popup" | "popup-only";
+
+export interface ProjectSecretRequirement {
+  key: string;
+  purpose: string;
+  secret: boolean;
+  ownerGate: boolean;
+  environments: readonly ("preview" | "production")[];
+}
+
+export interface ProjectHumanAction {
+  key: string;
+  title: string;
+  provider: string;
+  description: string;
+  launchUrl: string;
+  mode: HumanActionMode;
+  completion: "manual-return-and-verify";
+  callbackUrl?: string;
+  relatedSecretKeys: readonly string[];
+}
+
+export interface LinkedProjectManifest {
+  key: LinkedProjectKey;
+  name: string;
+  description: string;
+  repoSlug: string;
+  defaultRef: string;
+  vercelProject: {
+    id: string;
+    name: string;
+  };
+  supabaseProjectRef: string | null;
+  integrationHealthUrl: string | null;
+  healthPlaybookKey: string;
+  compatibilityTargets: readonly CompatibilityTarget[];
+  executorPreference: readonly (
+    | "deterministic-code"
+    | "connected-chatgpt"
+    | "native-cooperative"
+    | "hermes-cloud-operative"
+  )[];
+  secretRequirements: readonly ProjectSecretRequirement[];
+  humanActions: readonly ProjectHumanAction[];
+}
+
+const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
+  creatorhub: {
+    key: "creatorhub",
+    name: "CreatorHub",
+    description:
+      "Creator operations, connected platforms, SmartLink, digital products, commerce, and AI-assisted publishing.",
+    repoSlug: "zanibethel/CreatorHub",
+    defaultRef: "main",
+    vercelProject: {
+      id: "prj_zf7GQgNvUBXmVWRcijS8aIVxzLsw",
+      name: "creatorhub",
+    },
+    supabaseProjectRef: "yufptpfiwdbzzrvhkvux",
+    integrationHealthUrl:
+      "https://creatorhub-gray.vercel.app/api/system/integration-health",
+    healthPlaybookKey: "creatorhub-health-check",
+    compatibilityTargets: [
+      "linked-project",
+      "provider-auth-handoff",
+      "provider-secret-broker",
+      "vercel-sandbox",
+      "vercel-ai-gateway",
+      "supabase",
+    ],
+    executorPreference: [
+      "deterministic-code",
+      "connected-chatgpt",
+      "native-cooperative",
+      "hermes-cloud-operative",
+    ],
+    secretRequirements: [
+      {
+        key: "INSTAGRAM_APP_ID",
+        purpose: "Instagram professional-account OAuth client identifier.",
+        secret: false,
+        ownerGate: true,
+        environments: ["preview", "production"],
+      },
+      {
+        key: "INSTAGRAM_APP_SECRET",
+        purpose: "Instagram OAuth client secret.",
+        secret: true,
+        ownerGate: true,
+        environments: ["preview", "production"],
+      },
+      {
+        key: "TIKTOK_CLIENT_KEY",
+        purpose: "TikTok Login Kit client key.",
+        secret: false,
+        ownerGate: true,
+        environments: ["preview", "production"],
+      },
+      {
+        key: "TIKTOK_CLIENT_SECRET",
+        purpose: "TikTok Login Kit client secret.",
+        secret: true,
+        ownerGate: true,
+        environments: ["preview", "production"],
+      },
+      {
+        key: "FANVUE_CLIENT_ID",
+        purpose: "Fanvue OAuth application client identifier.",
+        secret: false,
+        ownerGate: true,
+        environments: ["preview", "production"],
+      },
+      {
+        key: "FANVUE_CLIENT_SECRET",
+        purpose: "Fanvue OAuth application client secret.",
+        secret: true,
+        ownerGate: true,
+        environments: ["preview", "production"],
+      },
+      {
+        key: "STRIPE_SECRET_KEY",
+        purpose: "CreatorHub direct checkout server credential.",
+        secret: true,
+        ownerGate: true,
+        environments: ["preview", "production"],
+      },
+      {
+        key: "STRIPE_WEBHOOK_SECRET",
+        purpose: "Verify Stripe webhook signatures.",
+        secret: true,
+        ownerGate: true,
+        environments: ["preview", "production"],
+      },
+    ],
+    humanActions: [
+      {
+        key: "instagram-developer-app",
+        title: "Instagram developer app",
+        provider: "Meta",
+        description:
+          "Sign in to Meta for Developers, create or review the CreatorHub app, and register the production OAuth callback.",
+        launchUrl: "https://developers.facebook.com/apps/",
+        mode: "embedded-or-popup",
+        completion: "manual-return-and-verify",
+        callbackUrl:
+          "https://creatorhub-gray.vercel.app/api/oauth/instagram/callback",
+        relatedSecretKeys: ["INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"],
+      },
+      {
+        key: "tiktok-developer-app",
+        title: "TikTok developer app",
+        provider: "TikTok",
+        description:
+          "Sign in to TikTok for Developers, configure Login Kit, and register the production OAuth callback.",
+        launchUrl: "https://developers.tiktok.com/apps/",
+        mode: "embedded-or-popup",
+        completion: "manual-return-and-verify",
+        callbackUrl:
+          "https://creatorhub-gray.vercel.app/api/oauth/tiktok/callback",
+        relatedSecretKeys: ["TIKTOK_CLIENT_KEY", "TIKTOK_CLIENT_SECRET"],
+      },
+      {
+        key: "fanvue-developer-app",
+        title: "Fanvue developer app",
+        provider: "Fanvue",
+        description:
+          "Sign in to Fanvue, complete any required creator verification, create the OAuth app, and register the production callback.",
+        launchUrl: "https://www.fanvue.com/developers/apps",
+        mode: "embedded-or-popup",
+        completion: "manual-return-and-verify",
+        callbackUrl:
+          "https://creatorhub-gray.vercel.app/api/oauth/fanvue/callback",
+        relatedSecretKeys: ["FANVUE_CLIENT_ID", "FANVUE_CLIENT_SECRET"],
+      },
+    ],
+  },
+  raisehub: {
+    key: "raisehub",
+    name: "RaiseHub",
+    description:
+      "Fundraising platform with business workspaces, partner rewards, demo/prod isolation, owner controls, and Stripe-backed commerce.",
+    repoSlug: "zanibethel/raisehub",
+    defaultRef: "main",
+    vercelProject: {
+      id: "prj_dgC022Tu2ua8xNgoBKRrenRmYAnd",
+      name: "raisehub",
+    },
+    supabaseProjectRef: null,
+    integrationHealthUrl: null,
+    healthPlaybookKey: "raisehub-health-check",
+    compatibilityTargets: [
+      "linked-project",
+      "provider-secret-broker",
+      "vercel-sandbox",
+      "supabase",
+    ],
+    executorPreference: [
+      "deterministic-code",
+      "connected-chatgpt",
+      "native-cooperative",
+      "hermes-cloud-operative",
+    ],
+    secretRequirements: [],
+    humanActions: [],
+  },
+};
+
+export function linkedProjectKeys(): LinkedProjectKey[] {
+  return Object.keys(PROJECTS) as LinkedProjectKey[];
+}
+
+export function getLinkedProject(
+  key: string | null | undefined,
+): LinkedProjectManifest | null {
+  if (!key) return null;
+  return (PROJECTS as Record<string, LinkedProjectManifest | undefined>)[key] ?? null;
+}
+
+export function linkedProjects(): LinkedProjectManifest[] {
+  return linkedProjectKeys().map((key) => PROJECTS[key]);
+}
+
+export function getProjectHumanAction(
+  projectKey: string,
+  actionKey: string,
+): ProjectHumanAction | null {
+  const project = getLinkedProject(projectKey);
+  return project?.humanActions.find((action) => action.key === actionKey) ?? null;
+}
