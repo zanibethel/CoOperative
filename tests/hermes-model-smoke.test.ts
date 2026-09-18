@@ -76,3 +76,11 @@ test("model smoke preserves structured Workflow errors", () => {
   assert.match(workflowSource, /record\.message/);
   assert.match(workflowSource, /record\.cause/);
 });
+
+
+test("Hermes shell command uses explicit separators before timeout execution", () => {
+  assert.match(workflowSource, /\.join\("; "\)/);
+  assert.match(workflowSource, /test -x "\$HERMES_BIN"/);
+  assert.match(workflowSource, /exec timeout 75s "\$HERMES_BIN"/);
+  assert.equal(workflowSource.includes('].join(" ")'), false);
+});
