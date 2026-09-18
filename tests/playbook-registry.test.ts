@@ -7,7 +7,7 @@ import {
 } from "../lib/operative/playbook-registry.ts";
 
 test("Cloud Operative exposes only reviewed playbook keys", () => {
-  assert.deepEqual(cloudPlaybookKeys(), ["cloud-self-check", "hermes-runtime-check"]);
+  assert.deepEqual(cloudPlaybookKeys(), ["cloud-self-check", "hermes-runtime-check", "hermes-model-smoke"]);
   assert.equal(getCloudPlaybook("unknown-playbook"), null);
 });
 
@@ -37,4 +37,13 @@ test("Hermes runtime check is pinned and credential-free", () => {
   assert.match(install, /--skip-browser/);
   assert.match(install, /--skip-computer-use/);
   assert.equal(install.includes("NOUS_API_KEY"), false);
+});
+
+
+test("model-backed Hermes smoke uses the governed cloud-hermes executor", () => {
+  const playbook = getCloudPlaybook("hermes-model-smoke");
+  assert.ok(playbook);
+  assert.equal(playbook.executor, "cloud-hermes");
+  assert.equal(playbook.executionMode, "workflow");
+  assert.deepEqual(playbook.buildCommands(), []);
 });
