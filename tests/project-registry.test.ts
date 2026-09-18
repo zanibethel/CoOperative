@@ -42,7 +42,9 @@ test("CreatorHub human setup covers Instagram, TikTok, and Fanvue without secret
   assert.match(serialized, /TIKTOK_CLIENT_SECRET/);
   assert.match(serialized, /FANVUE_CLIENT_SECRET/);
   assert.equal(serialized.includes("access_token"), false);
-  assert.equal(serialized.includes("client_secret":""), false);
+  for (const requirement of creatorhub.secretRequirements) {
+    assert.equal("value" in requirement, false);
+  }
 });
 
 test("project executor preference keeps deterministic and connected ChatGPT ahead of Hermes", () => {
