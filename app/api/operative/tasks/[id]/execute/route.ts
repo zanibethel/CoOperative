@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCloudPlaybook } from "@/lib/operative/playbook-registry";
-import { runSandboxTask } from "@/lib/operative/sandbox-adapter";
+import { runSandboxTask, startDetachedSandboxTask } from "@/lib/operative/sandbox-adapter";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -193,6 +193,63 @@ export async function POST(
   const gitRef = process.env.VERCEL_GIT_COMMIT_SHA || "cloud-operative-bootstrap";
 
   try {
+    if (playbook.executionMode === "detached") {
+      const detached = await startDetachedSandboxTask({
+        taskId: task.id,
+        repoSlug: playbook.repoSlug,
+        gitRef,
+        commands: playbook.buildCommands(),
+        timeoutMs: 10 * 60 * 1000,
+      });
+
+      const detachedResult = {
+        playbookKey: playbook.key,
+        gitRef,
+        executionMode: "detached",
+        state: "running",
+        sandboxName: detached.sandboxName,
+        startedAt: detached.startedAt,
+        deadlineAt: detached.deadlineAt,
+      };
+
+      const { error: persistDetachedError } = await admin
+        .from("operative_tasks")
+        .update({
+          result: detachedResult,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", task.id)
+        .eq("organization_id", task.organization_id)
+        .eq("status", "executing");
+
+      if (persistDetachedError) {
+        throw persistDetachedError;
+      }
+
+      await admin.from("task_events").insert({
+        task_id: task.id,
+        organization_id: task.organization_id,
+        event_type: "sandbox_created",
+        actor: "system",
+        detail: {
+          sandboxName: detached.sandboxName,
+          executionMode: "detached",
+          playbookKey: playbook.key,
+          deadlineAt: detached.deadlineAt,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          taskId: task.id,
+          status: "executing",
+          asynchronous: true,
+          result: detachedResult,
+        },
+        { status: 202 },
+      );
+    }
+
     const result = await runSandboxTask({
       taskId: task.id,
       repoSlug: playbook.repoSlug,
