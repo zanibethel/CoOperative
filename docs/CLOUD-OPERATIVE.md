@@ -96,6 +96,16 @@ The AI model can change without losing the owner's operating context.
 
 See `docs/MEMORY-AND-PREFERENCES.md` for the full memory model.
 
+## Omnichannel continuity
+
+ChatGPT, Telegram, and the CoOperative Owner Console should be treated as interfaces into one canonical CoOperative conversation/task/memory system.
+
+A conversation or task started in one channel should be resumable in another without re-explaining context.
+
+CoOperative remains the system of record. Channel-specific chat histories are not authoritative.
+
+See `docs/OMNICHANNEL-CONVERSATIONS.md`.
+
 ## Target experience
 
 The owner should be able to use the Owner Console from phone or desktop:
