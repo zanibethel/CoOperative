@@ -20,9 +20,13 @@ interface HermesModelSmokeInput {
 
 interface HermesUsageReport {
   estimated_cost_usd?: number;
+  cost_source?: string;
+  cost_status?: string;
   input_tokens?: number;
   output_tokens?: number;
   reasoning_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
   total_tokens?: number;
   api_calls?: number;
   model?: string;
@@ -36,6 +40,21 @@ interface HermesUsageReport {
   };
 }
 
+interface GatewayPricing {
+  input?: string;
+  output?: string;
+  input_cache_read?: string;
+  input_cache_write?: string;
+  varies_by_provider?: boolean;
+}
+
+interface ResolvedCost {
+  usd: number;
+  microunits: number;
+  source: "hermes-usage" | "ai-gateway-catalog";
+  status: "reported" | "estimated";
+}
+
 interface ModelSmokeEvidence {
   sandboxName: string;
   model: string;
@@ -45,6 +64,10 @@ interface ModelSmokeEvidence {
   durationMs: number;
   usage: HermesUsageReport;
   costMicrounits: number;
+  costUsd: number;
+  costSource: ResolvedCost["source"];
+  costStatus: ResolvedCost["status"];
+  pricingSnapshot: GatewayPricing;
 }
 
 function tail(value: string, limit = 2500) {
@@ -52,16 +75,95 @@ function tail(value: string, limit = 2500) {
   return value.slice(value.length - limit);
 }
 
-function usageCostMicrounits(usage: HermesUsageReport): number {
-  const usd =
+function parseUnitPrice(value: string | undefined, label: string): number {
+  if (!value) {
+    throw new Error("AI Gateway model catalog did not provide " + label + " pricing.");
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error("AI Gateway model catalog returned invalid " + label + " pricing.");
+  }
+
+  return parsed;
+}
+
+function resolveUsageCost(
+  usage: HermesUsageReport,
+  pricing: GatewayPricing | undefined,
+): ResolvedCost {
+  const reportedUsd =
     usage.total_including_auxiliary?.estimated_cost_usd ??
     usage.estimated_cost_usd;
 
-  if (typeof usd !== "number" || !Number.isFinite(usd) || usd < 0) {
-    throw new Error("Hermes usage report did not provide a valid cost estimate.");
+  const reportIsAuthoritative =
+    typeof reportedUsd === "number" &&
+    Number.isFinite(reportedUsd) &&
+    reportedUsd >= 0 &&
+    usage.cost_status !== "unknown" &&
+    usage.cost_source !== "none";
+
+  if (reportIsAuthoritative) {
+    return {
+      usd: reportedUsd,
+      microunits: Math.ceil(reportedUsd * 1_000_000),
+      source: "hermes-usage",
+      status: "reported",
+    };
   }
 
-  return Math.ceil(usd * 1_000_000);
+  if (!pricing) {
+    throw new Error(
+      "Hermes cost is unknown and AI Gateway catalog pricing is unavailable; refusing to record $0.",
+    );
+  }
+
+  if (pricing.varies_by_provider) {
+    throw new Error(
+      "Hermes cost is unknown and AI Gateway pricing varies by provider; exact cost cannot be resolved safely.",
+    );
+  }
+
+  const inputRate = parseUnitPrice(pricing.input, "input");
+  const outputRate = parseUnitPrice(pricing.output, "output");
+  const cacheReadRate = pricing.input_cache_read
+    ? parseUnitPrice(pricing.input_cache_read, "cache-read")
+    : inputRate;
+  const cacheWriteRate = pricing.input_cache_write
+    ? parseUnitPrice(pricing.input_cache_write, "cache-write")
+    : inputRate;
+
+  const inputTokens = Math.max(0, Number(usage.input_tokens ?? 0));
+  const outputTokens = Math.max(0, Number(usage.output_tokens ?? 0));
+  const cacheReadTokens = Math.max(0, Number(usage.cache_read_tokens ?? 0));
+  const cacheWriteTokens = Math.max(0, Number(usage.cache_write_tokens ?? 0));
+  const uncachedInputTokens = Math.max(
+    0,
+    inputTokens - cacheReadTokens - cacheWriteTokens,
+  );
+
+  const usd =
+    uncachedInputTokens * inputRate +
+    cacheReadTokens * cacheReadRate +
+    cacheWriteTokens * cacheWriteRate +
+    outputTokens * outputRate;
+
+  if (!Number.isFinite(usd) || usd < 0) {
+    throw new Error("Unable to calculate a valid AI Gateway catalog cost.");
+  }
+
+  if ((inputTokens > 0 || outputTokens > 0) && usd === 0) {
+    throw new Error(
+      "Model usage consumed tokens but resolved catalog cost was zero; refusing to record $0.",
+    );
+  }
+
+  return {
+    usd,
+    microunits: Math.ceil(usd * 1_000_000),
+    source: "ai-gateway-catalog",
+    status: "estimated",
+  };
 }
 
 async function recordProgress(
@@ -157,7 +259,11 @@ async function runModelSmoke(
   }
 
   const catalog = (await catalogResponse.json()) as {
-    data?: Array<{ id?: string; context_window?: number }>;
+    data?: Array<{
+      id?: string;
+      context_window?: number;
+      pricing?: GatewayPricing;
+    }>;
   };
   const selectedModel = catalog.data?.find((model) => model.id === MODEL);
   if (!selectedModel) {
@@ -268,7 +374,8 @@ async function runModelSmoke(
       throw new Error("Hermes usage report was not valid JSON.");
     }
 
-    const costMicrounits = usageCostMicrounits(usage);
+    const resolvedCost = resolveUsageCost(usage, selectedModel.pricing);
+    const costMicrounits = resolvedCost.microunits;
 
     if (costMicrounits > input.maxSpendMicrounits) {
       throw new Error(
@@ -297,6 +404,10 @@ async function runModelSmoke(
       durationMs: Date.now() - startedAt,
       usage,
       costMicrounits,
+      costUsd: resolvedCost.usd,
+      costSource: resolvedCost.source,
+      costStatus: resolvedCost.status,
+      pricingSnapshot: selectedModel.pricing ?? {},
     };
   } finally {
     await sandbox.stop();
@@ -391,7 +502,7 @@ async function finalizeSuccess(
       currency: "USD",
       is_marginal_cost: true,
       notes:
-        `Hermes usage-file estimate via Vercel AI Gateway; model ${evidence.model}; provider ${evidence.provider}.`,
+        `Hermes model cost ${evidence.costStatus} from ${evidence.costSource}; model ${evidence.model}; provider ${evidence.provider}; USD ${evidence.costUsd.toFixed(8)}.`,
     },
     {
       organization_id: input.organizationId,
