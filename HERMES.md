@@ -145,3 +145,14 @@ For every connector/platform PR, include:
 The first Connector Factory pilot is Square OAuth.
 
 Use the corresponding GitHub issue as the execution task.
+
+
+## Cloud Operative self-bootstrap
+
+After the Supabase/Vercel bootstrap pilot is complete, the next priority is to help build and migrate into the CoOperative Cloud Operative described in `docs/CLOUD-OPERATIVE.md`.
+
+The objective is to remove the owner's MacBook as a required runtime dependency.
+
+Hermes should help create the cloud task system, Telegram webhook path, on-demand execution workspace, durable state, cost/evidence tracking, and approval/resume flow.
+
+This is a governed self-bootstrap task: Hermes may build and test the infrastructure, but it does not gain broader permissions merely because it is helping create its successor/runtime. Existing owner gates in this file continue to apply.
