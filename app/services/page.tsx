@@ -56,13 +56,18 @@ export default function ServicesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  async function fetchServices() {
+    const response = await fetch("/api/services", { cache: "no-store" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error ?? "Unable to load services");
+    return payload;
+  }
+
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/services", { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Unable to load services");
+      const payload = await fetchServices();
       setProviders(payload.providers ?? []);
       setServices(payload.services ?? []);
     } catch (err) {
@@ -73,7 +78,25 @@ export default function ServicesPage() {
   }
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+
+    void fetchServices()
+      .then((payload) => {
+        if (cancelled) return;
+        setProviders(payload.providers ?? []);
+        setServices(payload.services ?? []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Unable to load services");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const monthlySpend = useMemo(
