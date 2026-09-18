@@ -667,6 +667,7 @@ export default function OwnerConsolePage() {
       <nav className="nav">
         <Link href="/" className="brand">CO/OPERATIVE</Link>
         <div className="nav-links">
+          <Link href="/console/projects">Projects</Link>
           <Link href="/services">Services</Link>
           <Link href="/intake">Briefing</Link>
           <div className="badge">Owner Console · Phase C</div>
