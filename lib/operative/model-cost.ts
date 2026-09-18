@@ -101,11 +101,12 @@ export function resolveModelCost(
     inputTokens - cacheReadTokens - cacheWriteTokens,
   );
 
-  const usd =
+  const rawUsd =
     uncachedInputTokens * inputRate +
     cacheReadTokens * cacheReadRate +
     cacheWriteTokens * cacheWriteRate +
     outputTokens * outputRate;
+  const usd = Number(rawUsd.toFixed(12));
 
   if (!Number.isFinite(usd) || usd < 0) {
     throw new Error("Unable to calculate a valid AI Gateway catalog cost.");
