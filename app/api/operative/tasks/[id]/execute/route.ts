@@ -67,6 +67,20 @@ export async function POST(
     );
   }
 
+  if (
+    playbook.executor === "hermes-cloud-operative" &&
+    playbook.projectKey &&
+    Number(task.max_spend_microunits ?? 0) <= 0
+  ) {
+    return NextResponse.json(
+      {
+        error: "Linked-project Hermes requires an explicit positive model spend cap.",
+        code: "MODEL_SPEND_CAP_REQUIRED",
+      },
+      { status: 409 },
+    );
+  }
+
   const compatibilityReview = reviewCompatibilityKnowledge(playbook.compatibilityTargets);
   if (!compatibilityReview.ok) {
     return NextResponse.json(
