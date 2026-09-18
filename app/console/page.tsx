@@ -88,6 +88,13 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
+function isDetachedRunningTask(task: Task) {
+  if (task.status !== "executing" || !task.result || typeof task.result !== "object") {
+    return false;
+  }
+  return (task.result as { executionMode?: unknown }).executionMode === "detached";
+}
+
 function taskFindings(result: unknown): Array<{ priority?: string; title: string; why?: string }> {
   if (!result || typeof result !== "object" || !("findings" in result)) return [];
   const findings = (result as { findings?: unknown }).findings;
@@ -145,6 +152,55 @@ export default function OwnerConsolePage() {
     () => overview.tasks.reduce((sum, task) => sum + Number(task.actual_spend_microunits ?? 0), 0),
     [overview.tasks],
   );
+
+  const detachedTaskIds = useMemo(
+    () => overview.tasks.filter(isDetachedRunningTask).map((task) => task.id),
+    [overview.tasks],
+  );
+
+  useEffect(() => {
+    if (detachedTaskIds.length === 0) return;
+
+    let cancelled = false;
+    let polling = false;
+
+    const poll = async () => {
+      if (cancelled || polling) return;
+      polling = true;
+
+      try {
+        await Promise.all(
+          detachedTaskIds.map(async (taskId) => {
+            await fetch("/api/operative/tasks/" + taskId + "/poll", {
+              method: "GET",
+              cache: "no-store",
+            }).catch(() => undefined);
+          }),
+        );
+
+        if (cancelled) return;
+
+        const response = await fetch("/api/operative/overview", { cache: "no-store" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Unable to refresh Mission Control");
+        if (!cancelled) setOverview(payload);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Unable to refresh detached task");
+        }
+      } finally {
+        polling = false;
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => void poll(), 4000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [detachedTaskIds.join(",")]);
 
   async function persistMessage(messageText: string) {
     const response = await fetch("/api/console/messages", {
@@ -327,6 +383,14 @@ export default function OwnerConsolePage() {
 
       if (!executeResponse.ok) {
         throw new Error(executed.error ?? "Cloud Hermes runtime check failed");
+      }
+
+      if (executeResponse.status === 202 || executed.asynchronous === true) {
+        setNotice(
+          "Cloud Hermes runtime check started. You can keep using the console; Mission Control will update automatically.",
+        );
+        await load();
+        return;
       }
 
       setNotice("Cloud Hermes runtime check completed. No model credentials were used.");
