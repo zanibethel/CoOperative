@@ -638,3 +638,34 @@ Each entry should contain:
 **Why:** Runtime bootstrap should prove that the prepared Hermes executable survives snapshot/restore and its CLI registry loads. Heavy diagnostics belong in separate diagnostic playbooks, not in the critical bootstrap proof.
 
 **Status:** Prepared runtime exists; lightweight reuse test ready for live retest.
+
+
+---
+
+## 2026-09-18 — First successful reusable Cloud Hermes runtime proof
+
+**Scope:** Cloud Hermes / Vercel Workflow / prepared Sandbox reuse
+
+**Owner intent:** Prove that Hermes can live as a reusable cloud runtime, execute independently of the Mac/browser, and avoid repeated cold installation.
+
+**Verified result:**
+- Canonical task `c163b381-9abe-4bc4-9af3-6a6bc3cac3a7` completed successfully.
+- Workflow run `wrun_01M2T5RK0NWRKZBSENZXNCDH7C` progressed through `preparing_runtime -> starting_hermes -> executing_check -> verifying -> completed`.
+- Prepared runtime `cooperative-hermes-runtime-v2026-9-14` was reused from snapshot (`reusedSnapshot: true`; `createdThisRun: false`).
+- Forked verification Sandbox: `plum-inc-tick-FCX1Jk`.
+- Verified Hermes Agent `v0.21.3 (2026.9.14)`, Python 3.11.16, OpenAI SDK 2.24.0.
+- Lightweight restored-runtime verification took approximately 3.9 seconds.
+- End-to-end task lifecycle from creation to completion was approximately 18 seconds.
+- Task state transitioned `queued -> planning -> executing -> verifying -> completed`.
+- Cost ledger recorded $0 direct marginal task cash cost; allocated Vercel Sandbox/Workflow usage remains a separate platform economics item.
+- No provider/model credential was used and no model call occurred.
+
+**Why this matters:** This proves the reusable cloud-Hermes runtime layer works independently of the Mac and browser. Future Cloud Hermes work can start from the prepared snapshot rather than reinstalling Hermes each time.
+
+**Affected areas:** Cloud Hermes, Executor Router, Vercel Workflow, Sandbox snapshot reuse, Cost Governor, Mission Control.
+
+**Conflict / supersession notes:** Supersedes the earlier failed cold-install verification attempts as the current validated Cloud Hermes runtime state. It does not yet prove a model-backed Hermes reasoning task; provider authentication/model routing remain the next gated step.
+
+**Source:** Supabase canonical task/event/cost evidence plus Owner Console live run.
+
+**Status:** Reusable Cloud Hermes runtime proof COMPLETE. Next gate: Preview-only provider authentication + first governed model-backed Hermes task.
