@@ -167,27 +167,44 @@ async function runModelSmoke(
       },
     ]);
 
-    const result = await sandbox.runCommand("bash", [
-      "-lc",
-      [
-        'HERMES_BIN="$HOME/.local/bin/hermes"',
-        '[ -x "$HERMES_BIN" ] || HERMES_BIN=/usr/local/bin/hermes',
-        'timeout 75s "$HERMES_BIN" chat',
-        "--oneshot",
-        "--query-file /tmp/cooperative-model-smoke.md",
-        "--provider ai-gateway",
-        `--model ${MODEL}`,
-        "--reasoning none",
-        "--max-turns 1",
-        "--run-budget 60",
-        "--usage-file /tmp/hermes-usage.json",
-        "--safe-mode",
-        "--ignore-user-config",
-        "--ignore-rules",
-        "--quiet",
-        "--source tool",
-      ].join(" "),
-    ]);
+    const hermesArgs = [
+      "chat",
+      "--oneshot",
+      "--query-file",
+      "/tmp/cooperative-model-smoke.md",
+      "--provider",
+      "ai-gateway",
+      "--model",
+      MODEL,
+      "--reasoning",
+      "none",
+      "--max-turns",
+      "1",
+      "--run-budget",
+      "60",
+      "--usage-file",
+      "/tmp/hermes-usage.json",
+      "--safe-mode",
+      "--ignore-user-config",
+      "--ignore-rules",
+      "--quiet",
+      "--source",
+      "tool",
+    ];
+
+    const quotedArgs = hermesArgs
+      .map((value) => "'" + value.replaceAll("'", "'\\''") + "'")
+      .join(" ");
+
+    const command = [
+      'set -e',
+      'HERMES_BIN="$HOME/.local/bin/hermes"',
+      'if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN=/usr/local/bin/hermes; fi',
+      'test -x "$HERMES_BIN"',
+      'exec timeout 75s "$HERMES_BIN" ' + quotedArgs,
+    ].join("; ");
+
+    const result = await sandbox.runCommand("bash", ["-lc", command]);
 
     const stdout = (await result.stdout()).trim();
     const stderr = (await result.stderr()).trim();
