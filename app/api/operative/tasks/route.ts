@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getCloudPlaybook } from "@/lib/operative/playbook-registry";
 import {
   buildDecisionBrief,
   renderDecisionBriefText,
@@ -108,7 +109,23 @@ export async function POST(request: Request) {
     }
   }
 
-  const policy = evaluateOwnerTaskPolicy(parsed.data);
+  const playbook = getCloudPlaybook(parsed.data.playbookKey);
+  if (parsed.data.playbookKey && !playbook) {
+    return NextResponse.json(
+      { error: "Unknown or unapproved playbook.", code: "PLAYBOOK_NOT_APPROVED" },
+      { status: 400 },
+    );
+  }
+
+  const effectiveIntent = {
+    ...parsed.data,
+    flags: {
+      ...(parsed.data.flags ?? {}),
+      requiresShell: parsed.data.flags?.requiresShell === true || playbook?.requiresShell === true,
+    },
+  };
+
+  const policy = evaluateOwnerTaskPolicy(effectiveIntent);
 
   let admin;
   try {
@@ -138,6 +155,7 @@ export async function POST(request: Request) {
       status: "queued",
       risk_level: policy.riskLevel,
       requires_owner_approval: policy.requiresOwnerApproval,
+      playbook_key: playbook?.key ?? null,
       max_spend_microunits: policy.maxSpendMicrounits,
     })
     .select(
@@ -157,7 +175,8 @@ export async function POST(request: Request) {
     detail: {
       source: "owner-console",
       policyReasons: policy.reasons,
-      safetyFlags: parsed.data.flags ?? {},
+      safetyFlags: effectiveIntent.flags,
+      playbookKey: playbook?.key ?? null,
       maxSpendMicrounits: policy.maxSpendMicrounits,
     },
   });
@@ -222,7 +241,7 @@ export async function POST(request: Request) {
         "No guarded execution will begin. The task remains stopped unless the owner later creates or modifies a replacement task.",
       estimatedCostCents: 0,
       riskLevel: policy.riskLevel,
-      requiredScopes: requiredScopes(parsed.data.flags ?? {}),
+      requiredScopes: requiredScopes(effectiveIntent.flags),
       rollbackPlan:
         "No guarded execution has occurred yet. Rejecting at this gate prevents the protected action from starting.",
       recommendedAction:
