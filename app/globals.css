@@ -429,3 +429,79 @@ b { color: var(--text); }
   color: var(--text);
   padding: 9px 10px;
 }
+
+
+.project-secret-broker {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+.project-secret-broker h3 { margin: 5px 0 0; }
+.project-secret-broker > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+.secret-broker-setup {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 10px;
+  background: var(--panel-2);
+}
+.secret-broker-setup p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: .76rem;
+  line-height: 1.45;
+}
+.secret-broker-row { gap: 10px; }
+.secret-broker-row > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+.secret-target-row {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
+  display: grid;
+  gap: 8px;
+}
+.secret-target-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.secret-target-meta strong {
+  font-size: .76rem;
+  text-transform: uppercase;
+}
+.secret-target-meta span {
+  color: var(--muted);
+  font-size: .7rem;
+}
+.secret-value-entry {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.secret-value-entry input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 9px 10px;
+  font: inherit;
+}
+
+@media (max-width: 600px) {
+  .secret-value-entry { flex-direction: column; align-items: stretch; }
+  .secret-value-entry input,
+  .secret-value-entry button,
+  .secret-target-row > button { width: 100%; }
+}
