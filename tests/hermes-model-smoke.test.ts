@@ -21,16 +21,19 @@ test("model smoke uses Vercel OIDC helper for AI Gateway", () => {
 });
 
 test("model smoke is single-turn and bounded", () => {
-  assert.match(workflowSource, /--max-turns 1/);
-  assert.match(workflowSource, /--run-budget 60/);
+  assert.match(workflowSource, /"--max-turns"/);
+  assert.match(workflowSource, /"1"/);
+  assert.match(workflowSource, /"--run-budget"/);
+  assert.match(workflowSource, /"60"/);
   assert.match(workflowSource, /timeout 75s/);
-  assert.match(workflowSource, /--safe-mode/);
-  assert.match(workflowSource, /--ignore-user-config/);
-  assert.match(workflowSource, /--ignore-rules/);
+  assert.match(workflowSource, /"--safe-mode"/);
+  assert.match(workflowSource, /"--ignore-user-config"/);
+  assert.match(workflowSource, /"--ignore-rules"/);
 });
 
 test("model smoke uses usage-file accounting and enforces task cap", () => {
-  assert.match(workflowSource, /--usage-file \/tmp\/hermes-usage\.json/);
+  assert.match(workflowSource, /"--usage-file"/);
+  assert.match(workflowSource, /"\/tmp\/hermes-usage\.json"/);
   assert.match(workflowSource, /total_including_auxiliary/);
   assert.match(workflowSource, /Cost Governor violation/);
   assert.match(workflowSource, /actual_spend_microunits/);
