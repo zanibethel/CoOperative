@@ -47,12 +47,14 @@ test("linked-project Hermes returns a bounded reviewable patch and blocks secret
   assert.match(source, /patchTouchesBlockedPath/);
   assert.match(source, /\.vercel/);
   assert.match(source, /\.env/);
+  assert.match(source, /"--run-budget"/);
+  assert.match(source, /"--checkpoints"/);
 });
 
 test("task dispatcher sends project-scoped workflow requests to linked Hermes", () => {
   assert.match(route, /linkedProjectHermesWorkflow/);
   assert.match(route, /playbook\.projectKey/);
-  assert.match(route, /request: task\.description/);
+  assert.match(route, /request: task\.description \|\| task\.title/);
   assert.match(route, /maxSpendMicrounits/);
   assert.match(route, /compatibilityReview/);
 });
