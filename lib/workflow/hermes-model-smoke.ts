@@ -167,30 +167,35 @@ async function runModelSmoke(
       },
     ]);
 
-    const hermesArgs = [
-      "chat",
-      "--oneshot",
-      "--query-file",
-      "/tmp/cooperative-model-smoke.md",
+    const globalHermesArgs = [
+      "--usage-file",
+      "/tmp/hermes-usage.json",
       "--provider",
       "ai-gateway",
       "--model",
       MODEL,
       "--reasoning",
       "none",
+      "--safe-mode",
+      "--ignore-user-config",
+      "--ignore-rules",
+    ];
+
+    const chatHermesArgs = [
+      "chat",
+      "--oneshot",
+      "--query-file",
+      "/tmp/cooperative-model-smoke.md",
       "--max-turns",
       "1",
       "--run-budget",
       "60",
-      "--usage-file",
-      "/tmp/hermes-usage.json",
-      "--safe-mode",
-      "--ignore-user-config",
-      "--ignore-rules",
       "--quiet",
       "--source",
       "tool",
     ];
+
+    const hermesArgs = [...globalHermesArgs, ...chatHermesArgs];
 
     const quotedArgs = hermesArgs
       .map((value) => "'" + value.replaceAll("'", "'\\''") + "'")
