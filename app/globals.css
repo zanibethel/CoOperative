@@ -79,3 +79,63 @@ b { color: var(--text); }
   .nav-links { gap: 8px; }
   .nav-links > a { display: none; }
 }
+
+
+/* Cloud Operative Owner Console */
+.operative-shell { max-width: 1320px; }
+.console-header { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, .5fr); gap: 24px; align-items: end; margin-bottom: 28px; }
+.console-header h1 { font-size: clamp(2.5rem, 6vw, 5rem); }
+.console-health { display: grid; gap: 7px; }
+.console-health span { color: var(--muted); font-size: .78rem; }
+.console-health strong + span { margin-top: 10px; }
+.console-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, .75fr); gap: 18px; align-items: start; }
+.console-thread { padding: 0; overflow: hidden; }
+.console-section-head { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 20px; }
+.console-section-head h2 { margin: 6px 0 0; }
+.message-list { min-height: 280px; max-height: 58vh; overflow-y: auto; padding: 8px 18px 20px; display: grid; gap: 10px; }
+.message { max-width: 88%; border: 1px solid var(--line); border-radius: 16px; padding: 13px 14px; background: var(--panel-2); }
+.message-owner { justify-self: end; background: color-mix(in srgb, var(--accent) 10%, var(--panel-2)); }
+.message-system { justify-self: start; }
+.message p { margin: 7px 0 0; white-space: pre-wrap; color: var(--text); }
+.message-meta { display: flex; flex-wrap: wrap; gap: 7px; color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; }
+.mini-tag { display: inline-flex; margin: 8px 6px 0 0; color: var(--accent); font-size: .7rem; }
+.empty-state { margin: auto; text-align: center; max-width: 360px; padding: 38px 14px; }
+.console-composer { border-top: 1px solid var(--line); padding: 18px; display: grid; gap: 12px; background: color-mix(in srgb, var(--panel) 95%, transparent); }
+.console-composer textarea { min-height: 120px; }
+.task-controls { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.task-controls summary { cursor: pointer; color: var(--muted); font-weight: 700; }
+.task-control-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 14px 0; }
+.task-control-grid label { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: .82rem; }
+.task-control-grid input { width: auto; }
+.task-budget { max-width: 280px; }
+.composer-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.secondary-button { border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 12px; padding: 12px 16px; font-weight: 800; }
+.secondary-button:disabled { opacity: .5; cursor: wait; }
+.notice { color: var(--accent-2); font-size: .86rem; }
+.console-sidebar { display: grid; gap: 16px; }
+.task-stack { display: grid; gap: 10px; }
+.task-card, .decision-card { border-top: 1px solid var(--line); padding-top: 13px; }
+.task-card:first-child, .decision-card:first-child { border-top: 0; }
+.task-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.task-card p, .decision-card p { font-size: .84rem; margin: 8px 0; }
+.status-pill { flex: 0 0 auto; border: 1px solid var(--line); border-radius: 999px; padding: 4px 7px; color: var(--muted); font-size: .68rem; text-transform: uppercase; }
+.status-completed { color: var(--accent-2); }
+.status-failed, .status-rolled_back, .status-cancelled { color: var(--danger); }
+.status-awaiting_approval { color: #fde68a; }
+.task-cost { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: .72rem; }
+.console-callout { margin-bottom: 18px; }
+.console-callout .cta { margin-top: 12px; }
+.decision-card small { color: var(--muted); display: block; margin-top: 9px; }
+
+@media (max-width: 900px) {
+  .console-header, .console-layout { grid-template-columns: 1fr; }
+  .console-health { display: none; }
+  .message-list { max-height: 52vh; }
+}
+
+@media (max-width: 600px) {
+  .task-control-grid { grid-template-columns: 1fr; }
+  .console-section-head { padding: 16px; }
+  .message-list, .console-composer { padding-left: 12px; padding-right: 12px; }
+  .message { max-width: 94%; }
+}
