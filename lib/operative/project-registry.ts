@@ -141,11 +141,12 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
     humanActions: [
       {
         key: "cooperative-secret-broker-connect",
-        title: "CoOperative secret broker · Vercel Connect",
+        title: "Create CoOperative API-key connector",
         provider: "Vercel Connect",
         description:
           "One-time shared setup: create an API-key connector that holds a team-scoped Vercel access token, then attach the connector to CoOperative. The token remains in Vercel Connect rather than CoOperative or Hermes.",
-        launchUrl: "https://vercel.com/connect",
+        launchUrl:
+          "https://vercel.com/d?title=Vercel+Connect&to=%2F%5Bteam%5D%2F~%2Fconnect%3Fcreate%3Dapi-key",
         mode: "embedded-or-popup",
         completion: "manual-return-and-verify",
         relatedSecretKeys: [],
