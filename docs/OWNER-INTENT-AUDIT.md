@@ -374,3 +374,30 @@ Each entry should contain:
 **Source:** Owner phone test, Hermes key correction, and independent ChatGPT/Vercel verification.
 
 **Status:** Corrected Preview is READY; rerun Cloud self-check next.
+
+
+---
+
+## 2026-09-18 — First live Cloud self-check reached Sandbox; Git metadata assumption corrected
+
+**Scope:** Cloud Operative / Vercel Sandbox / Owner Console bootstrap proof
+
+**Owner intent:** Prove that a phone-triggered CoOperative task can execute in the cloud without the Mac or Hermes model reasoning.
+
+**Changes / decisions:**
+- The second live phone self-check successfully passed canonical message persistence, governed task creation, deterministic policy evaluation, task state transitions, executor selection, Vercel Sandbox startup, cost/evidence recording, and Sandbox shutdown.
+- Execution failed only on the first allow-listed playbook command: `git rev-parse HEAD` returned exit code 128 because the Vercel Sandbox Git source did not expose a usable `.git` repository in the working directory.
+- The task correctly recorded `failed`, persisted the failing command/result, and retained a $0 direct marginal-cost ledger entry for the test.
+- The self-check was corrected to validate the staged project by checking for `package.json` rather than depending on Git metadata that the Sandbox source does not guarantee.
+- The deployment SHA remains recorded separately from the Vercel deployment environment and is passed as the requested source revision.
+- Corrected Preview deployment `dpl_DRGRSXkYyPz2yQAf1SNaxrCvv37q` is READY at `co-operative-4aposmg2m-zanibethels-projects.vercel.app`.
+
+**Why:** The bootstrap proof should verify the actual runtime artifact, not make assumptions about implementation details of Vercel Sandbox source staging.
+
+**Affected areas:** Cloud self-check playbook, Sandbox verification, task evidence.
+
+**Conflict / supersession notes:** Supersedes the earlier self-check assertion that `git rev-parse HEAD` is a valid verification step inside Vercel Sandbox. The overall deterministic-playbook architecture remains unchanged.
+
+**Source:** Owner phone test plus persisted task/event evidence and Vercel runtime verification.
+
+**Status:** Fix deployed to Preview; retest pending.
