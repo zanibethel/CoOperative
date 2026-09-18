@@ -48,7 +48,7 @@ export interface ExecutorSelection {
  *   ChatGPT/native-capability candidates are filtered out for those tasks
  *   even if they report available/qualified, since they cannot provide
  *   cloud autonomy, terminal access, or persistent task state;
- * - among the remaining eligible candidates, lowest `estimatedMarginalCostCents`
+ * - among the remaining eligible candidates, lowest `estimatedMarginalCostMicrounits`
  *   wins; ties broken by the fixed priority order above (deterministic code
  *   first, paid external AI last);
  * - do not select `connected-chatgpt` when the task requires background
@@ -76,17 +76,17 @@ export function selectExecutor(candidates: ExecutorCandidate[]): ExecutorSelecti
   }
 
   const ranked = [...eligible].sort((a, b) => {
-    if (a.estimatedMarginalCostCents !== b.estimatedMarginalCostCents) {
-      return a.estimatedMarginalCostCents - b.estimatedMarginalCostCents;
+    if (a.estimatedMarginalCostMicrounits !== b.estimatedMarginalCostMicrounits) {
+      return a.estimatedMarginalCostMicrounits - b.estimatedMarginalCostMicrounits;
     }
     return EXECUTOR_PRIORITY[a.kind] - EXECUTOR_PRIORITY[b.kind];
   });
 
   const selected = ranked[0];
   const reason =
-    selected.estimatedMarginalCostCents === 0
+    selected.estimatedMarginalCostMicrounits === 0
       ? `Selected ${selected.kind}: zero marginal cost (covered by deterministic code or an existing flat-rate/owner-paid connection).`
-      : `Selected ${selected.kind}: lowest marginal cost among qualified executors (${selected.estimatedMarginalCostCents}\u00a2).`;
+      : `Selected ${selected.kind}: lowest marginal cost among qualified executors (${selected.estimatedMarginalCostMicrounits}\u00a2).`;
 
   return { selected, reason, ranked };
 }
