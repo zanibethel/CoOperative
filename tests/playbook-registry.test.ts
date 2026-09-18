@@ -13,6 +13,8 @@ test("Cloud Operative exposes only reviewed playbook keys", () => {
     "hermes-model-smoke",
     "creatorhub-health-check",
     "raisehub-health-check",
+    "creatorhub-hermes-patch",
+    "raisehub-hermes-patch",
   ]);
   assert.equal(getCloudPlaybook("unknown-playbook"), null);
 });
@@ -74,5 +76,27 @@ test("linked-project playbooks pin their own repositories and refs", () => {
   assert.equal(raisehub.executor, "deterministic-code");
   assert.equal(raisehub.executionMode, "detached");
   assert.match(JSON.stringify(raisehub.buildCommands()), /npm/);
+  assert.match(JSON.stringify(raisehub.buildCommands()), /test/);
+});
+
+
+test("linked-project Hermes playbooks are workflow-backed and project-scoped", () => {
+  const creatorhub = getCloudPlaybook("creatorhub-hermes-patch");
+  const raisehub = getCloudPlaybook("raisehub-hermes-patch");
+
+  assert.ok(creatorhub);
+  assert.equal(creatorhub.executor, "hermes-cloud-operative");
+  assert.equal(creatorhub.executionMode, "workflow");
+  assert.equal(creatorhub.projectKey, "creatorhub");
+  assert.equal(creatorhub.repoSlug, "zanibethel/CreatorHub");
+  assert.equal(creatorhub.gitRef, "main");
+  assert.match(JSON.stringify(creatorhub.buildCommands()), /tsc/);
+
+  assert.ok(raisehub);
+  assert.equal(raisehub.executor, "hermes-cloud-operative");
+  assert.equal(raisehub.executionMode, "workflow");
+  assert.equal(raisehub.projectKey, "raisehub");
+  assert.equal(raisehub.repoSlug, "zanibethel/raisehub");
+  assert.equal(raisehub.gitRef, "main");
   assert.match(JSON.stringify(raisehub.buildCommands()), /test/);
 });
