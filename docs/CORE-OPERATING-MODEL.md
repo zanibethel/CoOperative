@@ -59,6 +59,36 @@ The durable intellectual property of CoOperative is:
 - outcome/evidence history;
 - reusable schemas and tests.
 
+## Execution economics: use the lowest marginal-cost qualified executor
+
+CoOperative should consider not only which model can do a task, but which **available executor** can do it safely at the lowest incremental cost.
+
+For owner-driven platform development, a connected ChatGPT session may already be covered by the owner's flat-rate subscription. When ChatGPT has the required tools and permissions to complete the task directly, using it may have lower marginal platform cost than consuming Hermes credits or paid API tokens.
+
+That does not make ChatGPT the permanent runtime. It makes it one qualified executor in the cost-aware routing layer.
+
+Preferred principle:
+
+```text
+known deterministic automation
+  -> connected owner-paid assistant/tooling when available and qualified
+  -> native CoOperative capability
+  -> Hermes / Cloud Operative when autonomy, shell access, persistence, or unavailable tools are required
+  -> paid external AI only for the reasoning that remains
+```
+
+Rules:
+
+- do not send the same work to ChatGPT and Hermes unless redundancy is intentional;
+- do not consume Hermes/model credits for work a connected lower-marginal-cost executor can safely complete;
+- use Hermes when the task benefits from cloud autonomy, terminal access, background execution, persistent task state, or specialized tooling;
+- every executor must write results, decisions, artifacts, and task state back to CoOperative's canonical system;
+- executor choice must never bypass approval, permission, audit, or security rules;
+- customer runtime must not depend on the owner having an active ChatGPT conversation open;
+- flat-rate subscriptions and platform overhead should be accounted for separately from per-task usage costs when evaluating unit economics.
+
+The long-term router should estimate executor availability, required capabilities, incremental cost, latency, risk, and expected quality before choosing who performs a task.
+
 ## Execution priority
 
 For every task, CoOperative should prefer this order:
