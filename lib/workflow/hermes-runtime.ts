@@ -25,7 +25,7 @@ interface RuntimeCheckEvidence {
   baseCreated: boolean;
   forkSandboxName: string;
   hermesVersion: string;
-  promptSizeOutput: string;
+  cliHelpOutput: string;
   durationMs: number;
 }
 
@@ -208,12 +208,13 @@ async function runRuntimeCheckFromPreparedBase(
   const sandbox = await Sandbox.fork({
     sourceSandbox: baseRuntimeName,
     persistent: false,
+    timeout: 2 * 60 * 1000,
   });
 
   try {
     const version = await sandbox.runCommand("bash", [
       "-lc",
-      'HERMES_BIN="$HOME/.local/bin/hermes"; [ -x "$HERMES_BIN" ] || HERMES_BIN=/usr/local/bin/hermes; "$HERMES_BIN" --version',
+      'HERMES_BIN="$HOME/.local/bin/hermes"; [ -x "$HERMES_BIN" ] || HERMES_BIN=/usr/local/bin/hermes; timeout 30s "$HERMES_BIN" --version',
     ]);
 
     const hermesVersion = (await version.stdout()).trim();
@@ -224,16 +225,16 @@ async function runRuntimeCheckFromPreparedBase(
       );
     }
 
-    const promptSize = await sandbox.runCommand("bash", [
+    const help = await sandbox.runCommand("bash", [
       "-lc",
-      'HERMES_BIN="$HOME/.local/bin/hermes"; [ -x "$HERMES_BIN" ] || HERMES_BIN=/usr/local/bin/hermes; "$HERMES_BIN" prompt-size --json',
+      'HERMES_BIN="$HOME/.local/bin/hermes"; [ -x "$HERMES_BIN" ] || HERMES_BIN=/usr/local/bin/hermes; timeout 30s "$HERMES_BIN" --help',
     ]);
 
-    const promptSizeOutput = (await promptSize.stdout()).trim();
-    if (promptSize.exitCode !== 0 || !promptSizeOutput) {
-      const stderr = await promptSize.stderr();
+    const cliHelpOutput = (await help.stdout()).trim();
+    if (help.exitCode !== 0 || !cliHelpOutput.includes("prompt-size")) {
+      const stderr = await help.stderr();
       throw new Error(
-        "Prepared Hermes prompt-size check failed: " + stderr.slice(-2000),
+        "Prepared Hermes CLI registry check failed: " + stderr.slice(-2000),
       );
     }
 
@@ -242,7 +243,7 @@ async function runRuntimeCheckFromPreparedBase(
       baseCreated: false,
       forkSandboxName: sandbox.name,
       hermesVersion,
-      promptSizeOutput: promptSizeOutput.slice(-4000),
+      cliHelpOutput: cliHelpOutput.slice(-4000),
       durationMs: Date.now() - startedAt,
     };
   } finally {
@@ -274,7 +275,7 @@ async function finalizeHermesRuntimeSuccess(
     evidence: {
       forkSandboxName: evidence.forkSandboxName,
       hermesVersion: evidence.hermesVersion,
-      promptSizeOutput: evidence.promptSizeOutput,
+      cliHelpOutput: evidence.cliHelpOutput,
       durationMs: evidence.durationMs,
     },
   };
@@ -344,6 +345,27 @@ async function finalizeHermesRuntimeSuccess(
     notes:
       "Workflow-backed Hermes runtime check completed with $0 direct task cash cost; allocated Sandbox/Workflow platform usage remains a separate economics item.",
   });
+}
+
+function workflowErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const name = error.name && error.name !== "Error" ? error.name + ": " : "";
+    return name + (error.message || "Workflow-backed Hermes runtime check failed.");
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+
+  if (error && typeof error === "object") {
+    const record = error as { name?: unknown; message?: unknown };
+    const name = typeof record.name === "string" && record.name ? record.name + ": " : "";
+    if (typeof record.message === "string" && record.message.trim()) {
+      return name + record.message.trim();
+    }
+  }
+
+  return "Workflow-backed Hermes runtime check failed.";
 }
 
 async function finalizeHermesRuntimeFailure(
@@ -437,8 +459,7 @@ export async function hermesRuntimeWorkflow(
 
     return { ok: true, evidence };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Workflow-backed Hermes runtime check failed.";
+    const message = workflowErrorMessage(error);
 
     await finalizeHermesRuntimeFailure(input, message);
     throw error;
