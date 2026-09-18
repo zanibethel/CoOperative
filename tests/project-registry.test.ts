@@ -34,7 +34,7 @@ test("CreatorHub human setup covers Instagram, TikTok, and Fanvue without secret
 
   assert.deepEqual(
     creatorhub.humanActions.map((action) => action.provider),
-    ["Meta", "TikTok", "Fanvue"],
+    ["Vercel", "Meta", "TikTok", "Fanvue"],
   );
 
   const serialized = JSON.stringify(creatorhub);
