@@ -8,8 +8,11 @@ Before doing platform work, read:
 
 1. `docs/CORE-OPERATING-MODEL.md`
 2. `docs/PLATFORM-VISION.md`
-3. `docs/LEARNING-LOOP.md`
-4. the relevant GitHub issue/task
+3. relevant recent entries in `docs/OWNER-INTENT-AUDIT.md`
+4. `docs/LEARNING-LOOP.md`
+5. the relevant GitHub issue/task
+
+Before proposing a new capability or materially changing an existing one, compare the request against the Owner Intent & Change Audit. Reuse existing work where possible. If the request conflicts with an active prior owner decision, surface the conflict rather than silently building both directions.
 
 ## Mission
 
