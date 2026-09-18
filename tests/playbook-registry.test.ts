@@ -40,10 +40,10 @@ test("Hermes runtime check is pinned and credential-free", () => {
 });
 
 
-test("model-backed Hermes smoke uses the governed cloud-hermes executor", () => {
+test("model-backed Hermes smoke uses the governed hermes-cloud-operative executor", () => {
   const playbook = getCloudPlaybook("hermes-model-smoke");
   assert.ok(playbook);
-  assert.equal(playbook.executor, "cloud-hermes");
+  assert.equal(playbook.executor, "hermes-cloud-operative");
   assert.equal(playbook.executionMode, "workflow");
   assert.deepEqual(playbook.buildCommands(), []);
 });
