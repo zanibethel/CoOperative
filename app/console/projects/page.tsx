@@ -386,7 +386,7 @@ export default function LinkedProjectsPage() {
             <section className="project-hermes-workspace">
               <div className="eyebrow">Cloud Hermes workspace</div>
               <p>
-                Ask Hermes to inspect this project's source and prepare a reviewable patch.
+                Ask Hermes to inspect this project&apos;s source and prepare a reviewable patch.
                 It receives file tools only: no provider credentials, no shell tools, no GitHub write,
                 no database mutation, and no deployment.
               </p>
