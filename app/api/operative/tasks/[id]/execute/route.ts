@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { start } from "workflow/api";
 
 import { getCloudPlaybook } from "@/lib/operative/playbook-registry";
 import { runSandboxTask, startDetachedSandboxTask } from "@/lib/operative/sandbox-adapter";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { hermesRuntimeWorkflow } from "@/lib/workflow/hermes-runtime";
 
 export const maxDuration = 300;
 
@@ -174,7 +176,7 @@ export async function POST(
       actor: "system",
       detail: {
         executor: "deterministic-code",
-        runtime: "vercel-sandbox",
+        runtime: playbook.executionMode === "workflow" ? "vercel-workflow+vercel-sandbox" : "vercel-sandbox",
         playbookKey: playbook.key,
         marginalCashCostMicrounits: 0,
       },
@@ -193,6 +195,99 @@ export async function POST(
   const gitRef = process.env.VERCEL_GIT_COMMIT_SHA || "cloud-operative-bootstrap";
 
   try {
+    if (playbook.executionMode === "workflow") {
+      const startedAt = new Date().toISOString();
+
+      const { error: initialResultError } = await admin
+        .from("operative_tasks")
+        .update({
+          result: {
+            playbookKey: playbook.key,
+            executionMode: "workflow",
+            progress: {
+              stage: "starting_workflow",
+              at: startedAt,
+            },
+          },
+          updated_at: startedAt,
+        })
+        .eq("id", task.id)
+        .eq("organization_id", task.organization_id)
+        .eq("status", "executing");
+
+      if (initialResultError) {
+        throw initialResultError;
+      }
+
+      const run = await start(hermesRuntimeWorkflow, [
+        {
+          taskId: task.id,
+          organizationId: task.organization_id,
+        },
+      ]);
+
+      const { data: currentTask, error: currentTaskError } = await admin
+        .from("operative_tasks")
+        .select("result")
+        .eq("id", task.id)
+        .eq("organization_id", task.organization_id)
+        .single();
+
+      if (currentTaskError) {
+        throw currentTaskError;
+      }
+
+      const currentResult =
+        currentTask.result &&
+        typeof currentTask.result === "object" &&
+        !Array.isArray(currentTask.result)
+          ? currentTask.result
+          : {};
+
+      const workflowResult = {
+        ...currentResult,
+        playbookKey: playbook.key,
+        executionMode: "workflow",
+        workflowRunId: run.runId,
+      };
+
+      const { error: persistWorkflowError } = await admin
+        .from("operative_tasks")
+        .update({
+          result: workflowResult,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", task.id)
+        .eq("organization_id", task.organization_id);
+
+      if (persistWorkflowError) {
+        throw persistWorkflowError;
+      }
+
+      await admin.from("task_events").insert({
+        task_id: task.id,
+        organization_id: task.organization_id,
+        event_type: "note",
+        actor: "system",
+        detail: {
+          type: "workflow_started",
+          workflowRunId: run.runId,
+          playbookKey: playbook.key,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          taskId: task.id,
+          status: "executing",
+          asynchronous: true,
+          workflowRunId: run.runId,
+          result: workflowResult,
+        },
+        { status: 202 },
+      );
+    }
+
     if (playbook.executionMode === "detached") {
       const detached = await startDetachedSandboxTask({
         taskId: task.id,
