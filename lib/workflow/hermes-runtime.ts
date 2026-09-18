@@ -132,53 +132,71 @@ async function ensurePreparedHermesRuntime(): Promise<{
 }> {
   "use step";
 
-  let created = false;
-
-  const base = await Sandbox.getOrCreate({
-    name: HERMES_BASE_NAME,
-    resume: false,
-    onCreate: async (sandbox) => {
-      created = true;
-
-      const install = await sandbox.runCommand("bash", [
-        "-lc",
-        `curl -fsSL ${HERMES_INSTALL_URL} -o /tmp/hermes-install.sh && bash /tmp/hermes-install.sh --skip-setup --skip-browser --skip-computer-use --non-interactive --branch ${HERMES_RELEASE}`,
-      ]);
-
-      if (install.exitCode !== 0) {
-        const stderr = await install.stderr();
-        throw new Error(
-          "Prepared Hermes runtime installation failed: " + stderr.slice(-2000),
-        );
-      }
-
-      const verify = await sandbox.runCommand("bash", [
-        "-lc",
-        'HERMES_BIN="$HOME/.local/bin/hermes"; [ -x "$HERMES_BIN" ] || HERMES_BIN=/usr/local/bin/hermes; "$HERMES_BIN" --version',
-      ]);
-
-      if (verify.exitCode !== 0) {
-        const stderr = await verify.stderr();
-        throw new Error(
-          "Prepared Hermes runtime verification failed: " + stderr.slice(-2000),
-        );
-      }
-
-      await sandbox.runCommand("bash", [
-        "-lc",
-        `mkdir -p /tmp/cooperative-runtime && printf '%s\n' '{"hermesRelease":"${HERMES_RELEASE}","prepared":true}' > /tmp/cooperative-runtime/manifest.json`,
-      ]);
-    },
-  });
-
-  if (created) {
-    await base.stop();
+  try {
+    await Sandbox.get({ name: HERMES_BASE_NAME, resume: false });
+    return {
+      baseRuntimeName: HERMES_BASE_NAME,
+      created: false,
+    };
+  } catch {
+    // The versioned base runtime does not exist yet. Prepare it once with an
+    // explicit session timeout long enough for a cold Hermes installation.
   }
 
-  return {
-    baseRuntimeName: HERMES_BASE_NAME,
-    created,
-  };
+  const base = await Sandbox.create({
+    name: HERMES_BASE_NAME,
+    persistent: true,
+    timeout: 15 * 60 * 1000,
+    snapshotExpiration: 30 * 24 * 60 * 60 * 1000,
+  });
+
+  try {
+    const install = await base.runCommand("bash", [
+      "-lc",
+      `curl -fsSL ${HERMES_INSTALL_URL} -o /tmp/hermes-install.sh && bash /tmp/hermes-install.sh --skip-setup --skip-browser --skip-computer-use --non-interactive --branch ${HERMES_RELEASE}`,
+    ]);
+
+    if (install.exitCode !== 0) {
+      const stderr = await install.stderr();
+      throw new Error(
+        "Prepared Hermes runtime installation failed: " + stderr.slice(-2000),
+      );
+    }
+
+    const verify = await base.runCommand("bash", [
+      "-lc",
+      'HERMES_BIN="$HOME/.local/bin/hermes"; [ -x "$HERMES_BIN" ] || HERMES_BIN=/usr/local/bin/hermes; "$HERMES_BIN" --version',
+    ]);
+
+    if (verify.exitCode !== 0) {
+      const stderr = await verify.stderr();
+      throw new Error(
+        "Prepared Hermes runtime verification failed: " + stderr.slice(-2000),
+      );
+    }
+
+    const manifest = await base.runCommand("bash", [
+      "-lc",
+      `mkdir -p /tmp/cooperative-runtime && printf '%s\n' '{"hermesRelease":"${HERMES_RELEASE}","prepared":true}' > /tmp/cooperative-runtime/manifest.json`,
+    ]);
+
+    if (manifest.exitCode !== 0) {
+      const stderr = await manifest.stderr();
+      throw new Error(
+        "Prepared Hermes runtime manifest write failed: " + stderr.slice(-2000),
+      );
+    }
+
+    await base.stop();
+
+    return {
+      baseRuntimeName: HERMES_BASE_NAME,
+      created: true,
+    };
+  } catch (error) {
+    await base.delete().catch(() => undefined);
+    throw error;
+  }
 }
 
 async function runRuntimeCheckFromPreparedBase(
