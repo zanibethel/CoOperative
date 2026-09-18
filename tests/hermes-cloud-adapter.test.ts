@@ -17,7 +17,7 @@ test("Cloud Hermes adapter keeps owner prompt out of shell arguments", () => {
   assert.match(source, /writeFiles/);
   assert.match(source, /\/tmp\/cooperative-task\.md/);
   assert.match(source, /--query-file/);
-  assert.equal(source.includes("spec.prompt, "--"), false);
+  assert.equal(source.includes("spec.prompt, \"--"), false);
 });
 
 test("Cloud Hermes adapter passes only the provider credential into Sandbox env", () => {
