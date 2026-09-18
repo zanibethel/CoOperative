@@ -46,3 +46,20 @@ test("workflow records durable progress stages", () => {
     assert.match(workflowSource, new RegExp(stage));
   }
 });
+
+
+test("prepared Hermes verification avoids the expensive prompt-size diagnostic", () => {
+  const runtimeCheckStart = workflowSource.indexOf("async function runRuntimeCheckFromPreparedBase");
+  const runtimeCheckEnd = workflowSource.indexOf("async function finalizeHermesRuntimeSuccess");
+  const runtimeCheck = workflowSource.slice(runtimeCheckStart, runtimeCheckEnd);
+  assert.match(runtimeCheck, /--version/);
+  assert.match(runtimeCheck, /--help/);
+  assert.match(runtimeCheck, /timeout 30s/);
+  assert.equal(runtimeCheck.includes("prompt-size --json"), false);
+  assert.match(runtimeCheck, /timeout:\s*2 \* 60 \* 1000/);
+});
+
+test("workflow preserves useful non-Error failure messages", () => {
+  assert.match(workflowSource, /workflowErrorMessage/);
+  assert.match(workflowSource, /record\.message/);
+});
