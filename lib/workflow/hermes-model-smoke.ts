@@ -152,7 +152,7 @@ async function runModelSmoke(
     "You are running a governed Cloud Hermes model smoke test.",
     "Do not call tools. Do not modify files. Do not access the network beyond the model request.",
     "Return one compact JSON object only, with these keys:",
-    'runtime: "cloud-hermes",',
+    'runtime: "hermes-cloud-operative",',
     'provider: "ai-gateway",',
     'answer: the integer result of 17 * 23,',
     'whyDeterministic: a sentence of 12 words or fewer explaining why deterministic code is normally better for arithmetic.',
@@ -328,7 +328,7 @@ async function finalizeSuccess(
     {
       organization_id: input.organizationId,
       task_id: input.taskId,
-      executor: "cloud-hermes",
+      executor: "hermes-cloud-operative",
       cost_category: "ai-tokens",
       amount_microunits: evidence.costMicrounits,
       currency: "USD",
