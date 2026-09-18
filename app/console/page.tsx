@@ -23,6 +23,8 @@ type Task = {
   selected_executor: string | null;
   max_spend_microunits: number;
   actual_spend_microunits: number;
+  result: unknown;
+  error?: string | null;
 };
 
 type Decision = {
@@ -84,6 +86,19 @@ function formatTime(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function taskFindings(result: unknown): Array<{ priority?: string; title: string; why?: string }> {
+  if (!result || typeof result !== "object" || !("findings" in result)) return [];
+  const findings = (result as { findings?: unknown }).findings;
+  if (!Array.isArray(findings)) return [];
+  return findings
+    .filter((item): item is { priority?: string; title: string; why?: string } =>
+      Boolean(item) &&
+      typeof item === "object" &&
+      typeof (item as { title?: unknown }).title === "string"
+    )
+    .slice(0, 7);
 }
 
 export default function OwnerConsolePage() {
@@ -564,6 +579,23 @@ export default function OwnerConsolePage() {
                     <span>spent {moneyFromMicrounits(Number(task.actual_spend_microunits ?? 0))}</span>
                     <span>cap {moneyFromMicrounits(Number(task.max_spend_microunits ?? 0))}</span>
                   </div>
+                  {taskFindings(task.result).length > 0 ? (
+                    <details className="task-result">
+                      <summary>View findings</summary>
+                      <div className="task-findings">
+                        {taskFindings(task.result).map((finding, index) => (
+                          <div key={index} className="task-finding">
+                            <strong>
+                              {finding.priority ? finding.priority.toUpperCase() + " · " : ""}
+                              {finding.title}
+                            </strong>
+                            {finding.why ? <p>{finding.why}</p> : null}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  ) : null}
+                  {task.error ? <p className="error">{task.error}</p> : null}
                 </article>
               ))}
             </div>
