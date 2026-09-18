@@ -231,7 +231,37 @@ Use deterministic implementations for repeatable work.
 
 Scripts should be reusable across models and agents.
 
-### 5. AI Router
+### 5. Cost-aware executor selection
+
+Before consuming Hermes or paid-model credits, determine whether the task can be completed by a lower-marginal-cost qualified executor.
+
+For owner/platform work, this may include an active connected ChatGPT session when it has the required tools and permissions.
+
+Executor candidates may include:
+
+- deterministic CoOperative code;
+- connected ChatGPT/tooling;
+- native CoOperative services;
+- Hermes / Cloud Operative;
+- external AI providers.
+
+The router should consider:
+
+- capability fit;
+- incremental cost;
+- owner availability;
+- need for background/persistent execution;
+- required shell/runtime access;
+- permissions;
+- latency;
+- risk;
+- quality requirement.
+
+ChatGPT is an optional owner-facing executor, not a required production dependency.
+
+When work is completed through ChatGPT, its outputs should still be written into the same canonical CoOperative task, decision, memory, and audit state.
+
+### 6. AI Router
 
 Call AI only for steps requiring interpretation, research synthesis, generation, debugging, or planning.
 
@@ -239,7 +269,7 @@ The playbook requests a capability, not a hard-coded model.
 
 Select the cheapest approved model meeting quality requirements and cost envelope.
 
-### 6. Execution Workspace
+### 7. Execution Workspace
 
 For tasks requiring a shell, repository checkout, tests, CLIs, or code execution:
 
@@ -253,7 +283,7 @@ For tasks requiring a shell, repository checkout, tests, CLIs, or code execution
 
 A sandbox is an execution workspace, not the authoritative database.
 
-### 7. Memory & Preference Engine
+### 8. Memory & Preference Engine
 
 Continuously extract and maintain relevant structured memory from owner/business conversations.
 
@@ -263,7 +293,7 @@ Do not put the entire memory store into every model prompt.
 
 See `docs/MEMORY-AND-PREFERENCES.md`.
 
-### 8. Durable Task State
+### 9. Durable Task State
 
 Task state belongs in Supabase, not only inside the sandbox.
 
@@ -285,7 +315,7 @@ or
   -> cancelled
 ```
 
-### 9. Artifact Storage
+### 10. Artifact Storage
 
 Initial storage plan:
 
@@ -304,7 +334,7 @@ Possible private buckets:
 
 Create buckets only as they become necessary and protect them with tenant/platform-specific policies.
 
-### 10. Secrets
+### 11. Secrets
 
 Use secure runtime secret/environment systems.
 
@@ -318,7 +348,7 @@ Never store raw secrets in:
 
 Tasks should refer to secrets by logical name/reference only.
 
-### 11. Telegram
+### 12. Telegram
 
 Telegram should eventually use a webhook into CoOperative instead of requiring a continuously running Mac gateway.
 
@@ -338,7 +368,7 @@ The Telegram identity must be allow-listed and mapped to the appropriate CoOpera
 
 Telegram does not have independent authority; it uses the same Owner Console/task policy.
 
-### 12. External ChatGPT bridge
+### 13. External ChatGPT bridge
 
 A future CoOperative connector/plugin may allow ChatGPT to use the same governed task interface.
 
