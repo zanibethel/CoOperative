@@ -4,3 +4,7 @@ node_modules/
 !.env.example
 npm-debug.log*
 .DS_Store
+.vercel
+next-env.d.ts
+tsconfig.tsbuildinfo
+supabase/.temp/

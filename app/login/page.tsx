@@ -19,6 +19,10 @@ export default function LoginPage() {
     setMessage("");
 
     const supabase = createClient();
+    const next =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("next") || "/onboarding"
+        : "/onboarding";
 
     if (mode === "login") {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -28,7 +32,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/onboarding");
+      router.push(next);
       router.refresh();
       return;
     }
@@ -37,7 +41,7 @@ export default function LoginPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
       },
     });
 
@@ -48,7 +52,7 @@ export default function LoginPage() {
     }
 
     if (data.session) {
-      router.push("/onboarding");
+      router.push(next);
       router.refresh();
       return;
     }
