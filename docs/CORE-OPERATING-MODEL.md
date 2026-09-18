@@ -59,6 +59,57 @@ The durable intellectual property of CoOperative is:
 - outcome/evidence history;
 - reusable schemas and tests.
 
+## Owner-orchestrated execution split
+
+For owner/platform development, ChatGPT is the primary planning, review, and implementation interface when it already has the required connected tools and permissions.
+
+Before asking Hermes or another metered agent to do work, first determine what can be completed directly through the owner's existing flat-rate/connected tooling.
+
+Default split:
+
+```text
+owner request
+  -> ChatGPT clarifies / plans / reviews
+  -> ChatGPT completes all safe work it can directly
+  -> remaining capability gap identified
+  -> Hermes receives only the smallest necessary autonomous/shell/runtime task
+  -> Hermes returns evidence/result
+  -> ChatGPT reviews/explains result with owner
+  -> CoOperative records canonical outcome
+```
+
+Hermes requests should be narrow but complete. Include only the context needed to succeed, plus:
+
+- exact objective;
+- acceptance criteria;
+- files/systems in scope;
+- explicit non-goals;
+- required tests/verification;
+- owner gates;
+- rollback expectations;
+- expected output/evidence.
+
+Do not save tokens by making a request so vague that Hermes must rediscover the problem. Optimize for **useful compute per paid token**, not merely minimum prompt size.
+
+Avoid:
+
+- asking Hermes to repeat analysis already completed by ChatGPT;
+- giving Hermes the full conversation history when a concise task brief is sufficient;
+- sending the same task to multiple paid models without an explicit verification reason;
+- asking Hermes to perform repo/document/review work that ChatGPT can already complete directly.
+
+Use Hermes when at least one of these is true:
+
+- shell/terminal execution is required;
+- the task must continue without an active ChatGPT conversation;
+- long-running/background execution is needed;
+- local/cloud runtime state is required;
+- a specialized tool is only available to Hermes;
+- independent second-model verification is worth the additional cost;
+- autonomous multi-step execution materially reduces owner effort.
+
+Credit availability does not change this rule. A larger balance increases available capacity; it does not justify waste.
+
 ## Execution economics: use the lowest marginal-cost qualified executor
 
 CoOperative should consider not only which model can do a task, but which **available executor** can do it safely at the lowest incremental cost.
