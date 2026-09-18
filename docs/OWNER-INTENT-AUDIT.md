@@ -292,3 +292,28 @@ Each entry should contain:
 **Source:** Owner-approved Hermes secret plumbing plus independent ChatGPT/Vercel deployment verification.
 
 **Status:** Preview runtime gate complete; first live Cloud self-check pending.
+
+
+---
+
+## 2026-09-18 — Owner Console login redirect fixed
+
+**Scope:** Cloud Operative / Owner Console / Preview authentication flow
+
+**Owner intent:** Opening the Owner Console should take the owner back to the console after authentication, not restart the Intelligence Report/intake workflow.
+
+**Changes / decisions:**
+- Found that `/console` correctly redirected unauthenticated users to `/login?next=/console`, but the login page ignored the `next` parameter and always sent successful sign-ins to `/onboarding`.
+- Existing-workspace onboarding then redirected to `/intake`, which made the owner see the older Intelligence Report flow instead of Cloud self-check/Mission Control.
+- Updated login/signup handling to preserve and honor the requested `next` route.
+- New Preview deployment is READY and available through the stable `cloud-operative-bootstrap` branch alias.
+
+**Why:** Authentication should preserve user intent and route continuity. The old behavior made a working Owner Console appear missing and could restart an unrelated workflow.
+
+**Affected areas:** Login flow, Owner Console navigation, Cloud self-check bootstrap proof.
+
+**Conflict / supersession notes:** No product-direction conflict; this corrects routing behavior to match the existing Owner Console design.
+
+**Source:** Owner report from phone testing plus ChatGPT code review.
+
+**Status:** Fixed in Preview.
