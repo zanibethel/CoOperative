@@ -59,6 +59,9 @@ export default function LinkedProjectsPage() {
       }),
     );
     setActiveHandoff({ project, action });
+    if (action.mode === "popup-only") {
+      openProviderWindow(action);
+    }
   }
 
   function openProviderWindow(action: ProjectHumanAction) {
@@ -498,13 +501,30 @@ export default function LinkedProjectsPage() {
             </div>
 
             <div className="provider-browser-frame-wrap">
-              <iframe
-                className="provider-browser-frame"
-                title={activeHandoff.action.title}
-                src={activeHandoff.action.launchUrl}
-                referrerPolicy="no-referrer"
-                sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-top-navigation-by-user-activation"
-              />
+              {activeHandoff.action.mode === "popup-only" ? (
+                <div className="provider-popup-only">
+                  <strong>{activeHandoff.action.provider} requires a full browser window.</strong>
+                  <p>
+                    CoOperative opened the provider securely in a separate tab/window.
+                    Complete the setup there, then return here and tap Done · return.
+                  </p>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => openProviderWindow(activeHandoff.action)}
+                  >
+                    Reopen provider
+                  </button>
+                </div>
+              ) : (
+                <iframe
+                  className="provider-browser-frame"
+                  title={activeHandoff.action.title}
+                  src={activeHandoff.action.launchUrl}
+                  referrerPolicy="no-referrer"
+                  sandbox="allow-forms allow-scripts allow-same-origin allow-popups allow-top-navigation-by-user-activation"
+                />
+              )}
             </div>
 
             <details className="provider-browser-guidance">
