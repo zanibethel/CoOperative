@@ -239,3 +239,142 @@ b { color: var(--text); }
   .task-error-actions { align-items: stretch; }
   .task-error-actions .task-error-action { flex: 1 1 100%; }
 }
+
+
+/* Linked projects + governed human provider handoff */
+.project-notice { margin: 0 0 16px; }
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+.linked-project-card { min-width: 0; overflow: hidden; }
+.linked-project-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+}
+.linked-project-head h2 { margin: 5px 0 0; }
+.project-meta-grid {
+  margin: 16px 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+.project-meta-grid > div {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.project-meta-grid span { color: var(--muted); font-size: .7rem; }
+.project-meta-grid strong { overflow-wrap: anywhere; font-size: .82rem; }
+.project-detail {
+  border-top: 1px solid var(--line);
+  padding: 11px 0;
+}
+.project-detail summary { cursor: pointer; font-size: .8rem; font-weight: 800; color: var(--accent); }
+.project-policy-list { margin: 10px 0 0 20px; color: var(--muted); font-size: .78rem; line-height: 1.6; }
+.project-secret-list { display: grid; gap: 8px; margin-top: 10px; }
+.project-secret-row {
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 9px;
+  display: grid;
+  gap: 4px;
+}
+.project-secret-row code { overflow-wrap: anywhere; color: var(--text); }
+.project-secret-row span,
+.project-secret-row small { color: var(--muted); font-size: .72rem; }
+.human-actions { border-top: 1px solid var(--line); padding-top: 13px; margin-top: 6px; display: grid; gap: 10px; }
+.human-action-row {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 11px;
+  display: grid;
+  gap: 10px;
+}
+.human-action-row p { margin: 5px 0 0; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.linked-project-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.provider-browser-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(2, 4, 8, .78);
+  backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  padding: 14px;
+}
+.provider-browser {
+  width: min(1100px, 100%);
+  height: min(820px, calc(100dvh - 28px));
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto auto minmax(220px, 1fr) auto auto;
+  box-shadow: 0 24px 90px rgba(0,0,0,.45);
+}
+.provider-browser-head,
+.provider-browser-location,
+.provider-browser-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.provider-browser-location {
+  justify-content: flex-start;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: .72rem;
+}
+.provider-browser-location code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.provider-browser-frame-wrap { min-height: 0; background: #fff; }
+.provider-browser-frame { width: 100%; height: 100%; border: 0; background: #fff; }
+.provider-browser-guidance {
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: .76rem;
+  line-height: 1.45;
+  max-height: 150px;
+  overflow: auto;
+}
+.provider-browser-guidance p { margin: 5px 0; }
+.provider-browser-guidance code { overflow-wrap: anywhere; color: var(--text); }
+.provider-browser-actions { border-top: 1px solid var(--line); border-bottom: 0; }
+
+@media (max-width: 800px) {
+  .project-grid { grid-template-columns: 1fr; }
+  .provider-browser-backdrop { padding: 0; }
+  .provider-browser {
+    width: 100%;
+    height: 100dvh;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .project-meta-grid { grid-template-columns: 1fr; }
+  .linked-project-actions > button,
+  .human-action-row > button,
+  .provider-browser-actions > button { width: 100%; }
+  .provider-browser-actions { align-items: stretch; flex-direction: column; }
+  .provider-browser-guidance { max-height: 180px; }
+}
