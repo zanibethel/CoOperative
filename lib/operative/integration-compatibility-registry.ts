@@ -4,7 +4,10 @@ export type CompatibilityTarget =
   | "vercel-workflow"
   | "vercel-sandbox"
   | "vercel-ai-gateway"
-  | "hermes-agent";
+  | "hermes-agent"
+  | "linked-project"
+  | "provider-auth-handoff"
+  | "provider-secret-broker";
 
 export interface CompatibilityRule {
   id: string;
@@ -203,6 +206,56 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     enforcementPaths: [
       "lib/workflow/hermes-runtime.ts",
       "lib/workflow/hermes-model-smoke.ts",
+    ],
+    learnedAt: "2026-09-18",
+    status: "active",
+  },
+  {
+    id: "linked-project-use-own-revision",
+    targets: ["linked-project", "vercel-sandbox"],
+    component: "Linked-project source selection",
+    appliesTo: "Cross-repository CoOperative playbooks",
+    symptom: "A linked-project task attempts to clone the CoOperative deployment SHA into a different repository.",
+    rootCause: "The executor reused VERCEL_GIT_COMMIT_SHA globally instead of the linked project's reviewed branch/ref.",
+    knownGoodPattern: "Each linked project declares its own repoSlug and defaultRef; cross-repository playbooks use that reviewed ref instead of CoOperative's deployment SHA.",
+    avoidPatterns: ["using CoOperative VERCEL_GIT_COMMIT_SHA for CreatorHub or RaiseHub"],
+    enforcementPaths: [
+      "lib/operative/project-registry.ts",
+      "lib/operative/playbook-registry.ts",
+      "app/api/operative/tasks/[id]/execute/route.ts",
+    ],
+    learnedAt: "2026-09-18",
+    status: "active",
+  },
+  {
+    id: "provider-auth-use-human-handoff",
+    targets: ["provider-auth-handoff"],
+    component: "Provider login / consent / verification",
+    appliesTo: "Third-party developer portals, OAuth consent, MFA, CAPTCHA, and KYC",
+    symptom: "Automation gets blocked by provider framing, login security, MFA, CAPTCHA, consent, or identity verification.",
+    rootCause: "Human provider authentication cannot be safely assumed to work inside an iframe or autonomous agent session.",
+    knownGoodPattern: "Keep a CoOperative setup session open, try the contained browser panel only when framing works, fall back to a dedicated top-level provider window, and let the owner return to deterministic verification.",
+    avoidPatterns: ["capturing provider passwords", "bypassing MFA or CAPTCHA", "requiring iframe-only login"],
+    enforcementPaths: [
+      "lib/operative/project-registry.ts",
+      "app/console/projects/page.tsx",
+      "docs/HUMAN-PROVIDER-BROWSER-HANDOFF.md",
+    ],
+    learnedAt: "2026-09-18",
+    status: "active",
+  },
+  {
+    id: "provider-secrets-never-enter-agent-context",
+    targets: ["provider-secret-broker", "hermes-agent"],
+    component: "Provider credential handling",
+    appliesTo: "Linked-project environment variables and API credentials",
+    symptom: "A setup workflow is tempted to paste provider secrets into task text, logs, repository files, or model prompts.",
+    rootCause: "Secrets needed for deterministic deployment were conflated with reasoning context.",
+    knownGoodPattern: "Store only required variable names in the project manifest. Secret values remain behind an explicit owner gate and are injected by a dedicated broker into the specific target environment without entering Hermes or ChatGPT task context.",
+    avoidPatterns: ["secret values in project manifests", "secret values in Hermes prompts", "secret values committed to Git"],
+    enforcementPaths: [
+      "lib/operative/project-registry.ts",
+      "docs/HUMAN-PROVIDER-BROWSER-HANDOFF.md",
     ],
     learnedAt: "2026-09-18",
     status: "active",
