@@ -1,7 +1,7 @@
 -- CoOperative deployed core schema v0.1
 -- Reference SQL for the currently deployed Supabase foundation.
--- Future Capability Registry / Playbook / Improvement Lab tables are intentionally
--- deferred until the core auth + tenant + assessment flow is proven.
+-- Core auth + tenant + assessment persistence is deployed.
+-- Phase 2 adds the governed Capability Registry and Playbook catalog below.
 
 create table if not exists public.organizations (
   id uuid primary key default gen_random_uuid(),
@@ -177,3 +177,69 @@ using (exists (
   where o.id = organization_id
     and o.owner_user_id = (select auth.uid())
 ));
+
+
+-- Phase 2: governed capability registry.
+create table if not exists public.capabilities (
+  id uuid primary key default gen_random_uuid(),
+  capability_key text not null unique check (capability_key ~ '^[a-z0-9-]+$'),
+  name text not null check (char_length(name) between 2 and 120),
+  provider text not null,
+  category text not null check (category in (
+    'communication','calendar','crm','payments','accounting','social',
+    'website','automation','ai','storage','research','other'
+  )),
+  delivery text not null check (delivery in (
+    'native','plugin','api','webhook','workflow-engine','agent','manual'
+  )),
+  audience text not null default 'customer' check (audience in ('customer','platform')),
+  auth_mode text not null check (auth_mode in (
+    'oauth','api-key','service-account','none','local-approval','unknown'
+  )),
+  estimated_cost_model text not null default 'unknown',
+  actions jsonb not null default '[]'::jsonb check (jsonb_typeof(actions) = 'array'),
+  risk_level text not null default 'medium' check (risk_level in ('low','medium','high')),
+  status text not null default 'research' check (status in ('research','approved','deprecated')),
+  notes text,
+  last_verified_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.capabilities enable row level security;
+revoke all on public.capabilities from anon;
+revoke all on public.capabilities from authenticated;
+grant select on public.capabilities to authenticated;
+
+create policy "authenticated users can view approved customer capabilities"
+on public.capabilities
+for select
+to authenticated
+using (status = 'approved' and audience = 'customer');
+
+create table if not exists public.playbooks (
+  id uuid primary key default gen_random_uuid(),
+  playbook_key text not null check (playbook_key ~ '^[a-z0-9-]+$'),
+  version integer not null check (version > 0),
+  name text not null,
+  problem_pattern text not null,
+  prerequisites jsonb not null default '[]'::jsonb check (jsonb_typeof(prerequisites) = 'array'),
+  required_capability_keys jsonb not null default '[]'::jsonb check (jsonb_typeof(required_capability_keys) = 'array'),
+  human_approval_required boolean not null default true,
+  status text not null default 'draft' check (status in ('draft','validated','published','retired')),
+  evidence_summary text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (playbook_key, version)
+);
+
+alter table public.playbooks enable row level security;
+revoke all on public.playbooks from anon;
+revoke all on public.playbooks from authenticated;
+grant select on public.playbooks to authenticated;
+
+create policy "authenticated users can view published playbooks"
+on public.playbooks
+for select
+to authenticated
+using (status = 'published');
