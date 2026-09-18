@@ -147,7 +147,7 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
           "One-time shared setup: create an API-key connector that holds a team-scoped Vercel access token, then attach the connector to CoOperative. The token remains in Vercel Connect rather than CoOperative or Hermes.",
         launchUrl:
           "https://vercel.com/d?title=Vercel+Connect&to=%2F%5Bteam%5D%2F~%2Fconnect%3Fcreate%3Dapi-key",
-        mode: "embedded-or-popup",
+        mode: "popup-only",
         completion: "manual-return-and-verify",
         relatedSecretKeys: [],
       },
