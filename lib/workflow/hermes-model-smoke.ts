@@ -1,4 +1,5 @@
 import { Sandbox } from "@vercel/sandbox";
+import { getVercelOidcToken } from "@vercel/oidc";
 
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -126,9 +127,9 @@ async function runModelSmoke(
 ): Promise<ModelSmokeEvidence> {
   "use step";
 
-  const oidcToken = process.env.VERCEL_OIDC_TOKEN?.trim();
+  const oidcToken = (await getVercelOidcToken())?.trim();
   if (!oidcToken) {
-    throw new Error("Vercel OIDC token is unavailable in this Workflow environment.");
+    throw new Error("Vercel OIDC helper did not return a token in this Workflow step.");
   }
 
   const startedAt = Date.now();
@@ -405,6 +406,18 @@ async function finalizeFailure(
 function readableError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error.trim()) return error.trim();
+
+  if (error && typeof error === "object") {
+    const record = error as { name?: unknown; message?: unknown; cause?: unknown };
+    const name = typeof record.name === "string" && record.name ? record.name + ": " : "";
+    if (typeof record.message === "string" && record.message.trim()) {
+      return name + record.message.trim();
+    }
+    if (record.cause instanceof Error && record.cause.message) {
+      return name + record.cause.message;
+    }
+  }
+
   return "Cloud Hermes model smoke test failed.";
 }
 
