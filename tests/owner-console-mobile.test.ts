@@ -42,3 +42,11 @@ test("sub-cent costs display full microunit precision and legacy unknown cost is
   assert.match(page, /cost unresolved/);
   assert.match(page, /usageCostStatus === "unknown"/);
 });
+
+
+test("Mission Control exposes linked-project Hermes patch evidence without auto-applying it", () => {
+  assert.match(page, /View linked-project patch/);
+  assert.match(page, /Copy patch/);
+  assert.match(page, /repository write not performed/);
+  assert.match(page, /taskHermesProjectPatch/);
+});
