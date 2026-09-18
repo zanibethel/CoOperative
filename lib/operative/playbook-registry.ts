@@ -1,4 +1,4 @@
-export const CLOUD_PLAYBOOK_KEYS = ["cloud-self-check", "hermes-runtime-check"] as const;
+export const CLOUD_PLAYBOOK_KEYS = ["cloud-self-check", "hermes-runtime-check", "hermes-model-smoke"] as const;
 export type CloudPlaybookKey = (typeof CLOUD_PLAYBOOK_KEYS)[number];
 
 export interface CloudPlaybook {
@@ -6,6 +6,7 @@ export interface CloudPlaybook {
   title: string;
   description: string;
   requiresShell: boolean;
+  executor: "deterministic-code" | "cloud-hermes";
   executionMode?: "sync" | "detached" | "workflow";
   repoSlug: string;
   buildCommands: () => { cmd: string; args?: string[] }[];
@@ -24,6 +25,7 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     description:
       "Clone the exact CoOperative revision in an isolated Vercel Sandbox, install dependencies, and run the unit tests.",
     requiresShell: true,
+    executor: "deterministic-code",
     executionMode: "sync",
     repoSlug: "zanibethel/CoOperative",
     buildCommands: () => [
@@ -39,6 +41,7 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     description:
       "Prepare or reuse the pinned Hermes Agent v0.21.3 runtime, fork an isolated Vercel Sandbox, and verify the restored CLI with bounded version/help checks without provider credentials.",
     requiresShell: true,
+    executor: "deterministic-code",
     executionMode: "workflow",
     repoSlug: "zanibethel/CoOperative",
     buildCommands: () => [
@@ -64,6 +67,17 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
         ],
       },
     ],
+  },
+  "hermes-model-smoke": {
+    key: "hermes-model-smoke",
+    title: "Cloud Hermes model smoke test",
+    description:
+      "Reuse the prepared Hermes runtime and run one bounded model-backed reasoning turn through Vercel AI Gateway using the deployment OIDC token. No persistent provider credential, shell tools, repository writes, or production changes.",
+    requiresShell: true,
+    executor: "cloud-hermes",
+    executionMode: "workflow",
+    repoSlug: "zanibethel/CoOperative",
+    buildCommands: () => [],
   },
 };
 
