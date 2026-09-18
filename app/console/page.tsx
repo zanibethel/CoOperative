@@ -275,6 +275,55 @@ export default function OwnerConsolePage() {
     }
   }
 
+  async function runHermesRuntimeCheck() {
+    setWorking(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const messageText =
+        "Verify that the pinned Hermes Agent runtime can install and execute inside Vercel Sandbox without model credentials.";
+      const message = await persistMessage(messageText);
+
+      const createResponse = await fetch("/api/operative/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: message.conversationId,
+          title: "Cloud Hermes runtime check",
+          description:
+            "Install pinned Hermes Agent v0.21.3 in an isolated Vercel Sandbox, verify the CLI, and run an offline prompt-size check. Do not use provider credentials or make a model call.",
+          playbookKey: "hermes-runtime-check",
+          maxSpendUsd: 0,
+          flags: { requiresShell: true },
+        }),
+      });
+
+      const created = await createResponse.json();
+      if (!createResponse.ok) {
+        throw new Error(created.error ?? "Unable to create Hermes runtime check task");
+      }
+
+      const executeResponse = await fetch(
+        "/api/operative/tasks/" + created.task.id + "/execute",
+        { method: "POST" },
+      );
+      const executed = await executeResponse.json();
+
+      if (!executeResponse.ok) {
+        throw new Error(executed.error ?? "Cloud Hermes runtime check failed");
+      }
+
+      setNotice("Cloud Hermes runtime check completed. No model credentials were used.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cloud Hermes runtime check failed");
+      await load().catch(() => undefined);
+    } finally {
+      setWorking(false);
+    }
+  }
+
   async function runCloudSelfCheck() {
     setWorking(true);
     setError("");
@@ -471,6 +520,26 @@ export default function OwnerConsolePage() {
             </button>
             <small className="console-helper">
               First live run requires the server-only Supabase secret gate so task events and evidence can be written safely.
+            </small>
+          </section>
+
+          <section className="card">
+            <div className="eyebrow">Cloud Hermes</div>
+            <h2>Runtime check</h2>
+            <p>
+              Install the pinned official Hermes Agent runtime in a temporary Vercel Sandbox,
+              verify the CLI, and shut it down. This uses no model/API credentials.
+            </p>
+            <button
+              className="primary"
+              type="button"
+              disabled={working || !overview.organization}
+              onClick={() => void runHermesRuntimeCheck()}
+            >
+              {working ? "Working…" : "Test Cloud Hermes runtime"}
+            </button>
+            <small className="console-helper">
+              Passing this proves Hermes itself can run in the cloud. Provider authentication and model routing remain a separate owner gate.
             </small>
           </section>
 
