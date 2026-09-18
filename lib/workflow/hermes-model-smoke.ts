@@ -1,0 +1,448 @@
+import { Sandbox } from "@vercel/sandbox";
+
+import { createAdminClient } from "@/lib/supabase/admin";
+
+const HERMES_BASE_NAME = "cooperative-hermes-runtime-v2026-9-14";
+const MODEL = "alibaba/qwen-3-14b";
+const PROVIDER = "ai-gateway";
+
+interface HermesModelSmokeInput {
+  taskId: string;
+  organizationId: string;
+  maxSpendMicrounits: number;
+}
+
+interface HermesUsageReport {
+  estimated_cost_usd?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  reasoning_tokens?: number;
+  total_tokens?: number;
+  api_calls?: number;
+  model?: string;
+  provider?: string;
+  completed?: boolean;
+  failed?: boolean;
+  total_including_auxiliary?: {
+    estimated_cost_usd?: number;
+    total_tokens?: number;
+    api_calls?: number;
+  };
+}
+
+interface ModelSmokeEvidence {
+  sandboxName: string;
+  model: string;
+  provider: string;
+  output: string;
+  stderrTail: string;
+  durationMs: number;
+  usage: HermesUsageReport;
+  costMicrounits: number;
+}
+
+function tail(value: string, limit = 2500) {
+  if (value.length <= limit) return value;
+  return value.slice(value.length - limit);
+}
+
+function usageCostMicrounits(usage: HermesUsageReport): number {
+  const usd =
+    usage.total_including_auxiliary?.estimated_cost_usd ??
+    usage.estimated_cost_usd;
+
+  if (typeof usd !== "number" || !Number.isFinite(usd) || usd < 0) {
+    throw new Error("Hermes usage report did not provide a valid cost estimate.");
+  }
+
+  return Math.ceil(usd * 1_000_000);
+}
+
+async function recordProgress(
+  input: HermesModelSmokeInput,
+  stage:
+    | "authenticating_gateway"
+    | "starting_hermes"
+    | "reasoning"
+    | "verifying"
+    | "completed"
+    | "failed",
+  detail: Record<string, unknown> = {},
+) {
+  "use step";
+
+  const admin = createAdminClient();
+  const now = new Date().toISOString();
+
+  const { data: task, error: taskError } = await admin
+    .from("operative_tasks")
+    .select("result")
+    .eq("id", input.taskId)
+    .eq("organization_id", input.organizationId)
+    .single();
+
+  if (taskError) throw taskError;
+
+  const current =
+    task.result && typeof task.result === "object" && !Array.isArray(task.result)
+      ? (task.result as Record<string, unknown>)
+      : {};
+
+  const result = {
+    ...current,
+    executionMode: "workflow",
+    progress: {
+      stage,
+      at: now,
+      ...detail,
+    },
+  };
+
+  const { error: updateError } = await admin
+    .from("operative_tasks")
+    .update({ result, updated_at: now })
+    .eq("id", input.taskId)
+    .eq("organization_id", input.organizationId);
+
+  if (updateError) throw updateError;
+
+  const { error: eventError } = await admin.from("task_events").insert({
+    task_id: input.taskId,
+    organization_id: input.organizationId,
+    event_type: "note",
+    actor: "system",
+    detail: {
+      type: "workflow_progress",
+      stage,
+      ...detail,
+    },
+  });
+
+  if (eventError) throw eventError;
+}
+
+async function runModelSmoke(
+  input: HermesModelSmokeInput,
+): Promise<ModelSmokeEvidence> {
+  "use step";
+
+  const oidcToken = process.env.VERCEL_OIDC_TOKEN?.trim();
+  if (!oidcToken) {
+    throw new Error("Vercel OIDC token is unavailable in this Workflow environment.");
+  }
+
+  const startedAt = Date.now();
+
+  // Fail fast if the prepared runtime disappeared instead of silently paying
+  // for another cold installation in the model-backed smoke test.
+  await Sandbox.get({ name: HERMES_BASE_NAME, resume: false });
+
+  const sandbox = await Sandbox.fork({
+    sourceSandbox: HERMES_BASE_NAME,
+    persistent: false,
+    timeout: 2 * 60 * 1000,
+    env: {
+      // Short-lived deployment identity only. No long-lived provider key is
+      // stored in CoOperative or baked into the prepared Hermes snapshot.
+      AI_GATEWAY_API_KEY: oidcToken,
+    },
+  });
+
+  const prompt = [
+    "You are running a governed Cloud Hermes model smoke test.",
+    "Do not call tools. Do not modify files. Do not access the network beyond the model request.",
+    "Return one compact JSON object only, with these keys:",
+    'runtime: "cloud-hermes",',
+    'provider: "ai-gateway",',
+    'answer: the integer result of 17 * 23,',
+    'whyDeterministic: a sentence of 12 words or fewer explaining why deterministic code is normally better for arithmetic.',
+  ].join("\n");
+
+  try {
+    await sandbox.writeFiles([
+      {
+        path: "/tmp/cooperative-model-smoke.md",
+        content: Buffer.from(prompt, "utf8"),
+      },
+    ]);
+
+    const result = await sandbox.runCommand("bash", [
+      "-lc",
+      [
+        'HERMES_BIN="$HOME/.local/bin/hermes"',
+        '[ -x "$HERMES_BIN" ] || HERMES_BIN=/usr/local/bin/hermes',
+        'timeout 75s "$HERMES_BIN" chat',
+        "--oneshot",
+        "--query-file /tmp/cooperative-model-smoke.md",
+        "--provider ai-gateway",
+        `--model ${MODEL}`,
+        "--reasoning none",
+        "--max-turns 1",
+        "--run-budget 60",
+        "--usage-file /tmp/hermes-usage.json",
+        "--safe-mode",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--quiet",
+        "--source tool",
+      ].join(" "),
+    ]);
+
+    const stdout = (await result.stdout()).trim();
+    const stderr = (await result.stderr()).trim();
+
+    const usageResult = await sandbox.runCommand("bash", [
+      "-lc",
+      "test -s /tmp/hermes-usage.json && cat /tmp/hermes-usage.json || true",
+    ]);
+    const usageText = (await usageResult.stdout()).trim();
+
+    if (!usageText) {
+      throw new Error(
+        "Hermes model call did not produce the required usage report. " +
+          tail(stderr || stdout),
+      );
+    }
+
+    let usage: HermesUsageReport;
+    try {
+      usage = JSON.parse(usageText) as HermesUsageReport;
+    } catch {
+      throw new Error("Hermes usage report was not valid JSON.");
+    }
+
+    const costMicrounits = usageCostMicrounits(usage);
+
+    if (costMicrounits > input.maxSpendMicrounits) {
+      throw new Error(
+        `Cost Governor violation: Hermes reported ${costMicrounits} microunits against a ${input.maxSpendMicrounits} microunit cap.`,
+      );
+    }
+
+    if (result.exitCode !== 0) {
+      throw new Error(
+        "Hermes model-backed smoke command failed: " + tail(stderr || stdout),
+      );
+    }
+
+    if (!stdout.includes("391")) {
+      throw new Error(
+        "Hermes returned a model response, but the fixed arithmetic verification did not pass.",
+      );
+    }
+
+    return {
+      sandboxName: sandbox.name,
+      model: usage.model || MODEL,
+      provider: usage.provider || PROVIDER,
+      output: tail(stdout, 4000),
+      stderrTail: tail(stderr),
+      durationMs: Date.now() - startedAt,
+      usage,
+      costMicrounits,
+    };
+  } finally {
+    await sandbox.stop();
+  }
+}
+
+async function finalizeSuccess(
+  input: HermesModelSmokeInput,
+  evidence: ModelSmokeEvidence,
+) {
+  "use step";
+
+  const admin = createAdminClient();
+  const now = new Date().toISOString();
+
+  const result = {
+    executionMode: "workflow",
+    workflow: "hermes-model-smoke",
+    progress: {
+      stage: "completed",
+      at: now,
+    },
+    evidence,
+  };
+
+  const { error: verifyingError } = await admin
+    .from("operative_tasks")
+    .update({
+      status: "verifying",
+      result,
+      actual_spend_microunits: evidence.costMicrounits,
+      updated_at: now,
+    })
+    .eq("id", input.taskId)
+    .eq("organization_id", input.organizationId)
+    .eq("status", "executing");
+
+  if (verifyingError) throw verifyingError;
+
+  await admin.from("task_events").insert({
+    task_id: input.taskId,
+    organization_id: input.organizationId,
+    event_type: "status_changed",
+    from_status: "executing",
+    to_status: "verifying",
+    actor: "system",
+    detail: {
+      verification: "Hermes completed one bounded model-backed turn through Vercel AI Gateway.",
+      model: evidence.model,
+      provider: evidence.provider,
+      actualSpendMicrounits: evidence.costMicrounits,
+    },
+  });
+
+  const { error: completeError } = await admin
+    .from("operative_tasks")
+    .update({
+      status: "completed",
+      result,
+      actual_spend_microunits: evidence.costMicrounits,
+      error: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.taskId)
+    .eq("organization_id", input.organizationId)
+    .eq("status", "verifying");
+
+  if (completeError) throw completeError;
+
+  await admin.from("task_events").insert({
+    task_id: input.taskId,
+    organization_id: input.organizationId,
+    event_type: "status_changed",
+    from_status: "verifying",
+    to_status: "completed",
+    actor: "system",
+    detail: {
+      verification: "First governed model-backed Cloud Hermes smoke test completed.",
+      model: evidence.model,
+      provider: evidence.provider,
+      actualSpendMicrounits: evidence.costMicrounits,
+    },
+  });
+
+  await admin.from("cost_ledger_entries").insert([
+    {
+      organization_id: input.organizationId,
+      task_id: input.taskId,
+      executor: "cloud-hermes",
+      cost_category: "ai-tokens",
+      amount_microunits: evidence.costMicrounits,
+      currency: "USD",
+      is_marginal_cost: true,
+      notes:
+        `Hermes usage-file estimate via Vercel AI Gateway; model ${evidence.model}; provider ${evidence.provider}.`,
+    },
+    {
+      organization_id: input.organizationId,
+      task_id: input.taskId,
+      executor: "vercel-sandbox",
+      cost_category: "sandbox-compute",
+      amount_microunits: 0,
+      currency: "USD",
+      is_marginal_cost: true,
+      notes:
+        "Prepared-runtime fork used for the model smoke test; allocated Vercel platform usage remains separate.",
+    },
+  ]);
+}
+
+async function finalizeFailure(
+  input: HermesModelSmokeInput,
+  message: string,
+) {
+  "use step";
+
+  const admin = createAdminClient();
+  const now = new Date().toISOString();
+
+  const { data: task } = await admin
+    .from("operative_tasks")
+    .select("result")
+    .eq("id", input.taskId)
+    .eq("organization_id", input.organizationId)
+    .maybeSingle();
+
+  const current =
+    task?.result && typeof task.result === "object" && !Array.isArray(task.result)
+      ? (task.result as Record<string, unknown>)
+      : {};
+
+  await admin
+    .from("operative_tasks")
+    .update({
+      status: "failed",
+      error: message,
+      result: {
+        ...current,
+        executionMode: "workflow",
+        progress: {
+          stage: "failed",
+          at: now,
+          message,
+        },
+      },
+      updated_at: now,
+    })
+    .eq("id", input.taskId)
+    .eq("organization_id", input.organizationId);
+
+  await admin.from("task_events").insert({
+    task_id: input.taskId,
+    organization_id: input.organizationId,
+    event_type: "error",
+    actor: "system",
+    detail: {
+      stage: "workflow_hermes_model_smoke",
+      message,
+    },
+  });
+}
+
+function readableError(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error.trim()) return error.trim();
+  return "Cloud Hermes model smoke test failed.";
+}
+
+export async function hermesModelSmokeWorkflow(
+  input: HermesModelSmokeInput,
+): Promise<{ ok: true; evidence: ModelSmokeEvidence }> {
+  "use workflow";
+
+  try {
+    await recordProgress(input, "authenticating_gateway", {
+      authMode: "vercel-oidc",
+      persistentProviderSecret: false,
+    });
+
+    await recordProgress(input, "starting_hermes", {
+      preparedRuntime: HERMES_BASE_NAME,
+      model: MODEL,
+      provider: PROVIDER,
+    });
+
+    await recordProgress(input, "reasoning", {
+      maxTurns: 1,
+      maxSpendMicrounits: input.maxSpendMicrounits,
+    });
+
+    const evidence = await runModelSmoke(input);
+
+    await recordProgress(input, "verifying", {
+      model: evidence.model,
+      provider: evidence.provider,
+      actualSpendMicrounits: evidence.costMicrounits,
+    });
+
+    await finalizeSuccess(input, evidence);
+    return { ok: true, evidence };
+  } catch (error) {
+    const message = readableError(error);
+    await finalizeFailure(input, message);
+    throw error;
+  }
+}
