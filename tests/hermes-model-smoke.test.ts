@@ -12,9 +12,10 @@ const consoleSource = fs.readFileSync(
   "utf8",
 );
 
-test("model smoke uses short-lived Vercel OIDC for AI Gateway", () => {
-  assert.match(workflowSource, /VERCEL_OIDC_TOKEN/);
+test("model smoke uses Vercel OIDC helper for AI Gateway", () => {
+  assert.match(workflowSource, /getVercelOidcToken/);
   assert.match(workflowSource, /AI_GATEWAY_API_KEY:\s*oidcToken/);
+  assert.equal(workflowSource.includes("process.env.VERCEL_OIDC_TOKEN"), false);
   assert.equal(workflowSource.includes("NOUS_API_KEY"), false);
   assert.equal(workflowSource.includes("SUPABASE_SECRET_KEY"), false);
 });
@@ -61,4 +62,17 @@ test("executor selection failures become terminal task failures", () => {
   assert.match(executeRouteSource, /Executor selection failed:/);
   assert.match(executeRouteSource, /stage:\s*"executor_selection"/);
   assert.match(executeRouteSource, /status:\s*"failed"/);
+});
+
+
+test("Vercel OIDC helper is a pinned direct dependency", () => {
+  const packageJson = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+  ) as { dependencies?: Record<string, string> };
+  assert.equal(packageJson.dependencies?.["@vercel/oidc"], "3.2.0");
+});
+
+test("model smoke preserves structured Workflow errors", () => {
+  assert.match(workflowSource, /record\.message/);
+  assert.match(workflowSource, /record\.cause/);
 });
