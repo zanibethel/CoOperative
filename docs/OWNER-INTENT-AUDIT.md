@@ -346,3 +346,31 @@ Each entry should contain:
 **Source:** Owner conversation in ChatGPT after reviewing the RaiseHub Owner Platform pattern.
 
 **Status:** Active architecture direction; auth/RLS/schema implementation still requires explicit owner approval.
+
+
+---
+
+## 2026-09-18 — Preview Supabase server key corrected after live Owner Console test
+
+**Scope:** Cloud Operative / Vercel Preview / Supabase trusted server access
+
+**Owner intent:** Make the Preview-only trusted Cloud Operative path actually usable without widening authority to Production or Telegram.
+
+**Changes / decisions:**
+- First phone test confirmed the Owner Console and normal user-scoped Supabase path worked, but trusted task creation failed with `Invalid API key`.
+- The failure was isolated to the Preview `SUPABASE_SECRET_KEY`; canonical owner messages still persisted successfully through the normal authenticated/RLS path.
+- Hermes used the authenticated Supabase CLI to inspect API keys for the exact CoOperative project ref `hbgyebthxmgbuoqadelb`, selected the valid current server-side secret key, and replaced the Vercel Preview-only value.
+- No secret value was exposed in repository/chat output.
+- Production and Telegram configuration remained unchanged.
+- Vercel redeployed the `cloud-operative-bootstrap` Preview.
+- Independent verification confirmed deployment `dpl_9givJ4ys9GJQPnx4vthG6kmVWaou` is READY at `co-operative-k33kl8irl-zanibethels-projects.vercel.app`, commit `78f7db48ad90b0097ffe5792edfa05fc8f7e0fd2`.
+
+**Why:** The first Preview secret value was not accepted by Supabase. Correcting the exact project key restores the intended trusted backend path while preserving the smallest-authority Preview-only test boundary.
+
+**Affected areas:** Owner Console governed task creation, trusted Supabase admin client, Cloud self-check.
+
+**Conflict / supersession notes:** Supersedes the previously configured invalid Preview secret value only. Does not authorize Production promotion, Telegram cutover, or broader server authority.
+
+**Source:** Owner phone test, Hermes key correction, and independent ChatGPT/Vercel verification.
+
+**Status:** Corrected Preview is READY; rerun Cloud self-check next.
