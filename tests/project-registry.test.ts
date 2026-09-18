@@ -69,9 +69,9 @@ test("human provider browser is a non-secret handoff with popup fallback", () =>
 
   assert.match(page, /CoOperative secure handoff/);
   assert.match(page, /<iframe/);
-  assert.match(page, /Open secure provider window/);
+  assert.match(page, /Open external/);
   assert.match(page, /cannot read this provider page/);
-  assert.match(page, /I completed this step · return to CoOperative/);
+  assert.match(page, /Done · return/);
   assert.match(page, /Values remain behind the secret broker gate/);
 });
 
