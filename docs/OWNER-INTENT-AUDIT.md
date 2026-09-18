@@ -611,3 +611,30 @@ Each entry should contain:
 **Source:** Owner-approved ChatGPT implementation, Vercel Workflow/Sandbox documentation, GitHub CI, and Vercel Preview verification.
 
 **Status:** Durable prepared-runtime bootstrap deployed to Preview and ready for live retest.
+
+
+---
+
+## 2026-09-18 — Prepared Hermes runtime succeeded; bootstrap verification simplified
+
+**Scope:** Cloud Hermes / Vercel Workflow / prepared runtime verification
+
+**Observed live result:**
+- Workflow run `wrun_01M2T36X6N9XAS6X4BZ0KCBFMA` successfully completed the expensive one-time Hermes runtime preparation.
+- Canonical task evidence recorded `preparedRuntime.createdThisRun = true` for `cooperative-hermes-runtime-v2026-9-14`.
+- Workflow advanced through `preparing_runtime -> starting_hermes -> executing_check`.
+- The failure occurred only in the disposable verification fork. The `hermes prompt-size --json` diagnostic kept the Sandbox SDK request open until the underlying fetch was terminated.
+- Vercel Workflow retried the verification step four times and then failed the task. No provider/model call was made.
+
+**Changes / decisions:**
+- The prepared Hermes base is retained and should be reused; do not reinstall it for the next check.
+- Removed `prompt-size` from the bootstrap runtime proof. It is an offline diagnostic that constructs a real inspection agent and is unnecessary for proving that the restored Hermes CLI works.
+- Snapshot verification now uses bounded lightweight `hermes --version` and `hermes --help` checks with 30-second command limits.
+- Forked verification Sandboxes have an explicit 2-minute lifetime.
+- Workflow failure serialization now preserves non-native error names/messages so Mission Control should show useful failure detail instead of only a generic message.
+- Owner Console wording updated to reflect fast restored-runtime verification.
+- Final commit `c569a40d9ab42e2bfaeb84ffb77cf58ceff5cdde` passed unit tests, TypeScript, lint, and build; Preview `dpl_46vL5siqgbouv232kQam8a3KU9Mw` is READY.
+
+**Why:** Runtime bootstrap should prove that the prepared Hermes executable survives snapshot/restore and its CLI registry loads. Heavy diagnostics belong in separate diagnostic playbooks, not in the critical bootstrap proof.
+
+**Status:** Prepared runtime exists; lightweight reuse test ready for live retest.
