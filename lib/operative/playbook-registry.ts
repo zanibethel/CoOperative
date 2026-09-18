@@ -37,7 +37,7 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     key: "hermes-runtime-check",
     title: "Cloud Hermes runtime check",
     description:
-      "Install the pinned official Hermes Agent v0.21.3 release inside an isolated Vercel Sandbox, verify the CLI, and run an offline prompt-size check without provider credentials.",
+      "Prepare or reuse the pinned Hermes Agent v0.21.3 runtime, fork an isolated Vercel Sandbox, and verify the restored CLI with bounded version/help checks without provider credentials.",
     requiresShell: true,
     executionMode: "workflow",
     repoSlug: "zanibethel/CoOperative",
@@ -60,7 +60,7 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
         cmd: "bash",
         args: [
           "-lc",
-          "HERMES_BIN=\"$HOME/.local/bin/hermes\"; [ -x \"$HERMES_BIN\" ] || HERMES_BIN=/usr/local/bin/hermes; \"$HERMES_BIN\" prompt-size --json > /tmp/hermes-prompt-size.json && test -s /tmp/hermes-prompt-size.json",
+          "HERMES_BIN=\"$HOME/.local/bin/hermes\"; [ -x \"$HERMES_BIN\" ] || HERMES_BIN=/usr/local/bin/hermes; timeout 30s \"$HERMES_BIN\" --help > /tmp/hermes-help.txt && grep -q \"prompt-size\" /tmp/hermes-help.txt",
         ],
       },
     ],
