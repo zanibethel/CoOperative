@@ -131,6 +131,22 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "hermes-v0213-scripted-oneshot-turn-limit-via-env",
+    targets: ["hermes-agent"],
+    component: "Hermes Agent scripted one-shot bounds",
+    appliesTo: "Hermes Agent v0.21.3 / release v2026.9.14",
+    symptom: "A top-level -z/--oneshot invocation rejects chat-only flags such as --max-turns, --run-budget, or --checkpoints.",
+    rootCause: "Those controls are registered on the chat subparser, while the usage-accounted scripted path is the top-level -z parser.",
+    knownGoodPattern: "Keep top-level -z arguments limited to top-level flags, bound wall time with the outer process timeout, and set HERMES_MAX_ITERATIONS for a finite one-shot tool-call cap.",
+    avoidPatterns: ["top-level -z with --max-turns", "top-level -z with --run-budget", "top-level -z with --checkpoints"],
+    enforcementPaths: [
+      "lib/workflow/linked-project-hermes.ts",
+      "tests/linked-project-hermes.test.ts",
+    ],
+    learnedAt: "2026-09-18",
+    status: "active",
+  },
+  {
     id: "hermes-v0213-minimum-context-64k",
     targets: ["hermes-agent", "vercel-ai-gateway"],
     component: "Hermes Agent model compatibility",
