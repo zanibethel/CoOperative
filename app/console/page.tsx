@@ -661,6 +661,7 @@ export default function OwnerConsolePage() {
                     <span>{task.risk_level} risk</span>
                     {task.requires_owner_approval ? <span>approval gated</span> : <span>standard policy</span>}
                     {task.selected_executor ? <span>{task.selected_executor}</span> : <span>executor pending</span>}
+                    {taskProgressLabel(task.result) ? <span>{taskProgressLabel(task.result)}</span> : null}
                   </div>
                   <p>{task.description}</p>
                   <div className="task-cost">
