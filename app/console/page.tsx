@@ -377,7 +377,7 @@ export default function OwnerConsolePage() {
 
     try {
       const messageText =
-        "Verify that the pinned Hermes Agent runtime can install and execute inside Vercel Sandbox without model credentials.";
+        "Verify that the pinned Hermes Agent runtime can be prepared once, reused from a Vercel Sandbox snapshot, and execute without model credentials.";
       const message = await persistMessage(messageText);
 
       const createResponse = await fetch("/api/operative/tasks", {
@@ -387,7 +387,7 @@ export default function OwnerConsolePage() {
           conversationId: message.conversationId,
           title: "Cloud Hermes runtime check",
           description:
-            "Install pinned Hermes Agent v0.21.3 in an isolated Vercel Sandbox, verify the CLI, and run an offline prompt-size check. Do not use provider credentials or make a model call.",
+            "Prepare or reuse the pinned Hermes Agent v0.21.3 runtime snapshot, fork an isolated Vercel Sandbox, verify the CLI, and run an offline prompt-size check. Do not use provider credentials or make a model call.",
           playbookKey: "hermes-runtime-check",
           maxSpendUsd: 0,
           flags: { requiresShell: true },
@@ -630,8 +630,8 @@ export default function OwnerConsolePage() {
             <div className="eyebrow">Cloud Hermes</div>
             <h2>Runtime check</h2>
             <p>
-              Install the pinned official Hermes Agent runtime in a temporary Vercel Sandbox,
-              verify the CLI, and shut it down. This uses no model/API credentials.
+              Prepare the pinned Hermes runtime once, reuse its Vercel Sandbox snapshot,
+              verify the CLI in an isolated fork, and shut it down. This uses no model/API credentials.
             </p>
             <button
               className="primary"
@@ -642,7 +642,7 @@ export default function OwnerConsolePage() {
               {working ? "Working…" : "Test Cloud Hermes runtime"}
             </button>
             <small className="console-helper">
-              Passing this proves Hermes itself can run in the cloud. Provider authentication and model routing remain a separate owner gate.
+              The first run may take longer while the reusable runtime is prepared. Later runs should reuse the snapshot. Provider authentication and model routing remain a separate owner gate.
             </small>
           </section>
 
