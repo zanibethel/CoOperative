@@ -377,4 +377,55 @@ b { color: var(--text); }
   .provider-browser-actions > button { width: 100%; }
   .provider-browser-actions { align-items: stretch; flex-direction: column; }
   .provider-browser-guidance { max-height: 180px; }
+  .project-hermes-controls { align-items: stretch; flex-direction: column; }
+  .project-hermes-controls label,
+  .project-hermes-controls button { width: 100%; }
+}
+
+
+.project-hermes-workspace {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+.project-hermes-workspace p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+.project-hermes-request {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 10px 11px;
+  font: inherit;
+  line-height: 1.45;
+}
+.project-hermes-controls {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+.project-hermes-controls label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: .72rem;
+  min-width: 150px;
+}
+.project-hermes-controls input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 9px 10px;
 }
