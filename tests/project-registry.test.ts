@@ -36,13 +36,14 @@ test("CreatorHub human setup covers Instagram, TikTok, and Fanvue without secret
 
   assert.deepEqual(
     creatorhub.humanActions.map((action) => action.provider),
-    ["Vercel", "Meta", "TikTok", "Fanvue"],
+    ["Vercel Connect", "Vercel", "Vercel", "Meta", "TikTok", "Fanvue"],
   );
 
   const serialized = JSON.stringify(creatorhub);
   assert.match(serialized, /INSTAGRAM_APP_SECRET/);
   assert.match(serialized, /TIKTOK_CLIENT_SECRET/);
   assert.match(serialized, /FANVUE_CLIENT_SECRET/);
+  assert.match(serialized, /COOPERATIVE_VERCEL_ADMIN_CONNECTOR/);
   assert.equal(serialized.includes("access_token"), false);
   for (const requirement of creatorhub.secretRequirements) {
     assert.equal("value" in requirement, false);
