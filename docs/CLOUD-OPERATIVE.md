@@ -72,22 +72,29 @@ Execution still flows through:
 
 No model may bypass the policy layer simply because it is embedded in the Owner Console.
 
-### Conversation continuity
+### Conversation continuity and memory
 
 Owner conversations should persist as structured CoOperative state, not depend on a single model/provider's hidden memory.
 
-Store durable items such as:
+Every conversation should be eligible to produce durable memory candidates such as:
 
+- owner preferences;
 - owner decisions;
 - stated business goals;
 - approved policies;
 - rejected approaches;
+- lessons/revelations;
 - decision rationale where useful;
+- recurring constraints;
 - open questions;
 - task references;
 - linked evidence.
 
+CoOperative should keep raw conversation history separate from structured memory, deduplicate repeated ideas, preserve provenance, and supersede old preferences when the owner changes direction.
+
 The AI model can change without losing the owner's operating context.
+
+See `docs/MEMORY-AND-PREFERENCES.md` for the full memory model.
 
 ## Target experience
 
@@ -236,7 +243,17 @@ For tasks requiring a shell, repository checkout, tests, CLIs, or code execution
 
 A sandbox is an execution workspace, not the authoritative database.
 
-### 7. Durable Task State
+### 7. Memory & Preference Engine
+
+Continuously extract and maintain relevant structured memory from owner/business conversations.
+
+Memory must be scoped, provenance-aware, editable, conflict-aware, selectively retrieved, and independent of the AI provider.
+
+Do not put the entire memory store into every model prompt.
+
+See `docs/MEMORY-AND-PREFERENCES.md`.
+
+### 8. Durable Task State
 
 Task state belongs in Supabase, not only inside the sandbox.
 
@@ -258,7 +275,7 @@ or
   -> cancelled
 ```
 
-### 8. Artifact Storage
+### 9. Artifact Storage
 
 Initial storage plan:
 
@@ -277,7 +294,7 @@ Possible private buckets:
 
 Create buckets only as they become necessary and protect them with tenant/platform-specific policies.
 
-### 9. Secrets
+### 10. Secrets
 
 Use secure runtime secret/environment systems.
 
@@ -291,7 +308,7 @@ Never store raw secrets in:
 
 Tasks should refer to secrets by logical name/reference only.
 
-### 10. Telegram
+### 11. Telegram
 
 Telegram should eventually use a webhook into CoOperative instead of requiring a continuously running Mac gateway.
 
@@ -311,7 +328,7 @@ The Telegram identity must be allow-listed and mapped to the appropriate CoOpera
 
 Telegram does not have independent authority; it uses the same Owner Console/task policy.
 
-### 11. External ChatGPT bridge
+### 12. External ChatGPT bridge
 
 A future CoOperative connector/plugin may allow ChatGPT to use the same governed task interface.
 
