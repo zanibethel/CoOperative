@@ -140,6 +140,29 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
     ],
     humanActions: [
       {
+        key: "cooperative-secret-broker-connect",
+        title: "CoOperative secret broker · Vercel Connect",
+        provider: "Vercel Connect",
+        description:
+          "One-time shared setup: create an API-key connector that holds a team-scoped Vercel access token, then attach the connector to CoOperative. The token remains in Vercel Connect rather than CoOperative or Hermes.",
+        launchUrl: "https://vercel.com/connect",
+        mode: "embedded-or-popup",
+        completion: "manual-return-and-verify",
+        relatedSecretKeys: [],
+      },
+      {
+        key: "cooperative-secret-broker-uid",
+        title: "CoOperative secret broker · connector UID",
+        provider: "Vercel",
+        description:
+          "After creating the connector, set COOPERATIVE_VERCEL_ADMIN_CONNECTOR on CoOperative to the connector UID (for example api-key/cooperative-vercel-admin). The UID is not the access token.",
+        launchUrl:
+          "https://vercel.com/zanibethels-projects/co-operative/settings/environment-variables",
+        mode: "embedded-or-popup",
+        completion: "manual-return-and-verify",
+        relatedSecretKeys: ["COOPERATIVE_VERCEL_ADMIN_CONNECTOR"],
+      },
+      {
         key: "vercel-environment",
         title: "CreatorHub environment variables",
         provider: "Vercel",
