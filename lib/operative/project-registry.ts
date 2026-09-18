@@ -138,6 +138,27 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
     ],
     humanActions: [
       {
+        key: "vercel-environment",
+        title: "CreatorHub environment variables",
+        provider: "Vercel",
+        description:
+          "Open CreatorHub's Vercel environment settings to add or review owner-approved identifiers and secrets without putting their values into CoOperative or Hermes context.",
+        launchUrl:
+          "https://vercel.com/zanibethels-projects/creatorhub/settings/environment-variables",
+        mode: "embedded-or-popup",
+        completion: "manual-return-and-verify",
+        relatedSecretKeys: [
+          "INSTAGRAM_APP_ID",
+          "INSTAGRAM_APP_SECRET",
+          "TIKTOK_CLIENT_KEY",
+          "TIKTOK_CLIENT_SECRET",
+          "FANVUE_CLIENT_ID",
+          "FANVUE_CLIENT_SECRET",
+          "STRIPE_SECRET_KEY",
+          "STRIPE_WEBHOOK_SECRET",
+        ],
+      },
+      {
         key: "instagram-developer-app",
         title: "Instagram developer app",
         provider: "Meta",
@@ -205,7 +226,20 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
       "hermes-cloud-operative",
     ],
     secretRequirements: [],
-    humanActions: [],
+    humanActions: [
+      {
+        key: "vercel-environment",
+        title: "RaiseHub environment variables",
+        provider: "Vercel",
+        description:
+          "Open RaiseHub's Vercel environment settings for owner-gated configuration. CoOperative does not read or retain values entered in the provider window.",
+        launchUrl:
+          "https://vercel.com/zanibethels-projects/raisehub/settings/environment-variables",
+        mode: "embedded-or-popup",
+        completion: "manual-return-and-verify",
+        relatedSecretKeys: [],
+      },
+    ],
   },
 };
 
