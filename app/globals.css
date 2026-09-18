@@ -548,3 +548,24 @@ b { color: var(--text); }
   .secret-value-entry button,
   .secret-target-row > button { width: 100%; }
 }
+
+
+.provider-popup-only {
+  height: 100%;
+  min-height: 260px;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  background: var(--panel);
+}
+.provider-popup-only strong { color: var(--text); font-size: 1rem; }
+.provider-popup-only p {
+  margin: 0 auto;
+  max-width: 520px;
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+.provider-popup-only button { justify-self: center; }
