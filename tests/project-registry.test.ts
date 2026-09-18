@@ -20,12 +20,14 @@ test("CreatorHub and RaiseHub are registered as linked projects", () => {
   assert.equal(creatorhub.vercelProject.name, "creatorhub");
   assert.equal(creatorhub.supabaseProjectRef, "yufptpfiwdbzzrvhkvux");
   assert.equal(creatorhub.healthPlaybookKey, "creatorhub-health-check");
+  assert.equal(creatorhub.hermesPlaybookKey, "creatorhub-hermes-patch");
 
   const raisehub = getLinkedProject("raisehub");
   assert.ok(raisehub);
   assert.equal(raisehub.repoSlug, "zanibethel/raisehub");
   assert.equal(raisehub.vercelProject.name, "raisehub");
   assert.equal(raisehub.healthPlaybookKey, "raisehub-health-check");
+  assert.equal(raisehub.hermesPlaybookKey, "raisehub-hermes-patch");
 });
 
 test("CreatorHub human setup covers Instagram, TikTok, and Fanvue without secret values", () => {
@@ -80,4 +82,17 @@ test("cross-repository execution uses each playbook's reviewed gitRef", () => {
 
   assert.match(route, /playbook\.gitRef \?\?/);
   assert.match(route, /process\.env\.VERCEL_GIT_COMMIT_SHA/);
+});
+
+
+test("linked-project UI exposes a bounded Hermes patch workspace", () => {
+  const page = fs.readFileSync(
+    path.join(process.cwd(), "app/console/projects/page.tsx"),
+    "utf8",
+  );
+
+  assert.match(page, /Cloud Hermes workspace/);
+  assert.match(page, /Run governed Hermes patch/);
+  assert.match(page, /maxSpendUsd: budget/);
+  assert.match(page, /Applying that patch to GitHub remains a separate reviewed action/);
 });
