@@ -35,20 +35,27 @@ AI is used only for steps that genuinely require reasoning, interpretation, or g
 
 See `docs/CORE-OPERATING-MODEL.md` for the full doctrine.
 
-## Eight product systems
+## Nine product systems
 
 ### 1. Intelligence Desk
 Builds a structured business model from conversations, connected systems, documents, websites, and observed workflows.
 
-### 2. Connected Services / Cost Map
+### 2. Memory & Preference Engine
+Continuously converts conversations, decisions, lessons, preferences, policies, goals, and relevant context into durable structured memory so the owner does not have to repeatedly explain how they want AI or the business to operate.
+
+Memory remains independent of any one AI provider, keeps provenance, supports changing preferences, and retrieves only relevant context for each task.
+
+See `docs/MEMORY-AND-PREFERENCES.md`.
+
+### 3. Connected Services / Cost Map
 Tracks what a customer already uses, what it costs, which features matter, what data is available, and whether each service should be kept, optimized, mirrored, or replaced.
 
-### 3. Capability Registry
+### 4. Capability Registry
 A current catalog of what CoOperative can use: native modules, APIs, plugins/connectors, workflow engines, AI capabilities, website components, communication channels, scheduling tools, payment tools, and manual handoffs.
 
 Every capability should record cost model, authentication method, supported actions, limits, risk, audience, and current approval status.
 
-### 4. Playbook + Script Library
+### 5. Playbook + Script Library
 A playbook is a reusable solution pattern or proven growth pattern, not customer data. Scripts/functions implement deterministic steps inside those playbooks.
 
 Example:
@@ -57,20 +64,20 @@ Example:
 
 A playbook can have many implementations depending on the customer's tools, permissions, cost priorities, and current native CoOperative coverage.
 
-### 5. Growth Opportunity Engine
+### 6. Growth Opportunity Engine
 Continuously looks for credible ways to protect revenue, save money, increase current revenue, and create new revenue.
 
 It should use business evidence, capacity, customer behavior, available capabilities, and proven playbooks to generate measurable proposals rather than generic ideas.
 
-### 6. Mission Control
+### 7. Mission Control
 Executes approved workflows with least-privilege access, approval gates, logs, retries, human exception handling, and cost limits.
 
-### 7. Connector Factory
+### 8. Connector Factory
 Turns approved providers into reusable connection adapters using OAuth/OIDC, APIs, webhooks, imports, or supported migration mechanisms.
 
 The connector hides provider-specific details behind stable CoOperative capability contracts.
 
-### 8. Improvement Lab
+### 9. Improvement Lab
 Analyzes evidence across deployments, researches new capabilities, improves playbooks/scripts, finds cheaper providers/models, discovers reusable growth patterns, and proposes platform changes.
 
 Hermes serves as the privileged Platform Operative / Improvement Engineer. It can research, prepare connectors/code, run tests, and propose changes. Its autonomy should expand only within governed risk classes.
