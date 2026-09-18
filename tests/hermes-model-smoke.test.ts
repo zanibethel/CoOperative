@@ -40,3 +40,25 @@ test("Owner Console makes the paid smoke test explicit and tiny", () => {
   assert.match(consoleSource, /max \$0\.02/);
   assert.match(consoleSource, /No persistent provider key/);
 });
+
+
+const registrySource = fs.readFileSync(
+  path.join(process.cwd(), "lib/operative/playbook-registry.ts"),
+  "utf8",
+);
+const executeRouteSource = fs.readFileSync(
+  path.join(process.cwd(), "app/api/operative/tasks/[id]/execute/route.ts"),
+  "utf8",
+);
+
+test("Cloud Hermes uses the canonical database executor contract", () => {
+  assert.match(registrySource, /executor:\s*"hermes-cloud-operative"/);
+  assert.equal(registrySource.includes('executor: "cloud-hermes"'), false);
+  assert.match(workflowSource, /executor:\s*"hermes-cloud-operative"/);
+});
+
+test("executor selection failures become terminal task failures", () => {
+  assert.match(executeRouteSource, /Executor selection failed:/);
+  assert.match(executeRouteSource, /stage:\s*"executor_selection"/);
+  assert.match(executeRouteSource, /status:\s*"failed"/);
+});
