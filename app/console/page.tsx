@@ -275,6 +275,60 @@ export default function OwnerConsolePage() {
     }
   }
 
+  async function runCloudSelfCheck() {
+    setWorking(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const messageText =
+        "Run the allow-listed Cloud Operative self-check in Vercel Sandbox and record the result.";
+      const message = await persistMessage(messageText);
+
+      const createResponse = await fetch("/api/operative/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: message.conversationId,
+          title: "Cloud Operative self-check",
+          description:
+            "Verify that CoOperative can execute its reviewed deterministic self-check playbook in an isolated cloud sandbox while the Mac is not part of the runtime.",
+          playbookKey: "cloud-self-check",
+          maxSpendUsd: 0,
+          flags: { requiresShell: true },
+        }),
+      });
+
+      const created = await createResponse.json();
+      if (!createResponse.ok) {
+        if (created.code === "SERVER_SECRET_NOT_CONFIGURED") {
+          throw new Error(
+            "Cloud self-check is ready, but trusted task writes remain disabled until SUPABASE_SECRET_KEY is explicitly configured.",
+          );
+        }
+        throw new Error(created.error ?? "Unable to create cloud self-check task");
+      }
+
+      const executeResponse = await fetch(
+        "/api/operative/tasks/" + created.task.id + "/execute",
+        { method: "POST" },
+      );
+      const executed = await executeResponse.json();
+
+      if (!executeResponse.ok) {
+        throw new Error(executed.error ?? "Cloud self-check execution failed");
+      }
+
+      setNotice("Cloud self-check completed and its evidence was saved to the task record.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cloud self-check failed");
+      await load().catch(() => undefined);
+    } finally {
+      setWorking(false);
+    }
+  }
+
   return (
     <main className="shell operative-shell">
       <nav className="nav">
@@ -400,6 +454,26 @@ export default function OwnerConsolePage() {
         </div>
 
         <aside className="console-sidebar">
+          <section className="card">
+            <div className="eyebrow">Bootstrap proof</div>
+            <h2>Cloud self-check</h2>
+            <p>
+              Run one reviewed deterministic playbook in an isolated Vercel Sandbox.
+              No owner text becomes shell commands and no Hermes/model reasoning is used.
+            </p>
+            <button
+              className="primary"
+              type="button"
+              disabled={working || !overview.organization}
+              onClick={() => void runCloudSelfCheck()}
+            >
+              {working ? "Working…" : "Run cloud self-check"}
+            </button>
+            <small className="console-helper">
+              First live run requires the server-only Supabase secret gate so task events and evidence can be written safely.
+            </small>
+          </section>
+
           <section className="card">
             <div className="eyebrow">Mission Control</div>
             <h2>Recent tasks</h2>
