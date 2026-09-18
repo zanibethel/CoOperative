@@ -45,6 +45,8 @@ test("initial Cloud Hermes roadblocks are preserved as reusable rules", () => {
     "linked-project-use-own-revision",
     "provider-auth-use-human-handoff",
     "linked-hermes-patch-review-before-write",
+    "secret-value-request-only-after-owner-approval",
+    "vercel-env-change-requires-new-deployment",
     "provider-secrets-never-enter-agent-context",
     "supabase-trusted-writes-preserve-owner-gates",
   ]) {
