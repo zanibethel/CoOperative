@@ -6,7 +6,7 @@ export interface CloudPlaybook {
   title: string;
   description: string;
   requiresShell: boolean;
-  executor: "deterministic-code" | "cloud-hermes";
+  executor: "deterministic-code" | "hermes-cloud-operative";
   executionMode?: "sync" | "detached" | "workflow";
   repoSlug: string;
   buildCommands: () => { cmd: string; args?: string[] }[];
@@ -74,7 +74,7 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     description:
       "Reuse the prepared Hermes runtime and run one bounded model-backed reasoning turn through Vercel AI Gateway using the deployment OIDC token. No persistent provider credential, shell tools, repository writes, or production changes.",
     requiresShell: true,
-    executor: "cloud-hermes",
+    executor: "hermes-cloud-operative",
     executionMode: "workflow",
     repoSlug: "zanibethel/CoOperative",
     buildCommands: () => [],
