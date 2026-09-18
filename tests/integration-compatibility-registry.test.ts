@@ -38,6 +38,7 @@ test("initial Cloud Hermes roadblocks are preserved as reusable rules", () => {
     "hermes-v0213-global-flags-before-subcommand",
     "hermes-v0213-minimum-context-64k",
     "hermes-v0213-usage-file-requires-scripted-oneshot",
+    "ai-gateway-unknown-cost-must-not-equal-zero",
     "hermes-prompt-size-diagnostic-must-be-bounded",
     "prepared-hermes-runtime-reuse",
     "supabase-trusted-writes-preserve-owner-gates",
