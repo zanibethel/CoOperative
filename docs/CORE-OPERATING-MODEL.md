@@ -267,6 +267,73 @@ The Capability Router selects the approved implementation based on:
 
 This allows CoOperative to replace providers without changing the customer's workflow.
 
+## Migration Learning Loop
+
+Every successful migration should reduce the cost, time, and uncertainty of the next similar migration.
+
+Early migrations may require more AI/Hermes reasoning. The durable output should become reusable CoOperative knowledge:
+
+- provider capability maps;
+- source-to-target field mappings;
+- schema transforms;
+- export/import scripts;
+- OAuth/scoping patterns;
+- data-validation rules;
+- reconciliation checks;
+- cutover checklists;
+- shadow-testing procedures;
+- rollback plans;
+- known edge cases;
+- cost/latency measurements;
+- migration success/failure evidence.
+
+Preferred progression:
+
+```text
+first migration
+  -> AI-assisted discovery
+  -> capture mappings + scripts + tests
+  -> validate outcome
+  -> promote to migration playbook
+
+next migration
+  -> reuse playbook
+  -> deterministic mapping/validation
+  -> AI only for exceptions
+  -> capture new edge cases
+  -> improve playbook
+
+mature migration
+  -> mostly automated
+  -> low-cost exception handling
+  -> predictable timing + cost
+```
+
+The goal is that common migrations eventually feel close to one-click from the customer's perspective while still preserving review, tenant isolation, reconciliation, and rollback safety.
+
+### Training and model improvement
+
+Migration outcomes may be used to improve CoOperative-specific models and routing, but raw private tenant data is not automatically training data.
+
+Prefer generalized or de-identified migration patterns such as:
+
+- "Provider A field X usually maps to target field Y";
+- "this API pagination pattern requires this retry behavior";
+- "this migration commonly fails when condition Z is present";
+- "this validation sequence catches duplicate records reliably".
+
+Use approved migration evidence to improve:
+
+- migration-plan generation;
+- connector selection;
+- field-mapping suggestions;
+- anomaly detection;
+- rollback prediction;
+- cost estimation;
+- exception triage.
+
+The strongest end state is not a model that memorizes customer data. It is a platform that has accumulated enough scripts, mappings, tests, and generalized evidence that the model only handles the unusual cases.
+
 ## Connected-service migration strategy
 
 CoOperative should meet the customer where they are.
