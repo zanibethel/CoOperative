@@ -460,3 +460,58 @@ Each entry should contain:
 **Source:** Owner phone execution plus independently queried Supabase task/event/cost evidence.
 
 **Status:** First cloud execution proof COMPLETE. Generic task dispatch/routing remains pending.
+
+
+---
+
+## 2026-09-18 — First canonical task completed by connected ChatGPT executor
+
+**Scope:** Cloud Operative / executor routing / RaiseHub managed-project pilot
+
+**Owner intent:** Use the active ChatGPT connection before consuming Hermes/model credits whenever ChatGPT already has the tools and permissions required for the task.
+
+**Changes / decisions:**
+- The real Owner Console task `Check out raisehub.app and let me know if there are any improvements I could make` was claimed from canonical CoOperative state by `connected-chatgpt`.
+- The task progressed through `queued -> planning -> executing -> verifying -> completed`.
+- ChatGPT reviewed the live RaiseHub production site, Vercel production/runtime health, and the current RaiseHub repository/docs.
+- Findings were persisted back into `operative_tasks.result`, task events were recorded, and a Cost Governor ledger entry recorded $0 incremental CoOperative/Hermes model spend.
+- The task's owner-provided maximum spend cap was $0.50; actual recorded marginal spend was $0.
+- Owner Console Mission Control was extended to render structured completed-task findings instead of leaving results visible only in the database.
+- This proves that connected ChatGPT can function as one governed executor while CoOperative remains the canonical task/evidence system.
+
+**Why:** The owner already pays a fixed ChatGPT subscription and wants Hermes credits reserved for capability gaps. This validates the intended executor split with a real managed-project task.
+
+**Affected areas:** Executor Router, Cost Governor, Mission Control results, RaiseHub improvement pilot, future ChatGPT bridge.
+
+**Conflict / supersession notes:** This does not mean Owner Console can independently summon this ChatGPT session yet. Automatic ChatGPT dispatch still requires a controlled ChatGPT/CoOperative bridge. The task was executed through the currently active connected owner session.
+
+**Source:** Owner-created CoOperative task plus connected ChatGPT/Vercel/GitHub execution and Supabase evidence.
+
+**Status:** Connected-ChatGPT executor pattern proven manually; bridge automation pending.
+
+---
+
+## 2026-09-18 — Cloud Hermes becomes an on-demand task-scoped runtime
+
+**Scope:** Cloud Operative / Hermes / model routing / Vercel Sandbox
+
+**Owner intent:** Move Hermes capability off the Mac without creating an expensive always-on server, and make CoOperative—not a mutable Hermes default—the authority for model choice and spend.
+
+**Changes / decisions:**
+- Added a credential-free `hermes-runtime-check` playbook to prove the pinned official Hermes runtime can install and execute inside Vercel Sandbox before any provider credential is migrated.
+- Added a dormant server-only Cloud Hermes adapter that refuses to run unless `NOUS_API_KEY` is explicitly configured.
+- Owner task text is written into the Sandbox as a file and supplied through Hermes `--query-file`; owner text never becomes shell commands.
+- Only the provider credential is passed into the Hermes Sandbox. `SUPABASE_SECRET_KEY` and other platform secrets are not injected.
+- Hermes runs with task-scoped model/provider, bounded max turns, bounded runtime, machine-readable usage capture, and guaranteed Sandbox shutdown.
+- Added task-scoped model-routing policy: standard work prefers the approved low-cost model and may fall back on recognized availability failures; advanced work preserves a stronger quality floor and must not silently downgrade.
+- Model ladders can be overridden by environment configuration so provider/model changes do not require architectural rewrites.
+
+**Why:** Cloud Hermes should be ephemeral reasoning/execution infrastructure governed by CoOperative policy and Cost Governor, not a permanent VM or a single manually selected model.
+
+**Affected areas:** Cloud Hermes adapter, AI Router, Cost Governor, Vercel Sandbox, Owner Console, future generic dispatcher.
+
+**Conflict / supersession notes:** Reinforces the earlier model-routing decision and the event-driven infrastructure strategy. Provider authentication remains an explicit owner gate and has not been configured.
+
+**Source:** Owner-authorized ChatGPT implementation after successful Mac-independent deterministic Cloud Operative proof.
+
+**Status:** Runtime/model-routing code prepared in Preview; credential-free Hermes runtime test and later provider-auth gate remain.
