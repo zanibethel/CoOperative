@@ -101,6 +101,45 @@ export async function POST(
   }
 
   const fromStatus = task.status;
+  let executionFromStatus = fromStatus;
+
+  if (fromStatus === "queued") {
+    const { data: planningClaim, error: planningClaimError } = await admin
+      .from("operative_tasks")
+      .update({
+        status: "planning",
+        error: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", task.id)
+      .eq("organization_id", task.organization_id)
+      .eq("status", "queued")
+      .select("id")
+      .maybeSingle();
+
+    if (planningClaimError) {
+      return NextResponse.json({ error: planningClaimError.message }, { status: 500 });
+    }
+
+    if (!planningClaim) {
+      return NextResponse.json(
+        { error: "Task was claimed or changed by another executor.", code: "TASK_CONFLICT" },
+        { status: 409 },
+      );
+    }
+
+    await admin.from("task_events").insert({
+      task_id: task.id,
+      organization_id: task.organization_id,
+      event_type: "status_changed",
+      from_status: "queued",
+      to_status: "planning",
+      actor: "system",
+      detail: { playbookKey: playbook.key },
+    });
+
+    executionFromStatus = "planning";
+  }
 
   const { data: claimed, error: claimError } = await admin
     .from("operative_tasks")
@@ -112,7 +151,7 @@ export async function POST(
     })
     .eq("id", task.id)
     .eq("organization_id", task.organization_id)
-    .eq("status", fromStatus)
+    .eq("status", executionFromStatus)
     .select("id")
     .maybeSingle();
 
@@ -144,7 +183,7 @@ export async function POST(
       task_id: task.id,
       organization_id: task.organization_id,
       event_type: "status_changed",
-      from_status: fromStatus,
+      from_status: executionFromStatus,
       to_status: "executing",
       actor: "system",
       detail: { playbookKey: playbook.key },
@@ -197,7 +236,7 @@ export async function POST(
       currency: "USD",
       is_marginal_cost: true,
       notes:
-        "Bootstrap self-check recorded at $0 marginal cash cost while using included Vercel Sandbox quota; runtime " +
+        "Bootstrap self-check recorded at $0 direct per-task marginal cash cost in the CoOperative ledger; allocated platform/quota cost should be reconciled separately. Runtime " +
         result.durationMs +
         "ms.",
     });
