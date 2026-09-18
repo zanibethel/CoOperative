@@ -118,8 +118,8 @@ export const OperativeTaskSchema = z.object({
     ])
     .nullable()
     .default(null),
-  maxSpendCents: z.number().int().min(0).default(0),
-  actualSpendCents: z.number().int().min(0).default(0),
+  maxSpendMicrounits: z.number().int().min(0).default(0),
+  actualSpendMicrounits: z.number().int().min(0).default(0),
   result: z.unknown().nullable().default(null),
   error: z.string().nullable().default(null),
 });
@@ -210,8 +210,8 @@ export const ExecutorCandidateSchema = z.object({
   available: z.boolean(),
   /** Whether it has the required tools/permissions for this specific task. */
   qualified: z.boolean(),
-  /** Estimated incremental (marginal) cost in cents for this task. Flat-rate-covered work is 0. */
-  estimatedMarginalCostCents: z.number().int().min(0),
+  /** Estimated incremental cost in millionths of a currency unit. Flat-rate-covered work is 0. */
+  estimatedMarginalCostMicrounits: z.number().int().min(0),
   /** Needs cloud autonomy, shell access, persistence, or background execution. */
   requiresAutonomousExecution: z.boolean().default(false),
   estimatedLatencyMs: z.number().int().min(0).optional(),
@@ -301,7 +301,7 @@ export const CostLedgerEntrySchema = z.object({
     "vercel-sandbox",
   ]),
   costCategory: CostCategorySchema,
-  amountCents: z.number().int().min(0),
+  amountMicrounits: z.number().int().min(0),
   currency: z.string().length(3).default("USD"),
   isMarginalCost: z.boolean().default(true),
   notes: z.string().max(500).optional(),
