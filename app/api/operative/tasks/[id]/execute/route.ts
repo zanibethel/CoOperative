@@ -310,7 +310,7 @@ export async function POST(
                   taskId: task.id,
                   organizationId: task.organization_id,
                   projectKey: playbook.projectKey,
-                  request: task.description,
+                  request: task.description || task.title,
                   maxSpendMicrounits: Number(task.max_spend_microunits ?? 0),
                   compatibilityReview: {
                     ruleIds: compatibilityReview.ruleIds,
