@@ -17,7 +17,7 @@ test("cloud self-check uses a fixed command allow-list", () => {
   assert.equal(playbook.requiresShell, true);
   assert.equal(playbook.repoSlug, "zanibethel/CoOperative");
   assert.deepEqual(playbook.buildCommands(), [
-    { cmd: "git", args: ["rev-parse", "HEAD"] },
+    { cmd: "test", args: ["-f", "package.json"] },
     { cmd: "node", args: ["--version"] },
     { cmd: "npm", args: ["install", "--no-audit", "--no-fund"] },
     { cmd: "npm", args: ["test"] },
