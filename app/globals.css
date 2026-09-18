@@ -114,7 +114,15 @@ b { color: var(--text); }
 .notice { color: var(--accent-2); font-size: .86rem; }
 .console-sidebar { display: grid; gap: 16px; }
 .task-stack { display: grid; gap: 10px; }
-.task-card, .decision-card { border-top: 1px solid var(--line); padding-top: 13px; }
+.task-card, .decision-card { border-top: 1px solid var(--line); padding-top: 13px; min-width: 0; overflow: hidden; }
+.task-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
 .task-card:first-child, .decision-card:first-child { border-top: 0; }
 .task-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
 .task-card p, .decision-card p { font-size: .84rem; margin: 8px 0; }
@@ -164,3 +172,70 @@ b { color: var(--text); }
 .task-finding { border-left: 2px solid var(--line); padding-left: 9px; }
 .task-finding strong { display: block; font-size: .77rem; line-height: 1.4; }
 .task-finding p { margin: 4px 0 0; font-size: .76rem; line-height: 1.45; color: var(--muted); }
+
+.task-error {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  min-width: 0;
+}
+.task-error summary {
+  cursor: pointer;
+  color: var(--danger);
+  font-size: .78rem;
+  font-weight: 800;
+}
+.task-error-panel {
+  margin-top: 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 4%, var(--panel-2));
+  padding: 9px;
+  min-width: 0;
+}
+.task-error-toolbar,
+.task-error-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.task-error-toolbar span {
+  color: var(--muted);
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.task-error-code {
+  margin: 8px 0;
+  max-height: 180px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: 8px;
+  padding: 9px;
+  background: rgba(0, 0, 0, .22);
+  color: var(--danger);
+  font-size: .72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.task-error-action {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: .7rem;
+  font-weight: 800;
+}
+.task-error-action:active { transform: translateY(1px); }
+
+@media (max-width: 600px) {
+  .task-card-head { gap: 8px; }
+  .task-error-code { max-height: 150px; }
+  .task-error-actions { align-items: stretch; }
+  .task-error-actions .task-error-action { flex: 1 1 100%; }
+}
