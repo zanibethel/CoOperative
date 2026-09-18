@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { hermesRuntimeWorkflow } from "@/lib/workflow/hermes-runtime";
 import { hermesModelSmokeWorkflow } from "@/lib/workflow/hermes-model-smoke";
+import { linkedProjectHermesWorkflow } from "@/lib/workflow/linked-project-hermes";
 
 export const maxDuration = 300;
 
@@ -38,7 +39,7 @@ export async function POST(
   const { data: task, error: taskError } = await supabase
     .from("operative_tasks")
     .select(
-      "id, organization_id, status, playbook_key, requires_owner_approval, max_spend_microunits",
+      "id, organization_id, title, description, status, playbook_key, requires_owner_approval, max_spend_microunits",
     )
     .eq("id", id)
     .maybeSingle();
@@ -235,7 +236,7 @@ export async function POST(
       detail: {
         executor: playbook.executor,
         runtime:
-          playbook.key === "hermes-model-smoke"
+          playbook.executor === "hermes-cloud-operative"
             ? "vercel-workflow+vercel-sandbox+ai-gateway"
             : playbook.executionMode === "workflow"
               ? "vercel-workflow+vercel-sandbox"
@@ -303,12 +304,26 @@ export async function POST(
                 },
               },
             ])
-          : await start(hermesRuntimeWorkflow, [
-              {
-                taskId: task.id,
-                organizationId: task.organization_id,
-              },
-            ]);
+          : playbook.projectKey
+            ? await start(linkedProjectHermesWorkflow, [
+                {
+                  taskId: task.id,
+                  organizationId: task.organization_id,
+                  projectKey: playbook.projectKey,
+                  request: task.description,
+                  maxSpendMicrounits: Number(task.max_spend_microunits ?? 0),
+                  compatibilityReview: {
+                    ruleIds: compatibilityReview.ruleIds,
+                    brief: compatibilityReview.brief,
+                  },
+                },
+              ])
+            : await start(hermesRuntimeWorkflow, [
+                {
+                  taskId: task.id,
+                  organizationId: task.organization_id,
+                },
+              ]);
 
       const { data: currentTask, error: currentTaskError } = await admin
         .from("operative_tasks")
