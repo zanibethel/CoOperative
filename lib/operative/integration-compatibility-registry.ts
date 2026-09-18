@@ -245,6 +245,27 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "linked-hermes-patch-review-before-write",
+    targets: ["linked-project", "hermes-agent", "provider-secret-broker"],
+    component: "Linked-project Hermes coding",
+    appliesTo: "CreatorHub and RaiseHub governed patch workflows",
+    symptom: "An autonomous coding task could otherwise turn model reasoning directly into repository, deployment, database, or secret changes.",
+    rootCause: "Reasoning and privileged write authority were coupled into one execution step.",
+    knownGoodPattern: "Run Hermes against an isolated public clone with file tools only, collect a bounded git patch, block credential/runtime paths, run deterministic project verification, record model usage/cost, and require a separate reviewed action before any GitHub or production write.",
+    avoidPatterns: [
+      "giving linked-project Hermes GitHub push credentials",
+      "injecting provider secrets into Hermes",
+      "letting Hermes deploy or mutate production directly",
+    ],
+    enforcementPaths: [
+      "lib/workflow/linked-project-hermes.ts",
+      "lib/operative/playbook-registry.ts",
+      "tests/linked-project-hermes.test.ts",
+    ],
+    learnedAt: "2026-09-18",
+    status: "active",
+  },
+  {
     id: "provider-secrets-never-enter-agent-context",
     targets: ["provider-secret-broker", "hermes-agent"],
     component: "Provider credential handling",
