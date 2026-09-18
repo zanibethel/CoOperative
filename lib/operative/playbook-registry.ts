@@ -6,6 +6,8 @@ export const CLOUD_PLAYBOOK_KEYS = [
   "hermes-model-smoke",
   "creatorhub-health-check",
   "raisehub-health-check",
+  "creatorhub-hermes-patch",
+  "raisehub-hermes-patch",
 ] as const;
 export type CloudPlaybookKey = (typeof CLOUD_PLAYBOOK_KEYS)[number];
 
@@ -18,6 +20,7 @@ export interface CloudPlaybook {
   executionMode?: "sync" | "detached" | "workflow";
   repoSlug: string;
   gitRef?: string;
+  projectKey?: "creatorhub" | "raisehub";
   compatibilityTargets: readonly CompatibilityTarget[];
   buildCommands: () => { cmd: string; args?: string[] }[];
 }
@@ -130,6 +133,64 @@ const PLAYBOOKS: Record<CloudPlaybookKey, CloudPlaybook> = {
     ],
     buildCommands: () => [
       { cmd: "test", args: ["-f", "package.json"] },
+      { cmd: "npm", args: ["ci", "--no-audit", "--no-fund"] },
+      { cmd: "npm", args: ["test"] },
+      { cmd: "npx", args: ["tsc", "--noEmit"] },
+      { cmd: "npm", args: ["run", "lint"] },
+      { cmd: "npm", args: ["run", "build"] },
+    ],
+  },
+  "creatorhub-hermes-patch": {
+    key: "creatorhub-hermes-patch",
+    title: "CreatorHub governed Hermes patch",
+    description:
+      "Use the prepared Cloud Hermes runtime with file-only tools to inspect and edit an isolated CreatorHub clone, then collect a reviewable patch and run deterministic verification. No GitHub write, secret access, provider login, database change, production change, or deployment.",
+    requiresShell: true,
+    executor: "hermes-cloud-operative",
+    executionMode: "workflow",
+    repoSlug: "zanibethel/CreatorHub",
+    gitRef: "main",
+    projectKey: "creatorhub",
+    compatibilityTargets: [
+      "cooperative-executor-contract",
+      "linked-project",
+      "provider-auth-handoff",
+      "provider-secret-broker",
+      "supabase",
+      "vercel-workflow",
+      "vercel-sandbox",
+      "vercel-ai-gateway",
+      "hermes-agent",
+    ],
+    buildCommands: () => [
+      { cmd: "npm", args: ["install", "--no-audit", "--no-fund"] },
+      { cmd: "npx", args: ["tsc", "--noEmit"] },
+      { cmd: "npm", args: ["run", "lint"] },
+      { cmd: "npm", args: ["run", "build"] },
+    ],
+  },
+  "raisehub-hermes-patch": {
+    key: "raisehub-hermes-patch",
+    title: "RaiseHub governed Hermes patch",
+    description:
+      "Use the prepared Cloud Hermes runtime with file-only tools to inspect and edit an isolated RaiseHub clone, then collect a reviewable patch and run deterministic verification. No GitHub write, secret access, payment action, database change, production change, or deployment.",
+    requiresShell: true,
+    executor: "hermes-cloud-operative",
+    executionMode: "workflow",
+    repoSlug: "zanibethel/raisehub",
+    gitRef: "main",
+    projectKey: "raisehub",
+    compatibilityTargets: [
+      "cooperative-executor-contract",
+      "linked-project",
+      "provider-secret-broker",
+      "supabase",
+      "vercel-workflow",
+      "vercel-sandbox",
+      "vercel-ai-gateway",
+      "hermes-agent",
+    ],
+    buildCommands: () => [
       { cmd: "npm", args: ["ci", "--no-audit", "--no-fund"] },
       { cmd: "npm", args: ["test"] },
       { cmd: "npx", args: ["tsc", "--noEmit"] },
