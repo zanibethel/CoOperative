@@ -19,6 +19,24 @@ CoOperative should preserve both:
 1. **conversation history** — what was actually said;
 2. **structured memory** — the durable facts, preferences, policies, decisions, lessons, goals, and unresolved questions extracted from that conversation.
 
+## Repository-visible owner intent audit
+
+Until the full canonical conversation/memory pipeline is operational—and as a durable human-readable complement afterward—meaningful owner conversations about product vision, future direction, architecture, operating policy, managed projects, or consequential implementation changes should also be summarized in:
+
+`docs/OWNER-INTENT-AUDIT.md`
+
+The audit is chronological evidence. Structured memory remains the selective machine-readable context layer.
+
+Before substantial work, agents should check relevant recent audit entries so they can:
+
+- recover the reason prior work exists;
+- avoid duplicating an existing feature;
+- detect conflicts with prior decisions;
+- identify explicit changes in owner direction;
+- preserve superseded decisions instead of silently rewriting history.
+
+Do not add routine chatter or low-value implementation noise to the audit.
+
 ## What should become durable memory
 
 Examples include:
@@ -238,7 +256,6 @@ The memory system is working when:
 8. memories have provenance;
 9. tenant/private information stays isolated;
 10. useful revelations continuously improve future conversations and decisions.
-
 
 ## Omnichannel memory sync
 
