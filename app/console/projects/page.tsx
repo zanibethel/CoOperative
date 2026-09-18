@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import SecretBrokerPanel from "./SecretBrokerPanel";
+
 import {
   linkedProjects,
   type LinkedProjectManifest,
@@ -352,6 +354,12 @@ export default function LinkedProjectsPage() {
                 Secure environment injection remains a separate owner-gated broker operation.
               </small>
             </details>
+
+            <SecretBrokerPanel
+              projectKey={project.key}
+              projectName={project.name}
+              requirements={project.secretRequirements}
+            />
 
             {project.humanActions.length > 0 ? (
               <div className="human-actions">
