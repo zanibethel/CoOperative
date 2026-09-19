@@ -53,6 +53,8 @@ test("linked-project Hermes returns a bounded reviewable patch and blocks secret
   assert.equal(source.includes('"--checkpoints"'), false);
   assert.equal(source.includes('"--source"'), false);
   assert.match(source, /timeout 300s/);
+  assert.match(source, /new TextEncoder\(\)\.encode\(value\)\.byteLength/);
+  assert.equal(source.includes("Buffer.byteLength"), false);
 });
 
 test("task dispatcher sends project-scoped workflow requests to linked Hermes", () => {
