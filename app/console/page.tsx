@@ -110,6 +110,14 @@ function taskProgressLabel(result: unknown): string | null {
   return stage.replaceAll("_", " ");
 }
 
+function taskLinkedProjectKey(result: unknown): "creatorhub" | "raisehub" | null {
+  if (!result || typeof result !== "object") return null;
+  const linkedProject = (result as { linkedProject?: unknown }).linkedProject;
+  return linkedProject === "creatorhub" || linkedProject === "raisehub"
+    ? linkedProject
+    : null;
+}
+
 function taskHermesModelEvidence(result: unknown): {
   model?: string;
   provider?: string;
@@ -505,6 +513,67 @@ export default function OwnerConsolePage() {
       setError(err instanceof Error ? err.message : "Unable to save decision response");
     } finally {
       setDecisionWorkingId(null);
+    }
+  }
+
+  async function retryHermesProjectTask(task: Task) {
+    const projectKey = taskLinkedProjectKey(task.result);
+    if (!projectKey) {
+      setError("This failed task is not linked to a supported Hermes project.");
+      return;
+    }
+
+    const budget = Number(task.max_spend_microunits ?? 0) / 1_000_000;
+    if (!Number.isFinite(budget) || budget <= 0) {
+      setError("This Hermes task does not have a positive model spend cap to reuse.");
+      return;
+    }
+
+    setWorking(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const projectName = projectKey === "creatorhub" ? "CreatorHub" : "RaiseHub";
+      const message = await persistMessage(
+        `Retry linked-project Hermes request for ${projectName}: ${task.description}`,
+      );
+
+      const createResponse = await fetch("/api/operative/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: message.conversationId,
+          title: `${projectName} · Hermes patch`,
+          description: task.description,
+          playbookKey: `${projectKey}-hermes-patch`,
+          maxSpendUsd: budget,
+          flags: { requiresShell: true },
+        }),
+      });
+      const created = await createResponse.json();
+      if (!createResponse.ok) {
+        throw new Error(created.error ?? "Unable to create retry Hermes task.");
+      }
+
+      const executeResponse = await fetch(
+        "/api/operative/tasks/" + created.task.id + "/execute",
+        { method: "POST" },
+      );
+      const executed = await executeResponse.json();
+      if (!executeResponse.ok) {
+        throw new Error(executed.error ?? "Unable to start retry Hermes task.");
+      }
+
+      setNotice(
+        `${projectName} Hermes retry started with the same ${moneyFromMicrounits(task.max_spend_microunits)} cap.`,
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to retry Hermes task.");
+      await load().catch(() => undefined);
+    } finally {
+      setWorking(false);
     }
   }
 
@@ -1065,6 +1134,16 @@ export default function OwnerConsolePage() {
                         </div>
                         <pre className="task-error-code"><code>{task.error}</code></pre>
                         <div className="task-error-actions">
+                          {taskLinkedProjectKey(task.result) ? (
+                            <button
+                              type="button"
+                              className="decision-approve"
+                              disabled={working}
+                              onClick={() => void retryHermesProjectTask(task)}
+                            >
+                              Retry Hermes patch
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="task-error-action"
