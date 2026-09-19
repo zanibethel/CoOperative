@@ -15,6 +15,10 @@ const MODEL = "alibaba/qwen3.5-flash";
 const PROVIDER = "ai-gateway";
 const MIN_HERMES_CONTEXT_WINDOW = 64_000;
 const MAX_PATCH_BYTES = 160_000;
+
+function utf8ByteLength(value: string) {
+  return new TextEncoder().encode(value).byteLength;
+}
 const MAX_TURNS = 16;
 
 interface HermesUsageReport {
@@ -408,7 +412,7 @@ async function runLinkedProjectHermes(
     });
     const patch = await diffResult.stdout();
 
-    if (Buffer.byteLength(patch, "utf8") > MAX_PATCH_BYTES) {
+    if (utf8ByteLength(patch) > MAX_PATCH_BYTES) {
       throw new Error(
         "Hermes patch exceeded the governed " + MAX_PATCH_BYTES + "-byte review limit.",
       );
@@ -744,7 +748,7 @@ export async function linkedProjectHermesWorkflow(
 
     await recordProgress(input, "collecting_patch", {
       changedFiles: evidence.changedFiles,
-      patchBytes: Buffer.byteLength(evidence.patch, "utf8"),
+      patchBytes: utf8ByteLength(evidence.patch),
       repositoryWritePerformed: false,
     });
 
