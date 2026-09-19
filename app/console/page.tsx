@@ -1008,6 +1008,22 @@ export default function OwnerConsolePage() {
                     {task.selected_executor ? <span>{task.selected_executor}</span> : <span>executor pending</span>}
                     {taskProgressLabel(task.result) ? <span>{taskProgressLabel(task.result)}</span> : null}
                   </div>
+                  {task.status === "executing" ? (
+                    <div className="task-live-progress" role="status" aria-live="polite">
+                      <div className="task-live-progress-head">
+                        <span>
+                          Live · {taskProgressLabel(task.result) ?? "working"}
+                        </span>
+                        <span>updates automatically</span>
+                      </div>
+                      <div
+                        className="task-live-progress-track"
+                        aria-label={"Task is still running: " + (taskProgressLabel(task.result) ?? "working")}
+                      >
+                        <span className="task-live-progress-bar" />
+                      </div>
+                    </div>
+                  ) : null}
                   <p className="task-description">{task.description}</p>
                   <div className="task-cost">
                     <span>spent {moneyFromMicrounits(Number(task.actual_spend_microunits ?? 0))}</span>
