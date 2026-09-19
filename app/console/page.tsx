@@ -29,6 +29,7 @@ type Task = {
 
 type Decision = {
   id: string;
+  task_id: string | null;
   proposal_summary: string;
   rationale: string;
   estimated_cost_cents: number;
@@ -289,6 +290,16 @@ export default function OwnerConsolePage() {
   const actualSpend = useMemo(
     () => overview.tasks.reduce((sum, task) => sum + Number(task.actual_spend_microunits ?? 0), 0),
     [overview.tasks],
+  );
+
+  const pendingDecisionByTask = useMemo(
+    () =>
+      new Map(
+        overview.pendingDecisions
+          .filter((decision): decision is Decision & { task_id: string } => Boolean(decision.task_id))
+          .map((decision) => [decision.task_id, decision]),
+      ),
+    [overview.pendingDecisions],
   );
 
   const detachedTaskIds = useMemo(
@@ -933,6 +944,30 @@ export default function OwnerConsolePage() {
                     <span>spent {moneyFromMicrounits(Number(task.actual_spend_microunits ?? 0))}</span>
                     <span>cap {moneyFromMicrounits(Number(task.max_spend_microunits ?? 0))}</span>
                   </div>
+                  {pendingDecisionByTask.get(task.id) ? (
+                    <div className="task-error-actions">
+                      <button
+                        type="button"
+                        className="decision-approve"
+                        disabled={decisionWorkingId === pendingDecisionByTask.get(task.id)?.id}
+                        onClick={() =>
+                          void respondToDecision(pendingDecisionByTask.get(task.id)!.id, "approve")
+                        }
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="decision-button"
+                        disabled={decisionWorkingId === pendingDecisionByTask.get(task.id)?.id}
+                        onClick={() =>
+                          void respondToDecision(pendingDecisionByTask.get(task.id)!.id, "reject")
+                        }
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  ) : null}
                   {taskFindings(task.result).length > 0 ? (
                     <details className="task-result">
                       <summary>View findings</summary>
