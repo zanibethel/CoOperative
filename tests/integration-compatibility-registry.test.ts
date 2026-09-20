@@ -50,6 +50,7 @@ test("initial Cloud Hermes roadblocks are preserved as reusable rules", () => {
     "provider-secrets-never-enter-agent-context",
     "linked-hermes-paid-step-no-auto-retry",
     "linked-hermes-timeout-split-scope",
+    "linked-hermes-deterministic-whitespace-repair-first",
     "linked-hermes-preserve-invalid-patch-evidence",
     "linked-hermes-detach-long-sandbox-process",
     "linked-hermes-bounded-phase-timeout-fix-worker",
