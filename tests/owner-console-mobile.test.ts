@@ -50,3 +50,11 @@ test("Mission Control exposes linked-project Hermes patch evidence without auto-
   assert.match(page, /repository write not performed/);
   assert.match(page, /taskHermesProjectPatch/);
 });
+
+
+test("Mission Control task cards show execution start and terminal end timestamps", () => {
+  assert.match(page, /className="task-timing"/);
+  assert.match(page, /<b>Started<\/b>/);
+  assert.match(page, /task\.started_at \?\? task\.created_at/);
+  assert.match(page, /task\.ended_at \? formatTime\(task\.ended_at\) : "In progress"/);
+});
