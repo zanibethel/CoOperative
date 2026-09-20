@@ -416,6 +416,27 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "linked-hermes-detach-long-sandbox-process",
+    targets: ["linked-project", "hermes-agent", "vercel-workflow", "vercel-sandbox"],
+    component: "Workflow ↔ Sandbox long-running transport",
+    appliesTo: "Hermes coding runs that may take several minutes",
+    symptom: "Workflow reaches Hermes reasoning, but the long Sandbox runCommand connection terminates with a Node fetch/undici TypeError before patch collection.",
+    rootCause: "One Workflow step held a single HTTP/TLS connection open for the full Hermes process lifetime. The serverless transport can terminate before the Sandbox command itself is done.",
+    knownGoodPattern: "Launch Hermes with Sandbox runCommand detached:true, return immediately, use durable Workflow sleep plus short polling steps to read status, then collect usage/patch and verify in separate short steps. Never hold one serverless request open for the full agent runtime.",
+    avoidPatterns: [
+      "awaiting a multi-minute Hermes runCommand inside one Workflow step",
+      "using setTimeout polling inside a serverless function",
+      "retrying paid Hermes after a transport termination without changing orchestration",
+    ],
+    enforcementPaths: [
+      "lib/workflow/linked-project-hermes.ts",
+      "tests/linked-project-hermes.test.ts",
+      "lib/operative/integration-compatibility-registry.ts",
+    ],
+    learnedAt: "2026-09-20",
+    status: "active",
+  },
+  {
     id: "linked-hermes-bounded-phase-timeout-fix-worker",
     targets: ["linked-project", "hermes-agent", "vercel-workflow"],
     component: "Linked-project Hermes worker iteration budget",
