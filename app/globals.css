@@ -876,3 +876,37 @@ b { color: var(--text); }
   line-height: 1.5;
 }
 .provider-popup-only button { justify-self: center; }
+
+
+.task-recovery-advice {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel-2));
+  padding: 11px;
+  display: grid;
+  gap: 8px;
+}
+.task-recovery-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--accent);
+  font-size: .69rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  font-weight: 800;
+}
+.task-recovery-advice > strong { color: var(--text); }
+.task-recovery-advice p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .76rem;
+  line-height: 1.45;
+}
+.task-recovery-advice p b { color: var(--text); }
+.task-recovery-warning {
+  border-left: 3px solid var(--danger);
+  padding-left: 8px;
+}
