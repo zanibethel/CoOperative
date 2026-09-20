@@ -48,6 +48,8 @@ test("initial Cloud Hermes roadblocks are preserved as reusable rules", () => {
     "secret-value-request-only-after-owner-approval",
     "vercel-env-change-requires-new-deployment",
     "provider-secrets-never-enter-agent-context",
+    "linked-hermes-paid-step-no-auto-retry",
+    "linked-hermes-timeout-split-scope",
     "supabase-trusted-writes-preserve-owner-gates",
   ]) {
     assert.ok(ids.has(id), `missing compatibility rule: ${id}`);
