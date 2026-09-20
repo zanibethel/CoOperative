@@ -526,8 +526,8 @@ async function startLinkedProjectHermesDetached(
     'max_iterations=max(1, int(os.getenv("HERMES_MAX_ITERATIONS", "4"))),';
   const iterationGuardScript = [
     "from pathlib import Path",
-    "import hermes_cli.oneshot as oneshot",
-    "path = Path(oneshot.__file__)",
+    "import sys",
+    "path = Path(sys.argv[1])",
     "text = path.read_text(encoding='utf-8')",
     "marker = " + JSON.stringify(iterationGuardMarker),
     "if marker not in text:",
@@ -539,24 +539,23 @@ async function startLinkedProjectHermesDetached(
     "print(str(path))",
   ].join("\n");
 
-  const hermesPythonShell = [
-    'HERMES_BIN="$HOME/.local/bin/hermes"',
-    'if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN=/usr/local/bin/hermes; fi',
-    'if [ ! -x "$HERMES_BIN" ]; then echo "missing-hermes-binary" >&2; exit 127; fi',
-    'HERMES_REAL="$(readlink -f "$HERMES_BIN" 2>/dev/null || printf "%s" "$HERMES_BIN")"',
-    'HERMES_PY="$(dirname "$HERMES_REAL")/python"',
-    'if [ ! -x "$HERMES_PY" ]; then',
-    '  IFS= read -r SHEBANG < "$HERMES_BIN"',
-    '  case "$SHEBANG" in',
-    '    "#!"*) INTERPRETER="${SHEBANG#\\#!}"; read -r -a PARTS <<< "$INTERPRETER"; HERMES_PY="${PARTS[0]}" ;;',
-    '    *) echo "unable-to-resolve-hermes-python" >&2; exit 126 ;;',
-    '  esac',
-    'fi',
+  const locateHermesOneshotShell = [
+    'SEARCH_ROOTS=""',
+    'for root in "$HOME/.cache/uv" "$HOME/.local" /usr/local /opt; do',
+    '  if [ -d "$root" ]; then SEARCH_ROOTS="$SEARCH_ROOTS $root"; fi',
+    'done',
+    'ONESHOT_PATH="$(find $SEARCH_ROOTS -type f -path "*/hermes_cli/oneshot.py" -print 2>/dev/null | head -n 1)"',
+    'if [ -z "$ONESHOT_PATH" ]; then echo "unable-to-locate-hermes-oneshot-source" >&2; exit 126; fi',
   ].join("\n");
 
   const iterationGuard = await sandbox.runCommand({
     cmd: "bash",
-    args: ["-lc", hermesPythonShell + '\nexec "$HERMES_PY" -c "$1"', "guard-install", iterationGuardScript],
+    args: [
+      "-lc",
+      locateHermesOneshotShell + '\nexec python -c "$1" "$ONESHOT_PATH"',
+      "guard-install",
+      iterationGuardScript,
+    ],
     cwd: "/tmp",
   });
   if (iterationGuard.exitCode !== 0) {
@@ -583,14 +582,8 @@ async function startLinkedProjectHermesDetached(
   ].join("\n");
 
   const guardVerify = await sandbox.runCommand({
-    cmd: "bash",
-    args: [
-      "-lc",
-      hermesPythonShell + '\nexec "$HERMES_PY" -c "$1" "$2"',
-      "guard-verify",
-      guardVerifyScript,
-      guardPath,
-    ],
+    cmd: "python",
+    args: ["-c", guardVerifyScript, guardPath],
     cwd: "/tmp",
   });
   if (guardVerify.exitCode !== 0) {
@@ -605,7 +598,7 @@ async function startLinkedProjectHermesDetached(
     throw new FatalError(message);
   }
 
-  const iterationGuardMode = "patched-v2026-9-14-oneshot-max-iterations";
+  const iterationGuardMode = "patched-v2026-9-14-oneshot-source-max-iterations";
 
   {
     const admin = createAdminClient();
