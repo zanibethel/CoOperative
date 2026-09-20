@@ -176,7 +176,7 @@ test("known git diff whitespace failures are repaired deterministically before a
   assert.match(source, /git diff --check · after deterministic repair/);
   assert.match(source, /deterministicRepairs/);
   assert.match(source, /repairableIssues\.length > 0/);
-  assert.equal(source.includes("space before tab in indent." |"), false);
+  assert.equal(source.includes("space before tab in indent."), false);
 });
 
 test("verification failure keeps structured repair advice instead of collapsing to a generic failure", () => {
