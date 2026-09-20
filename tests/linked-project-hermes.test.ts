@@ -126,13 +126,20 @@ test("timeout recovery preserves the exact failure and provides a bounded execut
 });
 
 
-test("bounded linked-project coding uses four Hermes iterations and nine-minute command headroom", () => {
+test("bounded linked-project coding patches the pinned oneshot path so four iterations are real", () => {
   assert.match(source, /const MAX_TURNS = 4/);
+  assert.match(source, /const MAX_EXPECTED_API_CALLS = MAX_TURNS \+ 1/);
   assert.match(source, /HERMES_MAX_ITERATIONS: String\(MAX_TURNS\)/);
+  assert.match(source, /hermes_cli\.oneshot/);
+  assert.match(source, /max_iterations=max\(1, int\(os\.getenv\("HERMES_MAX_ITERATIONS", "4"\)\)\),/);
+  assert.match(source, /py_compile\.compile/);
+  assert.match(source, /hermes_iteration_guard_verified/);
+  assert.match(source, /No paid model call was started/);
+  assert.match(source, /iterationGuardRespected/);
+  assert.match(source, /apiCalls > 0 && apiCalls <= MAX_EXPECTED_API_CALLS/);
   assert.match(source, /const HERMES_COMMAND_TIMEOUT_SECONDS = 540/);
   assert.match(source, /timeout: 12 \* 60 \* 1000/);
   assert.match(source, /deadlineAt: startedAt \+ 11 \* 60 \* 1000/);
-  assert.match(source, /"timeout " \+\s*HERMES_COMMAND_TIMEOUT_SECONDS \+\s*'s "\$HERMES_BIN" '/);
 });
 
 test("an already-bounded Phase 1 timeout recommends fixing the worker instead of splitting forever", () => {
@@ -208,4 +215,11 @@ test("targeted repair task lineage is validated and passed through dispatcher", 
   assert.match(createRoute, /same linked-project playbook with a preserved patch/);
   assert.match(route, /repairSourceTaskId/);
   assert.match(route, /repairSourceTaskId,/);
+});
+
+
+test("targeted repair re-checks the preserved patch against the original owner exclusions", () => {
+  assert.match(source, /\.select\("id,status,playbook_key,description,result"\)/);
+  assert.match(source, /ORIGINAL OWNER REQUEST AND EXCLUSIONS/);
+  assert.match(source, /Remove any out-of-scope changes that violate its explicit exclusions/);
 });
