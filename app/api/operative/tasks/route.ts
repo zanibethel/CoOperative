@@ -146,6 +146,66 @@ export async function POST(request: Request) {
     throw error;
   }
 
+  const repairSourceTaskId = parsed.data.repairSourceTaskId ?? null;
+
+  if (repairSourceTaskId) {
+    if (
+      !playbook ||
+      playbook.executor !== "hermes-cloud-operative" ||
+      !playbook.projectKey
+    ) {
+      return NextResponse.json(
+        {
+          error: "Targeted repair lineage is only supported for linked-project Hermes patch tasks.",
+          code: "REPAIR_PLAYBOOK_REQUIRED",
+        },
+        { status: 400 },
+      );
+    }
+
+    const { data: repairSource, error: repairSourceError } = await admin
+      .from("operative_tasks")
+      .select("id,status,playbook_key,result")
+      .eq("id", repairSourceTaskId)
+      .eq("organization_id", organization.id)
+      .maybeSingle();
+
+    if (repairSourceError) {
+      return NextResponse.json({ error: repairSourceError.message }, { status: 500 });
+    }
+
+    const sourceResult =
+      repairSource?.result &&
+      typeof repairSource.result === "object" &&
+      !Array.isArray(repairSource.result)
+        ? (repairSource.result as Record<string, unknown>)
+        : {};
+    const sourceEvidence =
+      sourceResult.evidence &&
+      typeof sourceResult.evidence === "object" &&
+      !Array.isArray(sourceResult.evidence)
+        ? (sourceResult.evidence as Record<string, unknown>)
+        : {};
+    const preservedPatch =
+      typeof sourceEvidence.patch === "string" ? sourceEvidence.patch : "";
+
+    if (
+      !repairSource ||
+      repairSource.status !== "failed" ||
+      repairSource.playbook_key !== playbook.key ||
+      !preservedPatch.trim()
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Targeted repair requires a failed task from the same linked-project playbook with a preserved patch.",
+          code: "REPAIR_SOURCE_INVALID",
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   const { data: task, error: taskError } = await admin
     .from("operative_tasks")
     .insert({
@@ -160,6 +220,12 @@ export async function POST(request: Request) {
       requires_owner_approval: policy.requiresOwnerApproval,
       playbook_key: playbook?.key ?? null,
       max_spend_microunits: policy.maxSpendMicrounits,
+      result: repairSourceTaskId
+        ? {
+            repairSourceTaskId,
+            repairMode: "targeted-hermes",
+          }
+        : null,
     })
     .select(
       "id, conversation_id, title, description, status, risk_level, requires_owner_approval, max_spend_microunits, actual_spend_microunits, created_at",
@@ -181,6 +247,7 @@ export async function POST(request: Request) {
       safetyFlags: effectiveIntent.flags,
       playbookKey: playbook?.key ?? null,
       maxSpendMicrounits: policy.maxSpendMicrounits,
+      repairSourceTaskId,
     },
   });
 
