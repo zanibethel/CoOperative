@@ -108,3 +108,13 @@ test("timeout-style linked Hermes failures include structured recovery advice", 
   assert.match(source, /costStatus: "unresolved"/);
   assert.match(source, /failureAdvice/);
 });
+
+
+test("timeout recovery preserves the exact failure and provides a bounded executable phase", () => {
+  assert.match(source, /executablePrompt\?: string/);
+  assert.match(source, /firstRecoveryPhasePrompt/);
+  assert.match(source, /Implement only Phase 1/);
+  assert.match(source, /failureAdviceFor\(terminalMessage, input\.request\)/);
+  assert.match(source, /existingPreciseError/);
+  assert.match(source, /effectiveMessage/);
+});
