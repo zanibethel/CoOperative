@@ -39,7 +39,7 @@ export async function POST(
   const { data: task, error: taskError } = await supabase
     .from("operative_tasks")
     .select(
-      "id, organization_id, title, description, status, playbook_key, requires_owner_approval, max_spend_microunits",
+      "id, organization_id, title, description, status, playbook_key, requires_owner_approval, max_spend_microunits, result",
     )
     .eq("id", id)
     .maybeSingle();
@@ -51,6 +51,15 @@ export async function POST(
   if (!task) {
     return NextResponse.json({ error: "Task not found" }, { status: 404 });
   }
+
+  const existingTaskResult =
+    task.result && typeof task.result === "object" && !Array.isArray(task.result)
+      ? (task.result as Record<string, unknown>)
+      : {};
+  const repairSourceTaskId =
+    typeof existingTaskResult.repairSourceTaskId === "string"
+      ? existingTaskResult.repairSourceTaskId
+      : null;
 
   if (!["queued", "awaiting_approval"].includes(task.status)) {
     return NextResponse.json(
@@ -284,6 +293,7 @@ export async function POST(
         .from("operative_tasks")
         .update({
           result: {
+            ...existingTaskResult,
             playbookKey: playbook.key,
             executionMode: "workflow",
             compatibilityReview: {
@@ -325,6 +335,7 @@ export async function POST(
                   organizationId: task.organization_id,
                   projectKey: playbook.projectKey,
                   request: task.description || task.title,
+                  repairSourceTaskId,
                   maxSpendMicrounits: Number(task.max_spend_microunits ?? 0),
                   compatibilityReview: {
                     ruleIds: compatibilityReview.ruleIds,
@@ -386,6 +397,7 @@ export async function POST(
           type: "workflow_started",
           workflowRunId: run.runId,
           playbookKey: playbook.key,
+          repairSourceTaskId,
         },
       });
 
