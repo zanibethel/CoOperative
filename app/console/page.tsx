@@ -25,6 +25,10 @@ type Task = {
   actual_spend_microunits: number;
   result: unknown;
   error?: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at?: string | null;
+  ended_at?: string | null;
 };
 
 type Decision = {
@@ -1465,6 +1469,15 @@ export default function OwnerConsolePage() {
                   <div className="task-cost">
                     <span>spent {moneyFromMicrounits(Number(task.actual_spend_microunits ?? 0))}</span>
                     <span>cap {moneyFromMicrounits(Number(task.max_spend_microunits ?? 0))}</span>
+                  </div>
+                  <div className="task-timing" aria-label="Task timing">
+                    <span>
+                      <b>Started</b> {formatTime(task.started_at ?? task.created_at)}
+                    </span>
+                    <span>
+                      <b>{task.ended_at ? "Ended" : "Status"}</b>{" "}
+                      {task.ended_at ? formatTime(task.ended_at) : "In progress"}
+                    </span>
                   </div>
                   {pendingDecisionByTask.get(task.id) ? (
                     <div className="task-error-actions">
