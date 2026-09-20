@@ -118,3 +118,17 @@ test("timeout recovery preserves the exact failure and provides a bounded execut
   assert.match(source, /existingPreciseError/);
   assert.match(source, /effectiveMessage/);
 });
+
+
+test("bounded linked-project coding uses four Hermes iterations so usage can flush before the outer timeout", () => {
+  assert.match(source, /const MAX_TURNS = 4/);
+  assert.match(source, /HERMES_MAX_ITERATIONS: String\(MAX_TURNS\)/);
+  assert.match(source, /timeout 300s/);
+});
+
+test("an already-bounded Phase 1 timeout recommends fixing the worker instead of splitting forever", () => {
+  assert.match(source, /const alreadyBounded/);
+  assert.match(source, /Fix the Hermes worker before another paid run/);
+  assert.match(source, /Do not split the Phase 1 request again/);
+  assert.match(source, /retrySafety: "safe-after-fix"/);
+});
