@@ -416,6 +416,28 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "linked-hermes-preserve-invalid-patch-evidence",
+    targets: ["linked-project", "hermes-agent", "vercel-workflow", "vercel-sandbox"],
+    component: "Linked-project patch collection and deterministic validation",
+    appliesTo: "Hermes runs that produce source changes but fail git diff --check or later verification",
+    symptom: "Hermes reaches patch collection, then the workflow reports only a generic failure and loses the patch, usage evidence, and exact git diff --check diagnostics.",
+    rootCause: "Patch collection threw immediately on git diff --check failure before serializing the patch and metering evidence. It also read only stderr even though git diff --check diagnostics can be written to stdout.",
+    knownGoodPattern: "Always collect and preserve the patch and usage evidence before deciding task success. Record git diff --check as the first deterministic verification step, capture both stdout and stderr, mark verification failed without throwing away evidence, and do not retry deterministic collection.",
+    avoidPatterns: [
+      "throwing before the patch is serialized",
+      "reading only stderr from git diff --check",
+      "retrying a deterministic patch-collection failure multiple times",
+      "collapsing a preserved verification failure into a generic workflow failure",
+    ],
+    enforcementPaths: [
+      "lib/workflow/linked-project-hermes.ts",
+      "tests/linked-project-hermes.test.ts",
+      "lib/operative/integration-compatibility-registry.ts",
+    ],
+    learnedAt: "2026-09-20",
+    status: "active",
+  },
+  {
     id: "linked-hermes-detach-long-sandbox-process",
     targets: ["linked-project", "hermes-agent", "vercel-workflow", "vercel-sandbox"],
     component: "Workflow ↔ Sandbox long-running transport",
