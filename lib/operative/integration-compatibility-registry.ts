@@ -416,6 +416,28 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "linked-hermes-deterministic-whitespace-repair-first",
+    targets: ["linked-project", "hermes-agent", "vercel-workflow", "vercel-sandbox"],
+    component: "Known mechanical patch repair before paid AI escalation",
+    appliesTo: "git diff --check failures caused by trailing whitespace or extra blank lines at EOF",
+    symptom: "A usable Hermes patch fails a deterministic whitespace gate even though no code reasoning is required to repair it.",
+    rootCause: "Mechanical patch hygiene was treated as an AI/retry problem instead of a deterministic transformation followed by re-verification.",
+    knownGoodPattern: "Parse git diff --check diagnostics, auto-repair only allow-listed whitespace defects in the isolated clone, rerun git diff --check, preserve every repair/check as evidence, and invoke no model for those known defects. Unknown or semantic failures remain reviewable and can be escalated to a targeted Hermes repair only with an owner-authorized spend cap.",
+    avoidPatterns: [
+      "paying Hermes to remove trailing whitespace",
+      "broad formatter rewrites when only specific diff-check lines are known",
+      "auto-repairing conflict markers or unknown whitespace diagnostics",
+      "discarding the original and post-repair verification evidence",
+    ],
+    enforcementPaths: [
+      "lib/workflow/linked-project-hermes.ts",
+      "tests/linked-project-hermes.test.ts",
+      "lib/operative/integration-compatibility-registry.ts",
+    ],
+    learnedAt: "2026-09-20",
+    status: "active",
+  },
+  {
     id: "linked-hermes-preserve-invalid-patch-evidence",
     targets: ["linked-project", "hermes-agent", "vercel-workflow", "vercel-sandbox"],
     component: "Linked-project patch collection and deterministic validation",
