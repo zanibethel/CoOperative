@@ -241,3 +241,10 @@ test("Hermes iteration shim runs in the Hermes-installed Python environment befo
   assert.match(source, /paidModelCallStarted: false/);
   assert.equal(source.includes('cmd: "python",\n    args: ["-c", iterationGuardScript]'), false);
 });
+
+
+test("Hermes guard shell invokes the resolved interpreter with the guard script as python -c input", () => {
+  assert.match(source, /exec "\$HERMES_PY" -c "\$1"/);
+  assert.match(source, /exec "\$HERMES_PY" -c "\$1" "\$2"/);
+  assert.equal(source.includes('exec "$HERMES_PY" "$@"'), false);
+});
