@@ -119,3 +119,14 @@ test("verification failures can launch an owner-gated targeted repair from the p
   assert.match(page, /targeted repair started · max \$/);
   assert.match(page, /saved to the canonical conversation/);
 });
+
+
+test("failed Hermes tasks show one clear recommended paid retry path", () => {
+  assert.match(page, /Recommended: retry targeted repair · max \$/);
+  assert.match(page, /Review targeted repair plan · no charge/);
+  assert.match(page, /continues from the preserved patch/);
+  assert.match(page, /review-plan button does not run anything or authorize spend/);
+  assert.match(page, /Generic Hermes retry is disabled so the preserved patch lineage is not lost/);
+  assert.match(page, /Open recommended retry/);
+  assert.match(page, /!taskFailureAdvice\(task\.result\)\?\.executablePrompt/);
+});
