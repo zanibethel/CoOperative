@@ -231,6 +231,50 @@ function hermesCostLabel(result: unknown): string {
   return moneyFromMicrounits(evidence.costMicrounits) + suffix;
 }
 
+function taskFailureAdvice(result: unknown): {
+  title: string;
+  summary: string;
+  cause: string;
+  retrySafety: "do-not-blind-retry" | "safe-after-fix" | "review-first";
+  costStatus: "known" | "unresolved";
+  recommendedAction: string;
+  suggestedPrompt?: string;
+} | null {
+  if (!result || typeof result !== "object") return null;
+  const advice = (result as { failureAdvice?: unknown }).failureAdvice;
+  if (!advice || typeof advice !== "object" || Array.isArray(advice)) return null;
+
+  const record = advice as Record<string, unknown>;
+  if (
+    typeof record.title !== "string" ||
+    typeof record.summary !== "string" ||
+    typeof record.cause !== "string" ||
+    typeof record.recommendedAction !== "string"
+  ) {
+    return null;
+  }
+
+  const retrySafety =
+    record.retrySafety === "do-not-blind-retry" ||
+    record.retrySafety === "safe-after-fix" ||
+    record.retrySafety === "review-first"
+      ? record.retrySafety
+      : "review-first";
+
+  return {
+    title: record.title,
+    summary: record.summary,
+    cause: record.cause,
+    retrySafety,
+    costStatus: record.costStatus === "known" ? "known" : "unresolved",
+    recommendedAction: record.recommendedAction,
+    suggestedPrompt:
+      typeof record.suggestedPrompt === "string"
+        ? record.suggestedPrompt
+        : undefined,
+  };
+}
+
 function taskHermesProjectPatch(result: unknown): {
   patch: string;
   changedFiles: string[];
@@ -880,6 +924,35 @@ export default function OwnerConsolePage() {
     }
   }
 
+  function prepareSuggestedRecovery(task: Task) {
+    const advice = taskFailureAdvice(task.result);
+    if (!advice?.suggestedPrompt) return;
+
+    setText(
+      [
+        advice.suggestedPrompt,
+        "",
+        "Task: " + task.title,
+        "Task ID: " + task.id,
+        "Original request:",
+        task.description,
+        "",
+        "Captured failure:",
+        task.error ?? advice.cause,
+      ].join("\n"),
+    );
+    setNotice(
+      "Recommended recovery prepared in the composer. Review it before queueing any new task.",
+    );
+
+    window.setTimeout(() => {
+      document.querySelector<HTMLTextAreaElement>(".console-composer textarea")?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 0);
+  }
+
   function prepareErrorRequest(task: Task, mode: "explain" | "fix") {
     if (!task.error) return;
 
@@ -1157,7 +1230,9 @@ export default function OwnerConsolePage() {
                 <span>{task.selected_executor ?? "executor pending"}</span>
                 <span>{moneyFromMicrounits(Number(task.actual_spend_microunits ?? 0))}</span>
               </div>
-              {task.status === "failed" && taskLinkedProjectKey(task.result) ? (
+              {task.status === "failed" &&
+              taskLinkedProjectKey(task.result) &&
+              taskFailureAdvice(task.result)?.retrySafety !== "do-not-blind-retry" ? (
                 <button
                   type="button"
                   className="decision-approve activity-retry"
@@ -1584,6 +1659,42 @@ export default function OwnerConsolePage() {
                       </div>
                     </details>
                   ) : null}
+                  {taskFailureAdvice(task.result) ? (
+                    <section className="task-recovery-advice">
+                      <div className="task-recovery-head">
+                        <span>Recommended next step</span>
+                        <span>
+                          {taskFailureAdvice(task.result)?.retrySafety === "do-not-blind-retry"
+                            ? "do not blind-retry"
+                            : taskFailureAdvice(task.result)?.retrySafety === "safe-after-fix"
+                              ? "retry after fix"
+                              : "review first"}
+                        </span>
+                      </div>
+                      <strong>{taskFailureAdvice(task.result)?.title}</strong>
+                      <p>{taskFailureAdvice(task.result)?.summary}</p>
+                      <p>
+                        <b>Why:</b> {taskFailureAdvice(task.result)?.cause}
+                      </p>
+                      <p>
+                        <b>Do this:</b> {taskFailureAdvice(task.result)?.recommendedAction}
+                      </p>
+                      {taskFailureAdvice(task.result)?.costStatus === "unresolved" ? (
+                        <p className="task-recovery-warning">
+                          Cost status: unresolved. Do not interpret $0.000000 as proof that no model usage occurred.
+                        </p>
+                      ) : null}
+                      {taskFailureAdvice(task.result)?.suggestedPrompt ? (
+                        <button
+                          type="button"
+                          className="decision-approve"
+                          onClick={() => prepareSuggestedRecovery(task)}
+                        >
+                          Prepare recommended recovery
+                        </button>
+                      ) : null}
+                    </section>
+                  ) : null}
                   {task.error ? (
                     <details className="task-error">
                       <summary>Error details</summary>
@@ -1600,7 +1711,8 @@ export default function OwnerConsolePage() {
                         </div>
                         <pre className="task-error-code"><code>{task.error}</code></pre>
                         <div className="task-error-actions">
-                          {taskLinkedProjectKey(task.result) ? (
+                          {taskLinkedProjectKey(task.result) &&
+                          taskFailureAdvice(task.result)?.retrySafety !== "do-not-blind-retry" ? (
                             <button
                               type="button"
                               className="decision-approve"
