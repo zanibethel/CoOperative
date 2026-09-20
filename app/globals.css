@@ -89,6 +89,63 @@ b { color: var(--text); }
 .console-health span { color: var(--muted); font-size: .78rem; }
 .console-health strong + span { margin-top: 10px; }
 .console-layout { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, .75fr); gap: 18px; align-items: start; }
+.console-activity {
+  margin-bottom: 18px;
+}
+.console-activity-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.console-activity-head h2 {
+  margin: 5px 0 0;
+}
+.console-activity-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.activity-task {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: var(--panel-2);
+  min-width: 0;
+}
+.activity-task .task-card-head strong {
+  overflow-wrap: anywhere;
+}
+.activity-task-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: .7rem;
+}
+.activity-retry {
+  margin-top: 10px;
+  width: 100%;
+}
+.thread-purpose {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 18px;
+  display: grid;
+  gap: 4px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+}
+.thread-purpose strong {
+  font-size: .8rem;
+}
+.thread-purpose span {
+  color: var(--muted);
+  font-size: .75rem;
+  line-height: 1.45;
+}
+
 .console-thread { padding: 0; overflow: hidden; }
 .console-section-head { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 20px; }
 .console-section-head h2 { margin: 6px 0 0; }
@@ -195,6 +252,7 @@ b { color: var(--text); }
   .console-header, .console-layout { grid-template-columns: 1fr; }
   .console-health { display: none; }
   .message-list { max-height: 52vh; }
+  .console-activity-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {
@@ -202,6 +260,8 @@ b { color: var(--text); }
   .console-section-head { padding: 16px; }
   .message-list, .console-composer { padding-left: 12px; padding-right: 12px; }
   .message { max-width: 94%; }
+  .thread-purpose { padding-left: 12px; padding-right: 12px; }
+  .console-activity { padding: 16px; }
 }
 
 
