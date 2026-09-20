@@ -47,6 +47,7 @@ test("initial Cloud Hermes roadblocks are preserved as reusable rules", () => {
     "hermes-prompt-size-diagnostic-must-be-bounded",
     "prepared-hermes-runtime-reuse",
     "linked-project-use-own-revision",
+    "provider-bootstrap-minimize-human-boundary",
     "provider-auth-use-human-handoff",
     "linked-hermes-patch-review-before-write",
     "secret-value-request-only-after-owner-approval",
