@@ -334,6 +334,21 @@ export default function OwnerConsolePage() {
     [overview.pendingDecisions],
   );
 
+  const featuredTasks = useMemo(() => {
+    const rank: Record<string, number> = {
+      executing: 0,
+      awaiting_approval: 1,
+      failed: 2,
+      queued: 3,
+      planning: 4,
+      verifying: 5,
+      completed: 6,
+    };
+    return [...overview.tasks]
+      .sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))
+      .slice(0, 3);
+  }, [overview.tasks]);
+
   const detachedTaskIds = useMemo(
     () =>
       overview.tasks
@@ -870,6 +885,78 @@ export default function OwnerConsolePage() {
         </div>
       ) : null}
 
+      <section className="card console-activity">
+        <div className="console-activity-head">
+          <div>
+            <div className="eyebrow">Mission Control</div>
+            <h2>Current activity</h2>
+          </div>
+          <span className="badge">{featuredTasks.length} shown</span>
+        </div>
+        <div className="console-activity-grid">
+          {featuredTasks.length === 0 ? <p>No tasks yet.</p> : null}
+          {featuredTasks.map((task) => (
+            <article className="activity-task" key={task.id}>
+              <div className="task-card-head">
+                <strong>{task.title}</strong>
+                <span className={["status-pill", "status-" + task.status].join(" ")}>
+                  {task.status.replaceAll("_", " ")}
+                </span>
+              </div>
+              {task.status === "executing" ? (
+                <div className="task-live-progress" role="status" aria-live="polite">
+                  <div className="task-live-progress-head">
+                    <span>
+                      {taskProgressSummary(task.result)?.phase
+                        ? `Phase ${taskProgressSummary(task.result)?.phase}/${taskProgressSummary(task.result)?.total} · ${taskProgressSummary(task.result)?.label}`
+                        : `Live · ${taskProgressSummary(task.result)?.label ?? "Working"}`}
+                    </span>
+                    <span>auto-updates</span>
+                  </div>
+                  <div className="task-live-progress-track">
+                    <span className="task-live-progress-bar" />
+                  </div>
+                </div>
+              ) : null}
+              <div className="activity-task-meta">
+                <span>{task.selected_executor ?? "executor pending"}</span>
+                <span>{moneyFromMicrounits(Number(task.actual_spend_microunits ?? 0))}</span>
+              </div>
+              {task.status === "failed" && taskLinkedProjectKey(task.result) ? (
+                <button
+                  type="button"
+                  className="decision-approve activity-retry"
+                  disabled={working}
+                  onClick={() => void retryHermesProjectTask(task)}
+                >
+                  Retry Hermes patch
+                </button>
+              ) : null}
+              {pendingDecisionByTask.get(task.id) ? (
+                <div className="decision-actions">
+                  <button
+                    type="button"
+                    className="decision-approve"
+                    disabled={decisionWorkingId === pendingDecisionByTask.get(task.id)?.id}
+                    onClick={() => void respondToDecision(pendingDecisionByTask.get(task.id)!.id, "approve")}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className="decision-button"
+                    disabled={decisionWorkingId === pendingDecisionByTask.get(task.id)?.id}
+                    onClick={() => void respondToDecision(pendingDecisionByTask.get(task.id)!.id, "reject")}
+                  >
+                    Reject
+                  </button>
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className="console-layout">
         <div className="console-thread card">
           <div className="console-section-head">
@@ -904,6 +991,11 @@ export default function OwnerConsolePage() {
                 {message.linked_decision_id ? <span className="mini-tag">decision linked</span> : null}
               </article>
             ))}
+          </div>
+
+          <div className="thread-purpose">
+            <strong>Owner thread</strong>
+            <span>Save context here without running anything, or turn a message into a governed task. Project-specific Hermes work is best launched from Linked Projects so CoOperative can attach the correct playbook automatically.</span>
           </div>
 
           <form className="console-composer" onSubmit={send}>
