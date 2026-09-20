@@ -110,6 +110,30 @@ function taskProgressLabel(result: unknown): string | null {
   return stage.replaceAll("_", " ");
 }
 
+function taskProgressSummary(result: unknown): {
+  phase?: number;
+  total?: number;
+  label: string;
+} | null {
+  if (!result || typeof result !== "object") return null;
+  const progress = (result as { progress?: unknown }).progress;
+  if (!progress || typeof progress !== "object") return null;
+  const stage = (progress as { stage?: unknown }).stage;
+  if (typeof stage !== "string") return null;
+
+  const linkedHermesStages: Record<string, { phase: number; total: number; label: string }> = {
+    authenticating_gateway: { phase: 1, total: 5, label: "Signing in" },
+    preparing_project: { phase: 2, total: 5, label: "Preparing project" },
+    reasoning: { phase: 3, total: 5, label: "AI reasoning" },
+    collecting_patch: { phase: 4, total: 5, label: "Collecting changes" },
+    verifying: { phase: 5, total: 5, label: "Verifying patch" },
+  };
+
+  return linkedHermesStages[stage] ?? {
+    label: stage.replaceAll("_", " "),
+  };
+}
+
 function taskLinkedProjectKey(result: unknown): "creatorhub" | "raisehub" | null {
   if (!result || typeof result !== "object") return null;
   const linkedProject = (result as { linkedProject?: unknown }).linkedProject;
@@ -1012,9 +1036,11 @@ export default function OwnerConsolePage() {
                     <div className="task-live-progress" role="status" aria-live="polite">
                       <div className="task-live-progress-head">
                         <span>
-                          Live · {taskProgressLabel(task.result) ?? "working"}
+                          {taskProgressSummary(task.result)?.phase
+                            ? `Phase ${taskProgressSummary(task.result)?.phase}/${taskProgressSummary(task.result)?.total} · ${taskProgressSummary(task.result)?.label}`
+                            : `Live · ${taskProgressSummary(task.result)?.label ?? "Working"}`}
                         </span>
-                        <span>updates automatically</span>
+                        <span>auto-updates</span>
                       </div>
                       <div
                         className="task-live-progress-track"
