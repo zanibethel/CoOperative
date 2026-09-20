@@ -1867,7 +1867,7 @@ export default function OwnerConsolePage() {
                               >
                                 {recoveryExecutingTaskId === task.id
                                   ? "Starting recovery…"
-                                  : advice.repairSourceTaskId
+                                  : taskFailureAdvice(task.result)?.repairSourceTaskId
                                     ? "Execute targeted repair · max $" +
                                       recommendedRecoveryBudgetUsd(task).toFixed(3)
                                     : "Execute recommended recovery · max $" +
