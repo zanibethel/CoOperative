@@ -7,6 +7,10 @@ on:
     paths:
       - "verification/creatorhub-eromify-phase1/**"
       - ".github/workflows/verify-creatorhub-eromify-phase1.yml"
+  pull_request:
+    paths:
+      - "verification/creatorhub-eromify-phase1/**"
+      - ".github/workflows/verify-creatorhub-eromify-phase1.yml"
 
 jobs:
   verify:
