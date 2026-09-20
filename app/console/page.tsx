@@ -360,6 +360,14 @@ export default function OwnerConsolePage() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error ?? "Unable to load Owner Console");
     setOverview(payload);
+    if (
+      payload.aiPolicy?.canManageAiLimits &&
+      typeof payload.aiPolicy?.defaultCostCapUsd === "number"
+    ) {
+      setAiCostCapUsd((current) =>
+        current || String(payload.aiPolicy.defaultCostCapUsd),
+      );
+    }
   }
 
   useEffect(() => {
@@ -369,7 +377,17 @@ export default function OwnerConsolePage() {
       .then(async (response) => {
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error ?? "Unable to load Owner Console");
-        if (!cancelled) setOverview(payload);
+        if (!cancelled) {
+          setOverview(payload);
+          if (
+            payload.aiPolicy?.canManageAiLimits &&
+            typeof payload.aiPolicy?.defaultCostCapUsd === "number"
+          ) {
+            setAiCostCapUsd((current) =>
+              current || String(payload.aiPolicy.defaultCostCapUsd),
+            );
+          }
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Unable to load Owner Console");
@@ -382,17 +400,6 @@ export default function OwnerConsolePage() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    const defaultCap = overview.aiPolicy?.defaultCostCapUsd;
-    if (
-      overview.aiPolicy?.canManageAiLimits &&
-      typeof defaultCap === "number" &&
-      !aiCostCapUsd
-    ) {
-      setAiCostCapUsd(String(defaultCap));
-    }
-  }, [overview.aiPolicy, aiCostCapUsd]);
 
     const actualSpend = useMemo(
     () => overview.tasks.reduce((sum, task) => sum + Number(task.actual_spend_microunits ?? 0), 0),
