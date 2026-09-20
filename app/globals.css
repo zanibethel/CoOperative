@@ -352,6 +352,17 @@ b { color: var(--text); }
 .status-failed, .status-rolled_back, .status-cancelled { color: var(--danger); }
 .status-awaiting_approval { color: #fde68a; }
 .task-cost { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: .72rem; }
+.task-timing {
+  margin-top: 7px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: .7rem;
+  line-height: 1.35;
+  flex-wrap: wrap;
+}
+.task-timing b { color: var(--text); font-weight: 800; }
 .task-live-progress {
   display: grid;
   gap: 6px;
