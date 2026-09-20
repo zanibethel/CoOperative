@@ -1,5 +1,6 @@
 import { getVercelOidcToken } from "@vercel/oidc";
 import { Sandbox } from "@vercel/sandbox";
+import { FatalError } from "workflow";
 
 import {
   resolveModelCost,
@@ -62,6 +63,16 @@ interface VerificationStep {
   stderrTail: string;
 }
 
+interface LinkedProjectFailureAdvice {
+  title: string;
+  summary: string;
+  cause: string;
+  retrySafety: "do-not-blind-retry" | "safe-after-fix" | "review-first";
+  costStatus: "known" | "unresolved";
+  recommendedAction: string;
+  suggestedPrompt?: string;
+}
+
 interface LinkedProjectEvidence {
   projectKey: LinkedProjectKey;
   hermesExitCode: number;
@@ -122,6 +133,85 @@ function patchTouchesBlockedPath(patch: string): string | null {
   const removedPaths = [...patch.matchAll(/^--- a\/(.+)$/gm)].map((match) => match[1]);
   const paths = [...addedPaths, ...removedPaths];
   return paths.find((path) => blocked.some((pattern) => pattern.test(path))) ?? null;
+}
+
+function failureAdviceFor(message: string): LinkedProjectFailureAdvice {
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("execution window") ||
+    normalized.includes("required usage report") ||
+    normalized.includes("timed out")
+  ) {
+    return {
+      title: "Split this request before another paid run",
+      summary:
+        "Hermes did not finish cleanly enough to emit the required usage/cost report.",
+      cause:
+        "The linked-project worker has a bounded execution window. A broad coding request can reach that limit before Hermes finalizes its usage file.",
+      retrySafety: "do-not-blind-retry",
+      costStatus: "unresolved",
+      recommendedAction:
+        "Break the request into smaller governed phases and run only the first phase. Do not use the blind Retry button for this failure.",
+      suggestedPrompt:
+        "Split the failed linked-project request into 3–5 small implementation phases. Prepare only Phase 1 as a new governed Hermes patch request, keeping the same safety gates. Do not retry the entire original request.",
+    };
+  }
+
+  if (normalized.includes("buffer is not defined")) {
+    return {
+      title: "Fix the deterministic workflow runtime first",
+      summary: "This is a CoOperative workflow compatibility failure, not a project-code failure.",
+      cause: "Node-specific runtime code was used inside a Workflow runtime that did not guarantee it.",
+      retrySafety: "safe-after-fix",
+      costStatus: "unresolved",
+      recommendedAction:
+        "Apply the known deterministic runtime fix and verify CI before another Hermes run.",
+      suggestedPrompt:
+        "Apply the known Workflow runtime compatibility fix from the Integration Compatibility Registry, verify CI, and only then prepare a new Hermes patch run.",
+    };
+  }
+
+  if (normalized.includes("without producing source changes")) {
+    return {
+      title: "Clarify the patch scope before retrying",
+      summary: "Hermes finished but produced no source changes.",
+      cause:
+        "The request was not converted into a valid source patch, so repository health alone cannot count as success.",
+      retrySafety: "review-first",
+      costStatus: "known",
+      recommendedAction:
+        "Narrow the requested change to one concrete source outcome and retry only that phase.",
+      suggestedPrompt:
+        "Rewrite this failed request as one concrete source-change phase with explicit files/behavior to produce, then prepare a governed Hermes patch for that phase only.",
+    };
+  }
+
+  if (normalized.includes("verification failed") || normalized.includes("failed git diff")) {
+    return {
+      title: "Repair the patch before another model run",
+      summary: "Hermes produced work, but deterministic verification rejected it.",
+      cause: "A source patch exists, but one of CoOperative's verification gates failed.",
+      retrySafety: "review-first",
+      costStatus: "known",
+      recommendedAction:
+        "Use the failing verification output to prepare a focused repair instead of rerunning the original request.",
+      suggestedPrompt:
+        "Inspect the preserved patch and failing deterministic verification step. Prepare the smallest safe repair needed to make verification pass; do not redo unrelated work.",
+    };
+  }
+
+  return {
+    title: "Review the failure before retrying",
+    summary: "CoOperative stopped the task without applying project changes.",
+    cause: message,
+    retrySafety: "review-first",
+    costStatus: "unresolved",
+    recommendedAction:
+      "Use Ask CoOperative to explain/fix the captured failure before starting another paid Hermes run.",
+    suggestedPrompt:
+      "Diagnose this failed linked-project task from its canonical events and logs, then recommend the smallest safe next action before any paid retry.",
+  };
 }
 
 async function recordProgress(
@@ -359,9 +449,12 @@ async function runLinkedProjectHermes(
     const usageText = (await usageResult.stdout()).trim();
 
     if (!usageText) {
-      throw new Error(
-        "Linked-project Hermes call did not produce the required usage report. " +
-          tail(stderr || stdout),
+      const timedOut = hermes.exitCode === 124;
+      throw new FatalError(
+        timedOut
+          ? "Cloud Hermes reached its 300-second execution window before writing the required usage report. Cost is unresolved; do not blind-retry this request. Split it into smaller governed phases."
+          : "Linked-project Hermes call did not produce the required usage report. Cost is unresolved; do not blind-retry until this failure is diagnosed. " +
+              tail(stderr || stdout),
       );
     }
 
@@ -666,6 +759,7 @@ async function finalizeFailure(
 
   const admin = createAdminClient();
   const now = new Date().toISOString();
+  const failureAdvice = failureAdviceFor(message);
 
   const { data: task } = await admin
     .from("operative_tasks")
@@ -693,6 +787,7 @@ async function finalizeFailure(
           at: now,
           message,
         },
+        failureAdvice,
       },
       updated_at: now,
     })
@@ -714,6 +809,8 @@ async function finalizeFailure(
     },
   });
 }
+
+runLinkedProjectHermes.maxRetries = 0;
 
 function readableError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
