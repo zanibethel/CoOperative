@@ -55,6 +55,9 @@ test("linked-project Hermes returns a bounded reviewable patch and blocks secret
   assert.match(source, /timeout 300s/);
   assert.match(source, /new TextEncoder\(\)\.encode\(value\)\.byteLength/);
   assert.equal(source.includes("Buffer.byteLength"), false);
+  assert.match(source, /export TERMINAL_CWD=/);
+  assert.match(source, /Repository root: /);
+  assert.match(source, /Prefer absolute paths under/);
 });
 
 test("task dispatcher sends project-scoped workflow requests to linked Hermes", () => {
@@ -82,4 +85,10 @@ test("linked-project Hermes finalization records verifying state and avoids dupl
   assert.match(source, /select\("id,executor,cost_category"\)/);
   assert.match(source, /existingKeys\.has\("hermes-cloud-operative:ai-tokens"\)/);
   assert.match(source, /existingKeys\.has\("vercel-sandbox:sandbox-compute"\)/);
+});
+
+test("linked-project Hermes patch tasks cannot succeed with an empty patch", () => {
+  assert.match(source, /sourceChangesProduced = evidence\.changedFiles\.length > 0/);
+  assert.match(source, /Hermes completed without producing source changes/);
+  assert.match(source, /evidence\.changedFiles\.length > 0/);
 });
