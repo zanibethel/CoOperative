@@ -293,6 +293,8 @@ async function runLinkedProjectHermes(
     const prompt = [
       "You are the governed Cloud Hermes coding worker for CoOperative.",
       "Project: " + project.name + " (" + project.repoSlug + " @ " + project.defaultRef + ").",
+      "Repository root: " + cwd + ".",
+      "Use file tools against this repository root. Prefer absolute paths under " + cwd + " so edits cannot drift into the Hermes runtime directory.",
       "Work only inside the current repository.",
       "You have file tools only. Do not use shell, browser, web, MCP, memory, provider dashboards, or external services.",
       "Do not read, create, or modify .env files, credentials, tokens, provider secrets, production configuration, database schemas/RLS, payment state, or deployment settings.",
@@ -332,6 +334,8 @@ async function runLinkedProjectHermes(
       'HERMES_BIN="$HOME/.local/bin/hermes"',
       'if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN=/usr/local/bin/hermes; fi',
       'test -x "$HERMES_BIN"',
+      'export TERMINAL_CWD=' + shellQuote(cwd),
+      'test -f "$TERMINAL_CWD/package.json"',
       'exec timeout 300s "$HERMES_BIN" ' + hermesArgs.map(shellQuote).join(" "),
     ].join("; ");
 
@@ -485,9 +489,11 @@ async function finalizeWithEvidence(
   const admin = createAdminClient();
   const now = new Date().toISOString();
   const overBudget = evidence.costMicrounits > input.maxSpendMicrounits;
+  const sourceChangesProduced = evidence.changedFiles.length > 0;
   const succeeded =
     evidence.hermesExitCode === 0 &&
     evidence.verificationSucceeded &&
+    sourceChangesProduced &&
     !overBudget;
 
   const result = {
@@ -599,9 +605,11 @@ async function finalizeWithEvidence(
     : evidence.hermesError
       ? evidence.hermesError +
         " Usage/cost evidence and any partial patch were preserved; nothing was written to GitHub."
-      : evidence.verificationSucceeded
-        ? null
-        : "Hermes produced a patch, but deterministic project verification failed. The patch was preserved for review and was not written to GitHub.";
+      : !sourceChangesProduced
+        ? "Hermes completed without producing source changes, so this governed patch task is incomplete. Nothing was written to GitHub."
+        : evidence.verificationSucceeded
+          ? null
+          : "Hermes produced a patch, but deterministic project verification failed. The patch was preserved for review and was not written to GitHub.";
 
   const { error: updateError } = await admin
     .from("operative_tasks")
@@ -637,6 +645,7 @@ async function finalizeWithEvidence(
       hermesExitCode: evidence.hermesExitCode,
       verificationSucceeded: evidence.verificationSucceeded,
       changedFiles: evidence.changedFiles,
+      sourceChangesProduced,
       actualSpendMicrounits: evidence.costMicrounits,
       overBudget,
       costLedgerReplaySafe: true,
@@ -764,6 +773,7 @@ export async function linkedProjectHermesWorkflow(
       ok:
         evidence.hermesExitCode === 0 &&
         evidence.verificationSucceeded &&
+        evidence.changedFiles.length > 0 &&
         evidence.costMicrounits <= input.maxSpendMicrounits,
       evidence,
     };
