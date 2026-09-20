@@ -240,6 +240,7 @@ function taskFailureAdvice(result: unknown): {
   recommendedAction: string;
   suggestedPrompt?: string;
   executablePrompt?: string;
+  repairSourceTaskId?: string;
 } | null {
   if (!result || typeof result !== "object") return null;
   const advice = (result as { failureAdvice?: unknown }).failureAdvice;
@@ -276,6 +277,10 @@ function taskFailureAdvice(result: unknown): {
     executablePrompt:
       typeof record.executablePrompt === "string"
         ? record.executablePrompt
+        : undefined,
+    repairSourceTaskId:
+      typeof record.repairSourceTaskId === "string"
+        ? record.repairSourceTaskId
         : undefined,
   };
 }
@@ -1007,7 +1012,9 @@ export default function OwnerConsolePage() {
     try {
       const message = await persistMessage(
         [
-          "Execute recommended recovery for " + projectName + ".",
+          advice.repairSourceTaskId
+            ? "Execute targeted repair for " + projectName + " from preserved task " + advice.repairSourceTaskId + "."
+            : "Execute recommended recovery for " + projectName + ".",
           "Authorized model spend cap: $" + budget.toFixed(3),
           "",
           executablePrompt,
@@ -1019,9 +1026,12 @@ export default function OwnerConsolePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           conversationId: message.conversationId,
-          title: projectName + " · recommended recovery",
+          title: advice.repairSourceTaskId
+            ? projectName + " · targeted repair"
+            : projectName + " · recommended recovery",
           description: executablePrompt,
           playbookKey: projectKey + "-hermes-patch",
+          repairSourceTaskId: advice.repairSourceTaskId ?? null,
           maxSpendUsd: budget,
           flags: { requiresShell: true },
         }),
@@ -1046,7 +1056,9 @@ export default function OwnerConsolePage() {
 
       setNotice(
         projectName +
-          " recommended recovery started · max $" +
+          (advice.repairSourceTaskId
+            ? " targeted repair started · max $"
+            : " recommended recovery started · max $") +
           budget.toFixed(3) +
           ". The action was also saved to the canonical conversation.",
       );
@@ -1855,8 +1867,11 @@ export default function OwnerConsolePage() {
                               >
                                 {recoveryExecutingTaskId === task.id
                                   ? "Starting recovery…"
-                                  : "Execute recommended recovery · max $" +
-                                    recommendedRecoveryBudgetUsd(task).toFixed(3)}
+                                  : advice.repairSourceTaskId
+                                    ? "Execute targeted repair · max $" +
+                                      recommendedRecoveryBudgetUsd(task).toFixed(3)
+                                    : "Execute recommended recovery · max $" +
+                                      recommendedRecoveryBudgetUsd(task).toFixed(3)}
                               </button>
                             ) : null}
                           </div>
