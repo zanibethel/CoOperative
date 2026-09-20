@@ -910,3 +910,17 @@ b { color: var(--text); }
   border-left: 3px solid var(--danger);
   padding-left: 8px;
 }
+
+
+.task-recovery-prepared {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+  color: var(--muted);
+  font-size: .72rem;
+}
+.task-recovery-prepared span { line-height: 1.4; }
