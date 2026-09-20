@@ -334,6 +334,32 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "provider-bootstrap-minimize-human-boundary",
+    targets: ["provider-auth-handoff", "provider-secret-broker", "linked-project"],
+    component: "CoOperative Provider Bootstrap",
+    appliesTo:
+      "Third-party integrations where CoOperative can automate setup around a provider-owned login, consent, MFA, CAPTCHA, KYC, or credential-issuance boundary.",
+    symptom:
+      "A provider integration turns into a long manual setup checklist even though most steps after authentication are deterministic.",
+    rootCause:
+      "Provider authentication, secret brokering, deployment activation, and capability verification were treated as one manual task instead of separate governed stages.",
+    knownGoodPattern:
+      "Prefer provider-native OAuth when the provider supports the custom client. Otherwise hand off only the minimum provider-owned identity/credential step, broker the resulting secret directly without agent exposure, require the deployment gate, then deterministically verify health and capabilities. Hermes is not required for the bootstrap itself.",
+    avoidPatterns: [
+      "giving Hermes provider passwords or API keys",
+      "asking the owner to manually repeat deterministic deployment and verification steps",
+      "claiming generic OAuth support without verifying the provider supports arbitrary custom clients",
+    ],
+    enforcementPaths: [
+      "lib/operative/provider-bootstrap.ts",
+      "lib/operative/project-registry.ts",
+      "app/api/operative/projects/[projectKey]/providers/[providerKey]/bootstrap/route.ts",
+      "tests/provider-bootstrap.test.ts",
+    ],
+    learnedAt: "2026-09-20",
+    status: "active",
+  },
+  {
     id: "provider-auth-use-human-handoff",
     targets: ["provider-auth-handoff"],
     component: "Provider login / consent / verification",
