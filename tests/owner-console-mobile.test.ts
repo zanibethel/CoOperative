@@ -62,7 +62,7 @@ test("Mission Control task cards show execution start and terminal end timestamp
 
 test("failed tasks surface recommended recovery instead of only a failed message", () => {
   assert.match(page, /Recommended next step/);
-  assert.match(page, /Prepare recommended recovery/);
+  assert.match(page, /Review recovery plan · no charge|Review targeted repair plan · no charge/);
   assert.match(page, /taskFailureAdvice/);
   assert.match(page, /do not blind-retry/);
   assert.match(page, /Cost status: unresolved/);
