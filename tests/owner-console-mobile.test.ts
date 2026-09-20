@@ -58,3 +58,16 @@ test("Mission Control task cards show execution start and terminal end timestamp
   assert.match(page, /task\.started_at \?\? task\.created_at/);
   assert.match(page, /task\.ended_at \? formatTime\(task\.ended_at\) : "In progress"/);
 });
+
+
+test("failed tasks surface recommended recovery instead of only a failed message", () => {
+  assert.match(page, /Recommended next step/);
+  assert.match(page, /Prepare recommended recovery/);
+  assert.match(page, /taskFailureAdvice/);
+  assert.match(page, /do not blind-retry/);
+  assert.match(page, /Cost status: unresolved/);
+});
+
+test("blind Hermes retry is hidden when recovery advice says not to retry", () => {
+  assert.match(page, /retrySafety !== "do-not-blind-retry"/);
+});
