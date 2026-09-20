@@ -422,6 +422,26 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "linked-hermes-git-status-path-prefix",
+    targets: ["linked-project", "hermes-agent", "vercel-sandbox"],
+    component: "Linked-project changed-file evidence",
+    appliesTo: "Parsing git status --short output from an isolated linked-project clone",
+    symptom: "Changed-file evidence shows paths such as rc/lib/... instead of src/lib/....",
+    rootCause: "The parser trimmed each porcelain status line before removing the fixed two-column status prefix, so slice(3) also removed the first character of the real path.",
+    knownGoodPattern: "Filter blank lines without trimming the status prefix, then slice the first three porcelain characters and trim only the remaining path.",
+    avoidPatterns: [
+      "calling trim() before slicing git status --short prefixes",
+      "using corrupted changed-file paths for scope or blocked-path decisions",
+    ],
+    enforcementPaths: [
+      "lib/workflow/linked-project-hermes.ts",
+      "tests/linked-project-hermes.test.ts",
+      "lib/operative/integration-compatibility-registry.ts",
+    ],
+    learnedAt: "2026-09-20",
+    status: "active",
+  },
+  {
     id: "linked-hermes-targeted-repair-from-preserved-patch",
     targets: ["linked-project", "hermes-agent", "vercel-workflow", "vercel-sandbox", "supabase"],
     component: "Owner-gated semantic repair after deterministic verification",
