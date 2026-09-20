@@ -92,3 +92,19 @@ test("linked-project Hermes patch tasks cannot succeed with an empty patch", () 
   assert.match(source, /Hermes completed without producing source changes/);
   assert.match(source, /evidence\.changedFiles\.length > 0/);
 });
+
+
+test("paid linked-project Hermes reasoning never auto-retries", () => {
+  assert.match(source, /import \{ FatalError \} from "workflow"/);
+  assert.match(source, /runLinkedProjectHermes\.maxRetries = 0/);
+  assert.match(source, /new FatalError/);
+  assert.match(source, /do not blind-retry/i);
+});
+
+test("timeout-style linked Hermes failures include structured recovery advice", () => {
+  assert.match(source, /failureAdviceFor/);
+  assert.match(source, /Split this request before another paid run/);
+  assert.match(source, /retrySafety: "do-not-blind-retry"/);
+  assert.match(source, /costStatus: "unresolved"/);
+  assert.match(source, /failureAdvice/);
+});
