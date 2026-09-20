@@ -137,10 +137,11 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     appliesTo: "Hermes Agent v0.21.3 / release v2026.9.14 top-level -z with usage accounting",
     symptom: "CoOperative sets HERMES_MAX_ITERATIONS=4, but the usage report can show far more model API calls and exceed the authorized spend cap.",
     rootCause: "In the pinned v2026.9.14 hermes_cli/oneshot.py path, AIAgent(...) is constructed without max_iterations, so the top-level -z path ignores HERMES_MAX_ITERATIONS even though other CLI paths expose turn limits.",
-    knownGoodPattern: "Before any paid model call, deterministically patch the pinned one-shot AIAgent constructor inside the disposable Sandbox to pass max_iterations from HERMES_MAX_ITERATIONS, verify the patched module compiles, fail closed if the shim cannot be installed, and audit the resulting api_calls against the governed bound.",
+    knownGoodPattern: "Before any paid model call, deterministically patch the pinned one-shot AIAgent constructor inside the disposable Sandbox to pass max_iterations from HERMES_MAX_ITERATIONS. Run that patch/compile step with the Python interpreter that owns the installed Hermes executable, not the Sandbox system python; fail closed before model execution if the Hermes environment cannot be resolved, then audit resulting api_calls against the governed bound.",
     avoidPatterns: [
       "trusting HERMES_MAX_ITERATIONS alone on pinned top-level -z",
       "switching to chat --oneshot when --usage-file accounting is mandatory",
+      "running the Hermes shim with system python when Hermes is installed in its own environment",
       "starting the paid model call if the iteration shim cannot be verified",
       "treating a post-hoc dollar cap violation as an acceptable hard-cap implementation",
     ],
