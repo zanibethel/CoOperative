@@ -137,6 +137,14 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
         ownerGate: true,
         environments: ["preview", "production"],
       },
+      {
+        key: "EROMIFY_API_KEY",
+        purpose:
+          "Server-only personal Eromify MCP API key used by CreatorHub for capability discovery and owner-approved generation.",
+        secret: true,
+        ownerGate: true,
+        environments: ["preview", "production"],
+      },
     ],
     humanActions: [
       {
@@ -164,6 +172,17 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
         relatedSecretKeys: ["COOPERATIVE_VERCEL_ADMIN_CONNECTOR"],
       },
       {
+        key: "eromify-mcp-api-key",
+        title: "Eromify MCP personal API key",
+        provider: "Eromify",
+        description:
+          "Open Eromify, sign in if required, then go to Settings → Claude/MCP and create a personal API key. Return to CoOperative and use the secret broker for EROMIFY_API_KEY so the value never enters Hermes or task text.",
+        launchUrl: "https://www.eromify.in/mcp",
+        mode: "embedded-or-popup",
+        completion: "manual-return-and-verify",
+        relatedSecretKeys: ["EROMIFY_API_KEY"],
+      },
+      {
         key: "vercel-environment",
         title: "CreatorHub environment variables",
         provider: "Vercel",
@@ -182,6 +201,7 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
           "FANVUE_CLIENT_SECRET",
           "STRIPE_SECRET_KEY",
           "STRIPE_WEBHOOK_SECRET",
+          "EROMIFY_API_KEY",
         ],
       },
       {
