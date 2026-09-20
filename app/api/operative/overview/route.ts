@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getAiAllowance, normalizeAiPlan } from "@/lib/operative/ai-usage-policy";
 
 export async function GET() {
   const supabase = await createClient();
@@ -13,7 +14,7 @@ export async function GET() {
 
   const { data: organization, error: organizationError } = await supabase
     .from("organizations")
-    .select("id, name")
+    .select("id, name, owner_user_id")
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
@@ -44,6 +45,9 @@ export async function GET() {
   }
 
   const conversation = conversations?.[0] ?? null;
+  const canManageAiLimits = organization.owner_user_id === user.id;
+  const aiPlan = normalizeAiPlan(user.app_metadata?.cooperative_plan, canManageAiLimits);
+  const aiAllowance = getAiAllowance(aiPlan);
 
   const [messagesResult, tasksResult, decisionsResult] = await Promise.all([
     conversation
@@ -79,10 +83,18 @@ export async function GET() {
   }
 
   return NextResponse.json({
-    organization,
+    organization: { id: organization.id, name: organization.name },
     conversation,
     messages: messagesResult.data ?? [],
     tasks: tasksResult.data ?? [],
     pendingDecisions: decisionsResult.data ?? [],
+    aiPolicy: {
+      plan: aiPlan,
+      canManageAiLimits,
+      requestTokenCap: aiAllowance.requestTokenCap,
+      monthlyTokenCap: aiAllowance.monthlyTokenCap,
+      defaultCostCapUsd: canManageAiLimits ? aiAllowance.defaultCostCapUsd : undefined,
+      hardCostCapUsd: canManageAiLimits ? aiAllowance.hardCostCapUsd : undefined,
+    },
   });
 }
