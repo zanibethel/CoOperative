@@ -190,6 +190,21 @@ function failureAdviceFor(
 ): LinkedProjectFailureAdvice {
   const normalized = message.toLowerCase();
 
+  if (normalized.includes("no paid model call was started")) {
+    return {
+      title: "Fix the Hermes runtime guard before another run",
+      summary:
+        "CoOperative stopped before the paid model call because the deterministic Hermes runtime guard could not be installed.",
+      cause: message,
+      retrySafety: "safe-after-fix",
+      costStatus: "known",
+      recommendedAction:
+        "Fix and verify the runtime guard first. No paid Hermes retry should run until the guard passes deterministically.",
+      suggestedPrompt:
+        "Fix the deterministic Hermes runtime guard, verify CI/deployment, then re-enable the same targeted repair without changing its spend cap.",
+    };
+  }
+
   if (
     normalized.includes("execution window") ||
     normalized.includes("required usage report") ||
@@ -356,6 +371,59 @@ async function recordProgress(
 }
 
 
+async function persistPreModelFailure(
+  input: LinkedProjectHermesInput,
+  message: string,
+) {
+  const admin = createAdminClient();
+  const now = new Date().toISOString();
+  const failureAdvice = failureAdviceFor(message, input.request);
+
+  const { data: task } = await admin
+    .from("operative_tasks")
+    .select("result")
+    .eq("id", input.taskId)
+    .eq("organization_id", input.organizationId)
+    .maybeSingle();
+
+  const current =
+    task?.result && typeof task.result === "object" && !Array.isArray(task.result)
+      ? (task.result as Record<string, unknown>)
+      : {};
+
+  await admin
+    .from("operative_tasks")
+    .update({
+      result: {
+        ...current,
+        failureAdvice,
+        progress: {
+          stage: "failed",
+          at: now,
+          message,
+        },
+      },
+      actual_spend_microunits: 0,
+      error: message,
+      updated_at: now,
+    })
+    .eq("id", input.taskId)
+    .eq("organization_id", input.organizationId);
+
+  await admin.from("task_events").insert({
+    task_id: input.taskId,
+    organization_id: input.organizationId,
+    event_type: "error",
+    actor: "system",
+    detail: {
+      type: "pre_model_guard_failure",
+      message,
+      actualSpendMicrounits: 0,
+      paidModelCallStarted: false,
+    },
+  });
+}
+
 interface DetachedHermesHandle {
   sandboxName: string;
   cwd: string;
@@ -471,36 +539,57 @@ async function startLinkedProjectHermesDetached(
     "print(str(path))",
   ].join("\n");
 
+  const hermesPythonShell = [
+    'HERMES_BIN="$HOME/.local/bin/hermes"',
+    'if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN=/usr/local/bin/hermes; fi',
+    'if [ ! -x "$HERMES_BIN" ]; then echo "missing-hermes-binary" >&2; exit 127; fi',
+    'HERMES_REAL="$(readlink -f "$HERMES_BIN" 2>/dev/null || printf "%s" "$HERMES_BIN")"',
+    'HERMES_PY="$(dirname "$HERMES_REAL")/python"',
+    'if [ ! -x "$HERMES_PY" ]; then',
+    '  IFS= read -r SHEBANG < "$HERMES_BIN"',
+    '  case "$SHEBANG" in',
+    '    "#!"*) INTERPRETER="${SHEBANG#\\#!}"; read -r -a PARTS <<< "$INTERPRETER"; HERMES_PY="${PARTS[0]}" ;;',
+    '    *) echo "unable-to-resolve-hermes-python" >&2; exit 126 ;;',
+    '  esac',
+    'fi',
+    'exec "$HERMES_PY" "$@"',
+  ].join("; ");
+
   const iterationGuard = await sandbox.runCommand({
-    cmd: "python",
-    args: ["-c", iterationGuardScript],
+    cmd: "bash",
+    args: ["-lc", hermesPythonShell + ' -- -c "$1"', "guard-install", iterationGuardScript],
     cwd: "/tmp",
   });
   if (iterationGuard.exitCode !== 0) {
     const detail = tail(
       (await iterationGuard.stderr()) || (await iterationGuard.stdout()),
     );
-    await sandbox.stop();
-    throw new FatalError(
+    const message =
       "Hermes one-shot iteration guard could not be installed before model execution. No paid model call was started. " +
-        detail,
-    );
+      detail;
+    await persistPreModelFailure(input, message);
+    await sandbox.stop();
+    throw new FatalError(message);
   }
 
   const guardPath = (await iterationGuard.stdout()).trim();
+  const guardVerifyScript = [
+    "from pathlib import Path",
+    "import py_compile, sys",
+    "path = Path(sys.argv[1])",
+    "text = path.read_text(encoding='utf-8')",
+    "marker = " + JSON.stringify(iterationGuardMarker),
+    "if marker not in text: raise SystemExit('iteration guard marker missing')",
+    "py_compile.compile(str(path), doraise=True)",
+  ].join("\n");
+
   const guardVerify = await sandbox.runCommand({
-    cmd: "python",
+    cmd: "bash",
     args: [
-      "-c",
-      [
-        "from pathlib import Path",
-        "import py_compile, sys",
-        "path = Path(sys.argv[1])",
-        "text = path.read_text(encoding='utf-8')",
-        "marker = " + JSON.stringify(iterationGuardMarker),
-        "if marker not in text: raise SystemExit('iteration guard marker missing')",
-        "py_compile.compile(str(path), doraise=True)",
-      ].join("\n"),
+      "-lc",
+      hermesPythonShell + ' -- -c "$1" "$2"',
+      "guard-verify",
+      guardVerifyScript,
       guardPath,
     ],
     cwd: "/tmp",
@@ -509,11 +598,12 @@ async function startLinkedProjectHermesDetached(
     const detail = tail(
       (await guardVerify.stderr()) || (await guardVerify.stdout()),
     );
-    await sandbox.stop();
-    throw new FatalError(
+    const message =
       "Hermes one-shot iteration guard failed deterministic verification before model execution. No paid model call was started. " +
-        detail,
-    );
+      detail;
+    await persistPreModelFailure(input, message);
+    await sandbox.stop();
+    throw new FatalError(message);
   }
 
   const iterationGuardMode = "patched-v2026-9-14-oneshot-max-iterations";
