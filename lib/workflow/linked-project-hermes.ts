@@ -552,11 +552,11 @@ async function startLinkedProjectHermesDetached(
     '    *) echo "unable-to-resolve-hermes-python" >&2; exit 126 ;;',
     '  esac',
     'fi',
-  ].join("; ");
+  ].join("\n");
 
   const iterationGuard = await sandbox.runCommand({
     cmd: "bash",
-    args: ["-lc", hermesPythonShell + '; exec "$HERMES_PY" -c "$1"', "guard-install", iterationGuardScript],
+    args: ["-lc", hermesPythonShell + '\nexec "$HERMES_PY" -c "$1"', "guard-install", iterationGuardScript],
     cwd: "/tmp",
   });
   if (iterationGuard.exitCode !== 0) {
@@ -586,7 +586,7 @@ async function startLinkedProjectHermesDetached(
     cmd: "bash",
     args: [
       "-lc",
-      hermesPythonShell + '; exec "$HERMES_PY" -c "$1" "$2"',
+      hermesPythonShell + '\nexec "$HERMES_PY" -c "$1" "$2"',
       "guard-verify",
       guardVerifyScript,
       guardPath,
