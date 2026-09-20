@@ -20,7 +20,7 @@ const MAX_PATCH_BYTES = 160_000;
 function utf8ByteLength(value: string) {
   return new TextEncoder().encode(value).byteLength;
 }
-const MAX_TURNS = 16;
+const MAX_TURNS = 4;
 
 interface HermesUsageReport {
   estimated_cost_usd?: number;
@@ -159,6 +159,27 @@ function failureAdviceFor(
     normalized.includes("required usage report") ||
     normalized.includes("timed out")
   ) {
+    const alreadyBounded =
+      request.includes("Implement only Phase 1") ||
+      request.includes("first independently verifiable source-code capability");
+
+    if (alreadyBounded) {
+      return {
+        title: "Fix the Hermes worker before another paid run",
+        summary:
+          "A deliberately small Phase 1 still consumed the full execution window, so further scope splitting is no longer the right recovery.",
+        cause:
+          "The linked-project worker allowed too many Hermes iterations for the 300-second command window. The worker is being reduced to a four-iteration coding budget so it can terminate and flush usage evidence before the outer timeout.",
+        retrySafety: "safe-after-fix",
+        costStatus: "unresolved",
+        recommendedAction:
+          "Do not split the Phase 1 request again. Verify the worker-budget fix first, then rerun this same bounded Phase 1 once.",
+        suggestedPrompt:
+          "Verify the linked-project Hermes worker uses the bounded four-iteration budget and passes CI. Then rerun this same bounded Phase 1 once; do not recursively split it again.",
+        executablePrompt: request.trim(),
+      };
+    }
+
     return {
       title: "Split this request before another paid run",
       summary:
