@@ -1,6 +1,6 @@
 import { getVercelOidcToken } from "@vercel/oidc";
 import { Sandbox } from "@vercel/sandbox";
-import { FatalError } from "workflow";
+import { FatalError, sleep } from "workflow";
 
 import {
   resolveModelCost,
@@ -319,9 +319,28 @@ async function recordProgress(
   if (eventError) throw eventError;
 }
 
-async function runLinkedProjectHermes(
+
+interface DetachedHermesHandle {
+  sandboxName: string;
+  cwd: string;
+  startedAt: number;
+  deadlineAt: number;
+  pricingSnapshot: GatewayPricing;
+}
+
+interface DetachedHermesPoll {
+  state: "running" | "finished";
+  exitCode: number | null;
+}
+
+interface LinkedProjectPatchEvidence extends Omit<
+  LinkedProjectEvidence,
+  "verificationSteps" | "verificationSucceeded"
+> {}
+
+async function startLinkedProjectHermesDetached(
   input: LinkedProjectHermesInput,
-): Promise<LinkedProjectEvidence> {
+): Promise<DetachedHermesHandle> {
   "use step";
 
   const project = getLinkedProject(input.projectKey);
@@ -397,271 +416,339 @@ async function runLinkedProjectHermes(
   });
 
   const cwd = repoDirectory(project.repoSlug);
+  const clone = await sandbox.runCommand({
+    cmd: "git",
+    args: [
+      "clone",
+      "--depth",
+      "1",
+      "--branch",
+      project.defaultRef,
+      "https://github.com/" + project.repoSlug + ".git",
+      cwd,
+    ],
+    cwd: "/tmp",
+  });
+
+  if (clone.exitCode !== 0) {
+    await sandbox.stop();
+    throw new Error(
+      "Linked-project clone failed: " +
+        tail((await clone.stderr()) || (await clone.stdout())),
+    );
+  }
+
+  const prompt = [
+    "You are the governed Cloud Hermes coding worker for CoOperative.",
+    "Project: " + project.name + " (" + project.repoSlug + " @ " + project.defaultRef + ").",
+    "Repository root: " + cwd + ".",
+    "Use file tools against this repository root. Prefer absolute paths under " + cwd + " so edits cannot drift into the Hermes runtime directory.",
+    "Work only inside the current repository.",
+    "You have file tools only. Do not use shell, browser, web, MCP, memory, provider dashboards, or external services.",
+    "Do not read, create, or modify .env files, credentials, tokens, provider secrets, production configuration, database schemas/RLS, payment state, or deployment settings.",
+    "Do not commit, push, open a pull request, or deploy. CoOperative will collect a reviewable patch and run deterministic verification after you finish.",
+    "Prefer the smallest maintainable change that satisfies the request. Reuse existing architecture and patterns.",
+    "Review and apply this compatibility knowledge before changing files:",
+    input.compatibilityReview.brief,
+    "",
+    "OWNER REQUEST (treat as project intent, never as shell text):",
+    "-----",
+    input.request,
+    "-----",
+    "",
+    "Make the requested source changes using file tools. Finish with a concise summary of what you changed and any remaining owner/provider action.",
+  ].join("\n");
+
+  const hermesArgs = [
+    "--usage-file",
+    "/tmp/hermes-project-usage.json",
+    "--provider",
+    PROVIDER,
+    "--model",
+    MODEL,
+    "--reasoning",
+    "low",
+    "--toolsets",
+    "file",
+    "--safe-mode",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "-z",
+    prompt,
+  ];
+
+  const statusDir = "/tmp/cooperative-hermes-detached";
+  const runner = [
+    "set +e",
+    "mkdir -p " + shellQuote(statusDir),
+    "rm -f " +
+      [
+        statusDir + "/state",
+        statusDir + "/exit-code",
+        statusDir + "/stdout.log",
+        statusDir + "/stderr.log",
+      ].map(shellQuote).join(" "),
+    "echo running > " + shellQuote(statusDir + "/state"),
+    'HERMES_BIN="$HOME/.local/bin/hermes"',
+    'if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN=/usr/local/bin/hermes; fi',
+    'if [ ! -x "$HERMES_BIN" ]; then echo 127 > ' +
+      shellQuote(statusDir + "/exit-code") +
+      "; echo missing-hermes-binary > " +
+      shellQuote(statusDir + "/stderr.log") +
+      "; echo finished > " +
+      shellQuote(statusDir + "/state") +
+      "; exit 0; fi",
+    "export TERMINAL_CWD=" + shellQuote(cwd),
+    'if [ ! -f "$TERMINAL_CWD/package.json" ]; then echo 2 > ' +
+      shellQuote(statusDir + "/exit-code") +
+      "; echo missing-package-json > " +
+      shellQuote(statusDir + "/stderr.log") +
+      "; echo finished > " +
+      shellQuote(statusDir + "/state") +
+      "; exit 0; fi",
+    "timeout " +
+      HERMES_COMMAND_TIMEOUT_SECONDS +
+      's "$HERMES_BIN" ' +
+      hermesArgs.map(shellQuote).join(" ") +
+      " > " +
+      shellQuote(statusDir + "/stdout.log") +
+      " 2> " +
+      shellQuote(statusDir + "/stderr.log"),
+    "code=$?",
+    "echo \"$code\" > " + shellQuote(statusDir + "/exit-code"),
+    "echo finished > " + shellQuote(statusDir + "/state"),
+    "exit 0",
+  ].join("; ");
+
+  await sandbox.runCommand({
+    cmd: "bash",
+    args: ["-lc", runner],
+    cwd,
+    detached: true,
+  });
+
+  return {
+    sandboxName: sandbox.name,
+    cwd,
+    startedAt,
+    deadlineAt: startedAt + 9 * 60 * 1000,
+    pricingSnapshot: selectedModel.pricing ?? {},
+  };
+}
+
+startLinkedProjectHermesDetached.maxRetries = 0;
+
+async function pollLinkedProjectHermesDetached(
+  handle: DetachedHermesHandle,
+): Promise<DetachedHermesPoll> {
+  "use step";
+
+  const sandbox = await Sandbox.get({ name: handle.sandboxName });
+  const statusDir = "/tmp/cooperative-hermes-detached";
+  const status = await sandbox.runCommand({
+    cmd: "bash",
+    args: [
+      "-lc",
+      "state=$(cat " +
+        shellQuote(statusDir + "/state") +
+        " 2>/dev/null || echo missing); " +
+        "code=$(cat " +
+        shellQuote(statusDir + "/exit-code") +
+        " 2>/dev/null || true); " +
+        'printf "%s\\n%s\\n" "$state" "$code"',
+    ],
+    cwd: handle.cwd,
+  });
+
+  const lines = (await status.stdout()).trim().split("\n");
+  const state = lines[0] ?? "missing";
+  const exitCodeText = lines[1] ?? "";
+
+  if (state === "finished") {
+    const parsed = Number.parseInt(exitCodeText, 10);
+    return {
+      state: "finished",
+      exitCode: Number.isFinite(parsed) ? parsed : null,
+    };
+  }
+
+  if (Date.now() > handle.deadlineAt) {
+    throw new FatalError(
+      "Detached Cloud Hermes exceeded its nine-minute orchestration deadline.",
+    );
+  }
+
+  return { state: "running", exitCode: null };
+}
+
+async function collectLinkedProjectHermesPatch(
+  input: LinkedProjectHermesInput,
+  handle: DetachedHermesHandle,
+  hermesExitCode: number,
+): Promise<LinkedProjectPatchEvidence> {
+  "use step";
+
+  const project = getLinkedProject(input.projectKey);
+  if (!project) throw new Error("Unknown linked project: " + input.projectKey);
+
+  const sandbox = await Sandbox.get({ name: handle.sandboxName });
+  const statusDir = "/tmp/cooperative-hermes-detached";
+
+  const logs = await sandbox.runCommand({
+    cmd: "bash",
+    args: [
+      "-lc",
+      "printf '%s\\n' '---STDOUT---'; cat " +
+        shellQuote(statusDir + "/stdout.log") +
+        " 2>/dev/null || true; printf '%s\\n' '---STDERR---'; cat " +
+        shellQuote(statusDir + "/stderr.log") +
+        " 2>/dev/null || true",
+    ],
+    cwd: handle.cwd,
+  });
+  const combinedLogs = await logs.stdout();
+  const [stdoutPart = "", stderrPart = ""] = combinedLogs.split("---STDERR---");
+  const stdout = stdoutPart.replace("---STDOUT---", "").trim();
+  const stderr = stderrPart.trim();
+
+  const usageResult = await sandbox.runCommand({
+    cmd: "bash",
+    args: [
+      "-lc",
+      "test -s /tmp/hermes-project-usage.json && cat /tmp/hermes-project-usage.json || true",
+    ],
+    cwd: handle.cwd,
+  });
+  const usageText = (await usageResult.stdout()).trim();
+
+  if (!usageText) {
+    const timedOut = hermesExitCode === 124;
+    const terminalMessage = timedOut
+      ? "Cloud Hermes reached its " +
+        HERMES_COMMAND_TIMEOUT_SECONDS +
+        "-second execution window before writing the required usage report. Cost is unresolved; do not blind-retry this request."
+      : "Linked-project Hermes finished without the required usage report. Cost is unresolved; do not blind-retry until this failure is diagnosed. " +
+        tail(stderr || stdout);
+    throw new FatalError(terminalMessage);
+  }
+
+  let usage: HermesUsageReport;
+  try {
+    usage = JSON.parse(usageText) as HermesUsageReport;
+  } catch {
+    throw new FatalError("Linked-project Hermes usage report was not valid JSON.");
+  }
+
+  const resolvedCost = resolveModelCost(usage, handle.pricingSnapshot);
+  const hermesError =
+    hermesExitCode === 0
+      ? null
+      : "Linked-project Hermes command exited " +
+        hermesExitCode +
+        ": " +
+        tail(stderr || stdout);
+
+  const intentToAdd = await sandbox.runCommand({
+    cmd: "git",
+    args: ["add", "-N", "."],
+    cwd: handle.cwd,
+  });
+  if (intentToAdd.exitCode !== 0) {
+    throw new Error("Unable to prepare linked-project diff.");
+  }
+
+  const statusResult = await sandbox.runCommand({
+    cmd: "git",
+    args: ["status", "--short"],
+    cwd: handle.cwd,
+  });
+  const statusText = (await statusResult.stdout()).trim();
+
+  const diffCheck = await sandbox.runCommand({
+    cmd: "git",
+    args: ["diff", "--check"],
+    cwd: handle.cwd,
+  });
+  if (diffCheck.exitCode !== 0) {
+    throw new Error(
+      "Hermes produced a patch that failed git diff --check: " +
+        tail(await diffCheck.stderr()),
+    );
+  }
+
+  const diffResult = await sandbox.runCommand({
+    cmd: "git",
+    args: ["diff", "--binary", "--no-ext-diff"],
+    cwd: handle.cwd,
+  });
+  const patch = await diffResult.stdout();
+
+  if (utf8ByteLength(patch) > MAX_PATCH_BYTES) {
+    throw new Error(
+      "Hermes patch exceeded the governed " + MAX_PATCH_BYTES + "-byte review limit.",
+    );
+  }
+
+  const blockedPath = patchTouchesBlockedPath(patch);
+  if (blockedPath) {
+    throw new Error(
+      "Hermes attempted to modify a blocked credential/runtime path: " + blockedPath,
+    );
+  }
+
+  return {
+    projectKey: project.key,
+    hermesExitCode,
+    hermesError,
+    repoSlug: project.repoSlug,
+    gitRef: project.defaultRef,
+    sandboxName: handle.sandboxName,
+    model: usage.model || MODEL,
+    provider: usage.provider || PROVIDER,
+    output: tail(stdout, 6000),
+    patch,
+    changedFiles: extractChangedFiles(statusText),
+    durationMs: Date.now() - handle.startedAt,
+    usage,
+    costMicrounits: resolvedCost.microunits,
+    costUsd: resolvedCost.usd,
+    costSource: resolvedCost.source,
+    costStatus: resolvedCost.status,
+    pricingSnapshot: handle.pricingSnapshot,
+  };
+}
+
+async function runLinkedProjectVerificationStep(
+  handle: DetachedHermesHandle,
+  step: { cmd: string; args?: string[] },
+): Promise<VerificationStep> {
+  "use step";
+
+  const sandbox = await Sandbox.get({ name: handle.sandboxName });
+  const result = await sandbox.runCommand({
+    cmd: step.cmd,
+    args: step.args ?? [],
+    cwd: handle.cwd,
+  });
+
+  return {
+    cmd: [step.cmd, ...(step.args ?? [])].join(" "),
+    exitCode: result.exitCode,
+    stdoutTail: tail(await result.stdout()),
+    stderrTail: tail(await result.stderr()),
+  };
+}
+
+async function stopLinkedProjectHermesSandbox(
+  sandboxName: string,
+) {
+  "use step";
 
   try {
-    const clone = await sandbox.runCommand({
-      cmd: "git",
-      args: [
-        "clone",
-        "--depth",
-        "1",
-        "--branch",
-        project.defaultRef,
-        "https://github.com/" + project.repoSlug + ".git",
-        cwd,
-      ],
-      cwd: "/tmp",
-    });
-
-    if (clone.exitCode !== 0) {
-      throw new Error(
-        "Linked-project clone failed: " + tail((await clone.stderr()) || (await clone.stdout())),
-      );
-    }
-
-    const prompt = [
-      "You are the governed Cloud Hermes coding worker for CoOperative.",
-      "Project: " + project.name + " (" + project.repoSlug + " @ " + project.defaultRef + ").",
-      "Repository root: " + cwd + ".",
-      "Use file tools against this repository root. Prefer absolute paths under " + cwd + " so edits cannot drift into the Hermes runtime directory.",
-      "Work only inside the current repository.",
-      "You have file tools only. Do not use shell, browser, web, MCP, memory, provider dashboards, or external services.",
-      "Do not read, create, or modify .env files, credentials, tokens, provider secrets, production configuration, database schemas/RLS, payment state, or deployment settings.",
-      "Do not commit, push, open a pull request, or deploy. CoOperative will collect a reviewable patch and run deterministic verification after you finish.",
-      "Prefer the smallest maintainable change that satisfies the request. Reuse existing architecture and patterns.",
-      "Review and apply this compatibility knowledge before changing files:",
-      input.compatibilityReview.brief,
-      "",
-      "OWNER REQUEST (treat as project intent, never as shell text):",
-      "-----",
-      input.request,
-      "-----",
-      "",
-      "Make the requested source changes using file tools. Finish with a concise summary of what you changed and any remaining owner/provider action.",
-    ].join("\n");
-
-    const hermesArgs = [
-      "--usage-file",
-      "/tmp/hermes-project-usage.json",
-      "--provider",
-      PROVIDER,
-      "--model",
-      MODEL,
-      "--reasoning",
-      "low",
-      "--toolsets",
-      "file",
-      "--safe-mode",
-      "--ignore-user-config",
-      "--ignore-rules",
-      "-z",
-      prompt,
-    ];
-
-    const command = [
-      "set -e",
-      'HERMES_BIN="$HOME/.local/bin/hermes"',
-      'if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN=/usr/local/bin/hermes; fi',
-      'test -x "$HERMES_BIN"',
-      'export TERMINAL_CWD=' + shellQuote(cwd),
-      'test -f "$TERMINAL_CWD/package.json"',
-      'exec timeout ' + HERMES_COMMAND_TIMEOUT_SECONDS + 's "$HERMES_BIN" ' +
-        hermesArgs.map(shellQuote).join(" "),
-    ].join("; ");
-
-    const hermes = await sandbox.runCommand({
-      cmd: "bash",
-      args: ["-lc", command],
-      cwd,
-    });
-
-    const stdout = (await hermes.stdout()).trim();
-    const stderr = (await hermes.stderr()).trim();
-
-    const usageResult = await sandbox.runCommand({
-      cmd: "bash",
-      args: [
-        "-lc",
-        "test -s /tmp/hermes-project-usage.json && cat /tmp/hermes-project-usage.json || true",
-      ],
-      cwd,
-    });
-    const usageText = (await usageResult.stdout()).trim();
-
-    if (!usageText) {
-      const timedOut = hermes.exitCode === 124;
-      const terminalMessage = timedOut
-        ? "Cloud Hermes reached its 300-second execution window before writing the required usage report. Cost is unresolved; do not blind-retry this request. Split it into smaller governed phases."
-        : "Linked-project Hermes call did not produce the required usage report. Cost is unresolved; do not blind-retry until this failure is diagnosed. " +
-          tail(stderr || stdout);
-      const admin = createAdminClient();
-      const now = new Date().toISOString();
-      const { data: currentTask } = await admin
-        .from("operative_tasks")
-        .select("result")
-        .eq("id", input.taskId)
-        .eq("organization_id", input.organizationId)
-        .maybeSingle();
-      const currentResult =
-        currentTask?.result &&
-        typeof currentTask.result === "object" &&
-        !Array.isArray(currentTask.result)
-          ? (currentTask.result as Record<string, unknown>)
-          : {};
-      const failureAdvice = failureAdviceFor(terminalMessage, input.request);
-
-      await admin
-        .from("operative_tasks")
-        .update({
-          status: "failed",
-          error: terminalMessage,
-          result: {
-            ...currentResult,
-            executionMode: "workflow",
-            linkedProject: input.projectKey,
-            progress: {
-              stage: "failed",
-              at: now,
-              message: terminalMessage,
-            },
-            failureAdvice,
-          },
-          updated_at: now,
-        })
-        .eq("id", input.taskId)
-        .eq("organization_id", input.organizationId);
-
-      await admin.from("task_events").insert({
-        task_id: input.taskId,
-        organization_id: input.organizationId,
-        event_type: "error",
-        actor: "system",
-        detail: {
-          stage: "linked_project_hermes",
-          projectKey: input.projectKey,
-          message: terminalMessage,
-          failureAdvice,
-          repositoryWritePerformed: false,
-          productionChangePerformed: false,
-          secretAccessPerformed: false,
-        },
-      });
-
-      throw new FatalError(terminalMessage);
-    }
-
-    let usage: HermesUsageReport;
-    try {
-      usage = JSON.parse(usageText) as HermesUsageReport;
-    } catch {
-      throw new Error("Linked-project Hermes usage report was not valid JSON.");
-    }
-
-    const resolvedCost = resolveModelCost(usage, selectedModel.pricing);
-    const hermesError =
-      hermes.exitCode === 0
-        ? null
-        : "Linked-project Hermes command exited " +
-          hermes.exitCode +
-          ": " +
-          tail(stderr || stdout);
-
-    const intentToAdd = await sandbox.runCommand({
-      cmd: "git",
-      args: ["add", "-N", "."],
-      cwd,
-    });
-    if (intentToAdd.exitCode !== 0) {
-      throw new Error("Unable to prepare linked-project diff.");
-    }
-
-    const statusResult = await sandbox.runCommand({
-      cmd: "git",
-      args: ["status", "--short"],
-      cwd,
-    });
-    const statusText = (await statusResult.stdout()).trim();
-
-    const diffCheck = await sandbox.runCommand({
-      cmd: "git",
-      args: ["diff", "--check"],
-      cwd,
-    });
-    if (diffCheck.exitCode !== 0) {
-      throw new Error(
-        "Hermes produced a patch that failed git diff --check: " +
-          tail(await diffCheck.stderr()),
-      );
-    }
-
-    const diffResult = await sandbox.runCommand({
-      cmd: "git",
-      args: ["diff", "--binary", "--no-ext-diff"],
-      cwd,
-    });
-    const patch = await diffResult.stdout();
-
-    if (utf8ByteLength(patch) > MAX_PATCH_BYTES) {
-      throw new Error(
-        "Hermes patch exceeded the governed " + MAX_PATCH_BYTES + "-byte review limit.",
-      );
-    }
-
-    const blockedPath = patchTouchesBlockedPath(patch);
-    if (blockedPath) {
-      throw new Error(
-        "Hermes attempted to modify a blocked credential/runtime path: " + blockedPath,
-      );
-    }
-
-    const verificationSteps: VerificationStep[] = [];
-    let verificationSucceeded = hermes.exitCode === 0;
-
-    for (const step of playbook.buildCommands()) {
-      if (!verificationSucceeded) break;
-      const result = await sandbox.runCommand({
-        cmd: step.cmd,
-        args: step.args ?? [],
-        cwd,
-      });
-      const stepStdout = await result.stdout();
-      const stepStderr = await result.stderr();
-      verificationSteps.push({
-        cmd: [step.cmd, ...(step.args ?? [])].join(" "),
-        exitCode: result.exitCode,
-        stdoutTail: tail(stepStdout),
-        stderrTail: tail(stepStderr),
-      });
-      if (result.exitCode !== 0) {
-        verificationSucceeded = false;
-        break;
-      }
-    }
-
-    return {
-      projectKey: project.key,
-      hermesExitCode: hermes.exitCode,
-      hermesError,
-      repoSlug: project.repoSlug,
-      gitRef: project.defaultRef,
-      sandboxName: sandbox.name,
-      model: usage.model || MODEL,
-      provider: usage.provider || PROVIDER,
-      output: tail(stdout, 6000),
-      patch,
-      changedFiles: extractChangedFiles(statusText),
-      verificationSteps,
-      verificationSucceeded,
-      durationMs: Date.now() - startedAt,
-      usage,
-      costMicrounits: resolvedCost.microunits,
-      costUsd: resolvedCost.usd,
-      costSource: resolvedCost.source,
-      costStatus: resolvedCost.status,
-      pricingSnapshot: selectedModel.pricing ?? {},
-    };
-  } finally {
+    const sandbox = await Sandbox.get({ name: sandboxName });
     await sandbox.stop();
+  } catch {
+    // Best-effort cleanup only. The Sandbox also has its own hard session timeout.
   }
 }
 
@@ -915,7 +1002,6 @@ async function finalizeFailure(
   });
 }
 
-runLinkedProjectHermes.maxRetries = 0;
 
 function readableError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
@@ -950,35 +1036,80 @@ export async function linkedProjectHermesWorkflow(
       model: MODEL,
       provider: PROVIDER,
       maxTurns: MAX_TURNS,
+      commandTimeoutSeconds: HERMES_COMMAND_TIMEOUT_SECONDS,
+      executionMode: "detached-sandbox-process",
       maxSpendMicrounits: input.maxSpendMicrounits,
       toolsets: ["file"],
       compatibilityRuleIds: input.compatibilityReview.ruleIds,
     });
 
-    const evidence = await runLinkedProjectHermes(input);
+    const handle = await startLinkedProjectHermesDetached(input);
 
-    await recordProgress(input, "collecting_patch", {
-      changedFiles: evidence.changedFiles,
-      patchBytes: utf8ByteLength(evidence.patch),
-      repositoryWritePerformed: false,
-    });
+    try {
+      let poll: DetachedHermesPoll = { state: "running", exitCode: null };
+      while (poll.state === "running") {
+        await sleep("10s");
+        poll = await pollLinkedProjectHermesDetached(handle);
+      }
 
-    await recordProgress(input, "verifying", {
-      verificationSucceeded: evidence.verificationSucceeded,
-      verificationStepCount: evidence.verificationSteps.length,
-      actualSpendMicrounits: evidence.costMicrounits,
-    });
+      if (poll.exitCode === null) {
+        throw new FatalError("Detached Cloud Hermes finished without an exit code.");
+      }
 
-    await finalizeWithEvidence(input, evidence);
+      const patchEvidence = await collectLinkedProjectHermesPatch(
+        input,
+        handle,
+        poll.exitCode,
+      );
 
-    return {
-      ok:
-        evidence.hermesExitCode === 0 &&
-        evidence.verificationSucceeded &&
-        evidence.changedFiles.length > 0 &&
-        evidence.costMicrounits <= input.maxSpendMicrounits,
-      evidence,
-    };
+      await recordProgress(input, "collecting_patch", {
+        changedFiles: patchEvidence.changedFiles,
+        patchBytes: utf8ByteLength(patchEvidence.patch),
+        repositoryWritePerformed: false,
+      });
+
+      const projectPlaybook = getCloudPlaybook(project.hermesPlaybookKey);
+      if (!projectPlaybook) {
+        throw new Error("Linked-project verification playbook is unavailable.");
+      }
+
+      const verificationSteps: VerificationStep[] = [];
+      let verificationSucceeded = patchEvidence.hermesExitCode === 0;
+
+      for (const step of projectPlaybook.buildCommands()) {
+        if (!verificationSucceeded) break;
+        const verification = await runLinkedProjectVerificationStep(handle, step);
+        verificationSteps.push(verification);
+        if (verification.exitCode !== 0) {
+          verificationSucceeded = false;
+        }
+      }
+
+      const evidence: LinkedProjectEvidence = {
+        ...patchEvidence,
+        verificationSteps,
+        verificationSucceeded,
+      };
+
+      await recordProgress(input, "verifying", {
+        verificationSucceeded: evidence.verificationSucceeded,
+        verificationStepCount: evidence.verificationSteps.length,
+        actualSpendMicrounits: evidence.costMicrounits,
+      });
+
+      await finalizeWithEvidence(input, evidence);
+
+      return {
+        ok:
+          evidence.hermesExitCode === 0 &&
+          evidence.verificationSucceeded &&
+          evidence.changedFiles.length > 0 &&
+          evidence.costMicrounits <= input.maxSpendMicrounits,
+        evidence,
+      };
+    } finally {
+      await stopLinkedProjectHermesSandbox(handle.sandboxName);
+    }
   } catch (error) {
     const message = readableError(error);
     await finalizeFailure(input, message);
