@@ -540,12 +540,17 @@ async function startLinkedProjectHermesDetached(
   ].join("\n");
 
   const locateHermesOneshotShell = [
-    'SEARCH_ROOTS=""',
-    'for root in "$HOME/.cache/uv" "$HOME/.local" /usr/local /opt; do',
-    '  if [ -d "$root" ]; then SEARCH_ROOTS="$SEARCH_ROOTS $root"; fi',
-    'done',
-    'ONESHOT_PATH="$(find $SEARCH_ROOTS -type f -path "*/hermes_cli/oneshot.py" -print 2>/dev/null | head -n 1)"',
-    'if [ -z "$ONESHOT_PATH" ]; then echo "unable-to-locate-hermes-oneshot-source" >&2; exit 126; fi',
+    'HERMES_BIN="$HOME/.local/bin/hermes"',
+    'if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN=/usr/local/bin/hermes; fi',
+    'if [ ! -x "$HERMES_BIN" ]; then echo "missing-hermes-binary" >&2; exit 127; fi',
+    '# A uv/env launcher may materialize its managed environment only when invoked.',
+    '# --version is deterministic and cannot start a model call.',
+    '"$HERMES_BIN" --version >/dev/null 2>&1 || true',
+    'ONESHOT_PATH="$(find / \( -path /proc -o -path /sys -o -path /dev \) -prune -o -type f -path "*/hermes_cli/oneshot.py" -print -quit 2>/dev/null)"',
+    'if [ -z "$ONESHOT_PATH" ]; then',
+    '  echo "unable-to-locate-hermes-oneshot-source after deterministic runtime hydration" >&2',
+    '  exit 126',
+    'fi',
   ].join("\n");
 
   const iterationGuard = await sandbox.runCommand({
