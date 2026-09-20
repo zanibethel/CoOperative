@@ -924,3 +924,35 @@ b { color: var(--text); }
   font-size: .72rem;
 }
 .task-recovery-prepared span { line-height: 1.4; }
+
+
+.task-recovery-draft {
+  display: grid;
+  gap: 8px;
+}
+.task-recovery-draft textarea {
+  width: 100%;
+  min-height: 170px;
+  max-height: 280px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 10px;
+  font: inherit;
+  font-size: .74rem;
+  line-height: 1.45;
+}
+.task-recovery-draft-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.task-recovery-draft small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+@media (max-width: 600px) {
+  .task-recovery-draft-actions > button { width: 100%; }
+}
