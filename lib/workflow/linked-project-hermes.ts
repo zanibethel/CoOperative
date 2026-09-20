@@ -21,6 +21,7 @@ function utf8ByteLength(value: string) {
   return new TextEncoder().encode(value).byteLength;
 }
 const MAX_TURNS = 4;
+const MAX_EXPECTED_API_CALLS = MAX_TURNS + 1;
 const HERMES_COMMAND_TIMEOUT_SECONDS = 540;
 
 interface HermesUsageReport {
@@ -93,6 +94,8 @@ interface LinkedProjectEvidence {
   verificationSucceeded: boolean;
   diffCheckSucceeded: boolean;
   deterministicRepairs: string[];
+  iterationGuardMode: string;
+  iterationGuardRespected: boolean;
   durationMs: number;
   usage: HermesUsageReport;
   costMicrounits: number;
@@ -360,6 +363,7 @@ interface DetachedHermesHandle {
   startedAt: number;
   deadlineAt: number;
   pricingSnapshot: GatewayPricing;
+  iterationGuardMode: string;
 }
 
 interface DetachedHermesPoll {
@@ -451,6 +455,87 @@ async function startLinkedProjectHermesDetached(
     },
   });
 
+  const iterationGuardMarker =
+    'max_iterations=max(1, int(os.getenv("HERMES_MAX_ITERATIONS", "4"))),';
+  const iterationGuardScript = [
+    "from pathlib import Path",
+    "import hermes_cli.oneshot as oneshot",
+    "path = Path(oneshot.__file__)",
+    "text = path.read_text(encoding='utf-8')",
+    "marker = " + JSON.stringify(iterationGuardMarker),
+    "if marker not in text:",
+    "    needle = '            model=choice.model,\\n'",
+    "    if text.count(needle) != 1:",
+    "        raise SystemExit('unable to locate pinned oneshot AIAgent model argument')",
+    "    text = text.replace(needle, needle + '            ' + marker + '\\n', 1)",
+    "    path.write_text(text, encoding='utf-8')",
+    "print(str(path))",
+  ].join("\n");
+
+  const iterationGuard = await sandbox.runCommand({
+    cmd: "python",
+    args: ["-c", iterationGuardScript],
+    cwd: "/tmp",
+  });
+  if (iterationGuard.exitCode !== 0) {
+    const detail = tail(
+      (await iterationGuard.stderr()) || (await iterationGuard.stdout()),
+    );
+    await sandbox.stop();
+    throw new FatalError(
+      "Hermes one-shot iteration guard could not be installed before model execution. No paid model call was started. " +
+        detail,
+    );
+  }
+
+  const guardPath = (await iterationGuard.stdout()).trim();
+  const guardVerify = await sandbox.runCommand({
+    cmd: "python",
+    args: [
+      "-c",
+      [
+        "from pathlib import Path",
+        "import py_compile, sys",
+        "path = Path(sys.argv[1])",
+        "text = path.read_text(encoding='utf-8')",
+        "marker = " + JSON.stringify(iterationGuardMarker),
+        "if marker not in text: raise SystemExit('iteration guard marker missing')",
+        "py_compile.compile(str(path), doraise=True)",
+      ].join("\n"),
+      guardPath,
+    ],
+    cwd: "/tmp",
+  });
+  if (guardVerify.exitCode !== 0) {
+    const detail = tail(
+      (await guardVerify.stderr()) || (await guardVerify.stdout()),
+    );
+    await sandbox.stop();
+    throw new FatalError(
+      "Hermes one-shot iteration guard failed deterministic verification before model execution. No paid model call was started. " +
+        detail,
+    );
+  }
+
+  const iterationGuardMode = "patched-v2026-9-14-oneshot-max-iterations";
+
+  {
+    const admin = createAdminClient();
+    await admin.from("task_events").insert({
+      task_id: input.taskId,
+      organization_id: input.organizationId,
+      event_type: "note",
+      actor: "system",
+      detail: {
+        type: "hermes_iteration_guard_verified",
+        maxTurns: MAX_TURNS,
+        maxExpectedApiCalls: MAX_EXPECTED_API_CALLS,
+        iterationGuardMode,
+        paidModelCallStarted: false,
+      },
+    });
+  }
+
   const cwd = repoDirectory(project.repoSlug);
   const clone = await sandbox.runCommand({
     cmd: "git",
@@ -480,7 +565,7 @@ async function startLinkedProjectHermesDetached(
     const admin = createAdminClient();
     const { data: sourceTask, error: sourceTaskError } = await admin
       .from("operative_tasks")
-      .select("id,status,playbook_key,result")
+      .select("id,status,playbook_key,description,result")
       .eq("id", input.repairSourceTaskId)
       .eq("organization_id", input.organizationId)
       .maybeSingle();
@@ -582,7 +667,9 @@ async function startLinkedProjectHermesDetached(
       "TARGETED REPAIR MODE.",
       "A preserved patch from failed task " + input.repairSourceTaskId + " has already been applied to this clone.",
       "Do not recreate or broaden the original feature. Keep the existing patch and make only the smallest changes required to resolve its failing deterministic verification.",
-      "Do not remove working portions of the preserved patch unless the verification failure requires it.",
+      "Re-check the preserved patch against the ORIGINAL OWNER REQUEST below. Remove any out-of-scope changes that violate its explicit exclusions.",
+      "Do not remove working portions of the preserved patch unless verification or the original owner scope requires it.",
+      "ORIGINAL OWNER REQUEST AND EXCLUSIONS:\n" + tail(sourceTask.description || "", 6000),
       failedSourceDetail
         ? "FAILING VERIFICATION EVIDENCE:\n" + tail(failedSourceDetail, 5000)
         : "The exact failed verification output was unavailable; inspect the already-applied patch and repair only what is necessary for deterministic verification.",
@@ -699,6 +786,7 @@ async function startLinkedProjectHermesDetached(
     startedAt,
     deadlineAt: startedAt + 11 * 60 * 1000,
     pricingSnapshot: selectedModel.pricing ?? {},
+    iterationGuardMode,
   };
 }
 
@@ -794,7 +882,7 @@ async function collectLinkedProjectHermesPatch(
         HERMES_COMMAND_TIMEOUT_SECONDS +
         "-second execution window before writing the required usage report. Cost is unresolved; do not blind-retry this request."
       : "Linked-project Hermes finished without the required usage report. Cost is unresolved; do not blind-retry until this failure is diagnosed. " +
-        tail(stderr || stdout);
+        tail(stderr || stdout));
     throw new FatalError(terminalMessage);
   }
 
@@ -806,8 +894,19 @@ async function collectLinkedProjectHermesPatch(
   }
 
   const resolvedCost = resolveModelCost(usage, handle.pricingSnapshot);
+  const apiCalls = Number(usage.api_calls ?? 0);
+  const iterationGuardRespected =
+    apiCalls > 0 && apiCalls <= MAX_EXPECTED_API_CALLS;
+  const guardError = iterationGuardRespected
+    ? null
+    : "Hermes iteration guard violation: usage reported " +
+      apiCalls +
+      " API calls with a governed expectation of at most " +
+      MAX_EXPECTED_API_CALLS +
+      ". Do not start another paid run until the one-shot iteration guard is fixed.";
   const hermesError =
-    hermesExitCode === 0
+    guardError ??
+    (hermesExitCode === 0
       ? null
       : "Linked-project Hermes command exited " +
         hermesExitCode +
@@ -961,6 +1060,8 @@ async function collectLinkedProjectHermesPatch(
     diffCheckSucceeded,
     diffCheckSteps,
     deterministicRepairs,
+    iterationGuardMode: handle.iterationGuardMode,
+    iterationGuardRespected,
     durationMs: Date.now() - handle.startedAt,
     usage,
     costMicrounits: resolvedCost.microunits,
@@ -1140,10 +1241,12 @@ async function finalizeWithEvidence(
         .join("\n")
     : "";
 
-  const finalError = overBudget
-    ? `Cost Governor violation: actual model cost ${evidence.costMicrounits} microunits exceeded the ${input.maxSpendMicrounits} microunit cap.`
-    : evidence.hermesError
-      ? evidence.hermesError +
+  const finalError = !evidence.iterationGuardRespected
+    ? evidence.hermesError
+    : overBudget
+      ? `Cost Governor violation: actual model cost ${evidence.costMicrounits} microunits exceeded the ${input.maxSpendMicrounits} microunit cap.`
+      : evidence.hermesError
+        ? evidence.hermesError +
         " Usage/cost evidence and any partial patch were preserved; nothing was written to GitHub."
       : !sourceChangesProduced
         ? "Hermes completed without producing source changes, so this governed patch task is incomplete. Nothing was written to GitHub."
@@ -1154,7 +1257,7 @@ async function finalizeWithEvidence(
 
   const failureAdvice =
     finalError &&
-    !overBudget &&
+    evidence.iterationGuardRespected &&
     evidence.hermesExitCode === 0 &&
     sourceChangesProduced &&
     !evidence.verificationSucceeded
@@ -1220,6 +1323,9 @@ async function finalizeWithEvidence(
       actualSpendMicrounits: evidence.costMicrounits,
       overBudget,
       deterministicRepairs: evidence.deterministicRepairs,
+      iterationGuardMode: evidence.iterationGuardMode,
+      iterationGuardRespected: evidence.iterationGuardRespected,
+      apiCalls: evidence.usage.api_calls ?? null,
       costLedgerReplaySafe: true,
       repositoryWritePerformed: false,
       productionChangePerformed: false,
@@ -1336,6 +1442,7 @@ export async function linkedProjectHermesWorkflow(
       model: MODEL,
       provider: PROVIDER,
       maxTurns: MAX_TURNS,
+      maxExpectedApiCalls: MAX_EXPECTED_API_CALLS,
       commandTimeoutSeconds: HERMES_COMMAND_TIMEOUT_SECONDS,
       executionMode: "detached-sandbox-process",
       repairSourceTaskId: input.repairSourceTaskId ?? null,
