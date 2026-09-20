@@ -50,6 +50,7 @@ test("initial Cloud Hermes roadblocks are preserved as reusable rules", () => {
     "provider-secrets-never-enter-agent-context",
     "linked-hermes-paid-step-no-auto-retry",
     "linked-hermes-timeout-split-scope",
+    "linked-hermes-bounded-phase-timeout-fix-worker",
     "supabase-trusted-writes-preserve-owner-gates",
   ]) {
     assert.ok(ids.has(id), `missing compatibility rule: ${id}`);
