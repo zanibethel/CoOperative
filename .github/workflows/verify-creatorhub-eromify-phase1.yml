@@ -38,6 +38,14 @@ jobs:
           git -C creatorhub diff -- src/lib/eromify.ts > creatorhub-eromify-phase1.patch
           test -s creatorhub-eromify-phase1.patch
 
+      - name: Isolate CreatorHub workspace
+        run: |
+          # Next.js walks upward looking for lockfiles. The CoOperative checkout
+          # has its own package-lock.json, which can make Turbopack select the
+          # wrong workspace root. Remove only the runner copy so CreatorHub's
+          # own lockfile is authoritative.
+          rm -f package-lock.json
+
       - name: Install CreatorHub dependencies
         working-directory: creatorhub
         run: npm install --no-audit --no-fund
