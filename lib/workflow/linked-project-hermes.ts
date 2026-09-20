@@ -71,6 +71,7 @@ interface LinkedProjectFailureAdvice {
   costStatus: "known" | "unresolved";
   recommendedAction: string;
   suggestedPrompt?: string;
+  executablePrompt?: string;
 }
 
 interface LinkedProjectEvidence {
@@ -135,7 +136,22 @@ function patchTouchesBlockedPath(patch: string): string | null {
   return paths.find((path) => blocked.some((pattern) => pattern.test(path))) ?? null;
 }
 
-function failureAdviceFor(message: string): LinkedProjectFailureAdvice {
+function firstRecoveryPhasePrompt(request: string): string {
+  const compact = request.trim().replace(/\s+/g, " ");
+  return [
+    "Implement only Phase 1 of the failed linked-project request.",
+    "Scope this run to the first independently verifiable source-code capability in the original request, plus only the directly coupled types/tests needed for that capability.",
+    "Do not plan or implement downstream phases in this run.",
+    "Do not deploy, push, touch secrets, change production, or change the database.",
+    "Original request for context:",
+    compact,
+  ].join("\n");
+}
+
+function failureAdviceFor(
+  message: string,
+  request = "",
+): LinkedProjectFailureAdvice {
   const normalized = message.toLowerCase();
 
   if (
@@ -155,6 +171,7 @@ function failureAdviceFor(message: string): LinkedProjectFailureAdvice {
         "Break the request into smaller governed phases and run only the first phase. Do not use the blind Retry button for this failure.",
       suggestedPrompt:
         "Split the failed linked-project request into 3–5 small implementation phases. Prepare only Phase 1 as a new governed Hermes patch request, keeping the same safety gates. Do not retry the entire original request.",
+      executablePrompt: firstRecoveryPhasePrompt(request),
     };
   }
 
@@ -450,12 +467,64 @@ async function runLinkedProjectHermes(
 
     if (!usageText) {
       const timedOut = hermes.exitCode === 124;
-      throw new FatalError(
-        timedOut
-          ? "Cloud Hermes reached its 300-second execution window before writing the required usage report. Cost is unresolved; do not blind-retry this request. Split it into smaller governed phases."
-          : "Linked-project Hermes call did not produce the required usage report. Cost is unresolved; do not blind-retry until this failure is diagnosed. " +
-              tail(stderr || stdout),
-      );
+      const terminalMessage = timedOut
+        ? "Cloud Hermes reached its 300-second execution window before writing the required usage report. Cost is unresolved; do not blind-retry this request. Split it into smaller governed phases."
+        : "Linked-project Hermes call did not produce the required usage report. Cost is unresolved; do not blind-retry until this failure is diagnosed. " +
+          tail(stderr || stdout);
+      const admin = createAdminClient();
+      const now = new Date().toISOString();
+      const { data: currentTask } = await admin
+        .from("operative_tasks")
+        .select("result")
+        .eq("id", input.taskId)
+        .eq("organization_id", input.organizationId)
+        .maybeSingle();
+      const currentResult =
+        currentTask?.result &&
+        typeof currentTask.result === "object" &&
+        !Array.isArray(currentTask.result)
+          ? (currentTask.result as Record<string, unknown>)
+          : {};
+      const failureAdvice = failureAdviceFor(terminalMessage, input.request);
+
+      await admin
+        .from("operative_tasks")
+        .update({
+          status: "failed",
+          error: terminalMessage,
+          result: {
+            ...currentResult,
+            executionMode: "workflow",
+            linkedProject: input.projectKey,
+            progress: {
+              stage: "failed",
+              at: now,
+              message: terminalMessage,
+            },
+            failureAdvice,
+          },
+          updated_at: now,
+        })
+        .eq("id", input.taskId)
+        .eq("organization_id", input.organizationId);
+
+      await admin.from("task_events").insert({
+        task_id: input.taskId,
+        organization_id: input.organizationId,
+        event_type: "error",
+        actor: "system",
+        detail: {
+          stage: "linked_project_hermes",
+          projectKey: input.projectKey,
+          message: terminalMessage,
+          failureAdvice,
+          repositoryWritePerformed: false,
+          productionChangePerformed: false,
+          secretAccessPerformed: false,
+        },
+      });
+
+      throw new FatalError(terminalMessage);
     }
 
     let usage: HermesUsageReport;
@@ -759,11 +828,9 @@ async function finalizeFailure(
 
   const admin = createAdminClient();
   const now = new Date().toISOString();
-  const failureAdvice = failureAdviceFor(message);
-
   const { data: task } = await admin
     .from("operative_tasks")
-    .select("result")
+    .select("result,error,status")
     .eq("id", input.taskId)
     .eq("organization_id", input.organizationId)
     .maybeSingle();
@@ -772,12 +839,27 @@ async function finalizeFailure(
     task?.result && typeof task.result === "object" && !Array.isArray(task.result)
       ? (task.result as Record<string, unknown>)
       : {};
+  const existingAdvice =
+    current.failureAdvice &&
+    typeof current.failureAdvice === "object" &&
+    !Array.isArray(current.failureAdvice)
+      ? current.failureAdvice
+      : null;
+  const existingPreciseError =
+    typeof task?.error === "string" &&
+    task.error.trim() &&
+    task.error !== "Linked-project Hermes workflow failed."
+      ? task.error
+      : null;
+  const effectiveMessage = existingPreciseError || message;
+  const failureAdvice =
+    existingAdvice ?? failureAdviceFor(effectiveMessage, input.request);
 
   await admin
     .from("operative_tasks")
     .update({
       status: "failed",
-      error: message,
+      error: effectiveMessage,
       result: {
         ...current,
         executionMode: "workflow",
@@ -785,7 +867,7 @@ async function finalizeFailure(
         progress: {
           stage: "failed",
           at: now,
-          message,
+          message: effectiveMessage,
         },
         failureAdvice,
       },
