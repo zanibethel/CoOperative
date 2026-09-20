@@ -882,7 +882,7 @@ async function collectLinkedProjectHermesPatch(
         HERMES_COMMAND_TIMEOUT_SECONDS +
         "-second execution window before writing the required usage report. Cost is unresolved; do not blind-retry this request."
       : "Linked-project Hermes finished without the required usage report. Cost is unresolved; do not blind-retry until this failure is diagnosed. " +
-        tail(stderr || stdout));
+        tail(stderr || stdout);
     throw new FatalError(terminalMessage);
   }
 
@@ -911,7 +911,7 @@ async function collectLinkedProjectHermesPatch(
       : "Linked-project Hermes command exited " +
         hermesExitCode +
         ": " +
-        tail(stderr || stdout);
+        tail(stderr || stdout));
 
   const intentToAdd = await sandbox.runCommand({
     cmd: "git",
