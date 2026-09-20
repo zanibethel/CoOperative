@@ -43,6 +43,14 @@ type Overview = {
   messages: Message[];
   tasks: Task[];
   pendingDecisions: Decision[];
+  aiPolicy?: {
+    plan: string;
+    canManageAiLimits: boolean;
+    requestTokenCap: number;
+    monthlyTokenCap: number;
+    defaultCostCapUsd?: number;
+    hardCostCapUsd?: number;
+  };
 };
 
 type SafetyFlags = {
@@ -295,6 +303,9 @@ export default function OwnerConsolePage() {
     "Ask me what to do next, where something is, or to find a recent report.",
   );
   const [assistantLinks, setAssistantLinks] = useState<Array<{ label: string; href: string }>>([]);
+  const [aiWorking, setAiWorking] = useState(false);
+  const [aiCostCapUsd, setAiCostCapUsd] = useState("");
+  const [assistantUsage, setAssistantUsage] = useState("");
 
   async function load() {
     const response = await fetch("/api/operative/overview", { cache: "no-store" });
@@ -324,7 +335,18 @@ export default function OwnerConsolePage() {
     };
   }, []);
 
-  const actualSpend = useMemo(
+  useEffect(() => {
+    const defaultCap = overview.aiPolicy?.defaultCostCapUsd;
+    if (
+      overview.aiPolicy?.canManageAiLimits &&
+      typeof defaultCap === "number" &&
+      !aiCostCapUsd
+    ) {
+      setAiCostCapUsd(String(defaultCap));
+    }
+  }, [overview.aiPolicy, aiCostCapUsd]);
+
+    const actualSpend = useMemo(
     () => overview.tasks.reduce((sum, task) => sum + Number(task.actual_spend_microunits ?? 0), 0),
     [overview.tasks],
   );
@@ -558,6 +580,66 @@ export default function OwnerConsolePage() {
       { label: "Mission Control", href: "/console" },
     ]);
     if (!messageOverride) setText("");
+  }
+
+  async function askAi() {
+    const messageText = text.trim();
+    if (!messageText) return;
+
+    setAiWorking(true);
+    setError("");
+    setNotice("");
+    setAssistantUsage("");
+    setChatOpen(true);
+
+    try {
+      const response = await fetch("/api/console/ask-ai", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          text: messageText,
+          maxCostUsd: overview.aiPolicy?.canManageAiLimits
+            ? Number(aiCostCapUsd || overview.aiPolicy.defaultCostCapUsd || 0)
+            : undefined,
+        }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Ask AI failed.");
+      }
+
+      setAssistantReply(payload.answer ?? "AI completed without a text answer.");
+      setAssistantLinks(Array.isArray(payload.links) ? payload.links : []);
+      setText("");
+
+      if (payload.usage && overview.aiPolicy?.canManageAiLimits) {
+        const totalTokens = Number(payload.usage.totalTokens ?? 0);
+        const costUsd = Number(payload.usage.costUsd ?? 0);
+        const monthlyUsed = Number(payload.usage.monthlyTokensUsed ?? 0);
+        const monthlyCap = Number(payload.usage.monthlyTokenCap ?? 0);
+        setAssistantUsage(
+          totalTokens.toLocaleString() +
+            " tokens · $" +
+            costUsd.toFixed(6) +
+            " · month " +
+            monthlyUsed.toLocaleString() +
+            "/" +
+            monthlyCap.toLocaleString(),
+        );
+      } else if (payload.usage?.monthlyTokensRemaining !== undefined) {
+        setAssistantUsage(
+          Number(payload.usage.monthlyTokensRemaining).toLocaleString() +
+            " plan tokens remaining",
+        );
+      }
+
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ask AI failed.");
+    } finally {
+      setAiWorking(false);
+    }
   }
 
   async function persistMessage(messageText: string) {
@@ -1129,6 +1211,7 @@ export default function OwnerConsolePage() {
           <div className="chat-assistant-answer" aria-live="polite">
             <div className="eyebrow">Quick CoOperative</div>
             <p>{assistantReply}</p>
+            {assistantUsage ? <div className="chat-ai-usage">{assistantUsage}</div> : null}
             {assistantLinks.length > 0 ? (
               <div className="chat-answer-links">
                 {assistantLinks.map((link) =>
@@ -1156,6 +1239,36 @@ export default function OwnerConsolePage() {
               </button>
             </div>
           </div>
+
+          {overview.aiPolicy?.canManageAiLimits ? (
+            <details className="ai-owner-controls">
+              <summary>Owner AI limits</summary>
+              <div className="ai-owner-control-grid">
+                <label>
+                  Max cost for this AI answer
+                  <input
+                    type="number"
+                    min="0.001"
+                    max={overview.aiPolicy.hardCostCapUsd ?? 0.1}
+                    step="0.001"
+                    value={aiCostCapUsd}
+                    onChange={(event) => setAiCostCapUsd(event.target.value)}
+                  />
+                </label>
+                <div>
+                  <span>Request tokens</span>
+                  <strong>{overview.aiPolicy.requestTokenCap.toLocaleString()}</strong>
+                </div>
+                <div>
+                  <span>Monthly tokens</span>
+                  <strong>{overview.aiPolicy.monthlyTokenCap.toLocaleString()}</strong>
+                </div>
+              </div>
+              <small>
+                Regular users do not see these controls. Server-side plan limits still apply even if a client request is modified.
+              </small>
+            </details>
+          ) : null}
 
           <div className="message-list">
             {loading ? <p>Loading conversation…</p> : null}
@@ -1225,14 +1338,22 @@ export default function OwnerConsolePage() {
                 className="chat-ask-button"
                 type="button"
                 onClick={() => answerQuickQuestion()}
-                disabled={!text.trim()}
+                disabled={!text.trim() || aiWorking}
               >
-                Ask
+                Quick Ask
               </button>
-              <button className="secondary-button" type="submit" disabled={working || !text.trim() || !overview.organization}>
+              <button
+                className="chat-ai-button"
+                type="button"
+                onClick={() => void askAi()}
+                disabled={!text.trim() || aiWorking || !overview.organization}
+              >
+                {aiWorking ? "AI working…" : "Ask AI"}
+              </button>
+              <button className="secondary-button" type="submit" disabled={working || aiWorking || !text.trim() || !overview.organization}>
                 {working ? "Working…" : "Save to thread"}
               </button>
-              <button className="primary" type="button" onClick={() => void queueTask()} disabled={working || text.trim().length < 2 || !overview.organization}>
+              <button className="primary" type="button" onClick={() => void queueTask()} disabled={working || aiWorking || text.trim().length < 2 || !overview.organization}>
                 Queue governed task
               </button>
             </div>
