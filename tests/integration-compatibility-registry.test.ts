@@ -37,6 +37,8 @@ test("initial Cloud Hermes roadblocks are preserved as reusable rules", () => {
     "workflow-required-for-long-cloud-work",
     "hermes-v0213-global-flags-before-subcommand",
     "hermes-guard-multiline-shell-must-preserve-newlines",
+    "hermes-guard-hydrate-uv-runtime-before-source-discovery",
+    "targeted-repair-lineage-must-survive-generic-composer",
     "hermes-guard-do-not-treat-env-shebang-as-python",
     "hermes-v0213-scripted-oneshot-max-iterations-shim",
     "hermes-v0213-minimum-context-64k",
