@@ -17,6 +17,7 @@ export const OwnerTaskIntentSchema = z.object({
   title: z.string().trim().min(2).max(200),
   description: z.string().trim().max(4000).default(""),
   playbookKey: z.string().regex(/^[a-z0-9-]+$/).nullable().default(null),
+  repairSourceTaskId: z.string().uuid().nullable().optional(),
   maxSpendUsd: z.number().finite().min(0).max(1000).default(0),
   flags: TaskSafetyFlagsSchema.optional(),
 });
