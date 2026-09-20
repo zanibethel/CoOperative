@@ -230,3 +230,14 @@ test("git status path parsing preserves the first character of changed source pa
   assert.match(source, /\.map\(\(line\) => line\.slice\(3\)\.trim\(\)\)/);
   assert.equal(source.includes(".map((line) => line.trim())\n    .filter(Boolean)\n    .map((line) => line.slice(3)"), false);
 });
+
+
+test("Hermes iteration shim runs in the Hermes-installed Python environment before any spend", () => {
+  assert.match(source, /HERMES_REAL=.*readlink -f/);
+  assert.match(source, /HERMES_PY=.*dirname/);
+  assert.match(source, /IFS= read -r SHEBANG/);
+  assert.match(source, /persistPreModelFailure/);
+  assert.match(source, /actual_spend_microunits: 0/);
+  assert.match(source, /paidModelCallStarted: false/);
+  assert.equal(source.includes('cmd: "python",\n    args: ["-c", iterationGuardScript]'), false);
+});
