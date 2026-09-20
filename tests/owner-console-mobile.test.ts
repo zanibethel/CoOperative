@@ -101,3 +101,12 @@ test("recommended recovery can execute directly from the failed task card", () =
   assert.match(page, /Authorized model spend cap:/);
   assert.match(page, /saved to the canonical conversation/);
 });
+
+
+test("direct recovery execution uses a separate bounded executable prompt", () => {
+  assert.match(page, /executablePrompt\?: string/);
+  assert.match(page, /const executablePrompt = advice\?\.executablePrompt/);
+  assert.match(page, /description: executablePrompt/);
+  assert.match(page, /taskFailureAdvice\(task\.result\)\?\.executablePrompt/);
+  assert.match(page, /needs review before it can be executed directly/);
+});
