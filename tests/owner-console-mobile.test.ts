@@ -110,3 +110,12 @@ test("direct recovery execution uses a separate bounded executable prompt", () =
   assert.match(page, /taskFailureAdvice\(task\.result\)\?\.executablePrompt/);
   assert.match(page, /needs review before it can be executed directly/);
 });
+
+
+test("verification failures can launch an owner-gated targeted repair from the preserved patch", () => {
+  assert.match(page, /repairSourceTaskId\?: string/);
+  assert.match(page, /Execute targeted repair · max \$/);
+  assert.match(page, /repairSourceTaskId: advice\.repairSourceTaskId \?\? null/);
+  assert.match(page, /targeted repair started · max \$/);
+  assert.match(page, /saved to the canonical conversation/);
+});
