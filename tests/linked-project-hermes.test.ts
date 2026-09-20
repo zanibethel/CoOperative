@@ -249,3 +249,16 @@ test("Hermes guard verification compiles the exact patched source file without i
   assert.equal(source.includes("import hermes_cli.oneshot as oneshot"), false);
   assert.equal(source.includes("HERMES_PY"), false);
 });
+
+
+test("targeted repair lineage is recovered from an explicit preserved-task prompt when metadata is missing", () => {
+  assert.match(createRoute, /inferredRepairSourceTaskId/);
+  assert.match(createRoute, /preserved patch from task/);
+  assert.match(createRoute, /parsed\.data\.repairSourceTaskId \?\? inferredRepairSourceTaskId/);
+});
+
+test("uv-style Hermes launcher is hydrated before direct oneshot source discovery", () => {
+  assert.match(source, /"\$HERMES_BIN" --version >\/dev\/null 2>&1 \|\| true/);
+  assert.match(source, /find \/ \\\( -path \/proc -o -path \/sys -o -path \/dev \\\) -prune/);
+  assert.match(source, /unable-to-locate-hermes-oneshot-source after deterministic runtime hydration/);
+});
