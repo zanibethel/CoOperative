@@ -52,7 +52,8 @@ test("linked-project Hermes returns a bounded reviewable patch and blocks secret
   assert.equal(source.includes('"--run-budget"'), false);
   assert.equal(source.includes('"--checkpoints"'), false);
   assert.equal(source.includes('"--source"'), false);
-  assert.match(source, /timeout 300s/);
+  assert.match(source, /const HERMES_COMMAND_TIMEOUT_SECONDS = 420/);
+  assert.match(source, /timeout ' \+ HERMES_COMMAND_TIMEOUT_SECONDS \+ 's/);
   assert.match(source, /new TextEncoder\(\)\.encode\(value\)\.byteLength/);
   assert.equal(source.includes("Buffer.byteLength"), false);
   assert.match(source, /export TERMINAL_CWD=/);
@@ -120,10 +121,11 @@ test("timeout recovery preserves the exact failure and provides a bounded execut
 });
 
 
-test("bounded linked-project coding uses four Hermes iterations so usage can flush before the outer timeout", () => {
+test("bounded linked-project coding uses four Hermes iterations and seven-minute command headroom", () => {
   assert.match(source, /const MAX_TURNS = 4/);
   assert.match(source, /HERMES_MAX_ITERATIONS: String\(MAX_TURNS\)/);
-  assert.match(source, /timeout 300s/);
+  assert.match(source, /const HERMES_COMMAND_TIMEOUT_SECONDS = 420/);
+  assert.match(source, /timeout ' \+ HERMES_COMMAND_TIMEOUT_SECONDS \+ 's/);
 });
 
 test("an already-bounded Phase 1 timeout recommends fixing the worker instead of splitting forever", () => {
