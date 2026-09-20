@@ -161,8 +161,26 @@ test("diff-check failure preserves patch, usage and exact deterministic evidence
   assert.match(source, /const diffCheckStderr = await diffCheck\.stderr\(\)/);
   assert.match(source, /cmd: "git diff --check"/);
   assert.match(source, /diffCheckSucceeded/);
-  assert.match(source, /verificationSteps: VerificationStep\[\] = \[patchEvidence\.diffCheckStep\]/);
+  assert.match(source, /verificationSteps: VerificationStep\[\] = \[\.\.\.patchEvidence\.diffCheckSteps\]/);
   assert.match(source, /patch and usage\/cost evidence were preserved/);
   assert.match(source, /collectLinkedProjectHermesPatch\.maxRetries = 0/);
   assert.equal(source.includes("Hermes produced a patch that failed git diff --check:"), false);
+});
+
+
+test("known git diff whitespace failures are repaired deterministically before any AI escalation", () => {
+  assert.match(source, /parseSafeDiffWhitespaceIssues/);
+  assert.match(source, /trailing whitespace\\\./);
+  assert.match(source, /new blank line at EOF\\\./);
+  assert.match(source, /CoOperative deterministic whitespace repair/);
+  assert.match(source, /git diff --check · after deterministic repair/);
+  assert.match(source, /deterministicRepairs/);
+  assert.match(source, /repairableIssues\.length > 0/);
+  assert.equal(source.includes("space before tab in indent." |"), false);
+});
+
+test("verification failure keeps structured repair advice instead of collapsing to a generic failure", () => {
+  assert.match(source, /const failureAdvice = finalError/);
+  assert.match(source, /failureAdviceFor\(finalError, input\.request\)/);
+  assert.match(source, /\.\.\.\(failureAdvice \? \{ failureAdvice \} : \{\}\)/);
 });
