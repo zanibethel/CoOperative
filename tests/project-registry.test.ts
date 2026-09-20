@@ -30,7 +30,7 @@ test("CreatorHub and RaiseHub are registered as linked projects", () => {
   assert.equal(raisehub.hermesPlaybookKey, "raisehub-hermes-patch");
 });
 
-test("CreatorHub human setup covers Instagram, TikTok, and Fanvue without secret values", () => {
+test("CreatorHub human setup covers Eromify, Instagram, TikTok, and Fanvue without secret values", () => {
   const creatorhub = getLinkedProject("creatorhub");
   assert.ok(creatorhub);
 
