@@ -239,6 +239,7 @@ function taskFailureAdvice(result: unknown): {
   costStatus: "known" | "unresolved";
   recommendedAction: string;
   suggestedPrompt?: string;
+  executablePrompt?: string;
 } | null {
   if (!result || typeof result !== "object") return null;
   const advice = (result as { failureAdvice?: unknown }).failureAdvice;
@@ -271,6 +272,10 @@ function taskFailureAdvice(result: unknown): {
     suggestedPrompt:
       typeof record.suggestedPrompt === "string"
         ? record.suggestedPrompt
+        : undefined,
+    executablePrompt:
+      typeof record.executablePrompt === "string"
+        ? record.executablePrompt
         : undefined,
   };
 }
@@ -983,10 +988,12 @@ export default function OwnerConsolePage() {
   async function executeRecommendedRecovery(task: Task) {
     const advice = taskFailureAdvice(task.result);
     const projectKey = taskLinkedProjectKey(task.result);
-    const draft = recoveryDraftText(task);
+    const executablePrompt = advice?.executablePrompt?.trim() ?? "";
 
-    if (!advice?.suggestedPrompt || !projectKey || !draft) {
-      setError("This recommendation is not executable as a linked-project recovery.");
+    if (!advice?.suggestedPrompt || !projectKey || !executablePrompt) {
+      setError(
+        "This recommendation needs review before it can be executed directly.",
+      );
       return;
     }
 
@@ -1003,7 +1010,7 @@ export default function OwnerConsolePage() {
           "Execute recommended recovery for " + projectName + ".",
           "Authorized model spend cap: $" + budget.toFixed(3),
           "",
-          draft,
+          executablePrompt,
         ].join("\n"),
       );
 
@@ -1013,7 +1020,7 @@ export default function OwnerConsolePage() {
         body: JSON.stringify({
           conversationId: message.conversationId,
           title: projectName + " · recommended recovery",
-          description: draft,
+          description: executablePrompt,
           playbookKey: projectKey + "-hermes-patch",
           maxSpendUsd: budget,
           flags: { requiresShell: true },
@@ -1836,7 +1843,8 @@ export default function OwnerConsolePage() {
                                 ? "Recovery draft prepared"
                                 : "Prepare recommended recovery"}
                             </button>
-                            {taskLinkedProjectKey(task.result) ? (
+                            {taskLinkedProjectKey(task.result) &&
+                            taskFailureAdvice(task.result)?.executablePrompt ? (
                               <button
                                 type="button"
                                 className="decision-approve"
