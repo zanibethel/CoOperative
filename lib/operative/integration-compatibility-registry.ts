@@ -416,6 +416,27 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "linked-hermes-bounded-phase-timeout-fix-worker",
+    targets: ["linked-project", "hermes-agent", "vercel-workflow"],
+    component: "Linked-project Hermes worker iteration budget",
+    appliesTo: "Already-bounded Phase 1 source-change requests that still hit the outer command timeout",
+    symptom: "A small independently verifiable Phase 1 still runs for the full 300-second command window and exits before its usage report is flushed.",
+    rootCause: "The worker allowed up to 16 Hermes iterations inside a five-minute outer timeout, so model/tool iteration latency could consume the entire window even after the task scope was reduced.",
+    knownGoodPattern: "Do not recursively split an already-bounded Phase 1. Reduce the linked-project Hermes iteration budget to four, preserve the outer timeout as a safety backstop, verify CI, and retry the same bounded phase once.",
+    avoidPatterns: [
+      "splitting an already-bounded Phase 1 again",
+      "keeping a 16-iteration coding budget inside a 300-second outer timeout",
+      "repeated paid retries before the worker-budget fix is verified",
+    ],
+    enforcementPaths: [
+      "lib/workflow/linked-project-hermes.ts",
+      "tests/linked-project-hermes.test.ts",
+      "lib/operative/integration-compatibility-registry.ts",
+    ],
+    learnedAt: "2026-09-20",
+    status: "active",
+  },
+  {
     id: "linked-hermes-empty-patch-is-not-success",
     targets: ["linked-project", "hermes-agent"],
     component: "Linked-project Hermes success criteria",
