@@ -1,0 +1,57 @@
+name: Verify CreatorHub Eromify Phase 1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [cloud-operative-bootstrap]
+    paths:
+      - "verification/creatorhub-eromify-phase1/**"
+      - ".github/workflows/verify-creatorhub-eromify-phase1.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CoOperative
+        uses: actions/checkout@v4
+
+      - name: Checkout CreatorHub main
+        uses: actions/checkout@v4
+        with:
+          repository: zanibethel/CreatorHub
+          ref: main
+          path: creatorhub
+
+      - name: Apply deterministic Phase 1 candidate
+        run: |
+          mkdir -p creatorhub/src/lib
+          cp verification/creatorhub-eromify-phase1/eromify.ts creatorhub/src/lib/eromify.ts
+          git -C creatorhub add -N src/lib/eromify.ts
+          changed="$(git -C creatorhub diff --name-only)"
+          test "$changed" = "src/lib/eromify.ts"
+          test ! -e creatorhub/src/lib/__tests__/eromify.test.ts
+          git -C creatorhub diff --check
+          git -C creatorhub diff -- src/lib/eromify.ts > creatorhub-eromify-phase1.patch
+          test -s creatorhub-eromify-phase1.patch
+
+      - name: Install CreatorHub dependencies
+        working-directory: creatorhub
+        run: npm install --no-audit --no-fund
+
+      - name: Type check
+        working-directory: creatorhub
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: creatorhub
+        run: npm run lint
+
+      - name: Build
+        working-directory: creatorhub
+        run: npm run build
+
+      - name: Preserve verified candidate patch
+        uses: actions/upload-artifact@v4
+        with:
+          name: creatorhub-eromify-phase1-verified-patch
+          path: creatorhub-eromify-phase1.patch
