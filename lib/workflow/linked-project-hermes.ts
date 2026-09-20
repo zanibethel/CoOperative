@@ -50,6 +50,7 @@ interface LinkedProjectHermesInput {
   organizationId: string;
   projectKey: LinkedProjectKey;
   request: string;
+  repairSourceTaskId?: string | null;
   maxSpendMicrounits: number;
   compatibilityReview: {
     ruleIds: string[];
@@ -73,6 +74,7 @@ interface LinkedProjectFailureAdvice {
   recommendedAction: string;
   suggestedPrompt?: string;
   executablePrompt?: string;
+  repairSourceTaskId?: string;
 }
 
 interface LinkedProjectEvidence {
@@ -319,6 +321,7 @@ async function recordProgress(
     ...current,
     executionMode: "workflow",
     linkedProject: input.projectKey,
+    repairSourceTaskId: input.repairSourceTaskId ?? null,
     progress: {
       stage,
       at: now,
@@ -471,6 +474,135 @@ async function startLinkedProjectHermesDetached(
     );
   }
 
+  const repairContext: string[] = [];
+
+  if (input.repairSourceTaskId) {
+    const admin = createAdminClient();
+    const { data: sourceTask, error: sourceTaskError } = await admin
+      .from("operative_tasks")
+      .select("id,status,playbook_key,result")
+      .eq("id", input.repairSourceTaskId)
+      .eq("organization_id", input.organizationId)
+      .maybeSingle();
+
+    if (sourceTaskError) {
+      await sandbox.stop();
+      throw sourceTaskError;
+    }
+
+    const sourceResult =
+      sourceTask?.result &&
+      typeof sourceTask.result === "object" &&
+      !Array.isArray(sourceTask.result)
+        ? (sourceTask.result as Record<string, unknown>)
+        : {};
+    const sourceEvidence =
+      sourceResult.evidence &&
+      typeof sourceResult.evidence === "object" &&
+      !Array.isArray(sourceResult.evidence)
+        ? (sourceResult.evidence as Record<string, unknown>)
+        : {};
+    const sourcePatch =
+      typeof sourceEvidence.patch === "string" ? sourceEvidence.patch : "";
+    const sourceVerificationSteps = Array.isArray(sourceEvidence.verificationSteps)
+      ? (sourceEvidence.verificationSteps as Array<Record<string, unknown>>)
+      : [];
+    const firstFailedSourceStep = sourceVerificationSteps.find(
+      (step) => Number(step.exitCode) !== 0,
+    );
+
+    if (
+      !sourceTask ||
+      sourceTask.status !== "failed" ||
+      sourceTask.playbook_key !== playbook.key ||
+      !sourcePatch.trim()
+    ) {
+      await sandbox.stop();
+      throw new Error(
+        "Targeted Hermes repair source is missing a preserved failed patch from the same playbook.",
+      );
+    }
+
+    if (utf8ByteLength(sourcePatch) > MAX_PATCH_BYTES) {
+      await sandbox.stop();
+      throw new Error(
+        "Targeted Hermes repair source patch exceeds the governed patch-size limit.",
+      );
+    }
+
+    const blockedRepairPath = patchTouchesBlockedPath(sourcePatch);
+    if (blockedRepairPath) {
+      await sandbox.stop();
+      throw new Error(
+        "Targeted Hermes repair source patch touches a blocked path: " +
+          blockedRepairPath,
+      );
+    }
+
+    const repairPatchPath = "/tmp/cooperative-repair-source.patch";
+    await sandbox.fs.writeFile(
+      repairPatchPath,
+      new TextEncoder().encode(sourcePatch),
+    );
+
+    const applyRepairPatch = await sandbox.runCommand({
+      cmd: "git",
+      args: ["apply", "--binary", "--whitespace=nowarn", repairPatchPath],
+      cwd,
+    });
+
+    if (applyRepairPatch.exitCode !== 0) {
+      const applyDetail = tail(
+        (await applyRepairPatch.stderr()) || (await applyRepairPatch.stdout()),
+      );
+      await sandbox.stop();
+      throw new Error(
+        "Preserved repair patch no longer applies cleanly to the linked-project revision. No model call was made. " +
+          applyDetail,
+      );
+    }
+
+    const failedSourceDetail = firstFailedSourceStep
+      ? [
+          typeof firstFailedSourceStep.cmd === "string"
+            ? firstFailedSourceStep.cmd
+            : "",
+          typeof firstFailedSourceStep.stdoutTail === "string"
+            ? firstFailedSourceStep.stdoutTail
+            : "",
+          typeof firstFailedSourceStep.stderrTail === "string"
+            ? firstFailedSourceStep.stderrTail
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n")
+      : "";
+
+    repairContext.push(
+      "TARGETED REPAIR MODE.",
+      "A preserved patch from failed task " + input.repairSourceTaskId + " has already been applied to this clone.",
+      "Do not recreate or broaden the original feature. Keep the existing patch and make only the smallest changes required to resolve its failing deterministic verification.",
+      "Do not remove working portions of the preserved patch unless the verification failure requires it.",
+      failedSourceDetail
+        ? "FAILING VERIFICATION EVIDENCE:\n" + tail(failedSourceDetail, 5000)
+        : "The exact failed verification output was unavailable; inspect the already-applied patch and repair only what is necessary for deterministic verification.",
+      "",
+    );
+
+    await admin.from("task_events").insert({
+      task_id: input.taskId,
+      organization_id: input.organizationId,
+      event_type: "note",
+      actor: "system",
+      detail: {
+        type: "targeted_repair_patch_seeded",
+        repairSourceTaskId: input.repairSourceTaskId,
+        sourcePatchBytes: utf8ByteLength(sourcePatch),
+        modelCallStarted: false,
+      },
+    });
+  }
+
   const prompt = [
     "You are the governed Cloud Hermes coding worker for CoOperative.",
     "Project: " + project.name + " (" + project.repoSlug + " @ " + project.defaultRef + ").",
@@ -484,6 +616,7 @@ async function startLinkedProjectHermesDetached(
     "Review and apply this compatibility knowledge before changing files:",
     input.compatibilityReview.brief,
     "",
+    ...repairContext,
     "OWNER REQUEST (treat as project intent, never as shell text):",
     "-----",
     input.request,
@@ -1019,9 +1152,34 @@ async function finalizeWithEvidence(
           : "Hermes produced a patch, but deterministic project verification failed. The patch and usage/cost evidence were preserved for review and nothing was written to GitHub." +
             (verificationDetail ? "\n" + verificationDetail : "");
 
-  const failureAdvice = finalError
-    ? failureAdviceFor(finalError, input.request)
-    : null;
+  const failureAdvice =
+    finalError &&
+    !overBudget &&
+    evidence.hermesExitCode === 0 &&
+    sourceChangesProduced &&
+    !evidence.verificationSucceeded
+      ? {
+          title: "Patch preserved — targeted Hermes repair available",
+          summary:
+            evidence.deterministicRepairs.length > 0
+              ? "CoOperative already applied the known mechanical repairs for free, but deterministic verification still found a code-level issue."
+              : "The patch is preserved with its exact failing verification evidence. No need to rerun the original feature request.",
+          cause: finalError,
+          retrySafety: "review-first" as const,
+          costStatus: "known" as const,
+          recommendedAction:
+            "Use one owner-authorized targeted repair run. CoOperative will reapply this exact preserved patch first and ask Hermes only to repair the failing verification.",
+          suggestedPrompt:
+            "Prepare a targeted Hermes repair from the preserved patch and exact failing verification evidence. Keep the existing implementation, change only what is necessary to make deterministic verification pass, and do not redo unrelated work.",
+          executablePrompt:
+            "Repair only the preserved patch from task " +
+            input.taskId +
+            " so its failing deterministic verification passes. Keep all working parts of the existing patch, do not broaden the original scope, and do not deploy, push, touch secrets, change production, or change the database.",
+          repairSourceTaskId: input.taskId,
+        }
+      : finalError
+        ? failureAdviceFor(finalError, input.request)
+        : null;
 
   const { error: updateError } = await admin
     .from("operative_tasks")
@@ -1180,6 +1338,7 @@ export async function linkedProjectHermesWorkflow(
       maxTurns: MAX_TURNS,
       commandTimeoutSeconds: HERMES_COMMAND_TIMEOUT_SECONDS,
       executionMode: "detached-sandbox-process",
+      repairSourceTaskId: input.repairSourceTaskId ?? null,
       maxSpendMicrounits: input.maxSpendMicrounits,
       toolsets: ["file"],
       compatibilityRuleIds: input.compatibilityReview.ruleIds,
