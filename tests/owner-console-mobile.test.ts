@@ -71,3 +71,14 @@ test("failed tasks surface recommended recovery instead of only a failed message
 test("blind Hermes retry is hidden when recovery advice says not to retry", () => {
   assert.match(page, /retrySafety !== "do-not-blind-retry"/);
 });
+
+
+test("recommended recovery visibly prepares a zero-spend draft and opens the real composer", () => {
+  assert.match(page, /id="owner-composer"/);
+  assert.match(page, /id="owner-composer-textarea"/);
+  assert.match(page, /setMaxSpendUsd\("0"\)/);
+  assert.match(page, /setRecoveryPreparedTaskId\(task\.id\)/);
+  assert.match(page, /Recovery draft prepared/);
+  assert.match(page, /Open recovery draft/);
+  assert.match(page, /jumpToComposer/);
+});
