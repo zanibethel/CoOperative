@@ -346,6 +346,7 @@ export default function OwnerConsolePage() {
   const [decisionWorkingId, setDecisionWorkingId] = useState<string | null>(null);
   const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
   const [copiedPatchTaskId, setCopiedPatchTaskId] = useState<string | null>(null);
+  const [recoveryPreparedTaskId, setRecoveryPreparedTaskId] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [assistantReply, setAssistantReply] = useState(
     "Ask me what to do next, where something is, or to find a recent report.",
@@ -931,9 +932,28 @@ export default function OwnerConsolePage() {
     }
   }
 
+  function jumpToComposer() {
+    const composer = document.getElementById("owner-composer");
+    const textarea = document.getElementById(
+      "owner-composer-textarea",
+    ) as HTMLTextAreaElement | null;
+
+    composer?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+
+    window.setTimeout(() => {
+      textarea?.focus({ preventScroll: true });
+    }, 350);
+  }
+
   function prepareSuggestedRecovery(task: Task) {
     const advice = taskFailureAdvice(task.result);
-    if (!advice?.suggestedPrompt) return;
+    if (!advice?.suggestedPrompt) {
+      setError("This task does not contain a prepared recovery prompt.");
+      return;
+    }
 
     setText(
       [
@@ -948,16 +968,15 @@ export default function OwnerConsolePage() {
         task.error ?? advice.cause,
       ].join("\n"),
     );
+    setMaxSpendUsd("0");
+    setRecoveryPreparedTaskId(task.id);
     setNotice(
-      "Recommended recovery prepared in the composer. Review it before queueing any new task.",
+      "Recovery draft prepared. It has not run or spent anything. Review it in the Owner composer before queueing a new task.",
     );
 
-    window.setTimeout(() => {
-      document.querySelector<HTMLTextAreaElement>(".console-composer textarea")?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
-    }, 0);
+    window.requestAnimationFrame(() => {
+      jumpToComposer();
+    });
   }
 
   function prepareErrorRequest(task: Task, mode: "explain" | "fix") {
@@ -1387,8 +1406,9 @@ export default function OwnerConsolePage() {
             <span>Save context here without running anything, or turn a message into a governed task. Project-specific Hermes work is best launched from Linked Projects so CoOperative can attach the correct playbook automatically.</span>
           </div>
 
-          <form className="console-composer" onSubmit={send}>
+          <form id="owner-composer" className="console-composer" onSubmit={send}>
             <textarea
+              id="owner-composer-textarea"
               placeholder="Tell CoOperative what you want, what changed, or what should happen next…"
               value={text}
               onChange={(event) => setText(event.target.value)}
@@ -1697,8 +1717,24 @@ export default function OwnerConsolePage() {
                           className="decision-approve"
                           onClick={() => prepareSuggestedRecovery(task)}
                         >
-                          Prepare recommended recovery
+                          {recoveryPreparedTaskId === task.id
+                            ? "Recovery draft prepared"
+                            : "Prepare recommended recovery"}
                         </button>
+                        {recoveryPreparedTaskId === task.id ? (
+                          <div className="task-recovery-prepared" role="status">
+                            <span>
+                              Draft ready · $0 authorized · nothing has run yet
+                            </span>
+                            <button
+                              type="button"
+                              className="task-error-action"
+                              onClick={jumpToComposer}
+                            >
+                              Open recovery draft
+                            </button>
+                          </div>
+                        ) : null}
                       ) : null}
                     </section>
                   ) : null}
