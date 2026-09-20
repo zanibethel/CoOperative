@@ -131,6 +131,26 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     status: "active",
   },
   {
+    id: "hermes-guard-multiline-shell-must-preserve-newlines",
+    targets: ["hermes-agent", "vercel-sandbox"],
+    component: "Hermes pre-model runtime guard shell wrapper",
+    appliesTo: "Multiline bash if/case blocks used to resolve the Hermes-owned Python interpreter",
+    symptom: "The pre-model guard fails immediately with bash syntax error near unexpected token ';'.",
+    rootCause: "A multiline bash script containing if/case/esac blocks was joined with '; ' between every source line, producing invalid constructs such as 'then;'.",
+    knownGoodPattern: "Preserve newline boundaries for multiline bash control-flow blocks, append the final exec on a newline, and regression-test that the wrapper is not semicolon-joined.",
+    avoidPatterns: [
+      "joining multiline if/case shell source with '; '",
+      "rewriting shell control flow into a single line without explicit syntax validation",
+    ],
+    enforcementPaths: [
+      "lib/workflow/linked-project-hermes.ts",
+      "tests/linked-project-hermes.test.ts",
+      "lib/operative/integration-compatibility-registry.ts",
+    ],
+    learnedAt: "2026-09-20",
+    status: "active",
+  },
+  {
     id: "hermes-v0213-scripted-oneshot-max-iterations-shim",
     targets: ["hermes-agent", "vercel-ai-gateway"],
     component: "Hermes Agent scripted one-shot cost/turn bounds",
