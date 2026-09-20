@@ -420,12 +420,13 @@ export const INTEGRATION_COMPATIBILITY_RULES: readonly CompatibilityRule[] = [
     targets: ["linked-project", "hermes-agent", "vercel-workflow"],
     component: "Linked-project Hermes worker iteration budget",
     appliesTo: "Already-bounded Phase 1 source-change requests that still hit the outer command timeout",
-    symptom: "A small independently verifiable Phase 1 still runs for the full 300-second command window and exits before its usage report is flushed.",
-    rootCause: "The worker allowed up to 16 Hermes iterations inside a five-minute outer timeout, so model/tool iteration latency could consume the entire window even after the task scope was reduced.",
-    knownGoodPattern: "Do not recursively split an already-bounded Phase 1. Reduce the linked-project Hermes iteration budget to four, preserve the outer timeout as a safety backstop, verify CI, and retry the same bounded phase once.",
+    symptom: "A small independently verifiable Phase 1 can consume the entire command window and exit before its usage report is flushed.",
+    rootCause: "The worker allowed up to 16 Hermes iterations inside a five-minute command window, leaving almost no headroom for model/tool latency and usage-file finalization even after the task scope was reduced.",
+    knownGoodPattern: "Do not recursively split an already-bounded Phase 1. Use a four-iteration Hermes budget with a 420-second command window inside the 10-minute Sandbox, preserve the timeout as a safety backstop, verify CI, and retry the same bounded phase once.",
     avoidPatterns: [
       "splitting an already-bounded Phase 1 again",
-      "keeping a 16-iteration coding budget inside a 300-second outer timeout",
+      "keeping a 16-iteration coding budget inside a 300-second command window",
+      "extending the timeout repeatedly without a bounded turn budget",
       "repeated paid retries before the worker-budget fix is verified",
     ],
     enforcementPaths: [
