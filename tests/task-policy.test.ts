@@ -64,3 +64,20 @@ test("high-risk flags resolve to high risk", () => {
   assert.equal(result.requiresOwnerApproval, true);
   assert.deepEqual(result.reasons, ["database change"]);
 });
+
+
+test("targeted repair lineage is explicit task metadata and does not bypass existing gates", () => {
+  const intent = OwnerTaskIntentSchema.parse({
+    title: "Repair preserved CreatorHub patch",
+    repairSourceTaskId: "11111111-1111-4111-8111-111111111111",
+    maxSpendUsd: 0.02,
+    flags: { requiresShell: true },
+  });
+
+  const result = evaluateOwnerTaskPolicy(intent);
+
+  assert.equal(intent.repairSourceTaskId, "11111111-1111-4111-8111-111111111111");
+  assert.equal(result.riskLevel, "medium");
+  assert.equal(result.requiresOwnerApproval, false);
+  assert.equal(result.maxSpendMicrounits, 20_000);
+});
