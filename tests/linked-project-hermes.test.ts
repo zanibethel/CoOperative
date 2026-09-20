@@ -154,3 +154,15 @@ test("long Hermes reasoning is detached and polled through durable workflow slee
 test("paid detached Hermes launch cannot auto-retry", () => {
   assert.match(source, /startLinkedProjectHermesDetached\.maxRetries = 0/);
 });
+
+
+test("diff-check failure preserves patch, usage and exact deterministic evidence", () => {
+  assert.match(source, /const diffCheckStdout = await diffCheck\.stdout\(\)/);
+  assert.match(source, /const diffCheckStderr = await diffCheck\.stderr\(\)/);
+  assert.match(source, /cmd: "git diff --check"/);
+  assert.match(source, /diffCheckSucceeded/);
+  assert.match(source, /verificationSteps: VerificationStep\[\] = \[patchEvidence\.diffCheckStep\]/);
+  assert.match(source, /patch and usage\/cost evidence were preserved/);
+  assert.match(source, /collectLinkedProjectHermesPatch\.maxRetries = 0/);
+  assert.equal(source.includes("Hermes produced a patch that failed git diff --check:"), false);
+});
