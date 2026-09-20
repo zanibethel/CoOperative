@@ -91,3 +91,13 @@ test("recovery draft opens inline and remains zero-spend until separately queued
   assert.match(page, /Edit in Owner composer/);
   assert.match(page, /Nothing has run\. Queueing or executing a new task remains a separate action/);
 });
+
+
+test("recommended recovery can execute directly from the failed task card", () => {
+  assert.match(page, /executeRecommendedRecovery/);
+  assert.match(page, /Execute recommended recovery · max \$/);
+  assert.match(page, /recommendedRecoveryBudgetUsd/);
+  assert.match(page, /playbookKey: projectKey \+ "-hermes-patch"/);
+  assert.match(page, /Authorized model spend cap:/);
+  assert.match(page, /saved to the canonical conversation/);
+});
