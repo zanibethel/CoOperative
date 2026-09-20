@@ -956,3 +956,13 @@ b { color: var(--text); }
 @media (max-width: 600px) {
   .task-recovery-draft-actions > button { width: 100%; }
 }
+
+
+.task-recovery-primary-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.task-recovery-primary-actions .decision-approve {
+  width: 100%;
+}
