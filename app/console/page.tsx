@@ -290,6 +290,11 @@ export default function OwnerConsolePage() {
   const [decisionWorkingId, setDecisionWorkingId] = useState<string | null>(null);
   const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
   const [copiedPatchTaskId, setCopiedPatchTaskId] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [assistantReply, setAssistantReply] = useState(
+    "Ask me what to do next, where something is, or to find a recent report.",
+  );
+  const [assistantLinks, setAssistantLinks] = useState<Array<{ label: string; href: string }>>([]);
 
   async function load() {
     const response = await fetch("/api/operative/overview", { cache: "no-store" });
@@ -410,6 +415,150 @@ export default function OwnerConsolePage() {
       window.clearInterval(timer);
     };
   }, [asyncTaskIds.join(","), detachedTaskIds.join(",")]);
+
+  function answerQuickQuestion(messageOverride?: string) {
+    const messageText = (messageOverride ?? text).trim();
+    if (!messageText) return;
+
+    const query = messageText.toLowerCase();
+    setChatOpen(true);
+    setAssistantLinks([]);
+
+    if (
+      query.includes("what next") ||
+      query.includes("next step") ||
+      query.includes("what should i do") ||
+      query.includes("what do i do")
+    ) {
+      const executing = overview.tasks.find((task) => task.status === "executing");
+      const approval = overview.tasks.find(
+        (task) => task.status === "awaiting_approval" || pendingDecisionByTask.has(task.id),
+      );
+      const failed = overview.tasks.find((task) => task.status === "failed");
+      const queued = overview.tasks.find((task) => task.status === "queued");
+      const completed = overview.tasks.find((task) => task.status === "completed");
+      const next = executing ?? approval ?? failed ?? queued ?? completed;
+
+      if (!next) {
+        setAssistantReply("Nothing is waiting right now. Linked Projects is the best place to start project-specific work.");
+        setAssistantLinks([{ label: "Open Linked Projects", href: "/console/projects" }]);
+      } else if (executing) {
+        const progress = taskProgressSummary(executing.result);
+        setAssistantReply(
+          progress?.phase
+            ? `${executing.title} is still running at Phase ${progress.phase}/${progress.total}: ${progress.label}. Let it finish, then review its result.`
+            : `${executing.title} is still running. Let it finish, then review its result.`,
+        );
+        setAssistantLinks([{ label: "Open running task", href: "#task-" + executing.id }]);
+      } else if (approval) {
+        setAssistantReply(`${approval.title} needs an owner decision before it can move forward.`);
+        setAssistantLinks([{ label: "Open approval", href: "#task-" + approval.id }]);
+      } else if (failed) {
+        setAssistantReply(`${failed.title} failed. Open it to review the error and retry if the fix is already in place.`);
+        setAssistantLinks([{ label: "Open failed task", href: "#task-" + failed.id }]);
+      } else if (queued) {
+        setAssistantReply(`${queued.title} is queued but has not started executing yet.`);
+        setAssistantLinks([{ label: "Open queued task", href: "#task-" + queued.id }]);
+      } else if (completed) {
+        setAssistantReply(`${completed.title} is complete. The next useful step is to review its evidence/report.`);
+        setAssistantLinks([{ label: "Open latest report", href: "#task-" + completed.id }]);
+      }
+      if (!messageOverride) setText("");
+      return;
+    }
+
+    const navigation: Array<{ words: string[]; label: string; href: string; reply: string }> = [
+      {
+        words: ["linked project", "projects", "instagram", "secret broker", "connection", "provider"],
+        label: "Open Linked Projects",
+        href: "/console/projects",
+        reply: "Linked Projects is where project-specific Hermes work, provider setup, Instagram configuration, and secure secret entry live.",
+      },
+      {
+        words: ["service", "services"],
+        label: "Open Services",
+        href: "/services",
+        reply: "Services shows the capabilities CoOperative can offer or automate.",
+      },
+      {
+        words: ["briefing", "intake", "brief"],
+        label: "Open Briefing",
+        href: "/intake",
+        reply: "Briefing is where you can provide structured project or business context.",
+      },
+      {
+        words: ["mission control", "task", "status", "owner console", "home"],
+        label: "Open Mission Control",
+        href: "/console",
+        reply: "Mission Control is the main task/status view. Current activity is kept at the top.",
+      },
+    ];
+    const navMatch = navigation.find((item) => item.words.some((word) => query.includes(word)));
+
+    const wantsReport =
+      query.includes("report") ||
+      query.includes("result") ||
+      query.includes("evidence") ||
+      query.includes("patch") ||
+      query.includes("hermes");
+
+    if (wantsReport) {
+      const stopWords = new Set([
+        "show","find","open","me","the","a","an","report","reports","result","results","evidence",
+        "for","from","of","on","my","latest","recent","please","task","patch","hermes",
+      ]);
+      const terms = query
+        .replace(/[^a-z0-9]+/g, " ")
+        .split(" ")
+        .filter((term) => term.length > 2 && !stopWords.has(term));
+
+      const scored = overview.tasks
+        .map((task, index) => {
+          const haystack = (task.title + " " + task.description + " " + task.status).toLowerCase();
+          const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 3 : 0), 0)
+            + (task.status === "completed" ? 2 : 0)
+            + Math.max(0, 3 - index);
+          return { task, score };
+        })
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+
+      if (scored.length > 0) {
+        setAssistantReply(
+          scored.length === 1
+            ? "I found the closest matching report."
+            : "I found these recent task reports. Tap one to jump straight to its evidence.",
+        );
+        setAssistantLinks(
+          scored.map(({ task }) => ({
+            label: task.title + " · " + task.status.replaceAll("_", " "),
+            href: "#task-" + task.id,
+          })),
+        );
+      } else {
+        setAssistantReply("I couldn't find a matching report in the current task history. Try a project name or a few words from the task title.");
+      }
+      if (!messageOverride) setText("");
+      return;
+    }
+
+    if (navMatch) {
+      setAssistantReply(navMatch.reply);
+      setAssistantLinks([{ label: navMatch.label, href: navMatch.href }]);
+      if (!messageOverride) setText("");
+      return;
+    }
+
+    setAssistantReply(
+      "I can instantly help with navigation, current status, next steps, and finding recent task reports. For work that should persist or execute, use Save to thread or Queue governed task.",
+    );
+    setAssistantLinks([
+      { label: "Linked Projects", href: "/console/projects" },
+      { label: "Mission Control", href: "/console" },
+    ]);
+    if (!messageOverride) setText("");
+  }
 
   async function persistMessage(messageText: string) {
     const response = await fetch("/api/console/messages", {
@@ -958,13 +1107,54 @@ export default function OwnerConsolePage() {
       </section>
 
       <section className="console-layout">
-        <div className="console-thread card">
+        <div className={["console-thread", "card", "console-chat-panel", chatOpen ? "chat-open" : ""].join(" ")}>
           <div className="console-section-head">
             <div>
               <div className="eyebrow">Canonical thread</div>
               <h2>{overview.conversation?.title || "Owner conversation"}</h2>
             </div>
-            <span className="badge">{overview.messages.length} messages</span>
+            <div className="chat-panel-head-actions">
+              <span className="badge">{overview.messages.length} messages</span>
+              <button
+                type="button"
+                className="chat-close"
+                aria-label="Close CoOperative chat"
+                onClick={() => setChatOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          <div className="chat-assistant-answer" aria-live="polite">
+            <div className="eyebrow">Quick CoOperative</div>
+            <p>{assistantReply}</p>
+            {assistantLinks.length > 0 ? (
+              <div className="chat-answer-links">
+                {assistantLinks.map((link) =>
+                  link.href.startsWith("#") ? (
+                    <a key={link.href + link.label} href={link.href} onClick={() => setChatOpen(false)}>
+                      {link.label}
+                    </a>
+                  ) : (
+                    <Link key={link.href + link.label} href={link.href} onClick={() => setChatOpen(false)}>
+                      {link.label}
+                    </Link>
+                  ),
+                )}
+              </div>
+            ) : null}
+            <div className="chat-quick-actions">
+              <button type="button" onClick={() => answerQuickQuestion("What should I do next?")}>
+                What next?
+              </button>
+              <button type="button" onClick={() => answerQuickQuestion("Show recent reports")}>
+                Find reports
+              </button>
+              <button type="button" onClick={() => answerQuickQuestion("Open linked projects")}>
+                Navigation
+              </button>
+            </div>
           </div>
 
           <div className="message-list">
@@ -1031,6 +1221,14 @@ export default function OwnerConsolePage() {
             </details>
 
             <div className="composer-actions">
+              <button
+                className="chat-ask-button"
+                type="button"
+                onClick={() => answerQuickQuestion()}
+                disabled={!text.trim()}
+              >
+                Ask
+              </button>
               <button className="secondary-button" type="submit" disabled={working || !text.trim() || !overview.organization}>
                 {working ? "Working…" : "Save to thread"}
               </button>
@@ -1113,7 +1311,7 @@ export default function OwnerConsolePage() {
             <div className="task-stack">
               {overview.tasks.length === 0 ? <p>No tasks queued yet.</p> : null}
               {overview.tasks.map((task) => (
-                <article className="task-card" key={task.id}>
+                <article className="task-card" id={"task-" + task.id} key={task.id}>
                   <div className="task-card-head">
                     <strong>{task.title}</strong>
                     <span className={["status-pill", "status-" + task.status].join(" ")}>{task.status.replaceAll("_", " ")}</span>
@@ -1372,6 +1570,17 @@ export default function OwnerConsolePage() {
           </section>
         </aside>
       </section>
+
+      <button
+        type="button"
+        className={["chat-launcher", chatOpen ? "chat-launcher-open" : ""].join(" ")}
+        aria-expanded={chatOpen}
+        aria-label={chatOpen ? "Close CoOperative chat" : "Open CoOperative chat"}
+        onClick={() => setChatOpen((current) => !current)}
+      >
+        <span className="chat-launcher-icon">{chatOpen ? "×" : "◌"}</span>
+        <span>{chatOpen ? "Close" : "Ask CoOperative"}</span>
+      </button>
     </main>
   );
 }
