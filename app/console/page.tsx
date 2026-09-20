@@ -1712,29 +1712,31 @@ export default function OwnerConsolePage() {
                         </p>
                       ) : null}
                       {taskFailureAdvice(task.result)?.suggestedPrompt ? (
-                        <button
-                          type="button"
-                          className="decision-approve"
-                          onClick={() => prepareSuggestedRecovery(task)}
-                        >
-                          {recoveryPreparedTaskId === task.id
-                            ? "Recovery draft prepared"
-                            : "Prepare recommended recovery"}
-                        </button>
-                        {recoveryPreparedTaskId === task.id ? (
-                          <div className="task-recovery-prepared" role="status">
-                            <span>
-                              Draft ready · $0 authorized · nothing has run yet
-                            </span>
-                            <button
-                              type="button"
-                              className="task-error-action"
-                              onClick={jumpToComposer}
-                            >
-                              Open recovery draft
-                            </button>
-                          </div>
-                        ) : null}
+                        <>
+                          <button
+                            type="button"
+                            className="decision-approve"
+                            onClick={() => prepareSuggestedRecovery(task)}
+                          >
+                            {recoveryPreparedTaskId === task.id
+                              ? "Recovery draft prepared"
+                              : "Prepare recommended recovery"}
+                          </button>
+                          {recoveryPreparedTaskId === task.id ? (
+                            <div className="task-recovery-prepared" role="status">
+                              <span>
+                                Draft ready · $0 authorized · nothing has run yet
+                              </span>
+                              <button
+                                type="button"
+                                className="task-error-action"
+                                onClick={jumpToComposer}
+                              >
+                                Open recovery draft
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
                       ) : null}
                     </section>
                   ) : null}
