@@ -333,10 +333,10 @@ interface DetachedHermesPoll {
   exitCode: number | null;
 }
 
-interface LinkedProjectPatchEvidence extends Omit<
+type LinkedProjectPatchEvidence = Omit<
   LinkedProjectEvidence,
   "verificationSteps" | "verificationSucceeded"
-> {}
+>;
 
 async function startLinkedProjectHermesDetached(
   input: LinkedProjectHermesInput,
