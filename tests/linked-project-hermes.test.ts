@@ -232,32 +232,20 @@ test("git status path parsing preserves the first character of changed source pa
 });
 
 
-test("Hermes iteration shim runs in the Hermes-installed Python environment before any spend", () => {
-  assert.match(source, /HERMES_REAL=.*readlink -f/);
-  assert.match(source, /HERMES_PY=.*dirname/);
-  assert.match(source, /IFS= read -r SHEBANG/);
+test("Hermes iteration shim locates the pinned oneshot source directly before any spend", () => {
+  assert.match(source, /locateHermesOneshotShell/);
+  assert.match(source, /hermes_cli\/oneshot\.py/);
+  assert.match(source, /unable-to-locate-hermes-oneshot-source/);
   assert.match(source, /persistPreModelFailure/);
   assert.match(source, /actual_spend_microunits: 0/);
   assert.match(source, /paidModelCallStarted: false/);
-  assert.equal(source.includes('cmd: "python",\n    args: ["-c", iterationGuardScript]'), false);
+  assert.match(source, /exec python -c "\$1" "\$ONESHOT_PATH"/);
 });
 
-
-test("Hermes guard shell invokes the resolved interpreter with the guard script as python -c input", () => {
-  assert.match(source, /exec "\$HERMES_PY" -c "\$1"/);
-  assert.match(source, /exec "\$HERMES_PY" -c "\$1" "\$2"/);
-  assert.equal(source.includes('exec "$HERMES_PY" "$@"'), false);
-});
-
-
-test("Hermes guard shell preserves multiline if/case syntax instead of semicolon-joining blocks", () => {
-  const start = source.indexOf("const hermesPythonShell = [");
-  const end = source.indexOf("const iterationGuard =", start);
-  const shellBlock = source.slice(start, end);
-
-  assert.ok(start >= 0 && end > start);
-  assert.match(shellBlock, /\]\.join\("\\n"\)/);
-  assert.match(source, /hermesPythonShell \+ '\\nexec "\$HERMES_PY" -c "\$1"'/);
-  assert.match(source, /hermesPythonShell \+ '\\nexec "\$HERMES_PY" -c "\$1" "\$2"'/);
-  assert.equal(shellBlock.includes('].join("; ");'), false);
+test("Hermes guard verification compiles the exact patched source file without importing Hermes", () => {
+  assert.match(source, /cmd: "python"/);
+  assert.match(source, /args: \["-c", guardVerifyScript, guardPath\]/);
+  assert.match(source, /py_compile\.compile/);
+  assert.equal(source.includes("import hermes_cli.oneshot as oneshot"), false);
+  assert.equal(source.includes("HERMES_PY"), false);
 });
