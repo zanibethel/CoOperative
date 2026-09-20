@@ -259,6 +259,6 @@ test("targeted repair lineage is recovered from an explicit preserved-task promp
 
 test("uv-style Hermes launcher is hydrated before direct oneshot source discovery", () => {
   assert.match(source, /"\$HERMES_BIN" --version >\/dev\/null 2>&1 \|\| true/);
-  assert.match(source, /find \/ \\\( -path \/proc -o -path \/sys -o -path \/dev \\\) -prune/);
+  assert.match(source, /find "\$HOME" \/usr\/local \/opt \/tmp -type f -path/);
   assert.match(source, /unable-to-locate-hermes-oneshot-source after deterministic runtime hydration/);
 });
