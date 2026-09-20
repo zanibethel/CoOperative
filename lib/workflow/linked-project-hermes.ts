@@ -90,6 +90,7 @@ interface LinkedProjectEvidence {
   verificationSteps: VerificationStep[];
   verificationSucceeded: boolean;
   diffCheckSucceeded: boolean;
+  deterministicRepairs: string[];
   durationMs: number;
   usage: HermesUsageReport;
   costMicrounits: number;
@@ -136,6 +137,35 @@ function patchTouchesBlockedPath(patch: string): string | null {
   const removedPaths = [...patch.matchAll(/^--- a\/(.+)$/gm)].map((match) => match[1]);
   const paths = [...addedPaths, ...removedPaths];
   return paths.find((path) => blocked.some((pattern) => pattern.test(path))) ?? null;
+}
+
+
+type SafeDiffWhitespaceIssue = {
+  path: string;
+  line: number;
+  kind: "trailing whitespace." | "new blank line at EOF.";
+};
+
+function parseSafeDiffWhitespaceIssues(output: string): SafeDiffWhitespaceIssue[] {
+  const issues: SafeDiffWhitespaceIssue[] = [];
+
+  for (const line of output.split("\n")) {
+    const match = line.match(
+      /^(.+):(\d+): (trailing whitespace\.|new blank line at EOF\.)$/,
+    );
+    if (!match) continue;
+
+    const lineNumber = Number.parseInt(match[2], 10);
+    if (!Number.isFinite(lineNumber) || lineNumber < 1) continue;
+
+    issues.push({
+      path: match[1],
+      line: lineNumber,
+      kind: match[3] as SafeDiffWhitespaceIssue["kind"],
+    });
+  }
+
+  return issues.slice(0, 200);
 }
 
 function firstRecoveryPhasePrompt(request: string): string {
@@ -338,7 +368,7 @@ type LinkedProjectPatchEvidence = Omit<
   LinkedProjectEvidence,
   "verificationSteps" | "verificationSucceeded"
 > & {
-  diffCheckStep: VerificationStep;
+  diffCheckSteps: VerificationStep[];
 };
 
 async function startLinkedProjectHermesDetached(
@@ -667,20 +697,101 @@ async function collectLinkedProjectHermesPatch(
   });
   const statusText = (await statusResult.stdout()).trim();
 
-  const diffCheck = await sandbox.runCommand({
-    cmd: "git",
-    args: ["diff", "--check"],
-    cwd: handle.cwd,
-  });
-  const diffCheckStdout = await diffCheck.stdout();
-  const diffCheckStderr = await diffCheck.stderr();
-  const diffCheckStep: VerificationStep = {
-    cmd: "git diff --check",
-    exitCode: diffCheck.exitCode,
-    stdoutTail: tail(diffCheckStdout),
-    stderrTail: tail(diffCheckStderr),
-  };
-  const diffCheckSucceeded = diffCheck.exitCode === 0;
+  const diffCheckSteps: VerificationStep[] = [];
+  const deterministicRepairs: string[] = [];
+
+  async function runDiffCheck(label: string) {
+    const result = await sandbox.runCommand({
+      cmd: "git",
+      args: ["diff", "--check"],
+      cwd: handle.cwd,
+    });
+    const stdoutText = await result.stdout();
+    const stderrText = await result.stderr();
+    const step: VerificationStep = {
+      cmd: label,
+      exitCode: result.exitCode,
+      stdoutTail: tail(stdoutText),
+      stderrTail: tail(stderrText),
+    };
+    diffCheckSteps.push(step);
+    return {
+      exitCode: result.exitCode,
+      stdoutText,
+      stderrText,
+    };
+  }
+
+  let diffCheckResult = await runDiffCheck("git diff --check");
+
+  if (diffCheckResult.exitCode !== 0) {
+    const repairableIssues = parseSafeDiffWhitespaceIssues(
+      [diffCheckResult.stdoutText, diffCheckResult.stderrText]
+        .filter(Boolean)
+        .join("\n"),
+    );
+
+    if (repairableIssues.length > 0) {
+      const repairScript = [
+        'const fs = require("node:fs");',
+        'const path = require("node:path");',
+        "const issues = JSON.parse(process.argv[1]);",
+        "const root = path.resolve(process.cwd());",
+        "const grouped = new Map();",
+        "for (const issue of issues) {",
+        "  const list = grouped.get(issue.path) || [];",
+        "  list.push(issue);",
+        "  grouped.set(issue.path, list);",
+        "}",
+        "for (const [relativePath, fileIssues] of grouped) {",
+        "  const target = path.resolve(root, relativePath);",
+        "  if (target !== root && !target.startsWith(root + path.sep)) throw new Error('diff-check path escaped repository');",
+        "  let text = fs.readFileSync(target, 'utf8');",
+        "  const usesCrlf = text.includes('\\r\\n');",
+        "  let normalized = text.replace(/\\r\\n/g, '\\n');",
+        "  let lines = normalized.split('\\n');",
+        "  for (const issue of fileIssues) {",
+        "    if (issue.kind === 'trailing whitespace.') {",
+        "      const index = issue.line - 1;",
+        "      if (index >= 0 && index < lines.length) lines[index] = lines[index].replace(/[ \\t]+$/g, '');",
+        "    }",
+        "  }",
+        "  if (fileIssues.some((issue) => issue.kind === 'new blank line at EOF.')) {",
+        "    while (lines.length > 2 && lines.at(-1) === '' && lines.at(-2) === '') lines.splice(lines.length - 1, 1);",
+        "  }",
+        "  normalized = lines.join('\\n');",
+        "  text = usesCrlf ? normalized.replace(/\\n/g, '\\r\\n') : normalized;",
+        "  fs.writeFileSync(target, text, 'utf8');",
+        "}",
+      ].join("\n");
+
+      const repair = await sandbox.runCommand({
+        cmd: "node",
+        args: ["-e", repairScript, JSON.stringify(repairableIssues)],
+        cwd: handle.cwd,
+      });
+      const repairStdout = await repair.stdout();
+      const repairStderr = await repair.stderr();
+
+      diffCheckSteps.push({
+        cmd: "CoOperative deterministic whitespace repair",
+        exitCode: repair.exitCode,
+        stdoutTail: tail(repairStdout),
+        stderrTail: tail(repairStderr),
+      });
+
+      if (repair.exitCode === 0) {
+        deterministicRepairs.push(
+          ...repairableIssues.map(
+            (issue) => issue.path + ":" + issue.line + " " + issue.kind,
+          ),
+        );
+        diffCheckResult = await runDiffCheck("git diff --check · after deterministic repair");
+      }
+    }
+  }
+
+  const diffCheckSucceeded = diffCheckResult.exitCode === 0;
 
   const diffResult = await sandbox.runCommand({
     cmd: "git",
@@ -715,7 +826,8 @@ async function collectLinkedProjectHermesPatch(
     patch,
     changedFiles: extractChangedFiles(statusText),
     diffCheckSucceeded,
-    diffCheckStep,
+    diffCheckSteps,
+    deterministicRepairs,
     durationMs: Date.now() - handle.startedAt,
     usage,
     costMicrounits: resolvedCost.microunits,
@@ -907,12 +1019,17 @@ async function finalizeWithEvidence(
           : "Hermes produced a patch, but deterministic project verification failed. The patch and usage/cost evidence were preserved for review and nothing was written to GitHub." +
             (verificationDetail ? "\n" + verificationDetail : "");
 
+  const failureAdvice = finalError
+    ? failureAdviceFor(finalError, input.request)
+    : null;
+
   const { error: updateError } = await admin
     .from("operative_tasks")
     .update({
       status: succeeded ? "completed" : "failed",
       result: {
         ...result,
+        ...(failureAdvice ? { failureAdvice } : {}),
         progress: {
           stage: succeeded ? "completed" : "failed",
           at: new Date().toISOString(),
@@ -944,6 +1061,7 @@ async function finalizeWithEvidence(
       sourceChangesProduced,
       actualSpendMicrounits: evidence.costMicrounits,
       overBudget,
+      deterministicRepairs: evidence.deterministicRepairs,
       costLedgerReplaySafe: true,
       repositoryWritePerformed: false,
       productionChangePerformed: false,
@@ -1089,6 +1207,7 @@ export async function linkedProjectHermesWorkflow(
       await recordProgress(input, "collecting_patch", {
         changedFiles: patchEvidence.changedFiles,
         patchBytes: utf8ByteLength(patchEvidence.patch),
+        deterministicRepairs: patchEvidence.deterministicRepairs,
         repositoryWritePerformed: false,
       });
 
@@ -1097,7 +1216,7 @@ export async function linkedProjectHermesWorkflow(
         throw new Error("Linked-project verification playbook is unavailable.");
       }
 
-      const verificationSteps: VerificationStep[] = [patchEvidence.diffCheckStep];
+      const verificationSteps: VerificationStep[] = [...patchEvidence.diffCheckSteps];
       let verificationSucceeded =
         patchEvidence.hermesExitCode === 0 && patchEvidence.diffCheckSucceeded;
 
@@ -1110,8 +1229,8 @@ export async function linkedProjectHermesWorkflow(
         }
       }
 
-      const { diffCheckStep: _diffCheckStep, ...basePatchEvidence } = patchEvidence;
-      void _diffCheckStep;
+      const { diffCheckSteps: _diffCheckSteps, ...basePatchEvidence } = patchEvidence;
+      void _diffCheckSteps;
       const evidence: LinkedProjectEvidence = {
         ...basePatchEvidence,
         verificationSteps,
