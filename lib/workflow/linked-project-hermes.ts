@@ -21,7 +21,7 @@ function utf8ByteLength(value: string) {
   return new TextEncoder().encode(value).byteLength;
 }
 const MAX_TURNS = 4;
-const HERMES_COMMAND_TIMEOUT_SECONDS = 420;
+const HERMES_COMMAND_TIMEOUT_SECONDS = 540;
 
 interface HermesUsageReport {
   estimated_cost_usd?: number;
@@ -170,7 +170,7 @@ function failureAdviceFor(
         summary:
           "A deliberately small Phase 1 still consumed the full execution window, so further scope splitting is no longer the right recovery.",
         cause:
-          "The linked-project worker previously allowed too many Hermes iterations inside too little command headroom. The governed worker now uses four iterations with a 420-second command window so it can terminate and flush usage evidence before the outer sandbox timeout.",
+          "The linked-project worker previously allowed too many Hermes iterations inside too little command headroom. The governed worker now uses four iterations with a 540-second command window so it can terminate and flush usage evidence before the outer sandbox timeout.",
         retrySafety: "safe-after-fix",
         costStatus: "unresolved",
         recommendedAction:
@@ -408,7 +408,7 @@ async function startLinkedProjectHermesDetached(
   const sandbox = await Sandbox.fork({
     sourceSandbox: HERMES_BASE_NAME,
     persistent: false,
-    timeout: 10 * 60 * 1000,
+    timeout: 12 * 60 * 1000,
     env: {
       AI_GATEWAY_API_KEY: oidcToken,
       HERMES_MAX_ITERATIONS: String(MAX_TURNS),
@@ -531,7 +531,7 @@ async function startLinkedProjectHermesDetached(
     sandboxName: sandbox.name,
     cwd,
     startedAt,
-    deadlineAt: startedAt + 9 * 60 * 1000,
+    deadlineAt: startedAt + 11 * 60 * 1000,
     pricingSnapshot: selectedModel.pricing ?? {},
   };
 }
@@ -574,7 +574,7 @@ async function pollLinkedProjectHermesDetached(
 
   if (Date.now() > handle.deadlineAt) {
     throw new FatalError(
-      "Detached Cloud Hermes exceeded its nine-minute orchestration deadline.",
+      "Detached Cloud Hermes exceeded its eleven-minute orchestration deadline.",
     );
   }
 

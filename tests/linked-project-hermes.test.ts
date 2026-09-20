@@ -52,7 +52,7 @@ test("linked-project Hermes returns a bounded reviewable patch and blocks secret
   assert.equal(source.includes('"--run-budget"'), false);
   assert.equal(source.includes('"--checkpoints"'), false);
   assert.equal(source.includes('"--source"'), false);
-  assert.match(source, /const HERMES_COMMAND_TIMEOUT_SECONDS = 420/);
+  assert.match(source, /const HERMES_COMMAND_TIMEOUT_SECONDS = 540/);
   assert.match(source, /"timeout " \+\s*HERMES_COMMAND_TIMEOUT_SECONDS \+\s*'s "\$HERMES_BIN" '/);
   assert.match(source, /new TextEncoder\(\)\.encode\(value\)\.byteLength/);
   assert.equal(source.includes("Buffer.byteLength"), false);
@@ -122,10 +122,12 @@ test("timeout recovery preserves the exact failure and provides a bounded execut
 });
 
 
-test("bounded linked-project coding uses four Hermes iterations and seven-minute command headroom", () => {
+test("bounded linked-project coding uses four Hermes iterations and nine-minute command headroom", () => {
   assert.match(source, /const MAX_TURNS = 4/);
   assert.match(source, /HERMES_MAX_ITERATIONS: String\(MAX_TURNS\)/);
-  assert.match(source, /const HERMES_COMMAND_TIMEOUT_SECONDS = 420/);
+  assert.match(source, /const HERMES_COMMAND_TIMEOUT_SECONDS = 540/);
+  assert.match(source, /timeout: 12 \* 60 \* 1000/);
+  assert.match(source, /deadlineAt: startedAt \+ 11 \* 60 \* 1000/);
   assert.match(source, /"timeout " \+\s*HERMES_COMMAND_TIMEOUT_SECONDS \+\s*'s "\$HERMES_BIN" '/);
 });
 
