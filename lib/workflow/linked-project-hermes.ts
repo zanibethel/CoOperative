@@ -546,7 +546,7 @@ async function startLinkedProjectHermesDetached(
     '# A uv/env launcher may materialize its managed environment only when invoked.',
     '# --version is deterministic and cannot start a model call.',
     '"$HERMES_BIN" --version >/dev/null 2>&1 || true',
-    'ONESHOT_PATH="$(find / \( -path /proc -o -path /sys -o -path /dev \) -prune -o -type f -path "*/hermes_cli/oneshot.py" -print -quit 2>/dev/null)"',
+    'ONESHOT_PATH="$(find "$HOME" /usr/local /opt /tmp -type f -path "*/hermes_cli/oneshot.py" -print -quit 2>/dev/null)"',
     'if [ -z "$ONESHOT_PATH" ]; then',
     '  echo "unable-to-locate-hermes-oneshot-source after deterministic runtime hydration" >&2',
     '  exit 126',
