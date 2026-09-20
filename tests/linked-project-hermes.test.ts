@@ -130,7 +130,7 @@ test("bounded linked-project coding patches the pinned oneshot path so four iter
   assert.match(source, /const MAX_TURNS = 4/);
   assert.match(source, /const MAX_EXPECTED_API_CALLS = MAX_TURNS \+ 1/);
   assert.match(source, /HERMES_MAX_ITERATIONS: String\(MAX_TURNS\)/);
-  assert.match(source, /hermes_cli\.oneshot/);
+  assert.match(source, /hermes_cli\/oneshot\.py/);
   assert.match(source, /max_iterations=max\(1, int\(os\.getenv\("HERMES_MAX_ITERATIONS", "4"\)\)\),/);
   assert.match(source, /py_compile\.compile/);
   assert.match(source, /hermes_iteration_guard_verified/);
