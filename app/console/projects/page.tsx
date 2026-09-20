@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import SecretBrokerPanel from "./SecretBrokerPanel";
 
@@ -40,11 +40,6 @@ export default function LinkedProjectsPage() {
     creatorhub: "0.02",
     raisehub: "0.02",
   });
-
-  const activeSecrets = useMemo(
-    () => activeHandoff?.project.secretRequirements ?? [],
-    [activeHandoff],
-  );
 
   function startHumanAction(project: LinkedProjectManifest, action: ProjectHumanAction) {
     setError("");
