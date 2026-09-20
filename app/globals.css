@@ -217,6 +217,69 @@ b { color: var(--text); }
   border-color: transparent;
 }
 .chat-ask-button:disabled { opacity: .5; cursor: default; }
+.chat-ai-button {
+  border: 1px solid color-mix(in srgb, var(--accent-2) 70%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent-2) 16%, var(--panel));
+  color: var(--text);
+  padding: 8px 10px;
+  font-size: .74rem;
+  font-weight: 900;
+}
+.chat-ai-button:disabled { opacity: .5; cursor: wait; }
+.chat-ai-usage {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: .68rem;
+  line-height: 1.4;
+}
+.ai-owner-controls {
+  margin: 0 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 11px;
+  background: var(--panel-2);
+}
+.ai-owner-controls summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .75rem;
+  font-weight: 800;
+}
+.ai-owner-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) .8fr .8fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ai-owner-control-grid label,
+.ai-owner-control-grid > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.ai-owner-control-grid label,
+.ai-owner-control-grid span {
+  color: var(--muted);
+  font-size: .68rem;
+}
+.ai-owner-control-grid input {
+  padding: 8px 9px;
+  font-size: .78rem;
+}
+.ai-owner-control-grid strong {
+  margin: 0;
+  font-size: .8rem;
+  overflow-wrap: anywhere;
+}
+.ai-owner-controls small {
+  display: block;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: .67rem;
+  line-height: 1.4;
+}
+
 .chat-launcher {
   position: fixed;
   right: 18px;
@@ -373,6 +436,8 @@ b { color: var(--text); }
   .message-list { max-height: 24vh; }
   .composer-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .composer-actions .primary { grid-column: 1 / -1; width: 100%; justify-self: stretch; }
+  .ai-owner-control-grid { grid-template-columns: 1fr 1fr; }
+  .ai-owner-control-grid label { grid-column: 1 / -1; }
   .chat-launcher {
     right: 10px;
     bottom: max(10px, env(safe-area-inset-bottom));
