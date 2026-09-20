@@ -11,6 +11,10 @@ const route = fs.readFileSync(
   path.join(process.cwd(), "app/api/operative/tasks/[id]/execute/route.ts"),
   "utf8",
 );
+const createRoute = fs.readFileSync(
+  path.join(process.cwd(), "app/api/operative/tasks/route.ts"),
+  "utf8",
+);
 
 test("linked-project Hermes uses prepared cloud runtime and short-lived OIDC", () => {
   assert.match(source, /cooperative-hermes-runtime-v2026-9-14/);
@@ -157,9 +161,9 @@ test("paid detached Hermes launch cannot auto-retry", () => {
 
 
 test("diff-check failure preserves patch, usage and exact deterministic evidence", () => {
-  assert.match(source, /const diffCheckStdout = await diffCheck\.stdout\(\)/);
-  assert.match(source, /const diffCheckStderr = await diffCheck\.stderr\(\)/);
-  assert.match(source, /cmd: "git diff --check"/);
+  assert.match(source, /const stdoutText = await result\.stdout\(\)/);
+  assert.match(source, /const stderrText = await result\.stderr\(\)/);
+  assert.match(source, /runDiffCheck\("git diff --check"\)/);
   assert.match(source, /diffCheckSucceeded/);
   assert.match(source, /verificationSteps: VerificationStep\[\] = \[\.\.\.patchEvidence\.diffCheckSteps\]/);
   assert.match(source, /patch and usage\/cost evidence were preserved/);
@@ -180,7 +184,28 @@ test("known git diff whitespace failures are repaired deterministically before a
 });
 
 test("verification failure keeps structured repair advice instead of collapsing to a generic failure", () => {
-  assert.match(source, /const failureAdvice = finalError/);
+  assert.match(source, /const failureAdvice =/);
+  assert.match(source, /Patch preserved — targeted Hermes repair available/);
   assert.match(source, /failureAdviceFor\(finalError, input\.request\)/);
   assert.match(source, /\.\.\.\(failureAdvice \? \{ failureAdvice \} : \{\}\)/);
+});
+
+
+test("targeted Hermes repair reapplies preserved patch before any model reasoning", () => {
+  assert.match(source, /repairSourceTaskId\?: string \| null/);
+  assert.match(source, /TARGETED REPAIR MODE/);
+  assert.match(source, /sandbox\.fs\.writeFile/);
+  assert.match(source, /args: \["apply", "--binary", "--whitespace=nowarn", repairPatchPath\]/);
+  assert.match(source, /No model call was made/);
+  assert.match(source, /targeted_repair_patch_seeded/);
+  assert.match(source, /repairSourceTaskId: input\.taskId/);
+  assert.match(source, /Patch preserved — targeted Hermes repair available/);
+});
+
+test("targeted repair task lineage is validated and passed through dispatcher", () => {
+  assert.match(createRoute, /repairSourceTaskId/);
+  assert.match(createRoute, /REPAIR_SOURCE_INVALID/);
+  assert.match(createRoute, /same linked-project playbook with a preserved patch/);
+  assert.match(route, /repairSourceTaskId/);
+  assert.match(route, /repairSourceTaskId,/);
 });
