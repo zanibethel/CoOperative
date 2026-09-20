@@ -82,11 +82,43 @@ export async function GET() {
     return NextResponse.json({ error: firstError.message }, { status: 500 });
   }
 
+  const taskRows = tasksResult.data ?? [];
+  const taskIds = taskRows.map((task) => task.id);
+  const startedAtByTask = new Map<string, string>();
+
+  if (taskIds.length > 0) {
+    const { data: taskEvents, error: taskEventsError } = await supabase
+      .from("task_events")
+      .select("task_id,from_status,to_status,created_at")
+      .in("task_id", taskIds)
+      .eq("to_status", "executing")
+      .order("created_at", { ascending: true });
+
+    if (taskEventsError) {
+      return NextResponse.json({ error: taskEventsError.message }, { status: 500 });
+    }
+
+    for (const event of taskEvents ?? []) {
+      if (!startedAtByTask.has(event.task_id)) {
+        startedAtByTask.set(event.task_id, event.created_at);
+      }
+    }
+  }
+
+  const tasks = taskRows.map((task) => ({
+    ...task,
+    started_at: startedAtByTask.get(task.id) ?? task.created_at,
+    ended_at:
+      task.status === "completed" || task.status === "failed"
+        ? task.updated_at
+        : null,
+  }));
+
   return NextResponse.json({
     organization: { id: organization.id, name: organization.name },
     conversation,
     messages: messagesResult.data ?? [],
-    tasks: tasksResult.data ?? [],
+    tasks,
     pendingDecisions: decisionsResult.data ?? [],
     aiPolicy: {
       plan: aiPlan,
