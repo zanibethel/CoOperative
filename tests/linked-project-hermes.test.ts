@@ -38,7 +38,7 @@ test("linked-project Hermes preserves usage, cost and deterministic verification
   assert.match(source, /actual_spend_microunits: evidence\.costMicrounits/);
   assert.match(source, /cost_ledger_entries/);
   assert.match(source, /git",\s*args: \["diff", "--check"\]/);
-  assert.match(source, /playbook\.buildCommands\(\)/);
+  assert.match(source, /projectPlaybook\.buildCommands\(\)/);
   assert.match(source, /verificationSucceeded/);
 });
 
@@ -53,7 +53,7 @@ test("linked-project Hermes returns a bounded reviewable patch and blocks secret
   assert.equal(source.includes('"--checkpoints"'), false);
   assert.equal(source.includes('"--source"'), false);
   assert.match(source, /const HERMES_COMMAND_TIMEOUT_SECONDS = 420/);
-  assert.match(source, /timeout ' \+ HERMES_COMMAND_TIMEOUT_SECONDS \+ 's/);
+  assert.match(source, /"timeout " \+\s*HERMES_COMMAND_TIMEOUT_SECONDS \+\s*'s "\$HERMES_BIN" '/);
   assert.match(source, /new TextEncoder\(\)\.encode\(value\)\.byteLength/);
   assert.equal(source.includes("Buffer.byteLength"), false);
   assert.match(source, /export TERMINAL_CWD=/);
@@ -96,8 +96,8 @@ test("linked-project Hermes patch tasks cannot succeed with an empty patch", () 
 
 
 test("paid linked-project Hermes reasoning never auto-retries", () => {
-  assert.match(source, /import \{ FatalError \} from "workflow"/);
-  assert.match(source, /runLinkedProjectHermes\.maxRetries = 0/);
+  assert.match(source, /import \{ FatalError, sleep \} from "workflow"/);
+  assert.match(source, /startLinkedProjectHermesDetached\.maxRetries = 0/);
   assert.match(source, /new FatalError/);
   assert.match(source, /do not blind-retry/i);
 });
@@ -115,7 +115,8 @@ test("timeout recovery preserves the exact failure and provides a bounded execut
   assert.match(source, /executablePrompt\?: string/);
   assert.match(source, /firstRecoveryPhasePrompt/);
   assert.match(source, /Implement only Phase 1/);
-  assert.match(source, /failureAdviceFor\(terminalMessage, input\.request\)/);
+  assert.match(source, /const terminalMessage = timedOut/);
+  assert.match(source, /throw new FatalError\(terminalMessage\)/);
   assert.match(source, /existingPreciseError/);
   assert.match(source, /effectiveMessage/);
 });
@@ -125,7 +126,7 @@ test("bounded linked-project coding uses four Hermes iterations and seven-minute
   assert.match(source, /const MAX_TURNS = 4/);
   assert.match(source, /HERMES_MAX_ITERATIONS: String\(MAX_TURNS\)/);
   assert.match(source, /const HERMES_COMMAND_TIMEOUT_SECONDS = 420/);
-  assert.match(source, /timeout ' \+ HERMES_COMMAND_TIMEOUT_SECONDS \+ 's/);
+  assert.match(source, /"timeout " \+\s*HERMES_COMMAND_TIMEOUT_SECONDS \+\s*'s "\$HERMES_BIN" '/);
 });
 
 test("an already-bounded Phase 1 timeout recommends fixing the worker instead of splitting forever", () => {
