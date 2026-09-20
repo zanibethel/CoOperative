@@ -856,6 +856,16 @@ export default function OwnerConsolePage() {
   }
 
   async function retryHermesProjectTask(task: Task) {
+    const advice = taskFailureAdvice(task.result);
+    if (advice?.executablePrompt) {
+      setError(
+        advice.repairSourceTaskId
+          ? "Use the Recommended targeted repair button on this task. Generic Hermes retry is disabled so the preserved patch lineage is not lost."
+          : "Use the Recommended recovery button on this task. Generic Hermes retry is disabled while a specific recovery is available.",
+      );
+      return;
+    }
+
     const projectKey = taskLinkedProjectKey(task.result);
     if (!projectKey) {
       setError("This failed task is not linked to a supported Hermes project.");
@@ -1390,16 +1400,31 @@ export default function OwnerConsolePage() {
               </div>
               {task.status === "failed" &&
               taskLinkedProjectKey(task.result) &&
-              taskFailureAdvice(task.result)?.retrySafety !== "do-not-blind-retry" ? (
+              taskFailureAdvice(task.result)?.executablePrompt ? (
                 <button
                   type="button"
-                  className="decision-approve activity-retry"
-                  disabled={working}
-                  onClick={() => void retryHermesProjectTask(task)}
+                  className="decision-button activity-retry"
+                  onClick={() =>
+                    document.getElementById("task-" + task.id)?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    })
+                  }
                 >
-                  Retry Hermes patch
+                  Open recommended retry
                 </button>
-              ) : null}
+              ) : task.status === "failed" &&
+                taskLinkedProjectKey(task.result) &&
+                taskFailureAdvice(task.result)?.retrySafety !== "do-not-blind-retry" ? (
+                  <button
+                    type="button"
+                    className="decision-approve activity-retry"
+                    disabled={working}
+                    onClick={() => void retryHermesProjectTask(task)}
+                  >
+                    Retry Hermes patch
+                  </button>
+                ) : null}
               {pendingDecisionByTask.get(task.id) ? (
                 <div className="decision-actions">
                   <button
@@ -1852,8 +1877,10 @@ export default function OwnerConsolePage() {
                               onClick={() => prepareSuggestedRecovery(task)}
                             >
                               {recoveryPreparedTaskId === task.id
-                                ? "Recovery draft prepared"
-                                : "Prepare recommended recovery"}
+                                ? "Plan ready · no charge"
+                                : taskFailureAdvice(task.result)?.repairSourceTaskId
+                                  ? "Review targeted repair plan · no charge"
+                                  : "Review recovery plan · no charge"}
                             </button>
                             {taskLinkedProjectKey(task.result) &&
                             taskFailureAdvice(task.result)?.executablePrompt ? (
@@ -1868,13 +1895,20 @@ export default function OwnerConsolePage() {
                                 {recoveryExecutingTaskId === task.id
                                   ? "Starting recovery…"
                                   : taskFailureAdvice(task.result)?.repairSourceTaskId
-                                    ? "Execute targeted repair · max $" +
+                                    ? "Recommended: retry targeted repair · max $" +
                                       recommendedRecoveryBudgetUsd(task).toFixed(3)
-                                    : "Execute recommended recovery · max $" +
+                                    : "Recommended: run recovery · max $" +
                                       recommendedRecoveryBudgetUsd(task).toFixed(3)}
                               </button>
                             ) : null}
                           </div>
+                          {taskFailureAdvice(task.result)?.executablePrompt ? (
+                            <p className="console-helper">
+                              {taskFailureAdvice(task.result)?.repairSourceTaskId
+                                ? "Use the Recommended targeted repair button for the retry. It continues from the preserved patch. The review-plan button does not run anything or authorize spend."
+                                : "Use the Recommended recovery button for the retry. The review-plan button does not run anything or authorize spend."}
+                            </p>
+                          ) : null}
                           {recoveryPreparedTaskId === task.id ? (
                             <>
                               <div className="task-recovery-prepared" role="status">
@@ -1952,6 +1986,7 @@ export default function OwnerConsolePage() {
                         <pre className="task-error-code"><code>{task.error}</code></pre>
                         <div className="task-error-actions">
                           {taskLinkedProjectKey(task.result) &&
+                          !taskFailureAdvice(task.result)?.executablePrompt &&
                           taskFailureAdvice(task.result)?.retrySafety !== "do-not-blind-retry" ? (
                             <button
                               type="button"
