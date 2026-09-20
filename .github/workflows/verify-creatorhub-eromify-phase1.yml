@@ -26,17 +26,22 @@ jobs:
           ref: main
           path: creatorhub
 
-      - name: Apply deterministic Phase 1 candidate
+      - name: Verify deterministic Phase 1 candidate
         run: |
           mkdir -p creatorhub/src/lib
-          cp verification/creatorhub-eromify-phase1/eromify.ts creatorhub/src/lib/eromify.ts
-          git -C creatorhub add -N src/lib/eromify.ts
-          changed="$(git -C creatorhub diff --name-only)"
-          test "$changed" = "src/lib/eromify.ts"
+          if [ -f creatorhub/src/lib/eromify.ts ]; then
+            cmp verification/creatorhub-eromify-phase1/eromify.ts creatorhub/src/lib/eromify.ts
+            echo "CreatorHub main already contains the verified Phase 1 file." > creatorhub-eromify-phase1-status.txt
+          else
+            cp verification/creatorhub-eromify-phase1/eromify.ts creatorhub/src/lib/eromify.ts
+            git -C creatorhub add -N src/lib/eromify.ts
+            changed="$(git -C creatorhub diff --name-only)"
+            test "$changed" = "src/lib/eromify.ts"
+            git -C creatorhub diff -- src/lib/eromify.ts > creatorhub-eromify-phase1.patch
+            echo "Verified the unmerged Phase 1 candidate." > creatorhub-eromify-phase1-status.txt
+          fi
           test ! -e creatorhub/src/lib/__tests__/eromify.test.ts
           git -C creatorhub diff --check
-          git -C creatorhub diff -- src/lib/eromify.ts > creatorhub-eromify-phase1.patch
-          test -s creatorhub-eromify-phase1.patch
 
       - name: Isolate CreatorHub workspace
         run: |
@@ -62,8 +67,11 @@ jobs:
         working-directory: creatorhub
         run: npm run build
 
-      - name: Preserve verified candidate patch
+      - name: Preserve verification evidence
         uses: actions/upload-artifact@v4
         with:
-          name: creatorhub-eromify-phase1-verified-patch
-          path: creatorhub-eromify-phase1.patch
+          name: creatorhub-eromify-phase1-verification
+          path: |
+            creatorhub-eromify-phase1-status.txt
+            creatorhub-eromify-phase1.patch
+          if-no-files-found: ignore
