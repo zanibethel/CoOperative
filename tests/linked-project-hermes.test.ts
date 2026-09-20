@@ -223,3 +223,10 @@ test("targeted repair re-checks the preserved patch against the original owner e
   assert.match(source, /ORIGINAL OWNER REQUEST AND EXCLUSIONS/);
   assert.match(source, /Remove any out-of-scope changes that violate its explicit exclusions/);
 });
+
+
+test("git status path parsing preserves the first character of changed source paths", () => {
+  assert.match(source, /\.filter\(\(line\) => line\.trim\(\)\.length > 0\)/);
+  assert.match(source, /\.map\(\(line\) => line\.slice\(3\)\.trim\(\)\)/);
+  assert.equal(source.includes(".map((line) => line.trim())\n    .filter(Boolean)\n    .map((line) => line.slice(3)"), false);
+});
