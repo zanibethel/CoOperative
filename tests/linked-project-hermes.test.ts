@@ -248,3 +248,11 @@ test("Hermes guard shell invokes the resolved interpreter with the guard script 
   assert.match(source, /exec "\$HERMES_PY" -c "\$1" "\$2"/);
   assert.equal(source.includes('exec "$HERMES_PY" "$@"'), false);
 });
+
+
+test("Hermes guard shell preserves multiline if/case syntax instead of semicolon-joining blocks", () => {
+  assert.match(source, /\]\.join\("\\n"\)/);
+  assert.match(source, /hermesPythonShell \+ '\\nexec "\$HERMES_PY" -c "\$1"'/);
+  assert.match(source, /hermesPythonShell \+ '\\nexec "\$HERMES_PY" -c "\$1" "\$2"'/);
+  assert.equal(source.includes('].join("; ");'), false);
+});
