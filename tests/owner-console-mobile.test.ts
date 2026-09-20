@@ -82,3 +82,12 @@ test("recommended recovery visibly prepares a zero-spend draft and opens the rea
   assert.match(page, /Open recovery draft/);
   assert.match(page, /jumpToComposer/);
 });
+
+
+test("recovery draft opens inline and remains zero-spend until separately queued", () => {
+  assert.match(page, /setRecoveryOpenTaskId\(task\.id\)/);
+  assert.match(page, /aria-label="Prepared recovery draft"/);
+  assert.match(page, /Copy draft/);
+  assert.match(page, /Edit in Owner composer/);
+  assert.match(page, /Nothing has run\. Queueing or executing a new task remains a separate action/);
+});
