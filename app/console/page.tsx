@@ -349,6 +349,7 @@ export default function OwnerConsolePage() {
   const [recoveryPreparedTaskId, setRecoveryPreparedTaskId] = useState<string | null>(null);
   const [recoveryOpenTaskId, setRecoveryOpenTaskId] = useState<string | null>(null);
   const [copiedRecoveryTaskId, setCopiedRecoveryTaskId] = useState<string | null>(null);
+  const [recoveryExecutingTaskId, setRecoveryExecutingTaskId] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [assistantReply, setAssistantReply] = useState(
     "Ask me what to do next, where something is, or to find a recent report.",
@@ -965,6 +966,97 @@ export default function OwnerConsolePage() {
       }, 1800);
     } catch {
       setError("Unable to copy the recovery draft on this device.");
+    }
+  }
+
+  function recommendedRecoveryBudgetUsd(task: Task): number {
+    const originalBudget =
+      Number(task.max_spend_microunits ?? 0) / 1_000_000;
+
+    if (!Number.isFinite(originalBudget) || originalBudget <= 0) {
+      return 0.02;
+    }
+
+    return Math.min(originalBudget, 0.02);
+  }
+
+  async function executeRecommendedRecovery(task: Task) {
+    const advice = taskFailureAdvice(task.result);
+    const projectKey = taskLinkedProjectKey(task.result);
+    const draft = recoveryDraftText(task);
+
+    if (!advice?.suggestedPrompt || !projectKey || !draft) {
+      setError("This recommendation is not executable as a linked-project recovery.");
+      return;
+    }
+
+    const budget = recommendedRecoveryBudgetUsd(task);
+    const projectName = projectKey === "creatorhub" ? "CreatorHub" : "RaiseHub";
+
+    setRecoveryExecutingTaskId(task.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const message = await persistMessage(
+        [
+          "Execute recommended recovery for " + projectName + ".",
+          "Authorized model spend cap: $" + budget.toFixed(3),
+          "",
+          draft,
+        ].join("\n"),
+      );
+
+      const createResponse = await fetch("/api/operative/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          conversationId: message.conversationId,
+          title: projectName + " · recommended recovery",
+          description: draft,
+          playbookKey: projectKey + "-hermes-patch",
+          maxSpendUsd: budget,
+          flags: { requiresShell: true },
+        }),
+      });
+      const created = await createResponse.json();
+      if (!createResponse.ok) {
+        throw new Error(
+          created.error ?? "Unable to create the recommended recovery task.",
+        );
+      }
+
+      const executeResponse = await fetch(
+        "/api/operative/tasks/" + created.task.id + "/execute",
+        { method: "POST" },
+      );
+      const executed = await executeResponse.json();
+      if (!executeResponse.ok) {
+        throw new Error(
+          executed.error ?? "Unable to execute the recommended recovery.",
+        );
+      }
+
+      setNotice(
+        projectName +
+          " recommended recovery started · max $" +
+          budget.toFixed(3) +
+          ". The action was also saved to the canonical conversation.",
+      );
+      setRecoveryPreparedTaskId(null);
+      setRecoveryOpenTaskId(null);
+      setText("");
+      setMaxSpendUsd("0");
+      await load();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to execute the recommended recovery.",
+      );
+      await load().catch(() => undefined);
+    } finally {
+      setRecoveryExecutingTaskId(null);
     }
   }
 
@@ -1734,15 +1826,32 @@ export default function OwnerConsolePage() {
                       ) : null}
                       {taskFailureAdvice(task.result)?.suggestedPrompt ? (
                         <>
-                          <button
-                            type="button"
-                            className="decision-approve"
-                            onClick={() => prepareSuggestedRecovery(task)}
-                          >
-                            {recoveryPreparedTaskId === task.id
-                              ? "Recovery draft prepared"
-                              : "Prepare recommended recovery"}
-                          </button>
+                          <div className="task-recovery-primary-actions">
+                            <button
+                              type="button"
+                              className="decision-approve"
+                              onClick={() => prepareSuggestedRecovery(task)}
+                            >
+                              {recoveryPreparedTaskId === task.id
+                                ? "Recovery draft prepared"
+                                : "Prepare recommended recovery"}
+                            </button>
+                            {taskLinkedProjectKey(task.result) ? (
+                              <button
+                                type="button"
+                                className="decision-approve"
+                                disabled={recoveryExecutingTaskId === task.id}
+                                onClick={() =>
+                                  void executeRecommendedRecovery(task)
+                                }
+                              >
+                                {recoveryExecutingTaskId === task.id
+                                  ? "Starting recovery…"
+                                  : "Execute recommended recovery · max $" +
+                                    recommendedRecoveryBudgetUsd(task).toFixed(3)}
+                              </button>
+                            ) : null}
+                          </div>
                           {recoveryPreparedTaskId === task.id ? (
                             <>
                               <div className="task-recovery-prepared" role="status">
