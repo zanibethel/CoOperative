@@ -146,7 +146,17 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  const repairSourceTaskId = parsed.data.repairSourceTaskId ?? null;
+  const inferredRepairSourceTaskId =
+    !parsed.data.repairSourceTaskId &&
+    playbook?.executor === "hermes-cloud-operative" &&
+    playbook.projectKey
+      ? parsed.data.description
+          .match(
+            /preserved patch from task ([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})/i,
+          )?.[1] ?? null
+      : null;
+  const repairSourceTaskId =
+    parsed.data.repairSourceTaskId ?? inferredRepairSourceTaskId ?? null;
 
   if (repairSourceTaskId) {
     if (
