@@ -134,3 +134,20 @@ test("an already-bounded Phase 1 timeout recommends fixing the worker instead of
   assert.match(source, /Do not split the Phase 1 request again/);
   assert.match(source, /retrySafety: "safe-after-fix"/);
 });
+
+
+test("long Hermes reasoning is detached and polled through durable workflow sleeps", () => {
+  assert.match(source, /import \{ FatalError, sleep \} from "workflow"/);
+  assert.match(source, /startLinkedProjectHermesDetached/);
+  assert.match(source, /detached: true/);
+  assert.match(source, /await sleep\("10s"\)/);
+  assert.match(source, /pollLinkedProjectHermesDetached/);
+  assert.match(source, /collectLinkedProjectHermesPatch/);
+  assert.match(source, /runLinkedProjectVerificationStep/);
+  assert.match(source, /executionMode: "detached-sandbox-process"/);
+  assert.equal(source.includes("const hermes = await sandbox.runCommand"), false);
+});
+
+test("paid detached Hermes launch cannot auto-retry", () => {
+  assert.match(source, /startLinkedProjectHermesDetached\.maxRetries = 0/);
+});
