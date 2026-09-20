@@ -123,8 +123,7 @@ function repoDirectory(repoSlug: string) {
 function extractChangedFiles(statusText: string): string[] {
   return statusText
     .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
+    .filter((line) => line.trim().length > 0)
     .map((line) => line.slice(3).trim())
     .filter(Boolean)
     .slice(0, 100);
