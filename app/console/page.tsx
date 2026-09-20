@@ -347,6 +347,8 @@ export default function OwnerConsolePage() {
   const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
   const [copiedPatchTaskId, setCopiedPatchTaskId] = useState<string | null>(null);
   const [recoveryPreparedTaskId, setRecoveryPreparedTaskId] = useState<string | null>(null);
+  const [recoveryOpenTaskId, setRecoveryOpenTaskId] = useState<string | null>(null);
+  const [copiedRecoveryTaskId, setCopiedRecoveryTaskId] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [assistantReply, setAssistantReply] = useState(
     "Ask me what to do next, where something is, or to find a recent report.",
@@ -932,6 +934,40 @@ export default function OwnerConsolePage() {
     }
   }
 
+  function recoveryDraftText(task: Task): string {
+    const advice = taskFailureAdvice(task.result);
+    if (!advice?.suggestedPrompt) return "";
+
+    return [
+      advice.suggestedPrompt,
+      "",
+      "Task: " + task.title,
+      "Task ID: " + task.id,
+      "Original request:",
+      task.description,
+      "",
+      "Captured failure:",
+      task.error ?? advice.cause,
+    ].join("\n");
+  }
+
+  async function copyRecoveryDraft(task: Task) {
+    const draft = recoveryDraftText(task);
+    if (!draft) return;
+
+    try {
+      await navigator.clipboard.writeText(draft);
+      setCopiedRecoveryTaskId(task.id);
+      window.setTimeout(() => {
+        setCopiedRecoveryTaskId((current) =>
+          current === task.id ? null : current,
+        );
+      }, 1800);
+    } catch {
+      setError("Unable to copy the recovery draft on this device.");
+    }
+  }
+
   function jumpToComposer() {
     const composer = document.getElementById("owner-composer");
     const textarea = document.getElementById(
@@ -955,28 +991,13 @@ export default function OwnerConsolePage() {
       return;
     }
 
-    setText(
-      [
-        advice.suggestedPrompt,
-        "",
-        "Task: " + task.title,
-        "Task ID: " + task.id,
-        "Original request:",
-        task.description,
-        "",
-        "Captured failure:",
-        task.error ?? advice.cause,
-      ].join("\n"),
-    );
+    setText(recoveryDraftText(task));
     setMaxSpendUsd("0");
     setRecoveryPreparedTaskId(task.id);
+    setRecoveryOpenTaskId(task.id);
     setNotice(
-      "Recovery draft prepared. It has not run or spent anything. Review it in the Owner composer before queueing a new task.",
+      "Recovery draft prepared. It has not run or spent anything. Review it here before moving it to the Owner composer.",
     );
-
-    window.requestAnimationFrame(() => {
-      jumpToComposer();
-    });
   }
 
   function prepareErrorRequest(task: Task, mode: "explain" | "fix") {
@@ -1723,18 +1744,60 @@ export default function OwnerConsolePage() {
                               : "Prepare recommended recovery"}
                           </button>
                           {recoveryPreparedTaskId === task.id ? (
-                            <div className="task-recovery-prepared" role="status">
-                              <span>
-                                Draft ready · $0 authorized · nothing has run yet
-                              </span>
-                              <button
-                                type="button"
-                                className="task-error-action"
-                                onClick={jumpToComposer}
-                              >
-                                Open recovery draft
-                              </button>
-                            </div>
+                            <>
+                              <div className="task-recovery-prepared" role="status">
+                                <span>
+                                  Draft ready · $0 authorized · nothing has run yet
+                                </span>
+                                <button
+                                  type="button"
+                                  className="task-error-action"
+                                  onClick={() =>
+                                    setRecoveryOpenTaskId((current) =>
+                                      current === task.id ? null : task.id,
+                                    )
+                                  }
+                                >
+                                  {recoveryOpenTaskId === task.id
+                                    ? "Hide recovery draft"
+                                    : "Open recovery draft"}
+                                </button>
+                              </div>
+                              {recoveryOpenTaskId === task.id ? (
+                                <div className="task-recovery-draft">
+                                  <textarea
+                                    readOnly
+                                    value={recoveryDraftText(task)}
+                                    aria-label="Prepared recovery draft"
+                                  />
+                                  <div className="task-recovery-draft-actions">
+                                    <button
+                                      type="button"
+                                      className="task-error-action"
+                                      onClick={() => void copyRecoveryDraft(task)}
+                                    >
+                                      {copiedRecoveryTaskId === task.id
+                                        ? "Copied"
+                                        : "Copy draft"}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="decision-approve"
+                                      onClick={() => {
+                                        setText(recoveryDraftText(task));
+                                        setMaxSpendUsd("0");
+                                        jumpToComposer();
+                                      }}
+                                    >
+                                      Edit in Owner composer
+                                    </button>
+                                  </div>
+                                  <small>
+                                    Nothing has run. Queueing or executing a new task remains a separate action.
+                                  </small>
+                                </div>
+                              ) : null}
+                            </>
                           ) : null}
                         </>
                       ) : null}
