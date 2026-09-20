@@ -95,7 +95,7 @@ test("recovery draft opens inline and remains zero-spend until separately queued
 
 test("recommended recovery can execute directly from the failed task card", () => {
   assert.match(page, /executeRecommendedRecovery/);
-  assert.match(page, /Execute recommended recovery · max \$/);
+  assert.match(page, /Recommended: run recovery · max \$/);
   assert.match(page, /recommendedRecoveryBudgetUsd/);
   assert.match(page, /playbookKey: projectKey \+ "-hermes-patch"/);
   assert.match(page, /Authorized model spend cap:/);
@@ -114,7 +114,7 @@ test("direct recovery execution uses a separate bounded executable prompt", () =
 
 test("verification failures can launch an owner-gated targeted repair from the preserved patch", () => {
   assert.match(page, /repairSourceTaskId\?: string/);
-  assert.match(page, /Execute targeted repair · max \$/);
+  assert.match(page, /Recommended: retry targeted repair · max \$/);
   assert.match(page, /repairSourceTaskId: advice\.repairSourceTaskId \?\? null/);
   assert.match(page, /targeted repair started · max \$/);
   assert.match(page, /saved to the canonical conversation/);
