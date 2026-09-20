@@ -89,6 +89,7 @@ interface LinkedProjectEvidence {
   changedFiles: string[];
   verificationSteps: VerificationStep[];
   verificationSucceeded: boolean;
+  diffCheckSucceeded: boolean;
   durationMs: number;
   usage: HermesUsageReport;
   costMicrounits: number;
@@ -336,7 +337,9 @@ interface DetachedHermesPoll {
 type LinkedProjectPatchEvidence = Omit<
   LinkedProjectEvidence,
   "verificationSteps" | "verificationSucceeded"
->;
+> & {
+  diffCheckStep: VerificationStep;
+};
 
 async function startLinkedProjectHermesDetached(
   input: LinkedProjectHermesInput,
@@ -669,12 +672,15 @@ async function collectLinkedProjectHermesPatch(
     args: ["diff", "--check"],
     cwd: handle.cwd,
   });
-  if (diffCheck.exitCode !== 0) {
-    throw new Error(
-      "Hermes produced a patch that failed git diff --check: " +
-        tail(await diffCheck.stderr()),
-    );
-  }
+  const diffCheckStdout = await diffCheck.stdout();
+  const diffCheckStderr = await diffCheck.stderr();
+  const diffCheckStep: VerificationStep = {
+    cmd: "git diff --check",
+    exitCode: diffCheck.exitCode,
+    stdoutTail: tail(diffCheckStdout),
+    stderrTail: tail(diffCheckStderr),
+  };
+  const diffCheckSucceeded = diffCheck.exitCode === 0;
 
   const diffResult = await sandbox.runCommand({
     cmd: "git",
@@ -708,6 +714,8 @@ async function collectLinkedProjectHermesPatch(
     output: tail(stdout, 6000),
     patch,
     changedFiles: extractChangedFiles(statusText),
+    diffCheckSucceeded,
+    diffCheckStep,
     durationMs: Date.now() - handle.startedAt,
     usage,
     costMicrounits: resolvedCost.microunits,
@@ -717,6 +725,8 @@ async function collectLinkedProjectHermesPatch(
     pricingSnapshot: handle.pricingSnapshot,
   };
 }
+
+collectLinkedProjectHermesPatch.maxRetries = 0;
 
 async function runLinkedProjectVerificationStep(
   handle: DetachedHermesHandle,
@@ -872,6 +882,19 @@ async function finalizeWithEvidence(
     if (ledgerError) throw ledgerError;
   }
 
+  const firstFailedVerification = evidence.verificationSteps.find(
+    (step) => step.exitCode !== 0,
+  );
+  const verificationDetail = firstFailedVerification
+    ? [
+        firstFailedVerification.cmd,
+        firstFailedVerification.stdoutTail,
+        firstFailedVerification.stderrTail,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
+
   const finalError = overBudget
     ? `Cost Governor violation: actual model cost ${evidence.costMicrounits} microunits exceeded the ${input.maxSpendMicrounits} microunit cap.`
     : evidence.hermesError
@@ -881,7 +904,8 @@ async function finalizeWithEvidence(
         ? "Hermes completed without producing source changes, so this governed patch task is incomplete. Nothing was written to GitHub."
         : evidence.verificationSucceeded
           ? null
-          : "Hermes produced a patch, but deterministic project verification failed. The patch was preserved for review and was not written to GitHub.";
+          : "Hermes produced a patch, but deterministic project verification failed. The patch and usage/cost evidence were preserved for review and nothing was written to GitHub." +
+            (verificationDetail ? "\n" + verificationDetail : "");
 
   const { error: updateError } = await admin
     .from("operative_tasks")
@@ -1073,8 +1097,9 @@ export async function linkedProjectHermesWorkflow(
         throw new Error("Linked-project verification playbook is unavailable.");
       }
 
-      const verificationSteps: VerificationStep[] = [];
-      let verificationSucceeded = patchEvidence.hermesExitCode === 0;
+      const verificationSteps: VerificationStep[] = [patchEvidence.diffCheckStep];
+      let verificationSucceeded =
+        patchEvidence.hermesExitCode === 0 && patchEvidence.diffCheckSucceeded;
 
       for (const step of projectPlaybook.buildCommands()) {
         if (!verificationSucceeded) break;
@@ -1085,8 +1110,10 @@ export async function linkedProjectHermesWorkflow(
         }
       }
 
+      const { diffCheckStep: _diffCheckStep, ...basePatchEvidence } = patchEvidence;
+      void _diffCheckStep;
       const evidence: LinkedProjectEvidence = {
-        ...patchEvidence,
+        ...basePatchEvidence,
         verificationSteps,
         verificationSucceeded,
       };
