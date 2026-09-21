@@ -34,7 +34,7 @@ type BootstrapResponse = {
   hermesRequiredForBootstrap?: boolean;
 };
 
-function statusLabel(state: BootstrapResponse["next"] extends infer _T ? string : string) {
+function statusLabel(state: string) {
   if (state === "ready") return "ready";
   if (state === "verification_failed") return "needs verification";
   return "setup required";
