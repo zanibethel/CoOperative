@@ -79,12 +79,17 @@ export default function LinkedProjectsPage() {
       }
     }
 
-    if (latest) {
-      setActiveHandoff({ project: latest.project, action: latest.action });
+    if (!latest) return;
+
+    const resumed = latest;
+    const timer = window.setTimeout(() => {
+      setActiveHandoff({ project: resumed.project, action: resumed.action });
       setNotice(
-        `Resumed ${latest.action.provider} setup. Finish the external sign-in/setup step, then continue here.`,
+        `Resumed ${resumed.action.provider} setup. Finish the external sign-in/setup step, then continue here.`,
       );
-    }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, []);
 
   function startHumanAction(project: LinkedProjectManifest, action: ProjectHumanAction) {
