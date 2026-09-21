@@ -13,6 +13,15 @@ type BootstrapResponse = {
   providerName: string;
   preferredAuthOrder: string[];
   currentlySupportedAuth: string;
+  handoff?: {
+    mode?: "external-browser" | "oauth-redirect";
+    resume?: "local-session" | "oauth-callback";
+    credentialDelivery?: "owner-paste-to-broker" | "oauth-token-exchange";
+  };
+  humanAction?: {
+    externalAuthExpected?: boolean;
+    returnCta?: string;
+  } | null;
   secretRequirements: Array<{ key?: string; purpose?: string }>;
   verification: {
     liveChecked?: boolean;
@@ -189,6 +198,11 @@ export default function ProviderBootstrapPanel({
                       {live.toolCount} live MCP tool{live.toolCount === 1 ? "" : "s"}
                     </span>
                   ) : null}
+                  {state?.handoff?.mode === "external-browser" ? (
+                    <span>
+                      Sign-in opens in a full browser · setup resumes here when you return.
+                    </span>
+                  ) : null}
                 </div>
 
                 <div className="provider-bootstrap-actions">
@@ -198,7 +212,9 @@ export default function ProviderBootstrapPanel({
                       className="secondary-button"
                       onClick={() => onOpenHumanAction(provider.humanActionKey)}
                     >
-                      Open required provider step
+                      {state?.handoff?.mode === "external-browser"
+                        ? `Open ${state.providerName} in browser`
+                        : "Open required provider step"}
                     </button>
                   ) : null}
                   <button
