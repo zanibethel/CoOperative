@@ -40,7 +40,8 @@ test("CreatorHub human setup covers Eromify, Instagram, TikTok, and Fanvue witho
   );
 
   const serialized = JSON.stringify(creatorhub);
-  assert.match(serialized, /EROMIFY_API_KEY/);\n  assert.match(serialized, /INSTAGRAM_APP_SECRET/);
+  assert.match(serialized, /EROMIFY_API_KEY/);
+  assert.match(serialized, /INSTAGRAM_APP_SECRET/);
   assert.match(serialized, /TIKTOK_CLIENT_SECRET/);
   assert.match(serialized, /FANVUE_CLIENT_SECRET/);
   assert.match(serialized, /COOPERATIVE_VERCEL_ADMIN_CONNECTOR/);
