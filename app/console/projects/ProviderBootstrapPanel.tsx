@@ -87,10 +87,53 @@ export default function ProviderBootstrapPanel({
     .join("|");
 
   useEffect(() => {
-    for (const providerKey of providerKeySignature.split("|").filter(Boolean)) {
-      void refresh(providerKey);
+    let cancelled = false;
+
+    async function loadInitialStates() {
+      try {
+        const entries = await Promise.all(
+          providerKeySignature
+            .split("|")
+            .filter(Boolean)
+            .map(async (providerKey) => {
+              const response = await fetch(
+                `/api/operative/projects/${encodeURIComponent(projectKey)}/providers/${encodeURIComponent(providerKey)}/bootstrap`,
+                { cache: "no-store" },
+              );
+              const payload = (await response.json()) as BootstrapResponse & {
+                error?: string;
+              };
+              if (!response.ok) {
+                throw new Error(
+                  payload.error ?? "Provider bootstrap check failed.",
+                );
+              }
+              return [providerKey, payload] as const;
+            }),
+        );
+
+        if (!cancelled) {
+          setStates((current) => ({
+            ...current,
+            ...Object.fromEntries(entries),
+          }));
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "Unable to check provider bootstrap state.",
+          );
+        }
+      }
     }
-  }, [providerKeySignature, refresh]);
+
+    void loadInitialStates();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectKey, providerKeySignature]);
 
   if (providers.length === 0) return null;
 
