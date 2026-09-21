@@ -167,7 +167,7 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
         title: "CoOperative secret broker · connector UID",
         provider: "Vercel",
         description:
-          "After creating the connector, set COOPERATIVE_VERCEL_ADMIN_CONNECTOR on CoOperative to the connector UID (for example api-key/cooperative-vercel-admin). The UID is not the access token.",
+          "CoOperative now knows the reviewed connector UID cooperative-vercel-admin/secret-broker. This environment override is only needed if the connector UID changes later; the UID is not the access token.",
         launchUrl:
           "https://vercel.com/zanibethels-projects/co-operative/settings/environment-variables",
         mode: "embedded-or-popup",
