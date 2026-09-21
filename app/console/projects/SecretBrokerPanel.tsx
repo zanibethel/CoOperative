@@ -225,7 +225,7 @@ export default function SecretBrokerPanel({
   }
 
   return (
-    <section className="project-secret-broker">
+    <section id={`secret-broker-${projectKey}`} className="project-secret-broker">
       <div className="linked-project-head">
         <div>
           <div className="eyebrow">Secure secret broker</div>
