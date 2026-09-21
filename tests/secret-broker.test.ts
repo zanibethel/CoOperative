@@ -40,6 +40,14 @@ test("CreatorHub secret broker allow-list contains names and policy, never value
   }
 });
 
+test("secret broker has a reviewed default connector UID", () => {
+  assert.match(
+    broker,
+    /DEFAULT_VERCEL_ADMIN_CONNECTOR\s*=\s*\n?\s*"cooperative-vercel-admin\/secret-broker"/,
+  );
+  assert.match(broker, /configuredConnectorUid/);
+});
+
 test("secret broker obtains its Vercel API credential through Connect + OIDC", () => {
   assert.match(broker, /COOPERATIVE_VERCEL_ADMIN_CONNECTOR/);
   assert.match(broker, /getVercelOidcToken/);
