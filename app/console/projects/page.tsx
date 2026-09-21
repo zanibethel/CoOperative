@@ -353,6 +353,21 @@ export default function LinkedProjectsPage() {
               </small>
             </details>
 
+            <ProviderBootstrapPanel
+              projectKey={project.key}
+              providers={providerBootstrapsForProject(project.key).map((provider) => ({
+                providerKey: provider.providerKey,
+                providerName: provider.providerName,
+                humanActionKey: provider.humanActionKey,
+              }))}
+              onOpenHumanAction={(actionKey) => {
+                const action = project.humanActions.find(
+                  (candidate) => candidate.key === actionKey,
+                );
+                if (action) startHumanAction(project, action);
+              }}
+            />
+
             <SecretBrokerPanel
               projectKey={project.key}
               projectName={project.name}
