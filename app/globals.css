@@ -597,6 +597,17 @@ b { color: var(--text); }
 .project-secret-row code { overflow-wrap: anywhere; color: var(--text); }
 .project-secret-row span,
 .project-secret-row small { color: var(--muted); font-size: .72rem; }
+.secret-broker-focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.secret-broker-resume {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
 .human-actions { border-top: 1px solid var(--line); padding-top: 13px; margin-top: 6px; display: grid; gap: 10px; }
 .human-action-row {
   border: 1px solid var(--line);
