@@ -21,6 +21,9 @@ export interface ProjectHumanAction {
   mode: HumanActionMode;
   completion: "manual-return-and-verify";
   callbackUrl?: string;
+  resumeSecretKey?: string;
+  returnCta?: string;
+  externalAuthExpected?: boolean;
   relatedSecretKeys: readonly string[];
 }
 
@@ -176,10 +179,13 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
         title: "Eromify MCP personal API key",
         provider: "Eromify",
         description:
-          "Open Eromify, sign in if required, then go to Settings → Claude/MCP and create a personal API key. Return to CoOperative and use the secret broker for EROMIFY_API_KEY so the value never enters Hermes or task text.",
+          "Open Eromify in a full browser, use Google/provider sign-in if required, then create a personal MCP API key. Return to CoOperative and it will resume directly at the EROMIFY_API_KEY secure broker step.",
         launchUrl: "https://www.eromify.in/mcp-keys",
-        mode: "embedded-or-popup",
+        mode: "popup-only",
         completion: "manual-return-and-verify",
+        resumeSecretKey: "EROMIFY_API_KEY",
+        returnCta: "I have the Eromify API key · continue",
+        externalAuthExpected: true,
         relatedSecretKeys: ["EROMIFY_API_KEY"],
       },
       {
