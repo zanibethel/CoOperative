@@ -56,6 +56,15 @@ test("secret broker obtains its Vercel API credential through Connect + OIDC", (
   assert.equal(broker.includes("VERCEL_TOKEN"), false);
 });
 
+test("secret broker preflights linked-project access before sending a secret value", () => {
+  assert.match(broker, /resolveAccessibleVercelProject/);
+  assert.match(broker, /https:\/\/api\.vercel\.com\/v9\/projects\//);
+  assert.match(broker, /project\.vercelProject\.id/);
+  assert.match(broker, /project\.vercelProject\.name/);
+  assert.match(broker, /stored Vercel access token is likely scoped too narrowly/);
+  assert.match(broker, /No secret value was sent to Vercel/);
+});
+
 test("secret broker only writes allow-listed sensitive Vercel environment variables", () => {
   assert.match(broker, /getAllowedSecretRequirement/);
   assert.match(broker, /https:\/\/api\.vercel\.com\/v10\/projects\//);
