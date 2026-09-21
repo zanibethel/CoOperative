@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import ProviderBootstrapPanel from "./ProviderBootstrapPanel";
 import SecretBrokerPanel from "./SecretBrokerPanel";
@@ -37,11 +37,55 @@ export default function LinkedProjectsPage() {
   const [health, setHealth] = useState<Record<string, HealthResult>>({});
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [secretFocus, setSecretFocus] = useState<{
+    projectKey: string;
+    key: string;
+  } | null>(null);
   const [hermesRequests, setHermesRequests] = useState<Record<string, string>>({});
   const [hermesBudgets, setHermesBudgets] = useState<Record<string, string>>({
     creatorhub: "0.02",
     raisehub: "0.02",
   });
+
+  useEffect(() => {
+    let latest:
+      | { startedAt: number; project: LinkedProjectManifest; action: ProjectHumanAction }
+      | null = null;
+
+    for (const project of projects) {
+      for (const action of project.humanActions) {
+        const raw = window.localStorage.getItem(
+          humanActionStorageKey(project.key, action.key),
+        );
+        if (!raw) continue;
+
+        try {
+          const record = JSON.parse(raw) as {
+            state?: unknown;
+            startedAt?: unknown;
+          };
+          if (record.state !== "awaiting_user" || typeof record.startedAt !== "string") {
+            continue;
+          }
+
+          const startedAt = Date.parse(record.startedAt);
+          if (!Number.isFinite(startedAt)) continue;
+          if (!latest || startedAt > latest.startedAt) {
+            latest = { startedAt, project, action };
+          }
+        } catch {
+          // Ignore a malformed local resume marker and leave the provider gate closed.
+        }
+      }
+    }
+
+    if (latest) {
+      setActiveHandoff({ project: latest.project, action: latest.action });
+      setNotice(
+        `Resumed ${latest.action.provider} setup. Finish the external sign-in/setup step, then continue here.`,
+      );
+    }
+  }, []);
 
   function startHumanAction(project: LinkedProjectManifest, action: ProjectHumanAction) {
     setError("");
@@ -108,11 +152,20 @@ export default function LinkedProjectsPage() {
         }),
       );
 
+      if (action.resumeSecretKey) {
+        setSecretFocus({
+          projectKey: project.key,
+          key: action.resumeSecretKey,
+        });
+      }
+
       setNotice(
-        `${action.title} marked returned. CoOperative can now run deterministic verification before using Hermes.`,
+        action.resumeSecretKey
+          ? `${action.title} returned. Continue below with ${action.resumeSecretKey}; CoOperative will keep the value behind the secret broker.`
+          : `${action.title} marked returned. CoOperative can now run deterministic verification before using Hermes.`,
       );
       setActiveHandoff(null);
-      if (project.integrationHealthUrl) {
+      if (project.integrationHealthUrl && !action.resumeSecretKey) {
         await verifyIntegrationHealth(project);
       }
     } catch (err) {
@@ -374,6 +427,9 @@ export default function LinkedProjectsPage() {
               projectKey={project.key}
               projectName={project.name}
               requirements={project.secretRequirements}
+              focusKey={
+                secretFocus?.projectKey === project.key ? secretFocus.key : null
+              }
             />
 
             {project.humanActions.length > 0 ? (
@@ -518,7 +574,9 @@ export default function LinkedProjectsPage() {
                   <strong>{activeHandoff.action.provider} requires a full browser window.</strong>
                   <p>
                     CoOperative opened the provider securely in a separate tab/window.
-                    Complete the setup there, then return here and tap Done · return.
+                    {activeHandoff.action.externalAuthExpected
+                      ? " Google/provider sign-in can reject embedded browsers, so authenticate there, create the requested credential, then return to this CoOperative tab."
+                      : " Complete the setup there, then return to this CoOperative tab."}
                   </p>
                   <button
                     className="secondary-button"
@@ -576,7 +634,7 @@ export default function LinkedProjectsPage() {
                   void persistHumanCompletion(activeHandoff.project, activeHandoff.action)
                 }
               >
-                Done · return
+                {activeHandoff.action.returnCta ?? "Done · return"}
               </button>
             </div>
           </section>
