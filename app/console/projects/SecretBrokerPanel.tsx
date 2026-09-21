@@ -53,10 +53,12 @@ export default function SecretBrokerPanel({
   projectKey,
   projectName,
   requirements,
+  focusKey,
 }: {
   projectKey: string;
   projectName: string;
   requirements: readonly Requirement[];
+  focusKey?: string | null;
 }) {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [working, setWorking] = useState("");
@@ -106,6 +108,20 @@ export default function SecretBrokerPanel({
       cancelled = true;
     };
   }, [projectKey, requirements.length]);
+
+  useEffect(() => {
+    if (!focusKey) return;
+
+    const timer = window.setTimeout(() => {
+      const row = document.getElementById(
+        `secret-broker-${projectKey}-${focusKey}`,
+      );
+      row?.scrollIntoView({ behavior: "smooth", block: "center" });
+      row?.querySelector<HTMLInputElement>('input[type="password"]')?.focus();
+    }, 80);
+
+    return () => window.clearTimeout(timer);
+  }, [focusKey, projectKey, status]);
 
   const latestByScope = useMemo(() => {
     const map = new Map<string, SecretRequestRecord>();
@@ -247,6 +263,14 @@ export default function SecretBrokerPanel({
         in CoOperative, task text, Git, or Hermes context.
       </p>
 
+      {focusKey ? (
+        <div className="notice secret-broker-resume">
+          Continue provider setup here with <code>{focusKey}</code>. If value entry
+          is not unlocked yet, request and approve this exact variable first, then
+          paste the provider-generated value once.
+        </div>
+      ) : null}
+
       {!status?.brokerConfigured ? (
         <div className="secret-broker-setup">
           <strong>One-time broker setup is still required.</strong>
@@ -260,7 +284,17 @@ export default function SecretBrokerPanel({
 
       <div className="project-secret-list">
         {requirements.map((requirement) => (
-          <div className="project-secret-row secret-broker-row" key={requirement.key}>
+          <div
+            id={`secret-broker-${projectKey}-${requirement.key}`}
+            className={[
+              "project-secret-row",
+              "secret-broker-row",
+              focusKey === requirement.key ? "secret-broker-focus" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            key={requirement.key}
+          >
             <div>
               <code>{requirement.key}</code>
               <small>{requirement.purpose}</small>
