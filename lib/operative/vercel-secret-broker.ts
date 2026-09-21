@@ -105,6 +105,55 @@ export interface ApplyProjectSecretInput {
   value: string;
 }
 
+async function resolveAccessibleVercelProject(
+  token: string,
+  project: LinkedProjectManifest,
+): Promise<string> {
+  const candidates = [project.vercelProject.id, project.vercelProject.name];
+
+  for (const candidate of candidates) {
+    const url = new URL(
+      "https://api.vercel.com/v9/projects/" + encodeURIComponent(candidate),
+    );
+    url.searchParams.set("teamId", VERCEL_TEAM_ID);
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: "Bearer " + token,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    });
+
+    if (response.ok) {
+      const payload = (await response.json()) as { id?: unknown };
+      if (typeof payload.id === "string" && payload.id.trim()) {
+        return payload.id.trim();
+      }
+      return candidate;
+    }
+
+    if (response.status !== 404) {
+      throw new Error(
+        "Vercel broker preflight failed with status " +
+          response.status +
+          " while checking access to " +
+          project.name +
+          ".",
+      );
+    }
+  }
+
+  throw new Error(
+    "The CoOperative Vercel broker credential cannot access the linked " +
+      project.name +
+      " project in the configured team. The connector itself is working, but " +
+      "the stored Vercel access token is likely scoped too narrowly. Replace " +
+      "that stored Vercel token with one that can access the zanibethel's projects team, then retry. No secret value was sent to Vercel.",
+  );
+}
+
 /**
  * Upsert one allow-listed linked-project environment value.
  *
@@ -135,9 +184,13 @@ export async function applyProjectSecret(
   }
 
   const token = await getVercelBrokerToken();
+  const accessibleProjectId = await resolveAccessibleVercelProject(
+    token,
+    allowed.project,
+  );
   const url = new URL(
     "https://api.vercel.com/v10/projects/" +
-      encodeURIComponent(allowed.project.vercelProject.id) +
+      encodeURIComponent(accessibleProjectId) +
       "/env",
   );
   url.searchParams.set("teamId", VERCEL_TEAM_ID);
