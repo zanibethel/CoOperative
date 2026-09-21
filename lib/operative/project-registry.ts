@@ -177,7 +177,7 @@ const PROJECTS: Record<LinkedProjectKey, LinkedProjectManifest> = {
         provider: "Eromify",
         description:
           "Open Eromify, sign in if required, then go to Settings → Claude/MCP and create a personal API key. Return to CoOperative and use the secret broker for EROMIFY_API_KEY so the value never enters Hermes or task text.",
-        launchUrl: "https://www.eromify.in/mcp",
+        launchUrl: "https://www.eromify.in/mcp-keys",
         mode: "embedded-or-popup",
         completion: "manual-return-and-verify",
         relatedSecretKeys: ["EROMIFY_API_KEY"],
