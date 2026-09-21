@@ -176,6 +176,7 @@ export async function GET(
     providerName: bootstrap.providerName,
     preferredAuthOrder: bootstrap.preferredAuthOrder,
     currentlySupportedAuth: bootstrap.currentlySupportedAuth,
+    handoff: bootstrap.handoff,
     humanAction,
     secretRequirements,
     verification: {
