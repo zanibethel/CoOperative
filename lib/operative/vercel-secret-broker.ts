@@ -7,6 +7,15 @@ import {
 } from "./project-registry.ts";
 
 const VERCEL_TEAM_ID = "team_AH72aX1BaaPucIOvrSgvpEhw";
+const DEFAULT_VERCEL_ADMIN_CONNECTOR =
+  "cooperative-vercel-admin/secret-broker";
+
+function configuredConnectorUid(): string {
+  return (
+    process.env.COOPERATIVE_VERCEL_ADMIN_CONNECTOR?.trim() ||
+    DEFAULT_VERCEL_ADMIN_CONNECTOR
+  );
+}
 
 export type SecretTarget = "preview" | "production";
 
@@ -38,7 +47,7 @@ export function getAllowedSecretRequirement(
 }
 
 export function secretBrokerConfigured(): boolean {
-  return Boolean(process.env.COOPERATIVE_VERCEL_ADMIN_CONNECTOR?.trim());
+  return Boolean(configuredConnectorUid());
 }
 
 /**
@@ -49,12 +58,7 @@ export function secretBrokerConfigured(): boolean {
  * CoOperative proves its deployment identity with Vercel OIDC for each request.
  */
 async function getVercelBrokerToken(): Promise<string> {
-  const connector = process.env.COOPERATIVE_VERCEL_ADMIN_CONNECTOR?.trim();
-  if (!connector) {
-    throw new SecretBrokerSetupRequiredError(
-      "The CoOperative Vercel secret-broker connector has not been configured yet.",
-    );
-  }
+  const connector = configuredConnectorUid();
 
   const oidcToken = (await getVercelOidcToken())?.trim();
   if (!oidcToken) {
