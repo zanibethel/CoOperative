@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import ProviderBootstrapPanel from "./ProviderBootstrapPanel";\nimport SecretBrokerPanel from "./SecretBrokerPanel";
+import ProviderBootstrapPanel from "./ProviderBootstrapPanel";
+import SecretBrokerPanel from "./SecretBrokerPanel";
 
+import { providerBootstrapsForProject } from "@/lib/operative/provider-bootstrap";
 import {
   linkedProjects,
   type LinkedProjectManifest,
