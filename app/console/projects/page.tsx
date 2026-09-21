@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import SecretBrokerPanel from "./SecretBrokerPanel";
+import ProviderBootstrapPanel from "./ProviderBootstrapPanel";\nimport SecretBrokerPanel from "./SecretBrokerPanel";
 
 import {
   linkedProjects,
