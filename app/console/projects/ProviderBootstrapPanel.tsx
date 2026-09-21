@@ -82,11 +82,15 @@ export default function ProviderBootstrapPanel({
     [projectKey],
   );
 
+  const providerKeySignature = providers
+    .map((provider) => provider.providerKey)
+    .join("|");
+
   useEffect(() => {
-    for (const provider of providers) {
-      void refresh(provider.providerKey);
+    for (const providerKey of providerKeySignature.split("|").filter(Boolean)) {
+      void refresh(providerKey);
     }
-  }, [providers, refresh]);
+  }, [providerKeySignature, refresh]);
 
   if (providers.length === 0) return null;
 
