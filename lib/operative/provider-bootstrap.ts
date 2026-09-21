@@ -5,12 +5,19 @@ export type ProviderBootstrapAuthMethod =
   | "personal-api-key"
   | "developer-app";
 
+export type ProviderBootstrapHandoff = {
+  mode: "external-browser" | "oauth-redirect";
+  resume: "local-session" | "oauth-callback";
+  credentialDelivery: "owner-paste-to-broker" | "oauth-token-exchange";
+};
+
 export interface ProviderBootstrapDefinition {
   projectKey: LinkedProjectKey;
   providerKey: string;
   providerName: string;
   preferredAuthOrder: readonly ProviderBootstrapAuthMethod[];
   currentlySupportedAuth: ProviderBootstrapAuthMethod;
+  handoff: ProviderBootstrapHandoff;
   humanActionKey: string;
   secretKeys: readonly string[];
   verification: {
@@ -36,6 +43,15 @@ const PROVIDER_BOOTSTRAPS: readonly ProviderBootstrapDefinition[] = [
     // currently use a personal API key. Until generic custom-client OAuth is
     // verified, CoOperative fails closed to the documented script path.
     currentlySupportedAuth: "personal-api-key",
+    handoff: {
+      // Eromify's website login can use Google, but that authenticates the
+      // browser session rather than a verified generic OAuth API flow.
+      // Keep the real browser outside the embedded frame and resume the
+      // CoOperative setup session after the owner returns with the MCP key.
+      mode: "external-browser",
+      resume: "local-session",
+      credentialDelivery: "owner-paste-to-broker",
+    },
     humanActionKey: "eromify-mcp-api-key",
     secretKeys: ["EROMIFY_API_KEY"],
     verification: {
