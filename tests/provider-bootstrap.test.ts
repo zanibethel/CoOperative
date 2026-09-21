@@ -15,6 +15,11 @@ test("CreatorHub Eromify bootstrap minimizes human work and keeps secrets broker
   assert.ok(bootstrap);
   assert.deepEqual(bootstrap.preferredAuthOrder, ["oauth", "personal-api-key"]);
   assert.equal(bootstrap.currentlySupportedAuth, "personal-api-key");
+  assert.deepEqual(bootstrap.handoff, {
+    mode: "external-browser",
+    resume: "local-session",
+    credentialDelivery: "owner-paste-to-broker",
+  });
   assert.deepEqual(bootstrap.secretKeys, ["EROMIFY_API_KEY"]);
   assert.equal(bootstrap.verification.capabilityPath, "/api/eromify/capabilities");
 
@@ -29,6 +34,10 @@ test("CreatorHub Eromify bootstrap minimizes human work and keeps secrets broker
     (item) => item.key === bootstrap.humanActionKey,
   );
   assert.ok(action);
+  assert.equal(action.mode, "popup-only");
+  assert.equal(action.externalAuthExpected, true);
+  assert.equal(action.resumeSecretKey, "EROMIFY_API_KEY");
+  assert.equal(action.returnCta, "I have the Eromify API key · continue");
   assert.deepEqual(action.relatedSecretKeys, ["EROMIFY_API_KEY"]);
 
   assert.ok(
