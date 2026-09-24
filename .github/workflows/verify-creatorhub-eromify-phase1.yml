@@ -1,0 +1,77 @@
+name: Verify CreatorHub Eromify Phase 1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [cloud-operative-bootstrap]
+    paths:
+      - "verification/creatorhub-eromify-phase1/**"
+      - ".github/workflows/verify-creatorhub-eromify-phase1.yml"
+  pull_request:
+    paths:
+      - "verification/creatorhub-eromify-phase1/**"
+      - ".github/workflows/verify-creatorhub-eromify-phase1.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CoOperative
+        uses: actions/checkout@v4
+
+      - name: Checkout CreatorHub main
+        uses: actions/checkout@v4
+        with:
+          repository: zanibethel/CreatorHub
+          ref: main
+          path: creatorhub
+
+      - name: Verify deterministic Phase 1 candidate
+        run: |
+          mkdir -p creatorhub/src/lib
+          if [ -f creatorhub/src/lib/eromify.ts ]; then
+            cmp verification/creatorhub-eromify-phase1/eromify.ts creatorhub/src/lib/eromify.ts
+            echo "CreatorHub main already contains the verified Phase 1 file." > creatorhub-eromify-phase1-status.txt
+          else
+            cp verification/creatorhub-eromify-phase1/eromify.ts creatorhub/src/lib/eromify.ts
+            git -C creatorhub add -N src/lib/eromify.ts
+            changed="$(git -C creatorhub diff --name-only)"
+            test "$changed" = "src/lib/eromify.ts"
+            git -C creatorhub diff -- src/lib/eromify.ts > creatorhub-eromify-phase1.patch
+            echo "Verified the unmerged Phase 1 candidate." > creatorhub-eromify-phase1-status.txt
+          fi
+          test ! -e creatorhub/src/lib/__tests__/eromify.test.ts
+          git -C creatorhub diff --check
+
+      - name: Isolate CreatorHub workspace
+        run: |
+          # Next.js walks upward looking for lockfiles. The CoOperative checkout
+          # has its own package-lock.json, which can make Turbopack select the
+          # wrong workspace root. Remove only the runner copy so CreatorHub's
+          # own lockfile is authoritative.
+          rm -f package-lock.json
+
+      - name: Install CreatorHub dependencies
+        working-directory: creatorhub
+        run: npm install --no-audit --no-fund
+
+      - name: Type check
+        working-directory: creatorhub
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: creatorhub
+        run: npm run lint
+
+      - name: Build
+        working-directory: creatorhub
+        run: npm run build
+
+      - name: Preserve verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: creatorhub-eromify-phase1-verification
+          path: |
+            creatorhub-eromify-phase1-status.txt
+            creatorhub-eromify-phase1.patch
+          if-no-files-found: ignore

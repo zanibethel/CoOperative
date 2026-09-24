@@ -17,7 +17,7 @@ export default function HomePage() {
           lower-cost missions without giving up human control.
         </p>
         <div className="cta-row">
-          <Link className="cta" href="/intake">Begin mission briefing →</Link>
+          <Link className="cta" href="/console">Open Owner Console →</Link>\n          <Link className="secondary-cta" href="/intake">Begin mission briefing →</Link>
           <Link className="secondary-cta" href="/services">Map current services →</Link>
         </div>
       </section>
