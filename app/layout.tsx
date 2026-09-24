@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./site-menu.css";
+import SiteMenu from "./SiteMenu";
 
 export const metadata: Metadata = {
   title: "CoOperative",
@@ -9,7 +11,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <SiteMenu />
+        {children}
+      </body>
     </html>
   );
 }
