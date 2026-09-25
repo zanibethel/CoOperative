@@ -42,33 +42,25 @@ export default function WorkPage() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    let frame: number | null = null;
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
       if (!saved) return;
-      const parsed = JSON.parse(saved) as {
-        profile?: WorkerProfile;
-        stage?: Stage;
-        stepIndex?: number;
-        answers?: Record<string, string>;
-      };
-      if (parsed.profile) setProfile(parsed.profile);
-      if (parsed.stage) setStage(parsed.stage);
-      if (typeof parsed.stepIndex === "number") setStepIndex(parsed.stepIndex);
-      if (parsed.answers) setAnswers(parsed.answers);
+      const parsed = JSON.parse(saved) as { profile?: WorkerProfile };
+      if (!parsed.profile) return;
+
+      frame = window.requestAnimationFrame(() => {
+        setProfile(parsed.profile as WorkerProfile);
+        setStage("offer");
+      });
     } catch {
       // Demo state is disposable; invalid local data should never block the worker.
-    } finally {
-      setLoaded(true);
     }
-  }, []);
 
-  useEffect(() => {
-    if (!loaded) return;
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ profile, stage, stepIndex, answers }),
-    );
-  }, [profile, stage, stepIndex, answers, loaded]);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, []);
 
   const hourlyRateCents = useMemo(
     () => effectiveHourlyRateCents(order.compensationCents, order.estimatedMinutes),
@@ -83,6 +75,7 @@ export default function WorkPage() {
 
   function saveProfile(event: FormEvent) {
     event.preventDefault();
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ profile }));
     setStage("offer");
   }
 
