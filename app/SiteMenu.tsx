@@ -8,6 +8,7 @@ const menuItems = [
   { href: "/", label: "Home", detail: "CoOperative overview" },
   { href: "/console", label: "Mission Control", detail: "Tasks, approvals, reports, and Ask CoOperative" },
   { href: "/console/projects", label: "Linked Projects", detail: "CreatorHub, provider bootstrap, secrets, and integrations" },
+  { href: "/work", label: "Human Work", detail: "Worker profile, matching, guided tasks, and earnings preview" },
   { href: "/services", label: "Services", detail: "Capabilities and automation map" },
   { href: "/intake", label: "Mission Briefing", detail: "Add structured project and business context" },
 ] as const;
