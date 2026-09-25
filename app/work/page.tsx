@@ -39,7 +39,6 @@ export default function WorkPage() {
   const [stepIndex, setStepIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [helpOpen, setHelpOpen] = useState(false);
-  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let frame: number | null = null;
