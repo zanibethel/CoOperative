@@ -240,22 +240,32 @@ For owner/platform work, this may include an active connected ChatGPT session wh
 Executor candidates may include:
 
 - deterministic CoOperative code;
-- connected ChatGPT/tooling;
+- connected owner-paid assistants/tooling;
 - native CoOperative services;
+- approved external agent/computer runtimes;
 - Hermes / Cloud Operative;
-- external AI providers.
+- future governed Human Executor work.
 
 The router should consider:
 
-- capability fit;
-- incremental cost;
+- required capability fit rather than provider name;
+- incremental/marginal cost;
+- plan budget and hard task spend cap;
 - owner availability;
 - need for background/persistent execution;
-- required shell/runtime access;
-- permissions;
+- browser, shell, code, local-computer, connector, or scheduling requirements;
+- permissions and data-boundary requirements;
 - latency;
 - risk;
-- quality requirement.
+- measured/required quality.
+
+Autonomous execution is not Hermes-exclusive. Any approved runtime may satisfy
+that requirement if it advertises the capability, fits policy, and wins on
+cost/quality. CoOperative remains responsible for canonical state, approval,
+budget enforcement, verification, and evidence regardless of which runtime does
+the work.
+
+See `docs/AGENT-RUNTIME-STRATEGY.md`.
 
 ChatGPT is an optional owner-facing executor, not a required production dependency.
 

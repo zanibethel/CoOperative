@@ -43,11 +43,12 @@ CoOperative should improve current processes and also proactively identify measu
 4. **Playbook Engine** — choose the best known reusable process.
 5. **Growth Opportunity Engine** — continuously look for economically useful opportunities.
 6. **Script/Function Library** — perform deterministic work without AI.
-7. **AI Router** — use the cheapest qualified AI only for reasoning/generation steps.
-8. **Capability Router** — choose the approved native or connected service implementation.
-9. **Mission Control** — execute within permissions, approvals, and the customer's cost envelope.
-10. **Evidence** — measure cost, revenue, margin, failures, time saved, conversion, and human interventions.
-11. **Improvement Lab / Hermes** — improve playbooks, connectors, provider choices, scripts, growth patterns, and platform code under governance.
+7. **Executor Router** — match required capabilities to the cheapest qualified deterministic, connected, native, external-agent, Hermes, or future human executor.
+8. **AI Router** — choose the cheapest qualified model only for reasoning/generation steps that remain.
+9. **Capability Router** — choose the approved native or connected service implementation.
+10. **Mission Control** — execute within permissions, approvals, quality floors, and the customer's cost envelope.
+11. **Evidence** — measure cost, revenue, margin, failures, time saved, conversion, and human interventions.
+12. **Improvement Lab / Hermes** — improve playbooks, connectors, provider choices, scripts, growth patterns, and platform code under governance.
 
 ## Current scope
 
@@ -89,20 +90,25 @@ Playbook Engine      Growth Opportunity Engine
    +----+----+
    |         |
    v         v
-Scripts    AI Router
-   |         |
-   +----+----+
-        |
-        v
+Scripts    Reasoning needed?
+   |              |
+   +------+-------+
+          |
+          v
+    Executor Router
+          |
+   +------+------+------+------+
+   |      |      |      |      |
+ native connected external Hermes human
+        assistant agent         executor
+          |
+          v
+      AI Router
+          |
+          v
  Capability Router
-        |
-   +----+----+
-   |         |
- native    connected provider
-   |         |
-   +----+----+
-        |
-        v
+          |
+          v
  Execution + Mission Control
         |
         v
@@ -118,4 +124,4 @@ Scripts    AI Router
  governed playbook / connector / growth / code improvements
 ```
 
-See `docs/CORE-OPERATING-MODEL.md`, `docs/PLATFORM-VISION.md`, `docs/LEARNING-LOOP.md`, and `docs/WEEK-01.md`.
+See `docs/CORE-OPERATING-MODEL.md`, `docs/AGENT-RUNTIME-STRATEGY.md`, `docs/HUMAN-EXECUTOR.md`, `docs/PLATFORM-VISION.md`, and `docs/LEARNING-LOOP.md`.
