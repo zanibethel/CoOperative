@@ -70,38 +70,52 @@ That does not make ChatGPT the permanent runtime. It makes it one qualified exec
 Preferred principle:
 
 ```text
-known deterministic automation
+known deterministic automation / published playbook
   -> connected owner-paid assistant/tooling when available and qualified
   -> native CoOperative capability
-  -> Hermes / Cloud Operative when autonomy, shell access, persistence, or unavailable tools are required
-  -> paid external AI only for the reasoning that remains
+  -> approved external agent/runtime when it satisfies the required capabilities
+  -> Hermes / Cloud Operative when it is the best qualified runtime
+  -> stronger/more expensive AI only for the reasoning that remains
+  -> governed human executor for irreducibly human work
 ```
 
 Rules:
 
-- do not send the same work to ChatGPT and Hermes unless redundancy is intentional;
+- route by required capability, cost, risk, latency, and measured quality rather than provider name;
+- do not send the same work to multiple paid executors unless redundancy is intentional;
 - do not consume Hermes/model credits for work a connected lower-marginal-cost executor can safely complete;
-- use Hermes when the task benefits from cloud autonomy, terminal access, background execution, persistent task state, or specialized tooling;
-- every executor must write results, decisions, artifacts, and task state back to CoOperative's canonical system;
-- executor choice must never bypass approval, permission, audit, or security rules;
+- autonomy, browser use, shell access, persistent workspaces, local-computer access, research, and coding are executor capabilities, not Hermes-exclusive concepts;
+- general-purpose agent products may provide those capabilities, but they do not own CoOperative task state, policy, memory, economics, approvals, or verification;
+- every executor must write results, decisions, artifacts, usage, and task state back to CoOperative's canonical system;
+- executor choice must never bypass approval, permission, audit, security, or the task spend cap;
 - customer runtime must not depend on the owner having an active ChatGPT conversation open;
-- flat-rate subscriptions and platform overhead should be accounted for separately from per-task usage costs when evaluating unit economics.
+- flat-rate subscriptions and platform overhead should be accounted for separately from per-task marginal cost;
+- successful repeated agent work should be converted into cheaper deterministic scripts/playbooks wherever practical;
+- human work should receive only the smallest prepared human-needed slice, with compensation and scope made clear before acceptance.
 
-The long-term router should estimate executor availability, required capabilities, incremental cost, latency, risk, and expected quality before choosing who performs a task.
+The router should estimate executor availability, required capabilities, incremental cost, latency, risk, and expected quality before choosing who performs a task.
+
+See `docs/AGENT-RUNTIME-STRATEGY.md` for the current external-agent strategy and the KEEP / INTEGRATE / REPLACE / BUILD comparison.
 
 ## Execution priority
 
-For every task, CoOperative should prefer this order:
+For every task, CoOperative should prefer the cheapest qualified composition of
+steps rather than handing the whole mission to one powerful agent by default:
 
 1. deterministic code or an existing script;
 2. an approved published playbook;
-3. an approved native CoOperative capability;
-4. an approved connected external capability;
-5. a low-cost AI call for a narrowly defined reasoning/generation step;
-6. a stronger AI model only when cheaper options cannot meet the required quality;
-7. human review/decision when policy, uncertainty, or risk requires it.
+3. an approved native or already-paid connected capability;
+4. an approved external agent/runtime for capabilities that remain;
+5. Hermes / Cloud Operative when its shell, autonomy, persistent runtime, or specialized tooling is the better fit;
+6. a stronger AI model only when cheaper options cannot meet the quality floor;
+7. a governed Human Executor when the remaining step genuinely requires a person;
+8. human owner review/decision when policy, uncertainty, or risk requires it.
 
-Do not call an LLM to rediscover information or logic already encoded in the platform.
+A complex mission should be decomposed so deterministic and low-cost steps do
+not inherit the price of the most expensive executor used anywhere in the task.
+
+Do not call an LLM or computer agent to rediscover information or logic already
+encoded in the platform.
 
 ## Playbook-first architecture
 
