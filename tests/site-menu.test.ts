@@ -20,6 +20,7 @@ test("global hamburger menu exposes every core CoOperative destination", () => {
   assert.match(menu, /href: "\/"/);
   assert.match(menu, /href: "\/console"/);
   assert.match(menu, /href: "\/console\/projects"/);
+  assert.match(menu, /href: "\/work"/);
   assert.match(menu, /href: "\/services"/);
   assert.match(menu, /href: "\/intake"/);
   assert.match(menu, /Provider setup lives in Linked Projects/);

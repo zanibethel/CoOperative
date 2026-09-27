@@ -204,15 +204,52 @@ export const ExecutorKindSchema = z.enum([
 ]);
 export type ExecutorKind = z.infer<typeof ExecutorKindSchema>;
 
+export const ExecutorCapabilitySchema = z.enum([
+  "deterministic",
+  "reasoning",
+  "research",
+  "browser-automation",
+  "connected-tools",
+  "code-edit",
+  "shell",
+  "deploy",
+  "scheduled-work",
+  "autonomous-execution",
+  "persistent-workspace",
+  "local-computer",
+  "verification",
+  "human-judgment",
+  "physical-world",
+]);
+export type ExecutorCapability = z.infer<typeof ExecutorCapabilitySchema>;
+
+export const ExecutorRequirementsSchema = z.object({
+  requiredCapabilities: z.array(ExecutorCapabilitySchema).default([]),
+  requiresAutonomousExecution: z.boolean().default(false),
+  maxMarginalCostMicrounits: z.number().int().min(0).optional(),
+  minimumQualityScore: z.number().min(0).max(1).default(0),
+});
+export type ExecutorRequirements = z.infer<typeof ExecutorRequirementsSchema>;
+
 export const ExecutorCandidateSchema = z.object({
   kind: ExecutorKindSchema,
+  /** Optional provider/runtime identity inside the provider-independent executor kind. */
+  providerKey: z.string().regex(/^[a-z0-9-]+$/).optional(),
   /** Whether this executor is currently reachable/connected (e.g. ChatGPT session active). */
   available: z.boolean(),
   /** Whether it has the required tools/permissions for this specific task. */
   qualified: z.boolean(),
+  /** Capabilities this concrete executor/runtime can provide right now. */
+  capabilities: z.array(ExecutorCapabilitySchema).optional(),
   /** Estimated incremental cost in millionths of a currency unit. Flat-rate-covered work is 0. */
   estimatedMarginalCostMicrounits: z.number().int().min(0),
-  /** Needs cloud autonomy, shell access, persistence, or background execution. */
+  /** Optional measured/estimated task-fit score. Routing never treats missing quality as proof of quality. */
+  qualityScore: z.number().min(0).max(1).optional(),
+  /**
+   * Deprecated bootstrap field.
+   * Older callers used this candidate field to signal that the TASK needs autonomy.
+   * New callers should pass ExecutorRequirements.requiresAutonomousExecution.
+   */
   requiresAutonomousExecution: z.boolean().default(false),
   estimatedLatencyMs: z.number().int().min(0).optional(),
   riskLevel: RiskLevelSchema.default("low"),

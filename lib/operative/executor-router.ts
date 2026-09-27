@@ -1,34 +1,59 @@
-import type { ExecutorCandidate, ExecutorKind } from "../domain/operative-schemas.ts";
+import type {
+  ExecutorCandidate,
+  ExecutorCapability,
+  ExecutorKind,
+  ExecutorRequirements,
+} from "../domain/operative-schemas.ts";
 
 /**
  * Cost-aware executor router.
  *
- * Implements docs/CORE-OPERATING-MODEL.md "Execution economics: use the lowest
- * marginal-cost qualified executor":
+ * CoOperative owns the task, policy, cost envelope, state, and evidence.
+ * Executors are replaceable implementations selected by capability rather than
+ * by provider name.
  *
- *   known deterministic automation
- *     -> connected owner-paid assistant/tooling when available and qualified
+ * Preferred direction:
+ *
+ *   deterministic/playbook work
+ *     -> flat-rate/owner-paid connected executor when qualified
  *     -> native CoOperative capability
- *     -> Hermes / Cloud Operative when autonomy, shell access, persistence,
- *        or unavailable tools are required
- *     -> paid external AI only for the reasoning that remains
+ *     -> approved external agent/runtime
+ *     -> Hermes when it is the best qualified runtime
+ *     -> stronger/more expensive AI only when required
+ *     -> human executor for irreducibly human work
  *
- * This module never talks to a specific provider. It only ranks executor
- * candidates that the caller has already probed for availability/qualification,
- * and returns a reasoned selection. The playbook/task layer is responsible for
- * actually invoking the chosen executor and writing results back to the
- * canonical task/decision/audit state (docs/CLOUD-OPERATIVE.md "Cost-aware
- * executor selection": "every executor must write results ... back to
- * CoOperative's canonical system").
+ * The persisted executor enum is intentionally unchanged in this slice. A
+ * provider such as a general-purpose external agent runtime is represented by
+ * `external-ai-provider` plus a `providerKey` until a separately reviewed
+ * database migration expands the canonical enum.
  */
 
-/** Priority order used only as a tie-breaker when marginal cost is equal. */
+/** Priority order used only after cost and quality are tied. */
 const EXECUTOR_PRIORITY: Record<ExecutorKind, number> = {
   "deterministic-code": 0,
   "connected-chatgpt": 1,
   "native-capability": 2,
-  "hermes-cloud-operative": 3,
-  "external-ai-provider": 4,
+  "external-ai-provider": 3,
+  "hermes-cloud-operative": 4,
+};
+
+const INFERRED_CAPABILITIES: Record<ExecutorKind, readonly ExecutorCapability[]> = {
+  "deterministic-code": ["deterministic", "verification"],
+  "connected-chatgpt": ["reasoning", "research", "connected-tools", "verification"],
+  "native-capability": ["deterministic", "connected-tools", "verification"],
+  "hermes-cloud-operative": [
+    "reasoning",
+    "research",
+    "browser-automation",
+    "code-edit",
+    "shell",
+    "deploy",
+    "scheduled-work",
+    "autonomous-execution",
+    "persistent-workspace",
+    "verification",
+  ],
+  "external-ai-provider": ["reasoning"],
 };
 
 export interface ExecutorSelection {
@@ -38,65 +63,140 @@ export interface ExecutorSelection {
   ranked: ExecutorCandidate[];
 }
 
-/**
- * Select the lowest-marginal-cost qualified executor.
- *
- * Rules enforced (see docs/CORE-OPERATING-MODEL.md):
- * - only `available && qualified` candidates are eligible;
- * - a candidate that `requiresAutonomousExecution` can only be satisfied by
- *   `hermes-cloud-operative` (shell/terminal/persistent background work) —
- *   ChatGPT/native-capability candidates are filtered out for those tasks
- *   even if they report available/qualified, since they cannot provide
- *   cloud autonomy, terminal access, or persistent task state;
- * - among the remaining eligible candidates, lowest `estimatedMarginalCostMicrounits`
- *   wins; ties broken by the fixed priority order above (deterministic code
- *   first, paid external AI last);
- * - do not select `connected-chatgpt` when the task requires background
- *   execution that must survive without an active owner-side conversation
- *   (docs/CORE-OPERATING-MODEL.md: "customer runtime must not depend on the
- *   owner having an active ChatGPT conversation open").
- */
-export function selectExecutor(candidates: ExecutorCandidate[]): ExecutorSelection {
-  const needsAutonomy = candidates.some((c) => c.requiresAutonomousExecution);
+function capabilitiesFor(candidate: ExecutorCandidate): Set<ExecutorCapability> {
+  const declared =
+    candidate.capabilities && candidate.capabilities.length > 0
+      ? candidate.capabilities
+      : INFERRED_CAPABILITIES[candidate.kind];
 
-  const eligible = candidates.filter((c) => {
-    if (!c.available || !c.qualified) return false;
-    if (needsAutonomy && c.kind !== "hermes-cloud-operative") return false;
-    return true;
-  });
+  return new Set(declared);
+}
+
+function legacyRequirements(candidates: ExecutorCandidate[]): ExecutorRequirements {
+  return {
+    requiredCapabilities: [],
+    requiresAutonomousExecution: candidates.some(
+      (candidate) => candidate.requiresAutonomousExecution,
+    ),
+    minimumQualityScore: 0,
+  };
+}
+
+function satisfiesRequirements(
+  candidate: ExecutorCandidate,
+  requirements: ExecutorRequirements,
+) {
+  if (!candidate.available || !candidate.qualified) return false;
+
+  if (
+    requirements.maxMarginalCostMicrounits !== undefined &&
+    candidate.estimatedMarginalCostMicrounits >
+      requirements.maxMarginalCostMicrounits
+  ) {
+    return false;
+  }
+
+  if (
+    requirements.minimumQualityScore > 0 &&
+    (candidate.qualityScore === undefined ||
+      candidate.qualityScore < requirements.minimumQualityScore)
+  ) {
+    return false;
+  }
+
+  const capabilities = capabilitiesFor(candidate);
+
+  if (
+    requirements.requiresAutonomousExecution &&
+    !capabilities.has("autonomous-execution")
+  ) {
+    return false;
+  }
+
+  return requirements.requiredCapabilities.every((capability) =>
+    capabilities.has(capability),
+  );
+}
+
+/**
+ * Select the lowest-marginal-cost qualified executor that satisfies the task's
+ * capability, autonomy, quality, and spend requirements.
+ *
+ * New callers should pass explicit ExecutorRequirements. If requirements are
+ * omitted, the router preserves the older bootstrap behavior where
+ * `requiresAutonomousExecution` was carried on candidate objects.
+ */
+export function selectExecutor(
+  candidates: ExecutorCandidate[],
+  requirements?: ExecutorRequirements,
+): ExecutorSelection {
+  const resolvedRequirements = requirements ?? legacyRequirements(candidates);
+
+  const eligible = candidates.filter((candidate) =>
+    satisfiesRequirements(candidate, resolvedRequirements),
+  );
 
   if (eligible.length === 0) {
+    const missing = [
+      ...resolvedRequirements.requiredCapabilities,
+      ...(resolvedRequirements.requiresAutonomousExecution
+        ? (["autonomous-execution"] as ExecutorCapability[])
+        : []),
+    ];
+
     return {
       selected: null,
-      reason: needsAutonomy
-        ? "Task requires autonomous/persistent execution but no available+qualified hermes-cloud-operative candidate was provided."
-        : "No available and qualified executor candidate was provided.",
+      reason:
+        missing.length > 0
+          ? `No available and qualified executor satisfies required capabilities: ${[
+              ...new Set(missing),
+            ].join(", ")}.`
+          : "No available and qualified executor fits the task cost/quality requirements.",
       ranked: [],
     };
   }
 
   const ranked = [...eligible].sort((a, b) => {
-    if (a.estimatedMarginalCostMicrounits !== b.estimatedMarginalCostMicrounits) {
-      return a.estimatedMarginalCostMicrounits - b.estimatedMarginalCostMicrounits;
+    if (
+      a.estimatedMarginalCostMicrounits !==
+      b.estimatedMarginalCostMicrounits
+    ) {
+      return (
+        a.estimatedMarginalCostMicrounits -
+        b.estimatedMarginalCostMicrounits
+      );
     }
+
+    const qualityA = a.qualityScore ?? 0;
+    const qualityB = b.qualityScore ?? 0;
+    if (qualityA !== qualityB) return qualityB - qualityA;
+
+    const latencyA = a.estimatedLatencyMs ?? Number.MAX_SAFE_INTEGER;
+    const latencyB = b.estimatedLatencyMs ?? Number.MAX_SAFE_INTEGER;
+    if (latencyA !== latencyB) return latencyA - latencyB;
+
     return EXECUTOR_PRIORITY[a.kind] - EXECUTOR_PRIORITY[b.kind];
   });
 
   const selected = ranked[0];
+  const providerSuffix = selected.providerKey
+    ? ` (${selected.providerKey})`
+    : "";
+
   const reason =
     selected.estimatedMarginalCostMicrounits === 0
-      ? `Selected ${selected.kind}: zero marginal cost (covered by deterministic code or an existing flat-rate/owner-paid connection).`
-      : `Selected ${selected.kind}: lowest marginal cost among qualified executors (${selected.estimatedMarginalCostMicrounits} microunits).`;
+      ? `Selected ${selected.kind}${providerSuffix}: lowest marginal cost and all task requirements are satisfied.`
+      : `Selected ${selected.kind}${providerSuffix}: lowest marginal cost among qualified executors that satisfy the task requirements (${selected.estimatedMarginalCostMicrounits} microunits).`;
 
   return { selected, reason, ranked };
 }
 
 /**
  * Guard used by task executors before dispatching work to a candidate.
- * Executor choice must never bypass approval/permission/audit/security rules
- * (docs/CORE-OPERATING-MODEL.md), so high-risk candidates are only usable once
- * the caller confirms an owner approval already exists for this task.
+ * Executor choice must never bypass approval/permission/audit/security rules.
  */
-export function requiresApprovalBeforeDispatch(candidate: ExecutorCandidate): boolean {
+export function requiresApprovalBeforeDispatch(
+  candidate: ExecutorCandidate,
+): boolean {
   return candidate.riskLevel !== "low";
 }
