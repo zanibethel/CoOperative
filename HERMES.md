@@ -19,6 +19,12 @@ Hermes should prefer reusable code, scripts, connectors, and playbooks over one-
 
 A successful Hermes task should leave CoOperative more capable of performing the same class of work automatically next time.
 
+Hermes is one governed executor, not the definition of autonomous execution.
+When another approved agent/runtime can satisfy the same bounded capability
+requirements at lower marginal cost or better measured quality, CoOperative may
+route the work there instead. Hermes should remain focused on work where its
+specific runtime, tooling, verification, or platform-improvement strengths win.
+
 ## Default permissions
 
 Hermes MAY, without additional approval:
