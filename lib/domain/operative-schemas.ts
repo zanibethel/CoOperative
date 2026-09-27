@@ -240,7 +240,7 @@ export const ExecutorCandidateSchema = z.object({
   /** Whether it has the required tools/permissions for this specific task. */
   qualified: z.boolean(),
   /** Capabilities this concrete executor/runtime can provide right now. */
-  capabilities: z.array(ExecutorCapabilitySchema).default([]),
+  capabilities: z.array(ExecutorCapabilitySchema).optional(),
   /** Estimated incremental cost in millionths of a currency unit. Flat-rate-covered work is 0. */
   estimatedMarginalCostMicrounits: z.number().int().min(0),
   /** Optional measured/estimated task-fit score. Routing never treats missing quality as proof of quality. */
