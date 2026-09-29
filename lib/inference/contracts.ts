@@ -5,6 +5,11 @@ export const imageReferenceSchema = z.object({
   title: z.string().max(160).optional(),
 });
 
+export const imageReferenceUrlSchema = z.object({
+  url: z.string().url().refine((value) => value.startsWith("https://"), "Reference URL must use HTTPS."),
+  title: z.string().max(160).optional(),
+});
+
 export const imageInferenceRequestSchema = z.object({
   prompt: z.string().min(1).max(6000),
   aspectRatio: z.enum(["1:1", "4:5", "3:2", "16:9", "9:16"]).default("4:5"),
@@ -13,6 +18,10 @@ export const imageInferenceRequestSchema = z.object({
   steps: z.number().int().min(1).max(80).optional(),
   guidanceScale: z.number().min(0).max(30).optional(),
   strength: z.number().min(0).max(1).optional(),
+});
+
+export const imageInferenceApiRequestSchema = imageInferenceRequestSchema.extend({
+  referenceUrls: z.array(imageReferenceUrlSchema).max(4).default([]),
 });
 
 export const imageInferenceResponseSchema = z.object({
