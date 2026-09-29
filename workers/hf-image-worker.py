@@ -21,7 +21,7 @@ from typing import Literal
 import torch
 import uvicorn
 from diffusers import StableDiffusionImg2ImgPipeline, StableDiffusionPipeline
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from PIL import Image
 from pydantic import BaseModel, Field
 
@@ -29,8 +29,15 @@ MODEL_ID = os.getenv(
     "MODEL_ID",
     "stable-diffusion-v1-5/stable-diffusion-v1-5",
 )
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+if torch.cuda.is_available():
+    DEVICE = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    DEVICE = "mps"
+else:
+    DEVICE = "cpu"
+
+DTYPE = torch.float16 if DEVICE in {"cuda", "mps"} else torch.float32
+WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN")
 
 app = FastAPI(title="CoOperative Temporary Image Worker", version="0.1.0")
 
@@ -41,7 +48,7 @@ text_pipe = StableDiffusionPipeline.from_pretrained(
 text_pipe = text_pipe.to(DEVICE)
 image_pipe = StableDiffusionImg2ImgPipeline(**text_pipe.components)
 
-if DEVICE == "cuda":
+if DEVICE in {"cuda", "mps"}:
     text_pipe.enable_attention_slicing()
     image_pipe.enable_attention_slicing()
 
@@ -98,7 +105,7 @@ def health():
 @app.get("/capabilities")
 def capabilities():
     return {
-        "provider": "huggingface-job",
+        "provider": "cooperative-worker",
         "model": MODEL_ID,
         "capabilities": {
             "imageGeneration": True,
@@ -108,8 +115,16 @@ def capabilities():
     }
 
 
+def require_worker_token(authorization: str | None):
+    if not WORKER_TOKEN:
+        return
+    if authorization != f"Bearer {WORKER_TOKEN}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 @app.post("/v1/images/generate")
-def generate(request: ImageRequest):
+def generate(request: ImageRequest, authorization: str | None = Header(default=None)):
+    require_worker_token(authorization)
     started = time.time()
     width, height = dimensions(request.aspectRatio)
 
@@ -145,7 +160,7 @@ def generate(request: ImageRequest):
         return {
             "dataUrl": encode_png(image),
             "model": MODEL_ID,
-            "provider": "huggingface-job",
+            "provider": "cooperative-worker",
             "referencesUsed": references_used,
             "latencyMs": int((time.time() - started) * 1000),
         }
