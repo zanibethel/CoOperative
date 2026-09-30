@@ -155,11 +155,19 @@ def objective_terms(objective):
         if len(result) >= 8: break
     return result
 
-def collect_context(repo, objective, repository):
+def collect_context(repo, objective, repository, priority_paths=None):
     status = run(["git","status","--short"], repo).stdout[-5000:]
     recent = run(["git","log","-8","--oneline","--decorate"], repo).stdout[-5000:]
     tracked = run(["git","ls-files"], repo).stdout.splitlines()
     search_lines, candidate_paths = [], []
+    tracked_set = set(tracked)
+    for raw in re.findall(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+", objective):
+        relative = raw.strip(" `'\".,;:()[]{}")
+        if relative in tracked_set and relative not in candidate_paths:
+            candidate_paths.append(relative)
+    for relative in priority_paths or []:
+        if relative in tracked_set and relative not in candidate_paths:
+            candidate_paths.append(relative)
     for term in objective_terms(objective):
         result = run(["git","grep","-n","-I","-m","12","-e",term,"--"], repo, timeout=30, check=False)
         if result.returncode not in {0,1}: continue
@@ -240,6 +248,44 @@ def parse_plan(text):
         raise AgentError(f"Local AI returned invalid JSON: {exc}") from exc
     if not isinstance(value, dict): raise AgentError("Local AI response was not an object.")
     return value
+
+def parse_plan_with_retry(task_id, profile, messages, llm, text, max_tokens=2400):
+    try:
+        return parse_plan(text), llm, text, False
+    except AgentError as first_error:
+        progress(
+            task_id,
+            "Local AI returned malformed JSON; retrying once for valid structured output.",
+            kind="format_retry",
+            status="waiting_llm",
+            metadata={"error": str(first_error)[:800]},
+        )
+        retry_messages = messages + [
+            {"role":"assistant","content":text[:10000]},
+            {
+                "role":"user",
+                "content": (
+                    "Return the same intended plan again as strict valid JSON only. "
+                    "Do not add Markdown or commentary. Keep the same scope and escape file-content strings correctly."
+                ),
+            },
+        ]
+        retry_id = queue_llm(task_id, profile, retry_messages, max_tokens)
+        retry_llm = wait_llm(task_id, retry_id)
+        retry_text = str(retry_llm.get("text") or "")
+        try:
+            plan = parse_plan(retry_text)
+        except AgentError as second_error:
+            raise AgentError(
+                f"Local AI returned invalid JSON twice. First: {first_error}. Retry: {second_error}"
+            ) from second_error
+        progress(
+            task_id,
+            "Local AI JSON retry succeeded.",
+            status="running",
+            metadata={"model":retry_llm.get("model"),"latencyMs":retry_llm.get("latencyMs")},
+        )
+        return plan, retry_llm, retry_text, True
 
 def _diff_counts(original, proposed):
     before = original.splitlines()
@@ -445,8 +491,26 @@ def handle_task(task):
     else:
         update_remote(source, str(repository.get("defaultBranch") or "main"))
 
-    context = collect_context(target, objective, repository)
-    progress(task_id, "Repository evidence collected deterministically.", metadata={"candidateFiles":context["files"],"searchTerms":context["terms"]})
+    learning_context = task.get("learningContext") or []
+    priority_paths = []
+    if isinstance(learning_context, list):
+        for item in learning_context[:3]:
+            if not isinstance(item, dict):
+                continue
+            for relative in item.get("changedFiles") or []:
+                if isinstance(relative, str) and relative not in priority_paths:
+                    priority_paths.append(relative)
+
+    context = collect_context(target, objective, repository, priority_paths=priority_paths)
+    progress(
+        task_id,
+        "Repository evidence collected deterministically.",
+        metadata={
+            "candidateFiles":context["files"],
+            "searchTerms":context["terms"],
+            "priorityFiles":priority_paths[:10],
+        },
+    )
 
     checks = []
     if mode == "verify":
@@ -462,7 +526,6 @@ def handle_task(task):
                 f"skipped={item.get('skipped', False)}\n{item.get('output', '')}"
             )
         evidence += "\n\nDETERMINISTIC CHECK RESULTS:\n" + "\n\n".join(check_evidence)
-    learning_context = task.get("learningContext") or []
     learning_text = ""
     if isinstance(learning_context, list) and learning_context:
         learning_lines = [
@@ -514,7 +577,9 @@ def handle_task(task):
         })
         return
 
-    plan = parse_plan(text)
+    plan, llm, text, format_recovered = parse_plan_with_retry(
+        task_id, profile, messages, llm, text, 2400
+    )
     guard = evaluate_plan_scope(target, objective, plan)
     if guard["blocking"]:
         progress(
@@ -541,7 +606,10 @@ def handle_task(task):
         retry_id = queue_llm(task_id, profile, retry_messages, 2400)
         llm = wait_llm(task_id, retry_id)
         text = str(llm.get("text") or "")
-        plan = parse_plan(text)
+        plan, llm, text, scope_format_recovered = parse_plan_with_retry(
+            task_id, profile, retry_messages, llm, text, 2400
+        )
+        format_recovered = format_recovered or scope_format_recovered
         guard = evaluate_plan_scope(target, objective, plan)
         progress(
             task_id,
@@ -609,6 +677,8 @@ def handle_task(task):
         "profile":profile,
         "scopeGuard":guard,
         "learningExamplesUsed":len(learning_context) if isinstance(learning_context, list) else 0,
+        "formatRecovered":format_recovered,
+        "evidenceFiles":context["files"],
     })
 
 def queue_loop():
