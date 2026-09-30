@@ -35,5 +35,4 @@ create index if not exists local_ai_messages_conversation_created_idx
   on public.local_ai_messages(conversation_id, created_at);
 
 create unique index if not exists local_ai_messages_job_role_unique_idx
-  on public.local_ai_messages(job_id, role)
-  where job_id is not null;
+  on public.local_ai_messages(job_id, role);
