@@ -64,6 +64,8 @@ export async function GET(request: Request) {
         referencesUsed: job.references_used,
         referenceTitles,
         latencyMs: job.latency_ms,
+        seed: job.seed,
+        variationMode: job.variation_mode,
         error: job.error,
         aspectRatio: job.aspect_ratio,
         createdAt: job.created_at,

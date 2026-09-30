@@ -19,6 +19,8 @@ export const imageInferenceRequestSchema = z.object({
   steps: z.number().int().min(1).max(80).optional(),
   guidanceScale: z.number().min(0).max(30).optional(),
   strength: z.number().min(0).max(1).optional(),
+  variationMode: z.enum(["preserve", "balanced", "new-scene"]).default("balanced"),
+  seed: z.number().int().min(0).max(2147483647).optional(),
 });
 
 export const imageInferenceApiRequestSchema = imageInferenceRequestSchema.extend({
@@ -32,6 +34,8 @@ export const imageInferenceResponseSchema = z.object({
   provider: z.string(),
   referencesUsed: z.number().int().nonnegative().default(0),
   latencyMs: z.number().int().nonnegative().optional(),
+  seed: z.number().int().min(0).max(2147483647).optional(),
+  variationMode: z.enum(["preserve", "balanced", "new-scene"]).optional(),
 });
 
 export type ImageInferenceRequest = z.infer<typeof imageInferenceRequestSchema>;

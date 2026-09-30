@@ -58,6 +58,8 @@ export async function POST(request: Request) {
         steps: job.steps,
         guidanceScale: job.guidance_scale,
         strength: job.strength,
+        variationMode: job.variation_mode || "balanced",
+        seed: job.seed,
       },
       { headers: { "Cache-Control": "no-store" } },
     );
