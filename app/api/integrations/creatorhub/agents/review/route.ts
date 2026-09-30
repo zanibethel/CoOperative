@@ -183,7 +183,7 @@ export async function POST(request: Request) {
       max_tokens: 1800,
       temperature: 0.15,
       routing_mode: "local-quality",
-      task_class: "verification",
+      task_class: "general",
       route_reason: "Human requested a thorough explanation of an agent proposal and diff.",
       allow_paid_fallback: false,
       human_approval_required: false,
