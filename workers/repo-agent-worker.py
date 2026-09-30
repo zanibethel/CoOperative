@@ -246,6 +246,44 @@ def parse_plan(text):
     if not isinstance(value, dict): raise AgentError("Local AI response was not an object.")
     return value
 
+def parse_plan_with_retry(task_id, profile, messages, llm, text, max_tokens=2400):
+    try:
+        return parse_plan(text), llm, text, False
+    except AgentError as first_error:
+        progress(
+            task_id,
+            "Local AI returned malformed JSON; retrying once for valid structured output.",
+            kind="format_retry",
+            status="waiting_llm",
+            metadata={"error": str(first_error)[:800]},
+        )
+        retry_messages = messages + [
+            {"role":"assistant","content":text[:10000]},
+            {
+                "role":"user",
+                "content": (
+                    "Return the same intended plan again as strict valid JSON only. "
+                    "Do not add Markdown or commentary. Keep the same scope and escape file-content strings correctly."
+                ),
+            },
+        ]
+        retry_id = queue_llm(task_id, profile, retry_messages, max_tokens)
+        retry_llm = wait_llm(task_id, retry_id)
+        retry_text = str(retry_llm.get("text") or "")
+        try:
+            plan = parse_plan(retry_text)
+        except AgentError as second_error:
+            raise AgentError(
+                f"Local AI returned invalid JSON twice. First: {first_error}. Retry: {second_error}"
+            ) from second_error
+        progress(
+            task_id,
+            "Local AI JSON retry succeeded.",
+            status="running",
+            metadata={"model":retry_llm.get("model"),"latencyMs":retry_llm.get("latencyMs")},
+        )
+        return plan, retry_llm, retry_text, True
+
 def _diff_counts(original, proposed):
     before = original.splitlines()
     after = proposed.splitlines()
