@@ -1,4 +1,3 @@
-// @ts-nocheck
 "use client";
 
 import { useState } from "react";
@@ -37,10 +36,8 @@ export default function LocalAiChat() {
     const text = input.trim();
     if (!text || busy) return;
 
-    const requestMessages: ChatMessage[] = [
-      ...messages,
-      { role: "user", content: text },
-    ].slice(-20);
+    const userMessage: ChatMessage = { role: "user", content: text };
+    const requestMessages: ChatMessage[] = [...messages, userMessage].slice(-20);
 
     setMessages(requestMessages);
     setInput("");
