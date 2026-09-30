@@ -51,8 +51,10 @@ type JobResult = {
   conversationId?: string | null;
   conversationTitle?: string | null;
   messages?: unknown;
+  partialText?: string | null;
   text?: string | null;
   model?: string | null;
+  firstTokenMs?: number | null;
   latencyMs?: number | null;
   promptTokens?: number | null;
   outputTokens?: number | null;
@@ -86,6 +88,9 @@ function resultMeta(result: JobResult) {
   const details = [
     result.capability === "vision" ? "Local Vision" : null,
     result.model,
+    typeof result.firstTokenMs === "number"
+      ? `${(result.firstTokenMs / 1000).toFixed(1)}s first token`
+      : null,
     typeof result.latencyMs === "number"
       ? `${(result.latencyMs / 1000).toFixed(1)}s`
       : null,
@@ -174,6 +179,8 @@ export default function LocalAiChat() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [meta, setMeta] = useState("");
+  const [streamingText, setStreamingText] = useState("");
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
   const activePollRef = useRef<string | null>(null);
@@ -216,6 +223,8 @@ export default function LocalAiChat() {
       if (activePollRef.current === jobId) return;
 
       activePollRef.current = jobId;
+      setActiveJobId(jobId);
+      setStreamingText("");
       setBusy(true);
       setError("");
 
@@ -240,6 +249,9 @@ export default function LocalAiChat() {
           if (result.conversationId) {
             setConversationId(result.conversationId);
           }
+          if (typeof result.partialText === "string") {
+            setStreamingText(result.partialText);
+          }
 
           const runningLabel =
             result.capability === "vision" ? "Running Vision on your Mac" : "Running on your Mac";
@@ -260,6 +272,17 @@ export default function LocalAiChat() {
             continue;
           }
 
+          if (result.status === "cancelled") {
+            setStreamingText("");
+            setStatus("Ready");
+            window.localStorage.removeItem(ACTIVE_JOB_KEY);
+            if (result.conversationId) {
+              await loadConversation(result.conversationId);
+              await refreshConversations();
+            }
+            break;
+          }
+
           if (result.status === "completed") {
             if (result.conversationId) {
               await loadConversation(result.conversationId);
@@ -275,6 +298,7 @@ export default function LocalAiChat() {
               );
             }
 
+            setStreamingText("");
             setMeta(resultMeta(result));
             setStatus("Ready");
             window.localStorage.removeItem(ACTIVE_JOB_KEY);
@@ -292,6 +316,7 @@ export default function LocalAiChat() {
       } finally {
         if (activePollRef.current === jobId) {
           activePollRef.current = null;
+          setActiveJobId(null);
           setBusy(false);
         }
       }
@@ -435,6 +460,25 @@ export default function LocalAiChat() {
     }
   }
 
+  async function cancelJob() {
+    if (!activeJobId) return;
+
+    setStatus("Stopping…");
+    try {
+      const response = await fetch("/api/local-ai/chat/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: activeJobId }),
+      });
+      if (!response.ok) {
+        const result = (await response.json()) as { error?: string; detail?: string };
+        throw new Error(result.detail || result.error || "Could not stop Local AI.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not stop Local AI.");
+    }
+  }
+
   async function copyMessage(content: string) {
     try {
       await navigator.clipboard.writeText(content);
@@ -507,6 +551,7 @@ export default function LocalAiChat() {
     setInput("");
     setError("");
     setMeta("");
+    setStreamingText("");
     setBusy(true);
     setStatus(currentAttachments.length > 0 ? "Queued for Local Vision" : "Queued for your Mac");
 
@@ -669,7 +714,9 @@ export default function LocalAiChat() {
               <div className="chat-bubble-head">
                 <span>CoOperative AI</span>
               </div>
-              <div>{status}…</div>
+              <div className={streamingText ? "streaming-response" : undefined}>
+                {streamingText || `${status}…`}
+              </div>
             </div>
           ) : null}
         </div>
@@ -728,6 +775,16 @@ export default function LocalAiChat() {
             >
               {busy ? "Working…" : "Send"}
             </button>
+            {busy ? (
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => void cancelJob()}
+                disabled={!activeJobId}
+              >
+                Stop
+              </button>
+            ) : null}
             <button
               className="secondary-button"
               type="button"
