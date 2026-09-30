@@ -45,6 +45,7 @@ export async function POST(request: Request) {
       taskId: task.id,
       ownerRef: task.owner_ref,
       agentKey: task.agent_key,
+      repoKey: task.repo_key,
       mode: task.mode,
       objective: task.objective,
       requestedProfile: task.requested_profile,
