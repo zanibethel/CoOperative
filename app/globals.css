@@ -218,3 +218,70 @@ b { color: var(--text); }
   0%, 50% { opacity: .75; }
   51%, 100% { opacity: 0; }
 }
+
+.agent-layout { display: grid; gap: 18px; }
+.agent-compose { display: grid; gap: 18px; }
+.agent-submit-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.agent-submit-row > span { color: var(--muted); font-size: .82rem; }
+.agent-task-list { display: grid; gap: 12px; }
+.agent-task { display: grid; gap: 10px; }
+.agent-task > p { margin: 0; }
+.agent-task-head {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+}
+.agent-task-head strong { display: block; text-transform: capitalize; margin: 0 0 4px; }
+.agent-task-head small { color: var(--muted); text-transform: capitalize; }
+.agent-status {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 9px;
+  color: var(--muted);
+  font-size: .72rem;
+  text-transform: capitalize;
+}
+.agent-status.running,
+.agent-status.waiting-llm,
+.agent-status.queued { color: var(--accent); }
+.agent-status.completed { color: var(--accent-2); }
+.agent-status.needs-approval { color: #fde68a; }
+.agent-status.failed { color: var(--danger); }
+.agent-task-detail { display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 14px; }
+.agent-task-detail p { margin: 0; }
+.agent-output {
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  color: var(--text);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+.agent-diff { max-height: 620px; }
+.agent-checks { display: grid; gap: 8px; }
+.agent-check {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 11px;
+  color: var(--muted);
+  font-size: .82rem;
+}
+
+@media (max-width: 760px) {
+  .agent-task-head { align-items: flex-start; }
+  .agent-status { max-width: 42%; text-align: center; }
+}
