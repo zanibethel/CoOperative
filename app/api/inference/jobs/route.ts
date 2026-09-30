@@ -30,6 +30,9 @@ export async function POST(request: Request) {
     const input = enqueueSchema.parse(await request.json());
     const supabase = createAdminSupabaseClient();
     const jobId = crypto.randomUUID();
+    const seed =
+      input.seed ??
+      (Number.parseInt(jobId.replaceAll("-", "").slice(0, 8), 16) % 2147483648);
     const referencePaths: Array<{ path: string; title?: string; contentType: string }> = [];
 
     for (let index = 0; index < input.referenceUrls.length; index += 1) {
@@ -74,13 +77,21 @@ export async function POST(request: Request) {
       steps: input.steps ?? null,
       guidance_scale: input.guidanceScale ?? null,
       strength: input.strength ?? null,
+      variation_mode: input.variationMode,
+      seed,
       reference_paths: referencePaths,
     });
 
     if (error) throw error;
 
     return NextResponse.json(
-      { jobId, status: "queued", profile: input.profile },
+      {
+        jobId,
+        status: "queued",
+        profile: input.profile,
+        variationMode: input.variationMode,
+        seed,
+      },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
