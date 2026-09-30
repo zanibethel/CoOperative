@@ -1,7 +1,7 @@
 export type AgentKey = "repo-engineer" | "project-memory" | "debugger" | "verifier";
 export type AgentTaskMode = "inspect" | "prepare_change" | "update_memory" | "verify";
 
-export const AGENT_REGISTRY_REVISION = "2026-09-30.2";
+export const AGENT_REGISTRY_REVISION = "2026-09-30.3";
 
 export const AGENT_REGISTRY = {
   "repo-engineer": {
@@ -90,6 +90,7 @@ export const AGENT_REPOSITORIES = {
       "docs/ai/OWNER_PROFILE.md",
       "docs/ai/AGENT_POLICY.md",
       "docs/ai/AI_EXECUTOR_CHARTER.md",
+      "docs/END-STATE-ROADMAP.md",
       "docs/ai/CURRENT_STATE.md",
       "docs/ai/DECISIONS.md",
       "docs/ai/LESSONS.md",
