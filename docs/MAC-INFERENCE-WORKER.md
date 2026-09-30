@@ -61,7 +61,24 @@ curl http://127.0.0.1:8000/health
 
 For Apple Silicon, the response should report `"device":"mps"` and `"dtype":"float32"`. If `HF_TOKEN` is set, it will also report `"huggingFaceAuthenticated":true`.
 
-## 5. Expose it temporarily to CoOperative AI
+## 5. Async queue mode
+
+The worker now polls CoOperative AI for queued image jobs. This is the preferred path for Local Fast and Local Quality because the generation can outlive a browser session or Cloudflare request timeout.
+
+The production queue URL is the default, so if `INFERENCE_WORKER_TOKEN` is already set, no extra queue URL is required. To override it:
+
+```bash
+export COOPERATIVE_QUEUE_URL="https://co-operative-mu.vercel.app"
+```
+
+When the worker starts, health should show `"asyncQueue":{"configured":true,...}`.
+
+The Mac must stay awake and the worker process must keep running, but CreatorHub may be closed while a job is processing.
+
+## 6. Optional legacy direct tunnel
+
+The Cloudflare tunnel remains useful for the older direct/synchronous worker route and diagnostics, but async queued generation does not depend on it.
+
 
 In another Terminal window:
 
@@ -73,7 +90,7 @@ Cloudflare will print a temporary `https://...trycloudflare.com` URL.
 
 That URL is temporary and changes when the tunnel restarts.
 
-## 6. Configure CoOperative AI
+## 7. Configure CoOperative AI
 
 In the CoOperative Vercel project, configure server-side environment variables:
 
@@ -81,11 +98,12 @@ In the CoOperative Vercel project, configure server-side environment variables:
 INFERENCE_LOCAL_URL=<the trycloudflare URL>
 INFERENCE_LOCAL_TOKEN=<same INFERENCE_WORKER_TOKEN used on the Mac>
 COOPERATIVE_INFERENCE_SHARED_SECRET=<a separate random secret>
+SUPABASE_SERVICE_ROLE_KEY=<CoOperative Supabase service-role key; server-only>
 ```
 
 Redeploy CoOperative after changing environment variables.
 
-## 7. Configure CreatorHub
+## 8. Configure CreatorHub
 
 In the CreatorHub Vercel project, configure:
 
@@ -99,10 +117,10 @@ Redeploy CreatorHub.
 After this, CreatorHub image requests flow:
 
 ```text
-CreatorHub -> CoOperative AI -> Mac/MPS worker
+CreatorHub -> CoOperative AI queue -> Mac/MPS worker -> CoOperative AI storage -> CreatorHub
 ```
 
-If the Mac is offline or the temporary tunnel has ended, CoOperative can fall through to another configured worker/provider.
+Queued local jobs remain persisted while CreatorHub is closed. The Mac claims them when its worker is online. Manual local jobs never silently fall through to a paid hosted model.
 
 ## Safety
 
