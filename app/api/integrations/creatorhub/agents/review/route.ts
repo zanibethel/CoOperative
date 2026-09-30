@@ -42,6 +42,66 @@ function reviewPayload(task: {
   };
 }
 
+function deriveDenialFeedback(
+  objective: string | null | undefined,
+  review: ReturnType<typeof reviewPayload>,
+) {
+  const summary = review.summary || "";
+  const diffStat = review.diffStat || "";
+  const changedFiles = review.changedFiles.filter(
+    (value): value is string => typeof value === "string",
+  );
+  const lowerObjective = (objective || "").toLowerCase();
+
+  const insertions = Number(diffStat.match(/(\d+) insertion/)?.[1] || 0);
+  const deletions = Number(diffStat.match(/(\d+) deletion/)?.[1] || 0);
+  const totalChangedLines = insertions + deletions;
+  const narrowRequested =
+    /\b(smallest|minimal|narrow|bounded|surgical)\b/.test(lowerObjective) ||
+    /\b(fix|bug|error|regression)\b/.test(lowerObjective);
+  const summaryClaimsTests = /\b(test|tests|tested|testing)\b/i.test(summary);
+  const hasTestFile = changedFiles.some((path) =>
+    /(^|\/)(__tests__|tests?)(\/|$)|(^|\/).*\.(test|spec)\.[^/]+$|(^|\/)test_[^/]+\.py$/i.test(
+      path,
+    ),
+  );
+
+  const signals: string[] = [];
+  if (narrowRequested && totalChangedLines >= 300) {
+    signals.push(
+      `A bounded bug-fix objective produced a large diff (${totalChangedLines} changed lines).`,
+    );
+  }
+  if (deletions >= 100 && deletions > Math.max(insertions * 2, 150)) {
+    signals.push(
+      `The proposal was highly destructive (${deletions} deletions vs ${insertions} insertions).`,
+    );
+  }
+  if (summaryClaimsTests && !hasTestFile) {
+    signals.push(
+      "The proposal claimed test work, but no dedicated test/spec file was changed.",
+    );
+  }
+  if (review.checksPassed !== true) {
+    signals.push(
+      "Required deterministic checks were incomplete, skipped, or failed.",
+    );
+  }
+  if (signals.length === 0) {
+    signals.push(
+      "Human denial is a negative example: preserve the existing architecture and keep the next proposal tightly scoped to the stated objective.",
+    );
+  }
+
+  return {
+    source: "human-denial",
+    derivedAt: new Date().toISOString(),
+    signals,
+    diffStat: diffStat.slice(0, 2000),
+    changedFiles: changedFiles.slice(0, 12),
+  };
+}
+
 export async function POST(request: Request) {
   if (!authorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -110,10 +170,12 @@ export async function POST(request: Request) {
 
     if (input.action === "deny") {
       const reviewedAt = new Date().toISOString();
+      const reviewFeedback = deriveDenialFeedback(task.objective, review);
       const nextResult = {
         ...(task.result && typeof task.result === "object" ? task.result : {}),
         reviewDecision: "denied",
         reviewedAt,
+        reviewFeedback,
       };
 
       const { error: updateError } = await admin
@@ -133,7 +195,11 @@ export async function POST(request: Request) {
         owner_ref: owner,
         kind: "denied",
         message: "Human denied the prepared proposal. Nothing was pushed or deployed.",
-        metadata: { branchName: task.branch_name, source: "creatorhub-chat" },
+        metadata: {
+          branchName: task.branch_name,
+          source: "creatorhub-chat",
+          feedbackSignals: reviewFeedback.signals,
+        },
       });
 
       return NextResponse.json({
@@ -154,7 +220,7 @@ export async function POST(request: Request) {
           "You are reviewing a proposed repository change for a human owner.",
           "Use only the supplied objective, diff, changed files, branch, and deterministic check results.",
           "Give a thorough but readable review: what changed, why it appears to have been changed, whether it matches the objective, risks/regressions, what the checks do and do not prove, suspicious or unrelated edits, and what the owner should verify before approving.",
-          "Do not claim the change is correct merely because checks passed. Do not approve, push, merge, or deploy anything.",
+          "Do not claim the change is correct merely because checks passed. git diff --check only checks patch whitespace/conflict-marker style issues; it does not prove syntax, build success, tests, or runtime correctness. Treat skipped checks as missing evidence. Do not approve, push, merge, or deploy anything.",
         ].join("\n"),
       },
       {
