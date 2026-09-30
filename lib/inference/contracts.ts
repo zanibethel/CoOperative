@@ -42,3 +42,30 @@ export type InferenceWorker = {
   url: string;
   token?: string;
 };
+
+
+export const textInferenceMessageSchema = z.object({
+  role: z.enum(["system", "user", "assistant"]),
+  content: z.string().min(1).max(16000),
+});
+
+export const textInferenceRequestSchema = z.object({
+  messages: z.array(textInferenceMessageSchema).min(1).max(40),
+  profile: z.enum(["fast", "quality"]).default("fast"),
+  maxTokens: z.number().int().min(16).max(4096).default(768),
+  temperature: z.number().min(0).max(2).default(0.2),
+});
+
+export const textInferenceResponseSchema = z.object({
+  text: z.string(),
+  model: z.string(),
+  profile: z.enum(["fast", "quality"]),
+  provider: z.string(),
+  promptTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  latencyMs: z.number().int().nonnegative().optional(),
+});
+
+export type TextInferenceMessage = z.infer<typeof textInferenceMessageSchema>;
+export type TextInferenceRequest = z.infer<typeof textInferenceRequestSchema>;
+export type TextInferenceResponse = z.infer<typeof textInferenceResponseSchema>;
