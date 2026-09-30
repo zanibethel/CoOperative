@@ -41,6 +41,9 @@ export async function POST(request: Request) {
 
     if (jobError) throw jobError;
     if (!job) return NextResponse.json({ error: "Job not found." }, { status: 404 });
+    if (job.status === "cancelled") {
+      return NextResponse.json({ ok: true, status: "cancelled" });
+    }
 
     if (typeof body.error === "string" && body.error.trim()) {
       const { error: updateError } = await supabase
@@ -70,6 +73,7 @@ export async function POST(request: Request) {
       .from("text_inference_jobs")
       .update({
         status: "completed",
+        partial_text: body.text,
         result_text: body.text,
         result_model: body.model.slice(0, 300),
         result_provider:
