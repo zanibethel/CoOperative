@@ -37,6 +37,8 @@ export async function POST(request: Request) {
         jobId: job.id,
         messages: job.messages,
         profile: job.profile,
+        capability: job.capability || "text",
+        attachmentIds: Array.isArray(job.attachment_ids) ? job.attachment_ids : [],
         maxTokens: job.max_tokens,
         temperature: Number(job.temperature),
       },

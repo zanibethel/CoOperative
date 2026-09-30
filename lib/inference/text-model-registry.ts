@@ -11,7 +11,7 @@ export type TextTaskClass =
   | "reasoning"
   | "long-context";
 
-export const TEXT_MODEL_REGISTRY_REVISION = "2026-09-30.1";
+export const TEXT_MODEL_REGISTRY_REVISION = "2026-09-30.2";
 
 export const TEXT_MODEL_REGISTRY = {
   fast: {
@@ -28,6 +28,14 @@ export const TEXT_MODEL_REGISTRY = {
     overrideEnv: "TEXT_QUALITY_MODEL_ID",
     purpose: "Harder coding, debugging, reasoning, and longer-context work.",
   },
+} as const;
+
+export const TEXT_VISION_MODEL = {
+  capability: "vision",
+  runtime: "mlx-vlm",
+  defaultModelId: "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+  overrideEnv: "TEXT_VISION_MODEL_ID",
+  purpose: "On-demand local screenshot and photo understanding on Apple Silicon.",
 } as const;
 
 export type TextRouteDecision = {
@@ -100,6 +108,7 @@ export function publicTextModelRegistry() {
   return {
     revision: TEXT_MODEL_REGISTRY_REVISION,
     profiles: Object.values(TEXT_MODEL_REGISTRY),
+    capabilities: [TEXT_VISION_MODEL],
     policy: {
       localFirst: true,
       manualLocalFallback: "never-paid",

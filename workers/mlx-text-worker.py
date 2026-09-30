@@ -3,6 +3,7 @@
 # dependencies = [
 #   "httpx>=0.28.0",
 #   "mlx-lm>=0.24.0",
+#   "mlx-vlm>=0.1.21",
 # ]
 # ///
 
@@ -10,11 +11,14 @@ import gc
 import os
 import platform
 import socket
+import tempfile
 import time
+from pathlib import Path
 from typing import Literal
 
 import httpx
-from mlx_lm import generate, load
+from mlx_lm import generate as text_generate
+from mlx_lm import load as text_load
 from mlx_lm.sample_utils import make_sampler
 
 FAST_MODEL_ID = os.getenv(
@@ -24,6 +28,10 @@ FAST_MODEL_ID = os.getenv(
 QUALITY_MODEL_ID = os.getenv(
     "TEXT_QUALITY_MODEL_ID",
     "mlx-community/Qwen2.5-7B-Instruct-4bit",
+)
+VISION_MODEL_ID = os.getenv(
+    "TEXT_VISION_MODEL_ID",
+    "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
 )
 
 QUEUE_URL = os.getenv("COOPERATIVE_QUEUE_URL", "https://co-operative-mu.vercel.app").rstrip("/")
@@ -36,9 +44,10 @@ PROFILE_MODELS = {
     "quality": QUALITY_MODEL_ID,
 }
 
-loaded_profile: str | None = None
+loaded_key: str | None = None
 loaded_model = None
-loaded_tokenizer = None
+loaded_processor = None
+loaded_vlm_config = None
 
 
 def require_supported_mac():
@@ -59,10 +68,11 @@ def queue_headers():
 
 
 def clear_model():
-    global loaded_profile, loaded_model, loaded_tokenizer
+    global loaded_key, loaded_model, loaded_processor, loaded_vlm_config
     loaded_model = None
-    loaded_tokenizer = None
-    loaded_profile = None
+    loaded_processor = None
+    loaded_vlm_config = None
+    loaded_key = None
     gc.collect()
 
     try:
@@ -74,20 +84,40 @@ def clear_model():
         pass
 
 
-def ensure_profile(profile: Literal["fast", "quality"]):
-    global loaded_profile, loaded_model, loaded_tokenizer
+def ensure_text_profile(profile: Literal["fast", "quality"]):
+    global loaded_key, loaded_model, loaded_processor
 
-    if loaded_profile == profile and loaded_model is not None and loaded_tokenizer is not None:
+    key = f"text:{profile}"
+    if loaded_key == key and loaded_model is not None and loaded_processor is not None:
         return
 
     clear_model()
     model_id = PROFILE_MODELS[profile]
     print(f"Loading local text model {model_id} ({profile})...")
-    model, tokenizer = load(model_id)
+    model, tokenizer = text_load(model_id)
     loaded_model = model
-    loaded_tokenizer = tokenizer
-    loaded_profile = profile
+    loaded_processor = tokenizer
+    loaded_key = key
     print(f"Loaded local text model {model_id}.")
+
+
+def ensure_vision_model():
+    global loaded_key, loaded_model, loaded_processor, loaded_vlm_config
+
+    if loaded_key == "vision" and loaded_model is not None and loaded_processor is not None:
+        return
+
+    from mlx_vlm import load as vision_load
+    from mlx_vlm.utils import load_config
+
+    clear_model()
+    print(f"Loading local vision model {VISION_MODEL_ID}...")
+    model, processor = vision_load(VISION_MODEL_ID)
+    loaded_model = model
+    loaded_processor = processor
+    loaded_vlm_config = load_config(VISION_MODEL_ID)
+    loaded_key = "vision"
+    print(f"Loaded local vision model {VISION_MODEL_ID}.")
 
 
 def token_count(tokenizer, text: str) -> int | None:
@@ -97,12 +127,7 @@ def token_count(tokenizer, text: str) -> int | None:
         return None
 
 
-def run_generation(job: dict):
-    started = time.time()
-    profile = str(job.get("profile", "fast"))
-    if profile not in PROFILE_MODELS:
-        raise RuntimeError(f"Unsupported text profile: {profile}")
-
+def clean_messages_from_job(job: dict):
     messages = job.get("messages")
     if not isinstance(messages, list) or not messages:
         raise RuntimeError("Text job has no messages.")
@@ -113,20 +138,35 @@ def run_generation(job: dict):
             continue
         role = message.get("role")
         content = message.get("content")
-        if role not in {"system", "user", "assistant"} or not isinstance(content, str) or not content.strip():
+        if role not in {"system", "user", "assistant"} or not isinstance(content, str):
+            continue
+        if not content.strip():
             continue
         clean_messages.append({"role": role, "content": content[:16000]})
 
     if not clean_messages:
         raise RuntimeError("Text job contains no valid messages.")
 
+    return clean_messages
+
+
+def generation_settings(job: dict):
     max_tokens = int(job.get("maxTokens") or 768)
     max_tokens = min(4096, max(16, max_tokens))
     temperature = float(job.get("temperature") if job.get("temperature") is not None else 0.2)
     temperature = min(2.0, max(0.0, temperature))
+    return max_tokens, temperature
 
-    ensure_profile(profile)
-    tokenizer = loaded_tokenizer
+
+def run_text_generation(job: dict, clean_messages: list[dict]):
+    started = time.time()
+    profile = str(job.get("profile", "fast"))
+    if profile not in PROFILE_MODELS:
+        raise RuntimeError(f"Unsupported text profile: {profile}")
+
+    max_tokens, temperature = generation_settings(job)
+    ensure_text_profile(profile)
+    tokenizer = loaded_processor
     model = loaded_model
     model_id = PROFILE_MODELS[profile]
 
@@ -140,7 +180,7 @@ def run_generation(job: dict):
         top_p=0.95 if temperature > 0 else 1.0,
     )
 
-    text = generate(
+    text = text_generate(
         model,
         tokenizer,
         prompt=prompt,
@@ -162,6 +202,130 @@ def run_generation(job: dict):
     }
 
 
+def attachment_suffix(content_type: str | None):
+    if content_type and "png" in content_type:
+        return ".png"
+    if content_type and "webp" in content_type:
+        return ".webp"
+    return ".jpg"
+
+
+def download_attachments(attachment_ids: list[str], directory: str):
+    paths: list[str] = []
+
+    for index, attachment_id in enumerate(attachment_ids[:4]):
+        response = httpx.get(
+            f"{QUEUE_URL}/api/inference/text/attachments",
+            headers=queue_headers(),
+            params={"id": attachment_id},
+            timeout=60.0,
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+
+        suffix = attachment_suffix(response.headers.get("content-type"))
+        path = Path(directory) / f"image-{index + 1}{suffix}"
+        path.write_bytes(response.content)
+        paths.append(str(path))
+
+    if not paths:
+        raise RuntimeError("Vision job has no readable image attachments.")
+
+    return paths
+
+
+def vision_prompt(clean_messages: list[dict]):
+    recent = clean_messages[-12:]
+    lines = [
+        "Use the attached image or images to answer the latest user request.",
+        "Preserve relevant conversation context. If image details are uncertain, say so.",
+        "",
+        "Conversation:",
+    ]
+    for message in recent:
+        role = str(message["role"]).capitalize()
+        lines.append(f"{role}: {message['content']}")
+    lines.append("Assistant:")
+    return "\n".join(lines)
+
+
+def run_vision_generation(job: dict, clean_messages: list[dict], attachment_ids: list[str]):
+    from mlx_vlm import generate as vision_generate
+    from mlx_vlm.prompt_utils import apply_chat_template
+
+    started = time.time()
+    profile = str(job.get("profile", "fast"))
+    max_tokens, temperature = generation_settings(job)
+
+    ensure_vision_model()
+    model = loaded_model
+    processor = loaded_processor
+    config = loaded_vlm_config
+
+    with tempfile.TemporaryDirectory(prefix="cooperative-vision-") as directory:
+        image_paths = download_attachments(attachment_ids, directory)
+        prompt = vision_prompt(clean_messages)
+        formatted_prompt = apply_chat_template(
+            processor,
+            config,
+            prompt,
+            num_images=len(image_paths),
+        )
+
+        output = vision_generate(
+            model,
+            processor,
+            formatted_prompt,
+            image_paths,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            verbose=False,
+        )
+
+    if isinstance(output, str):
+        text = output
+        prompt_tokens = None
+        output_tokens = None
+    else:
+        text = getattr(output, "text", "")
+        prompt_tokens = getattr(output, "prompt_tokens", None)
+        output_tokens = getattr(
+            output,
+            "generation_tokens",
+            getattr(output, "completion_tokens", None),
+        )
+
+    if not isinstance(text, str) or not text.strip():
+        raise RuntimeError("Local vision model returned an empty response.")
+
+    return {
+        "text": text.strip(),
+        "model": VISION_MODEL_ID,
+        "profile": profile,
+        "provider": "cooperative-mlx-vlm-worker",
+        "promptTokens": prompt_tokens,
+        "outputTokens": output_tokens,
+        "latencyMs": int((time.time() - started) * 1000),
+    }
+
+
+def run_generation(job: dict):
+    clean_messages = clean_messages_from_job(job)
+    attachment_ids = job.get("attachmentIds")
+    if not isinstance(attachment_ids, list):
+        attachment_ids = []
+
+    capability = str(job.get("capability") or "text")
+    if capability == "vision" or attachment_ids:
+        return run_vision_generation(
+            job,
+            clean_messages,
+            [str(value) for value in attachment_ids if value],
+        )
+
+    return run_text_generation(job, clean_messages)
+
+
 def complete_job(job_id: str, payload: dict):
     response = httpx.post(
         f"{QUEUE_URL}/api/inference/text/jobs/complete",
@@ -177,6 +341,7 @@ def queue_loop():
     print(f"CoOperative AI text queue polling enabled for {QUEUE_URL} as {WORKER_ID}.")
     print(f"Text Fast: {FAST_MODEL_ID}")
     print(f"Text Quality: {QUALITY_MODEL_ID}")
+    print(f"Vision: {VISION_MODEL_ID}")
 
     while True:
         job_id = None
@@ -197,7 +362,8 @@ def queue_loop():
             job = response.json()
             job_id = str(job["jobId"])
             profile = job.get("profile", "fast")
-            print(f"Claimed async text job {job_id} ({profile}).")
+            capability = job.get("capability", "text")
+            print(f"Claimed async text job {job_id} ({profile}, {capability}).")
 
             result = run_generation(job)
             complete_job(job_id, result)

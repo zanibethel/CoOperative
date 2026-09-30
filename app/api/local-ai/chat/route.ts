@@ -2,17 +2,24 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase/server";
+import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const chatRequestSchema = z.object({
-  conversationId: z.string().uuid().optional(),
-  message: z.string().min(1).max(16000),
-  profile: z.enum(["fast", "quality"]).default("fast"),
-  maxTokens: z.number().int().min(16).max(4096).default(768),
-  temperature: z.number().min(0).max(2).default(0.2),
-});
+const chatRequestSchema = z
+  .object({
+    conversationId: z.string().uuid().optional(),
+    message: z.string().max(16000).default(""),
+    attachmentIds: z.array(z.string().uuid()).max(4).default([]),
+    profile: z.enum(["fast", "quality"]).default("fast"),
+    maxTokens: z.number().int().min(16).max(4096).default(768),
+    temperature: z.number().min(0).max(2).default(0.2),
+  })
+  .refine(
+    (value) => Boolean(value.message.trim()) || value.attachmentIds.length > 0,
+    "Message or image attachment is required.",
+  );
 
 async function currentOwnerRef() {
   const supabase = await createClient();
@@ -23,9 +30,10 @@ async function currentOwnerRef() {
   return user ? `coop-user:${user.id}` : null;
 }
 
-function titleFromMessage(message: string) {
+function titleFromMessage(message: string, hasImages: boolean) {
   const compact = message.replace(/\s+/g, " ").trim();
-  return compact.length > 72 ? `${compact.slice(0, 69)}…` : compact || "New chat";
+  if (!compact) return hasImages ? "Image question" : "New chat";
+  return compact.length > 72 ? `${compact.slice(0, 69)}…` : compact;
 }
 
 export async function POST(request: Request) {
@@ -56,7 +64,7 @@ export async function POST(request: Request) {
       conversationTitle = existing.title;
     } else {
       conversationId = crypto.randomUUID();
-      conversationTitle = titleFromMessage(input.message);
+      conversationTitle = titleFromMessage(input.message, input.attachmentIds.length > 0);
 
       const { error: createError } = await admin.from("local_ai_conversations").insert({
         id: conversationId,
@@ -68,15 +76,62 @@ export async function POST(request: Request) {
       if (createError) throw createError;
     }
 
+    let currentAttachmentIds = input.attachmentIds;
+
+    if (input.attachmentIds.length > 0) {
+      const { data: attachments, error: attachmentError } = await admin
+        .from("local_ai_attachments")
+        .select("id,conversation_id")
+        .eq("owner_ref", ownerRef)
+        .in("id", input.attachmentIds);
+
+      if (attachmentError) throw attachmentError;
+      if (!attachments || attachments.length !== input.attachmentIds.length) {
+        return NextResponse.json(
+          { error: "One or more image attachments were not found." },
+          { status: 400 },
+        );
+      }
+
+      const belongsElsewhere = attachments.some(
+        (attachment) =>
+          attachment.conversation_id && attachment.conversation_id !== conversationId,
+      );
+      if (belongsElsewhere) {
+        return NextResponse.json(
+          { error: "An image attachment belongs to another conversation." },
+          { status: 409 },
+        );
+      }
+
+      const { error: attachError } = await admin
+        .from("local_ai_attachments")
+        .update({ conversation_id: conversationId })
+        .in("id", input.attachmentIds)
+        .eq("owner_ref", ownerRef);
+
+      if (attachError) throw attachError;
+    }
+
     const { data: previousMessages, error: historyError } = await admin
       .from("local_ai_messages")
-      .select("role,content")
+      .select("role,content,attachment_ids")
       .eq("conversation_id", conversationId)
       .eq("owner_ref", ownerRef)
       .order("created_at", { ascending: false })
       .limit(39);
 
     if (historyError) throw historyError;
+
+    if (currentAttachmentIds.length === 0) {
+      const latestImageMessage = (previousMessages || []).find(
+        (message) =>
+          Array.isArray(message.attachment_ids) && message.attachment_ids.length > 0,
+      );
+      if (latestImageMessage) {
+        currentAttachmentIds = latestImageMessage.attachment_ids.slice(0, 4);
+      }
+    }
 
     const history = [...(previousMessages || [])]
       .reverse()
@@ -85,7 +140,13 @@ export async function POST(request: Request) {
         content: message.content as string,
       }));
 
-    const userMessage = { role: "user" as const, content: input.message.trim() };
+    const visibleUserText = input.message.trim();
+    const modelUserText =
+      visibleUserText ||
+      (currentAttachmentIds.length > 0
+        ? "Describe and analyze the attached image."
+        : "");
+    const userMessage = { role: "user" as const, content: modelUserText };
     const jobMessages = [...history, userMessage].slice(-40);
     const jobId = crypto.randomUUID();
 
@@ -95,6 +156,8 @@ export async function POST(request: Request) {
       client_owner_ref: ownerRef,
       conversation_id: conversationId,
       messages: jobMessages,
+      attachment_ids: currentAttachmentIds,
+      capability: currentAttachmentIds.length > 0 ? "vision" : "text",
       profile: input.profile,
       max_tokens: input.maxTokens,
       temperature: input.temperature,
@@ -106,7 +169,7 @@ export async function POST(request: Request) {
           : "Manual Local Fast selection.",
       allow_paid_fallback: false,
       human_approval_required: false,
-      model_registry_revision: "2026-09-30.1",
+      model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
     });
 
@@ -116,7 +179,8 @@ export async function POST(request: Request) {
       conversation_id: conversationId,
       owner_ref: ownerRef,
       role: "user",
-      content: userMessage.content,
+      content: visibleUserText,
+      attachment_ids: input.attachmentIds,
       job_id: jobId,
     });
 
@@ -170,7 +234,7 @@ export async function GET(request: Request) {
     let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,conversation_id,messages,result_text,result_model,result_provider,prompt_tokens,output_tokens,latency_ms,error,created_at,completed_at",
+        "id,status,profile,conversation_id,capability,attachment_ids,messages,result_text,result_model,result_provider,prompt_tokens,output_tokens,latency_ms,error,created_at,completed_at",
       )
       .eq("client_owner_ref", ownerRef);
 
@@ -196,6 +260,8 @@ export async function GET(request: Request) {
         status: job.status,
         profile: job.profile,
         conversationId: job.conversation_id,
+        capability: job.capability,
+        attachmentIds: job.attachment_ids,
         messages: job.messages,
         text: job.result_text,
         model: job.result_model,
