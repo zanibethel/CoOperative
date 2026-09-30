@@ -36,6 +36,7 @@ export const imageInferenceResponseSchema = z.object({
   latencyMs: z.number().int().nonnegative().optional(),
   seed: z.number().int().min(0).max(2147483647).optional(),
   variationMode: z.enum(["preserve", "balanced", "new-scene"]).optional(),
+  referenceMode: z.enum(["none", "img2img", "ip-adapter"]).optional(),
 });
 
 export type ImageInferenceRequest = z.infer<typeof imageInferenceRequestSchema>;

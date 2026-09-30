@@ -39,6 +39,14 @@ QUALITY_MODEL_ID = os.getenv(
     "QUALITY_MODEL_ID",
     "segmind/SSD-1B",
 )
+IP_ADAPTER_MODEL_ID = os.getenv(
+    "IP_ADAPTER_MODEL_ID",
+    "h94/IP-Adapter",
+)
+IP_ADAPTER_WEIGHT = os.getenv(
+    "IP_ADAPTER_WEIGHT",
+    "ip-adapter_sdxl.safetensors",
+)
 
 if torch.cuda.is_available():
     DEVICE = "cuda"
@@ -56,12 +64,13 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.5.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.6.0")
 
 MODEL_LOCK = threading.Lock()
 loaded_profile: str | None = None
 text_pipe = None
 image_pipe = None
+identity_adapter_loaded = False
 
 PROFILE_CONFIG = {
     "fast": {
@@ -123,11 +132,12 @@ class ImageRequest(BaseModel):
 
 
 def clear_model():
-    global loaded_profile, text_pipe, image_pipe
+    global loaded_profile, text_pipe, image_pipe, identity_adapter_loaded
 
     image_pipe = None
     text_pipe = None
     loaded_profile = None
+    identity_adapter_loaded = False
     gc.collect()
 
     if DEVICE == "mps" and hasattr(torch, "mps"):
@@ -170,6 +180,35 @@ def ensure_profile(profile: Literal["fast", "quality"]):
     text_pipe = pipe
     image_pipe = img_pipe
     loaded_profile = profile
+
+
+def ensure_identity_adapter():
+    global identity_adapter_loaded
+
+    if loaded_profile != "quality":
+        raise RuntimeError("Identity adapter currently requires the Local Quality SDXL profile.")
+    if identity_adapter_loaded:
+        return
+    if text_pipe is None:
+        raise RuntimeError("Local Quality pipeline is not loaded.")
+
+    print(
+        f"Loading identity adapter {IP_ADAPTER_MODEL_ID}/{IP_ADAPTER_WEIGHT}...",
+        flush=True,
+    )
+    text_pipe.load_ip_adapter(
+        IP_ADAPTER_MODEL_ID,
+        subfolder="sdxl_models",
+        weight_name=IP_ADAPTER_WEIGHT,
+    )
+    identity_adapter_loaded = True
+    print("Identity adapter loaded.", flush=True)
+
+
+def identity_scale(variation_mode: str) -> float:
+    if variation_mode == "new-scene":
+        return 0.50
+    return 0.68
 
 
 def decode_data_url(value: str) -> Image.Image:
@@ -239,7 +278,33 @@ def run_generation(request: ImageRequest):
             guidance_scale=guidance,
         )
 
-        if request.references:
+        if request.references and request.profile == "quality" and request.variationMode != "preserve":
+            ensure_identity_adapter()
+            scale = identity_scale(request.variationMode)
+            text_pipe.set_ip_adapter_scale(scale)
+
+            identity_images = [
+                decode_data_url(reference.dataUrl)
+                for reference in request.references[:2]
+            ]
+            ip_adapter_image = (
+                identity_images[0]
+                if len(identity_images) == 1
+                else [identity_images]
+            )
+
+            result = text_pipe(
+                width=width,
+                height=height,
+                ip_adapter_image=ip_adapter_image,
+                generator=generator,
+                **common,
+            )
+            references_used = len(identity_images)
+            reference_mode = "ip-adapter"
+        elif request.references:
+            if identity_adapter_loaded and hasattr(image_pipe, "set_ip_adapter_scale"):
+                image_pipe.set_ip_adapter_scale(0.0)
             source = decode_data_url(request.references[0].dataUrl)
             source = source.resize((width, height), Image.Resampling.LANCZOS)
             result = image_pipe(
@@ -249,7 +314,10 @@ def run_generation(request: ImageRequest):
                 **common,
             )
             references_used = 1
+            reference_mode = "img2img"
         else:
+            if identity_adapter_loaded and hasattr(text_pipe, "set_ip_adapter_scale"):
+                text_pipe.set_ip_adapter_scale(0.0)
             result = text_pipe(
                 width=width,
                 height=height,
@@ -257,6 +325,7 @@ def run_generation(request: ImageRequest):
                 **common,
             )
             references_used = 0
+            reference_mode = "none"
 
     if not result.images:
         raise RuntimeError("Model returned no image.")
@@ -280,6 +349,7 @@ def run_generation(request: ImageRequest):
         "latencyMs": int((time.time() - started) * 1000),
         "seed": seed,
         "variationMode": request.variationMode,
+        "referenceMode": reference_mode,
     }
 
 
@@ -395,6 +465,8 @@ def health():
             "async_queue",
             "seeded_variation",
             "variation_modes",
+            "ip_adapter_identity",
+            "multi_reference_identity",
         ],
     }
 
@@ -409,12 +481,14 @@ def capabilities():
         },
         "capabilities": {
             "imageGeneration": True,
-            "referenceImages": 1,
+            "referenceImages": 2,
             "textGeneration": False,
             "profiles": ["fast", "quality"],
             "asyncQueue": bool(QUEUE_URL and WORKER_TOKEN),
             "variationModes": ["preserve", "balanced", "new-scene"],
             "seededVariation": True,
+            "identityConditioning": "ip-adapter-quality",
+            "multiReferenceIdentity": 2,
         },
     }
 
