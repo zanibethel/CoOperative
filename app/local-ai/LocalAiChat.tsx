@@ -1,13 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 
 type Profile = "fast" | "quality";
+
+type ImageAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  previewUrl: string;
+};
 
 type ChatMessage = {
   id?: string;
   role: "user" | "assistant";
   content: string;
+  attachments?: ImageAttachment[];
   jobId?: string | null;
   createdAt?: string;
 };
@@ -28,10 +37,17 @@ type ConversationResult = {
   detail?: string;
 };
 
+type AttachmentResult = {
+  attachment?: ImageAttachment;
+  error?: string;
+  detail?: string;
+};
+
 type JobResult = {
   jobId?: string;
   status?: string;
   profile?: Profile;
+  capability?: "text" | "vision";
   conversationId?: string | null;
   conversationTitle?: string | null;
   messages?: unknown;
@@ -45,6 +61,9 @@ type JobResult = {
 };
 
 const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
+const MAX_ATTACHMENTS = 4;
+const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
+const MAX_IMAGE_EDGE = 1800;
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -65,6 +84,7 @@ function readMessages(value: unknown): ChatMessage[] {
 
 function resultMeta(result: JobResult) {
   const details = [
+    result.capability === "vision" ? "Local Vision" : null,
     result.model,
     typeof result.latencyMs === "number"
       ? `${(result.latencyMs / 1000).toFixed(1)}s`
@@ -75,6 +95,72 @@ function resultMeta(result: JobResult) {
   ].filter(Boolean);
 
   return details.join(" · ");
+}
+
+function loadBrowserImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("This image format could not be read on this device."));
+    };
+    image.src = url;
+  });
+}
+
+function canvasBlob(
+  canvas: HTMLCanvasElement,
+  mimeType: string,
+  quality: number,
+) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("Could not prepare image for upload."));
+      },
+      mimeType,
+      quality,
+    );
+  });
+}
+
+async function prepareImage(file: File) {
+  const directlySupported = new Set(["image/jpeg", "image/png", "image/webp"]);
+  if (directlySupported.has(file.type) && file.size <= MAX_UPLOAD_BYTES) {
+    return file;
+  }
+
+  const image = await loadBrowserImage(file);
+  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare image for upload.");
+
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+  let quality = 0.9;
+  let blob = await canvasBlob(canvas, "image/jpeg", quality);
+  while (blob.size > MAX_UPLOAD_BYTES && quality > 0.5) {
+    quality -= 0.1;
+    blob = await canvasBlob(canvas, "image/jpeg", quality);
+  }
+
+  if (blob.size > MAX_UPLOAD_BYTES) {
+    throw new Error("Image is still too large after compression.");
+  }
+
+  const baseName = file.name.replace(/\.[^.]+$/, "") || "image";
+  return new File([blob], `${baseName}.jpg`, { type: "image/jpeg" });
 }
 
 export default function LocalAiChat() {
@@ -88,7 +174,10 @@ export default function LocalAiChat() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [meta, setMeta] = useState("");
+  const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
+  const [uploadingImages, setUploadingImages] = useState(false);
   const activePollRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const refreshConversations = useCallback(async () => {
     const response = await fetch("/api/local-ai/conversations", { cache: "no-store" });
@@ -117,6 +206,7 @@ export default function LocalAiChat() {
     setConversationTitle(result.conversation.title);
     setProfile(result.conversation.profile);
     setMessages(result.messages || []);
+    setAttachments([]);
     setMeta("");
     setError("");
   }, []);
@@ -151,14 +241,21 @@ export default function LocalAiChat() {
             setConversationId(result.conversationId);
           }
 
+          const runningLabel =
+            result.capability === "vision" ? "Running Vision on your Mac" : "Running on your Mac";
+
           if (result.status === "queued") {
-            setStatus("Queued for your Mac");
+            setStatus(
+              result.capability === "vision"
+                ? "Queued for Local Vision"
+                : "Queued for your Mac",
+            );
             await wait(1500);
             continue;
           }
 
           if (result.status === "running") {
-            setStatus("Running on your Mac");
+            setStatus(runningLabel);
             await wait(1500);
             continue;
           }
@@ -266,8 +363,34 @@ export default function LocalAiChat() {
     };
   }, [loadConversation, pollJob, refreshConversations]);
 
-  function newChat() {
+  async function removeAttachment(attachment: ImageAttachment) {
+    setAttachments((current) => current.filter((item) => item.id !== attachment.id));
+    try {
+      await fetch(
+        `/api/local-ai/attachments?id=${encodeURIComponent(attachment.id)}`,
+        { method: "DELETE" },
+      );
+    } catch {
+      // The server can clean an unattached upload later; keep the UI responsive.
+    }
+  }
+
+  async function discardPendingAttachments() {
+    const pending = [...attachments];
+    setAttachments([]);
+    await Promise.allSettled(
+      pending.map((attachment) =>
+        fetch(
+          `/api/local-ai/attachments?id=${encodeURIComponent(attachment.id)}`,
+          { method: "DELETE" },
+        ),
+      ),
+    );
+  }
+
+  async function newChat() {
     if (busy) return;
+    await discardPendingAttachments();
     setConversationId(null);
     setConversationTitle("New chat");
     setMessages([]);
@@ -277,11 +400,18 @@ export default function LocalAiChat() {
     setStatus("Ready");
   }
 
+  async function switchConversation(id: string) {
+    if (busy) return;
+    await discardPendingAttachments();
+    await loadConversation(id);
+  }
+
   async function deleteConversation() {
     if (!conversationId || busy) return;
     if (!window.confirm(`Delete “${conversationTitle}”?`)) return;
 
     try {
+      await discardPendingAttachments();
       const response = await fetch(
         `/api/local-ai/conversations?id=${encodeURIComponent(conversationId)}`,
         { method: "DELETE" },
@@ -295,7 +425,10 @@ export default function LocalAiChat() {
       if (remaining[0]) {
         await loadConversation(remaining[0].id);
       } else {
-        newChat();
+        setConversationId(null);
+        setConversationTitle("New chat");
+        setMessages([]);
+        setMeta("");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete conversation.");
@@ -312,11 +445,62 @@ export default function LocalAiChat() {
     }
   }
 
+  async function uploadImages(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (files.length === 0 || busy) return;
+
+    const remainingSlots = MAX_ATTACHMENTS - attachments.length;
+    const selected = files.slice(0, remainingSlots);
+    if (selected.length === 0) {
+      setError("You can attach up to 4 images to one message.");
+      return;
+    }
+
+    setUploadingImages(true);
+    setError("");
+
+    try {
+      for (const file of selected) {
+        if (!file.type.startsWith("image/")) {
+          throw new Error("Only image files can be attached right now.");
+        }
+
+        const prepared = await prepareImage(file);
+        const form = new FormData();
+        form.append("file", prepared);
+
+        const response = await fetch("/api/local-ai/attachments", {
+          method: "POST",
+          body: form,
+        });
+        const result = (await response.json()) as AttachmentResult;
+
+        if (!response.ok || !result.attachment) {
+          throw new Error(
+            result.detail || result.error || "Could not upload image attachment.",
+          );
+        }
+
+        setAttachments((current) => [...current, result.attachment!].slice(0, MAX_ATTACHMENTS));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not attach image.");
+    } finally {
+      setUploadingImages(false);
+    }
+  }
+
   async function send() {
     const text = input.trim();
-    if (!text || busy) return;
+    if ((!text && attachments.length === 0) || busy || uploadingImages) return;
 
-    const userMessage: ChatMessage = { role: "user", content: text };
+    const currentAttachments = [...attachments];
+    const userMessage: ChatMessage = {
+      role: "user",
+      content: text,
+      attachments: currentAttachments,
+    };
     const fallbackMessages = [...messages, userMessage];
 
     setMessages(fallbackMessages);
@@ -324,7 +508,7 @@ export default function LocalAiChat() {
     setError("");
     setMeta("");
     setBusy(true);
-    setStatus("Queued for your Mac");
+    setStatus(currentAttachments.length > 0 ? "Queued for Local Vision" : "Queued for your Mac");
 
     try {
       const queuedResponse = await fetch("/api/local-ai/chat", {
@@ -333,6 +517,7 @@ export default function LocalAiChat() {
         body: JSON.stringify({
           conversationId: conversationId || undefined,
           message: text,
+          attachmentIds: currentAttachments.map((attachment) => attachment.id),
           profile,
           maxTokens: profile === "quality" ? 1200 : 768,
           temperature: 0.2,
@@ -344,6 +529,7 @@ export default function LocalAiChat() {
         throw new Error(queued.detail || queued.error || "Could not queue local AI job.");
       }
 
+      setAttachments([]);
       if (queued.conversationId) {
         setConversationId(queued.conversationId);
       }
@@ -358,6 +544,7 @@ export default function LocalAiChat() {
       setError(err instanceof Error ? err.message : "Local AI request failed.");
       setStatus("Ready");
       setBusy(false);
+      setAttachments(currentAttachments);
     }
   }
 
@@ -371,12 +558,12 @@ export default function LocalAiChat() {
             onChange={(event) => {
               const id = event.target.value;
               if (!id) {
-                newChat();
+                void newChat();
               } else {
-                void loadConversation(id);
+                void switchConversation(id);
               }
             }}
-            disabled={busy}
+            disabled={busy || uploadingImages}
           >
             <option value="">New chat</option>
             {conversations.map((conversation) => (
@@ -387,14 +574,19 @@ export default function LocalAiChat() {
           </select>
         </label>
         <div className="local-ai-thread-actions">
-          <button className="secondary-button" type="button" onClick={newChat} disabled={busy}>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => void newChat()}
+            disabled={busy || uploadingImages}
+          >
             New chat
           </button>
           <button
             className="text-button"
             type="button"
             onClick={() => void deleteConversation()}
-            disabled={busy || !conversationId}
+            disabled={busy || !conversationId || uploadingImages}
           >
             Delete
           </button>
@@ -404,10 +596,13 @@ export default function LocalAiChat() {
       <div className="local-ai-toolbar card">
         <div>
           <strong>{conversationTitle}</strong>
-          <p>Runs on the connected Mac. No paid model fallback from this screen.</p>
+          <p>
+            Runs on the connected Mac. Images automatically switch to Local Vision.
+            No paid model fallback from this screen.
+          </p>
         </div>
         <label className="field">
-          <span>Profile</span>
+          <span>Text profile</span>
           <select
             value={profile}
             onChange={(event) => setProfile(event.target.value as Profile)}
@@ -429,8 +624,8 @@ export default function LocalAiChat() {
             <div className="local-ai-empty">
               <strong>CoOperative AI Local</strong>
               <p>
-                Ask anything. This conversation will be saved so you can leave and
-                continue later.
+                Ask anything or attach a screenshot/photo. Conversations and images
+                stay tied to your saved thread.
               </p>
             </div>
           ) : (
@@ -441,16 +636,30 @@ export default function LocalAiChat() {
               >
                 <div className="chat-bubble-head">
                   <span>{message.role === "user" ? "You" : "CoOperative AI"}</span>
-                  <button
-                    className="message-action"
-                    type="button"
-                    onClick={() => void copyMessage(message.content)}
-                    aria-label="Copy message"
-                  >
-                    Copy
-                  </button>
+                  {message.content ? (
+                    <button
+                      className="message-action"
+                      type="button"
+                      onClick={() => void copyMessage(message.content)}
+                      aria-label="Copy message"
+                    >
+                      Copy
+                    </button>
+                  ) : null}
                 </div>
-                <div>{message.content}</div>
+                {message.attachments && message.attachments.length > 0 ? (
+                  <div className="chat-attachments">
+                    {message.attachments.map((attachment) => (
+                      <img
+                        key={attachment.id}
+                        src={attachment.previewUrl}
+                        alt={attachment.fileName}
+                        loading="lazy"
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {message.content ? <div>{message.content}</div> : null}
               </div>
             ))
           )}
@@ -466,26 +675,79 @@ export default function LocalAiChat() {
         </div>
 
         <div className="local-ai-composer">
+          {attachments.length > 0 ? (
+            <div className="pending-attachments">
+              {attachments.map((attachment) => (
+                <div className="pending-attachment" key={attachment.id}>
+                  <img src={attachment.previewUrl} alt={attachment.fileName} />
+                  <button
+                    type="button"
+                    onClick={() => void removeAttachment(attachment)}
+                    disabled={busy}
+                    aria-label={`Remove ${attachment.fileName}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask CoOperative AI…"
+            placeholder={
+              attachments.length > 0
+                ? "Ask about the attached image…"
+                : "Ask CoOperative AI…"
+            }
             disabled={busy}
             maxLength={16000}
           />
+
+          <input
+            ref={fileInputRef}
+            className="visually-hidden"
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(event) => void uploadImages(event)}
+            disabled={busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS}
+          />
+
           <div className="local-ai-actions">
             <button
               className="primary"
               type="button"
               onClick={() => void send()}
-              disabled={busy || !input.trim()}
+              disabled={
+                busy ||
+                uploadingImages ||
+                (!input.trim() && attachments.length === 0)
+              }
             >
               {busy ? "Working…" : "Send"}
             </button>
-            <button className="text-button" type="button" onClick={newChat} disabled={busy}>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS}
+            >
+              {uploadingImages ? "Uploading…" : "＋ Image"}
+            </button>
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => void newChat()}
+              disabled={busy || uploadingImages}
+            >
               New conversation
             </button>
           </div>
+          <small className="local-ai-attachment-note">
+            Up to 4 images. Large photos are compressed on your device before upload.
+          </small>
         </div>
 
         {error ? <p className="error">{error}</p> : null}
