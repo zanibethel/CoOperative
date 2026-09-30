@@ -61,6 +61,8 @@ export async function POST(request: Request) {
       steps: body.steps,
       guidanceScale: body.guidanceScale,
       strength: body.strength,
+      variationMode: body.variationMode,
+      seed: body.seed,
     };
     const result = await generateImageLocalFirst(inferenceRequest);
 
