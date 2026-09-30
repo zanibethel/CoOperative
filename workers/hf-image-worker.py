@@ -7,6 +7,7 @@
 #   "pillow>=11.0.0",
 #   "safetensors>=0.5.0",
 #   "torch>=2.5.0",
+#   "torchvision>=0.20.0",
 #   "transformers>=4.47.0",
 #   "uvicorn[standard]>=0.34.0",
 # ]
@@ -39,11 +40,11 @@ else:
 DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN")
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.2.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.2.1")
 
 text_pipe = StableDiffusionPipeline.from_pretrained(
     MODEL_ID,
-    torch_dtype=DTYPE,
+    dtype=DTYPE,
 )
 text_pipe = text_pipe.to(DEVICE)
 image_pipe = StableDiffusionImg2ImgPipeline(**text_pipe.components)
@@ -99,6 +100,7 @@ def health():
         "device": DEVICE,
         "model": MODEL_ID,
         "dtype": str(DTYPE).replace("torch.", ""),
+        "huggingFaceAuthenticated": bool(os.getenv("HF_TOKEN")),
         "capabilities": ["image_generation", "image_to_image"],
     }
 
