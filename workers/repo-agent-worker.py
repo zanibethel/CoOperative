@@ -308,6 +308,9 @@ def queue_loop():
         task_id = None
         try:
             response = post("/api/agents/tasks/claim", {"workerId":WORKER_ID}, timeout=30.0)
+            if response.status_code == 204:
+                time.sleep(POLL_SECONDS)
+                continue
             task = response.json()
             task_id = str(task["taskId"])
             print(f"Claimed agent task {task_id}: {task['agentKey']} / {task['repoKey']} / {task['mode']}")
