@@ -268,9 +268,9 @@ def queue_headers():
 
 def complete_job(job_id: str, payload: dict):
     response = httpx.post(
-        f"{QUEUE_URL}/api/inference/jobs/{job_id}/complete",
+        f"{QUEUE_URL}/api/inference/jobs/complete",
         headers=queue_headers(),
-        json=payload,
+        json={"jobId": job_id, **payload},
         timeout=120.0,
         follow_redirects=True,
     )
