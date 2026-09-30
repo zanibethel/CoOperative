@@ -147,7 +147,7 @@ def create_worktree(source_repo, repository, task_id):
 
 def objective_terms(objective):
     words = re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}", objective.lower())
-    ignored = {"this","that","with","from","into","when","what","where","have","should","would","could","need","make","using","update","change","code","repo","repository","agent"}
+    ignored = {"this","that","with","from","into","when","what","where","have","should","would","could","need","make","using","update","change","code","repo","repository","agent","user","request","creatorhub","creator","chat","page","context","current","implementation","inspect"}
     result = []
     for word in words:
         if word not in ignored and word not in result:
