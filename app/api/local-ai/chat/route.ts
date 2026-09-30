@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase/server";
+import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -168,7 +169,7 @@ export async function POST(request: Request) {
           : "Manual Local Fast selection.",
       allow_paid_fallback: false,
       human_approval_required: false,
-      model_registry_revision: "2026-09-30.1",
+      model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
     });
 
