@@ -49,7 +49,7 @@ else:
 
 DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN")
-QUEUE_URL = os.getenv("COOPERATIVE_QUEUE_URL", "").rstrip("/")
+QUEUE_URL = os.getenv("COOPERATIVE_QUEUE_URL", "https://co-operative-mu.vercel.app").rstrip("/")
 QUEUE_POLL_SECONDS = max(2, int(os.getenv("COOPERATIVE_QUEUE_POLL_SECONDS", "3")))
 WORKER_ID = os.getenv("COOPERATIVE_WORKER_ID", socket.gethostname())[:160]
 PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
