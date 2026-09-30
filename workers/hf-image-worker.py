@@ -28,6 +28,7 @@ import torch
 import uvicorn
 from diffusers import AutoPipelineForImage2Image, AutoPipelineForText2Image
 from fastapi import FastAPI, Header, HTTPException
+from transformers import CLIPVisionModelWithProjection
 from PIL import Image
 from pydantic import BaseModel, Field
 
@@ -39,13 +40,17 @@ QUALITY_MODEL_ID = os.getenv(
     "QUALITY_MODEL_ID",
     "segmind/SSD-1B",
 )
+IDENTITY_MODEL_ID = os.getenv(
+    "IDENTITY_MODEL_ID",
+    "stabilityai/stable-diffusion-xl-base-1.0",
+)
 IP_ADAPTER_MODEL_ID = os.getenv(
     "IP_ADAPTER_MODEL_ID",
     "h94/IP-Adapter",
 )
 IP_ADAPTER_WEIGHT = os.getenv(
     "IP_ADAPTER_WEIGHT",
-    "ip-adapter_sdxl.safetensors",
+    "ip-adapter-plus_sdxl_vit-h.safetensors",
 )
 
 if torch.cuda.is_available():
@@ -55,7 +60,7 @@ elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
 else:
     DEVICE = "cpu"
 
-DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+DTYPE = torch.float16 if DEVICE in {"cuda", "mps"} else torch.float32
 WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN")
 QUEUE_URL = os.getenv("COOPERATIVE_QUEUE_URL", "https://co-operative-mu.vercel.app").rstrip("/")
 QUEUE_POLL_SECONDS = max(2, int(os.getenv("COOPERATIVE_QUEUE_POLL_SECONDS", "3")))
@@ -64,7 +69,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.6.1")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.7.0")
 
 MODEL_LOCK = threading.Lock()
 loaded_profile: str | None = None
@@ -185,27 +190,52 @@ def ensure_profile(profile: Literal["fast", "quality"]):
     loaded_profile = profile
 
 
-def ensure_identity_adapter():
-    global identity_adapter_loaded
+def ensure_identity_profile():
+    global loaded_profile, text_pipe, image_pipe, identity_adapter_loaded
 
-    if loaded_profile != "quality":
-        raise RuntimeError("Identity adapter currently requires the Local Quality SDXL profile.")
-    if identity_adapter_loaded:
+    if (
+        loaded_profile == "quality-identity"
+        and text_pipe is not None
+        and identity_adapter_loaded
+    ):
         return
-    if text_pipe is None:
-        raise RuntimeError("Local Quality pipeline is not loaded.")
+
+    clear_model()
+    print(f"Loading identity base model {IDENTITY_MODEL_ID}...", flush=True)
+
+    image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+        IP_ADAPTER_MODEL_ID,
+        subfolder="models/image_encoder",
+        torch_dtype=DTYPE,
+    )
+
+    pipe = AutoPipelineForText2Image.from_pretrained(
+        IDENTITY_MODEL_ID,
+        image_encoder=image_encoder,
+        torch_dtype=DTYPE,
+        use_safetensors=True,
+    ).to(DEVICE)
 
     print(
         f"Loading identity adapter {IP_ADAPTER_MODEL_ID}/{IP_ADAPTER_WEIGHT}...",
         flush=True,
     )
-    text_pipe.load_ip_adapter(
+    pipe.load_ip_adapter(
         IP_ADAPTER_MODEL_ID,
         subfolder="sdxl_models",
         weight_name=IP_ADAPTER_WEIGHT,
     )
+
+    if hasattr(pipe, "enable_vae_slicing"):
+        pipe.enable_vae_slicing()
+    if hasattr(pipe, "enable_vae_tiling"):
+        pipe.enable_vae_tiling()
+
+    text_pipe = pipe
+    image_pipe = None
+    loaded_profile = "quality-identity"
     identity_adapter_loaded = True
-    print("Identity adapter loaded.", flush=True)
+    print("SDXL identity pipeline loaded.", flush=True)
 
 
 def identity_scale(variation_mode: str) -> float:
@@ -272,7 +302,15 @@ def run_generation(request: ImageRequest):
     generator = torch.Generator(device="cpu").manual_seed(seed)
 
     with MODEL_LOCK:
-        ensure_profile(request.profile)
+        identity_generation = (
+            bool(request.references)
+            and request.profile == "quality"
+            and request.variationMode != "preserve"
+        )
+        if identity_generation:
+            ensure_identity_profile()
+        else:
+            ensure_profile(request.profile)
 
         common = dict(
             prompt=request.prompt,
@@ -281,20 +319,21 @@ def run_generation(request: ImageRequest):
             guidance_scale=guidance,
         )
 
-        if request.references and request.profile == "quality" and request.variationMode != "preserve":
-            ensure_identity_adapter()
+        if identity_generation:
             scale = identity_scale(request.variationMode)
-            text_pipe.set_ip_adapter_scale(scale)
 
             identity_images = [
                 decode_data_url(reference.dataUrl)
                 for reference in request.references[:2]
             ]
-            ip_adapter_image = (
-                identity_images[0]
-                if len(identity_images) == 1
-                else [identity_images]
-            )
+            if len(identity_images) == 1:
+                text_pipe.set_ip_adapter_scale(scale)
+                ip_adapter_image = identity_images[0]
+            else:
+                text_pipe.set_ip_adapter_scale(
+                    [[scale for _ in identity_images]]
+                )
+                ip_adapter_image = [identity_images]
 
             result = text_pipe(
                 width=width,
@@ -345,7 +384,7 @@ def run_generation(request: ImageRequest):
 
     return {
         "dataUrl": encode_png(image),
-        "model": config["model"],
+        "model": IDENTITY_MODEL_ID if identity_generation else config["model"],
         "profile": request.profile,
         "provider": "cooperative-worker",
         "referencesUsed": references_used,
@@ -453,6 +492,7 @@ def health():
         "models": {
             "fast": FAST_MODEL_ID,
             "quality": QUALITY_MODEL_ID,
+            "qualityIdentity": IDENTITY_MODEL_ID,
         },
         "huggingFaceAuthenticated": bool(os.getenv("HF_TOKEN")),
         "asyncQueue": {
@@ -490,7 +530,8 @@ def capabilities():
             "asyncQueue": bool(QUEUE_URL and WORKER_TOKEN),
             "variationModes": ["preserve", "balanced", "new-scene"],
             "seededVariation": True,
-            "identityConditioning": "ip-adapter-quality",
+            "identityConditioning": "sdxl-ip-adapter-plus",
+            "identityModel": IDENTITY_MODEL_ID,
             "multiReferenceIdentity": 2,
         },
     }
