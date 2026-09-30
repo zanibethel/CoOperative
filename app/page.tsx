@@ -5,7 +5,10 @@ export default function HomePage() {
     <main className="shell">
       <nav className="nav">
         <div className="brand">CoOperative AI</div>
-        <div className="badge">v0.1 · Intelligence Desk</div>
+        <div className="nav-links">
+          <Link href="/local-ai">Local AI</Link>
+          <div className="badge">v0.1 · Intelligence Desk</div>
+        </div>
       </nav>
 
       <section className="hero">
