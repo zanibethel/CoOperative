@@ -76,8 +76,10 @@ b { color: var(--text); }
 .text-button:hover { color: var(--text); }
 @media (max-width: 760px) {
   .metrics, .services-layout { grid-template-columns: 1fr; }
-  .nav-links { gap: 8px; }
-  .nav-links > a { display: none; }
+  .nav { align-items: flex-start; }
+  .nav-links { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .nav-links > a { display: inline-flex; }
+  .nav-links .badge { font-size: .7rem; padding: 6px 8px; }
 }
 
 
