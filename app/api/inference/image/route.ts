@@ -56,6 +56,7 @@ export async function POST(request: Request) {
       prompt: body.prompt,
       aspectRatio: body.aspectRatio,
       references: [...body.references, ...remoteReferences].slice(0, 4),
+      profile: body.profile,
       negativePrompt: body.negativePrompt,
       steps: body.steps,
       guidanceScale: body.guidanceScale,
