@@ -26,6 +26,14 @@ function ownerRef(userId: string, creatorId: string) {
   return `creatorhub:${userId}:${creatorId}`;
 }
 
+function chooseRepository(message: string) {
+  const value = message.toLowerCase();
+  if (/(identity model|image model|local model|local inference|inference|worker|supervisor|ip-adapter|mlx|diffusers|cooperative queue|cooperative ai)/.test(value)) {
+    return "cooperative" as const;
+  }
+  return "creatorhub" as const;
+}
+
 function looksLikeRepoChange(message: string) {
   const value = message.toLowerCase();
   const codeWords = /(code|repo|repository|bug|fix|implement|update|change|refactor|build|route|api|component|database|schema|deployment)/;
@@ -58,11 +66,12 @@ export async function POST(request: Request) {
 
     if (looksLikeRepoChange(input.message)) {
       const taskId = crypto.randomUUID();
+      const repoKey = chooseRepository(input.message);
       const objective = [
-        `CreatorHub chat request for creator "${input.creatorName}".`,
-        `User request: ${input.message}`,
-        `Page context: ${input.pageContext || "CreatorHub dashboard"}.`,
-        `Creator context: ${JSON.stringify(input.context).slice(0, 10000)}`,
+        `USER REQUEST:\n${input.message}`,
+        `SOURCE: CreatorHub chat for creator "${input.creatorName}".`,
+        `PAGE CONTEXT: ${input.pageContext || "CreatorHub dashboard"}.`,
+        `CREATOR CONTEXT: ${JSON.stringify(input.context).slice(0, 10000)}`,
         "Inspect current CreatorHub repository evidence first. Use deterministic tooling before model reasoning. Prepare the smallest safe change that satisfies the request. Do not push or deploy; stop for review.",
       ].join("\n\n");
 
@@ -70,7 +79,7 @@ export async function POST(request: Request) {
         id: taskId,
         owner_ref: owner,
         agent_key: "repo-engineer",
-        repo_key: "creatorhub",
+        repo_key: repoKey,
         mode: "prepare_change",
         objective,
         requested_profile: "quality",
@@ -95,7 +104,7 @@ export async function POST(request: Request) {
         {
           mode: "agent",
           agent: AGENT_REGISTRY["repo-engineer"],
-          repository: AGENT_REPOSITORIES.creatorhub,
+          repository: AGENT_REPOSITORIES[repoKey],
           taskId,
           status: "queued",
           text: "I handed that to the CreatorHub Repo Engineer. It will inspect the current code first, use Local Quality only where needed, run the allowlisted checks, and stop with a prepared change for review.",
