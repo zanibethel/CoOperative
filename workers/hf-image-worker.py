@@ -56,7 +56,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.4.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.5.0")
 
 MODEL_LOCK = threading.Lock()
 loaded_profile: str | None = None
@@ -97,6 +97,12 @@ DEFAULT_NEGATIVE = (
     "duplicate limbs, waxy skin, plastic skin"
 )
 
+VARIATION_STRENGTH = {
+    "preserve": 0.48,
+    "balanced": 0.70,
+    "new-scene": 0.88,
+}
+
 
 class ReferenceImage(BaseModel):
     dataUrl: str
@@ -112,6 +118,8 @@ class ImageRequest(BaseModel):
     steps: int | None = Field(default=None, ge=1, le=80)
     guidanceScale: float | None = Field(default=None, ge=0, le=30)
     strength: float | None = Field(default=None, ge=0, le=1)
+    variationMode: Literal["preserve", "balanced", "new-scene"] = "balanced"
+    seed: int | None = Field(default=None, ge=0, le=2147483647)
 
 
 def clear_model():
@@ -204,8 +212,22 @@ def run_generation(request: ImageRequest):
 
     steps = request.steps if request.steps is not None else config["steps"]
     guidance = request.guidanceScale if request.guidanceScale is not None else config["guidance"]
-    strength = request.strength if request.strength is not None else config["strength"]
+    strength = (
+        request.strength
+        if request.strength is not None
+        else (
+            VARIATION_STRENGTH[request.variationMode]
+            if request.references
+            else config["strength"]
+        )
+    )
     negative = request.negativePrompt or DEFAULT_NEGATIVE
+    seed = (
+        request.seed
+        if request.seed is not None
+        else int.from_bytes(os.urandom(4), "big") % 2147483648
+    )
+    generator = torch.Generator(device="cpu").manual_seed(seed)
 
     with MODEL_LOCK:
         ensure_profile(request.profile)
@@ -223,6 +245,7 @@ def run_generation(request: ImageRequest):
             result = image_pipe(
                 image=source,
                 strength=strength,
+                generator=generator,
                 **common,
             )
             references_used = 1
@@ -230,6 +253,7 @@ def run_generation(request: ImageRequest):
             result = text_pipe(
                 width=width,
                 height=height,
+                generator=generator,
                 **common,
             )
             references_used = 0
@@ -254,6 +278,8 @@ def run_generation(request: ImageRequest):
         "provider": "cooperative-worker",
         "referencesUsed": references_used,
         "latencyMs": int((time.time() - started) * 1000),
+        "seed": seed,
+        "variationMode": request.variationMode,
     }
 
 
@@ -315,6 +341,8 @@ def queue_loop():
                 steps=job.get("steps"),
                 guidanceScale=job.get("guidanceScale"),
                 strength=job.get("strength"),
+                variationMode=job.get("variationMode", "balanced"),
+                seed=job.get("seed"),
             )
 
             result = run_generation(request)
@@ -365,6 +393,8 @@ def health():
             "fast_profile",
             "quality_profile",
             "async_queue",
+            "seeded_variation",
+            "variation_modes",
         ],
     }
 
@@ -383,6 +413,8 @@ def capabilities():
             "textGeneration": False,
             "profiles": ["fast", "quality"],
             "asyncQueue": bool(QUEUE_URL and WORKER_TOKEN),
+            "variationModes": ["preserve", "balanced", "new-scene"],
+            "seededVariation": True,
         },
     }
 
