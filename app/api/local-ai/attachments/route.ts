@@ -139,7 +139,7 @@ export async function GET(request: Request) {
     return new Response(await blob.arrayBuffer(), {
       headers: {
         "Content-Type": attachment.mime_type,
-        "Content-Disposition": `inline; filename="${attachment.file_name.replace(/"/g, "")}"`,
+        "Content-Disposition": "inline",
         "Cache-Control": "private, max-age=300",
       },
     });
