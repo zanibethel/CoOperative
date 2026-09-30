@@ -234,8 +234,10 @@ def system_prompt(agent, mode):
 def parse_plan(text):
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end < start: raise AgentError("Local AI did not return required JSON.")
-    try: value = json.loads(text[start:end+1])
-    except json.JSONDecodeError as exc: raise AgentError(f"Local AI returned invalid JSON: {exc}") from exc
+    try:
+        value = json.loads(text[start:end+1], strict=False)
+    except json.JSONDecodeError as exc:
+        raise AgentError(f"Local AI returned invalid JSON: {exc}") from exc
     if not isinstance(value, dict): raise AgentError("Local AI response was not an object.")
     return value
 
