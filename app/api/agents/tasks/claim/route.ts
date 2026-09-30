@@ -33,12 +33,66 @@ export async function POST(request: Request) {
       throw new Error("Claimed task references an unknown agent or repository.");
     }
 
+    const { data: recentCancelled } = await admin
+      .from("agent_tasks")
+      .select("id,objective,result,updated_at")
+      .eq("owner_ref", task.owner_ref)
+      .eq("repo_key", task.repo_key)
+      .eq("status", "cancelled")
+      .neq("id", task.id)
+      .order("updated_at", { ascending: false })
+      .limit(8);
+
+    const learningContext = (recentCancelled || [])
+      .filter((row) => {
+        const result =
+          row.result && typeof row.result === "object"
+            ? (row.result as Record<string, unknown>)
+            : {};
+        return result.reviewDecision === "denied";
+      })
+      .slice(0, 3)
+      .map((row) => {
+        const result =
+          row.result && typeof row.result === "object"
+            ? (row.result as Record<string, unknown>)
+            : {};
+        const feedback =
+          result.reviewFeedback && typeof result.reviewFeedback === "object"
+            ? (result.reviewFeedback as Record<string, unknown>)
+            : {};
+        return {
+          taskId: row.id,
+          objective:
+            typeof row.objective === "string" ? row.objective.slice(0, 1800) : "",
+          summary:
+            typeof result.summary === "string" ? result.summary.slice(0, 1200) : "",
+          signals: Array.isArray(feedback.signals)
+            ? feedback.signals
+                .filter((value): value is string => typeof value === "string")
+                .slice(0, 8)
+            : [],
+          diffStat:
+            typeof result.diffStat === "string"
+              ? result.diffStat.slice(0, 1200)
+              : "",
+          changedFiles: Array.isArray(result.changedFiles)
+            ? result.changedFiles
+                .filter((value): value is string => typeof value === "string")
+                .slice(0, 10)
+            : [],
+        };
+      });
+
     await admin.from("agent_task_events").insert({
       task_id: task.id,
       owner_ref: task.owner_ref,
       kind: "claimed",
       message: `Task claimed by ${workerId}.`,
-      metadata: { workerId },
+      metadata: {
+        workerId,
+        deniedExamplesLoaded: learningContext.length,
+      },
     });
 
     return NextResponse.json({
@@ -51,6 +105,7 @@ export async function POST(request: Request) {
       requestedProfile: task.requested_profile,
       agent,
       repository,
+      learningContext,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Could not claim agent task.";
