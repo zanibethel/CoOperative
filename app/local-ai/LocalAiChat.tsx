@@ -1,202 +1,124 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import { useState } from "react";
 
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
-type JobSnapshot = {
-  jobId: string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
-  profile: "fast" | "quality";
-  messages?: Array<{ role?: string; content?: string }> | null;
+type JobResult = {
+  jobId?: string;
+  status?: string;
   text?: string | null;
   model?: string | null;
+  latencyMs?: number | null;
   promptTokens?: number | null;
   outputTokens?: number | null;
-  latencyMs?: number | null;
   error?: string | null;
+  detail?: string | null;
 };
 
-function normalizeMessages(value: JobSnapshot["messages"]): ChatMessage[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((message) => {
-    if (
-      (message.role === "user" || message.role === "assistant") &&
-      typeof message.content === "string"
-    ) {
-      return [{ role: message.role, content: message.content }];
-    }
-    return [];
-  });
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export default function LocalAiChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [profile, setProfile] = useState<"fast" | "quality">("fast");
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<"queued" | "running" | "">("");
+  const [status, setStatus] = useState("Ready");
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [lastMeta, setLastMeta] = useState<{
-    model?: string | null;
-    latencyMs?: number | null;
-    promptTokens?: number | null;
-    outputTokens?: number | null;
-  } | null>(null);
+  const [meta, setMeta] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function resumeActiveJob() {
-      try {
-        const response = await fetch("/api/local-ai/chat", { cache: "no-store" });
-        if (response.status === 204 || cancelled) return;
-        if (!response.ok) return;
-
-        const payload = (await response.json()) as JobSnapshot;
-        if (cancelled) return;
-
-        const restored = normalizeMessages(payload.messages);
-        if (restored.length) setMessages(restored);
-        setProfile(payload.profile);
-        setJobStatus(payload.status === "running" ? "running" : "queued");
-        setActiveJobId(payload.jobId);
-      } catch {
-        // A resume check should not block a new local chat.
-      }
-    }
-
-    void resumeActiveJob();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!activeJobId) return;
-
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    async function poll() {
-      try {
-        const response = await fetch(
-          `/api/local-ai/chat?jobId=${encodeURIComponent(activeJobId)}`,
-          { cache: "no-store" },
-        );
-        const payload = (await response.json()) as JobSnapshot & { detail?: string };
-
-        if (!response.ok) {
-          throw new Error(payload.detail || payload.error || "Could not read local AI job.");
-        }
-        if (cancelled) return;
-
-        if (payload.status === "completed") {
-          if (payload.text) {
-            const assistantMessage: ChatMessage = {
-              role: "assistant",
-              content: payload.text,
-            };
-            setMessages((current) => [...current, assistantMessage]);
-          }
-          setLastMeta({
-            model: payload.model,
-            latencyMs: payload.latencyMs,
-            promptTokens: payload.promptTokens,
-            outputTokens: payload.outputTokens,
-          });
-          setActiveJobId(null);
-          setJobStatus("");
-          return;
-        }
-
-        if (payload.status === "failed" || payload.status === "cancelled") {
-          setError(payload.error || `Local AI job ${payload.status}.`);
-          setActiveJobId(null);
-          setJobStatus("");
-          return;
-        }
-
-        setJobStatus(payload.status === "running" ? "running" : "queued");
-        timer = setTimeout(poll, 2500);
-      } catch (err) {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Could not check local AI job.");
-        timer = setTimeout(poll, 5000);
-      }
-    }
-
-    void poll();
-
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [activeJobId]);
-
-  const busy = activeJobId !== null;
-  const statusText =
-    jobStatus === "running"
-      ? "Running on your Mac"
-      : busy
-        ? "Queued for your Mac"
-        : "Ready";
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function send() {
     const text = input.trim();
     if (!text || busy) return;
 
-    setError("");
-    setLastMeta(null);
-    setJobStatus("queued");
-
-    const nextMessages: ChatMessage[] = [
+    const requestMessages: ChatMessage[] = [
       ...messages,
       { role: "user", content: text },
     ].slice(-20);
 
-    setMessages(nextMessages);
+    setMessages(requestMessages);
     setInput("");
+    setError("");
+    setMeta("");
+    setBusy(true);
+    setStatus("Queued for your Mac");
 
     try {
-      const response = await fetch("/api/local-ai/chat", {
+      const queuedResponse = await fetch("/api/local-ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: nextMessages,
+          messages: requestMessages,
           profile,
           maxTokens: profile === "quality" ? 1200 : 768,
           temperature: 0.2,
         }),
       });
 
-      const payload = (await response.json()) as {
-        jobId?: string;
-        error?: string;
-        detail?: string;
-      };
-
-      if (!response.ok || !payload.jobId) {
-        throw new Error(payload.detail || payload.error || "Could not queue local AI job.");
+      const queued = (await queuedResponse.json()) as JobResult;
+      if (!queuedResponse.ok || !queued.jobId) {
+        throw new Error(queued.detail || queued.error || "Could not queue local AI job.");
       }
 
-      setActiveJobId(payload.jobId);
-    } catch (err) {
-      setJobStatus("");
-      setError(err instanceof Error ? err.message : "Could not queue local AI job.");
-    }
-  }
+      for (;;) {
+        await wait(2500);
 
-  function clearConversation() {
-    if (busy) return;
-    setMessages([]);
-    setLastMeta(null);
-    setError("");
+        const response = await fetch(
+          `/api/local-ai/chat?jobId=${encodeURIComponent(queued.jobId)}`,
+          { cache: "no-store" },
+        );
+        const result = (await response.json()) as JobResult;
+
+        if (!response.ok) {
+          throw new Error(result.detail || result.error || "Could not read local AI job.");
+        }
+
+        if (result.status === "queued") {
+          setStatus("Queued for your Mac");
+          continue;
+        }
+
+        if (result.status === "running") {
+          setStatus("Running on your Mac");
+          continue;
+        }
+
+        if (result.status === "completed") {
+          if (result.text) {
+            setMessages((current) => [
+              ...current,
+              { role: "assistant", content: result.text as string },
+            ]);
+          }
+
+          const details = [
+            result.model,
+            typeof result.latencyMs === "number"
+              ? `${(result.latencyMs / 1000).toFixed(1)}s`
+              : null,
+            typeof result.promptTokens === "number" && typeof result.outputTokens === "number"
+              ? `${result.promptTokens} in / ${result.outputTokens} out`
+              : null,
+          ].filter(Boolean);
+
+          setMeta(details.join(" · "));
+          setStatus("Ready");
+          break;
+        }
+
+        throw new Error(result.error || `Local AI job ended with status ${result.status || "unknown"}.`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Local AI request failed.");
+      setStatus("Ready");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -219,7 +141,7 @@ export default function LocalAiChat() {
         </label>
         <div className="local-ai-status">
           <span className={busy ? "status-dot active" : "status-dot"} />
-          {statusText}
+          {status}
         </div>
       </div>
 
@@ -228,10 +150,7 @@ export default function LocalAiChat() {
           {messages.length === 0 ? (
             <div className="local-ai-empty">
               <strong>CoOperative AI Local</strong>
-              <p>
-                Ask a planning, coding, debugging, or business-operations question.
-                Queued work remains in CoOperative AI even if you leave this page.
-              </p>
+              <p>Ask a planning, coding, debugging, or business-operations question.</p>
             </div>
           ) : (
             messages.map((message, index) => (
@@ -248,12 +167,12 @@ export default function LocalAiChat() {
           {busy ? (
             <div className="chat-bubble assistant pending">
               <span>CoOperative AI</span>
-              <div>{statusText}… You can leave this page and come back.</div>
+              <div>{status}…</div>
             </div>
           ) : null}
         </div>
 
-        <form className="local-ai-composer" onSubmit={submit}>
+        <div className="local-ai-composer">
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
@@ -262,33 +181,33 @@ export default function LocalAiChat() {
             maxLength={16000}
           />
           <div className="local-ai-actions">
-            <button className="primary" type="submit" disabled={busy || !input.trim()}>
+            <button
+              className="primary"
+              type="button"
+              onClick={() => void send()}
+              disabled={busy || !input.trim()}
+            >
               {busy ? "Working…" : "Send"}
             </button>
             <button
               className="text-button"
               type="button"
-              onClick={clearConversation}
+              onClick={() => {
+                if (!busy) {
+                  setMessages([]);
+                  setMeta("");
+                  setError("");
+                }
+              }}
               disabled={busy}
             >
               Clear conversation
             </button>
           </div>
-        </form>
+        </div>
 
         {error ? <p className="error">{error}</p> : null}
-        {lastMeta ? (
-          <p className="local-ai-meta">
-            {lastMeta.model || "Local model"}
-            {typeof lastMeta.latencyMs === "number"
-              ? ` · ${(lastMeta.latencyMs / 1000).toFixed(1)}s`
-              : ""}
-            {typeof lastMeta.promptTokens === "number" &&
-            typeof lastMeta.outputTokens === "number"
-              ? ` · ${lastMeta.promptTokens} in / ${lastMeta.outputTokens} out`
-              : ""}
-          </p>
-        ) : null}
+        {meta ? <p className="local-ai-meta">{meta}</p> : null}
       </div>
     </section>
   );
