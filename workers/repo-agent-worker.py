@@ -155,7 +155,7 @@ def objective_terms(objective):
         if len(result) >= 8: break
     return result
 
-def collect_context(repo, objective, repository):
+def collect_context(repo, objective, repository, priority_paths=None):
     status = run(["git","status","--short"], repo).stdout[-5000:]
     recent = run(["git","log","-8","--oneline","--decorate"], repo).stdout[-5000:]
     tracked = run(["git","ls-files"], repo).stdout.splitlines()
@@ -163,6 +163,9 @@ def collect_context(repo, objective, repository):
     tracked_set = set(tracked)
     for raw in re.findall(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+", objective):
         relative = raw.strip(" `'\".,;:()[]{}")
+        if relative in tracked_set and relative not in candidate_paths:
+            candidate_paths.append(relative)
+    for relative in priority_paths or []:
         if relative in tracked_set and relative not in candidate_paths:
             candidate_paths.append(relative)
     for term in objective_terms(objective):
@@ -488,8 +491,26 @@ def handle_task(task):
     else:
         update_remote(source, str(repository.get("defaultBranch") or "main"))
 
-    context = collect_context(target, objective, repository)
-    progress(task_id, "Repository evidence collected deterministically.", metadata={"candidateFiles":context["files"],"searchTerms":context["terms"]})
+    learning_context = task.get("learningContext") or []
+    priority_paths = []
+    if isinstance(learning_context, list):
+        for item in learning_context[:3]:
+            if not isinstance(item, dict):
+                continue
+            for relative in item.get("changedFiles") or []:
+                if isinstance(relative, str) and relative not in priority_paths:
+                    priority_paths.append(relative)
+
+    context = collect_context(target, objective, repository, priority_paths=priority_paths)
+    progress(
+        task_id,
+        "Repository evidence collected deterministically.",
+        metadata={
+            "candidateFiles":context["files"],
+            "searchTerms":context["terms"],
+            "priorityFiles":priority_paths[:10],
+        },
+    )
 
     checks = []
     if mode == "verify":
@@ -505,7 +526,6 @@ def handle_task(task):
                 f"skipped={item.get('skipped', False)}\n{item.get('output', '')}"
             )
         evidence += "\n\nDETERMINISTIC CHECK RESULTS:\n" + "\n\n".join(check_evidence)
-    learning_context = task.get("learningContext") or []
     learning_text = ""
     if isinstance(learning_context, list) and learning_context:
         learning_lines = [
