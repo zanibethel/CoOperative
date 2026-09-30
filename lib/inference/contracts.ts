@@ -56,6 +56,27 @@ export const textInferenceRequestSchema = z.object({
   temperature: z.number().min(0).max(2).default(0.2),
 });
 
+export const textRouteModeSchema = z.enum(["auto", "local-fast", "local-quality"]);
+export const textTaskClassSchema = z.enum([
+  "general",
+  "summary",
+  "planning",
+  "coding",
+  "debugging",
+  "reasoning",
+  "long-context",
+]);
+
+export const routedTextInferenceRequestSchema = z.object({
+  messages: z.array(textInferenceMessageSchema).min(1).max(40),
+  mode: textRouteModeSchema.default("auto"),
+  taskClass: textTaskClassSchema.default("general"),
+  maxTokens: z.number().int().min(16).max(4096).default(768),
+  temperature: z.number().min(0).max(2).default(0.2),
+  allowPaidFallback: z.boolean().default(false),
+  humanApprovalRequired: z.boolean().default(false),
+});
+
 export const textInferenceResponseSchema = z.object({
   text: z.string(),
   model: z.string(),
@@ -68,4 +89,5 @@ export const textInferenceResponseSchema = z.object({
 
 export type TextInferenceMessage = z.infer<typeof textInferenceMessageSchema>;
 export type TextInferenceRequest = z.infer<typeof textInferenceRequestSchema>;
+export type RoutedTextInferenceRequest = z.infer<typeof routedTextInferenceRequestSchema>;
 export type TextInferenceResponse = z.infer<typeof textInferenceResponseSchema>;
