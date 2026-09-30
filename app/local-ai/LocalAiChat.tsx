@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -11,24 +12,35 @@ type JobSnapshot = {
   jobId: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   profile: "fast" | "quality";
+  messages?: Array<{ role?: string; content?: string }> | null;
   text?: string | null;
   model?: string | null;
-  provider?: string | null;
   promptTokens?: number | null;
   outputTokens?: number | null;
   latencyMs?: number | null;
   error?: string | null;
 };
 
-const STORAGE_KEY = "cooperative-local-ai-active-job";
+function normalizeMessages(value: JobSnapshot["messages"]): ChatMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((message) => {
+    if (
+      (message.role === "user" || message.role === "assistant") &&
+      typeof message.content === "string"
+    ) {
+      return [{ role: message.role, content: message.content }];
+    }
+    return [];
+  });
+}
 
 export default function LocalAiChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [profile, setProfile] = useState<"fast" | "quality">("fast");
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<string>("");
-  const [error, setError] = useState<string>("");
+  const [jobStatus, setJobStatus] = useState<"queued" | "running" | "">("");
+  const [error, setError] = useState("");
   const [lastMeta, setLastMeta] = useState<{
     model?: string | null;
     latencyMs?: number | null;
@@ -37,52 +49,59 @@ export default function LocalAiChat() {
   } | null>(null);
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw) as {
-        jobId?: string;
-        profile?: "fast" | "quality";
-        messages?: ChatMessage[];
-      };
-      if (saved.jobId) setActiveJobId(saved.jobId);
-      if (saved.profile) setProfile(saved.profile);
-      if (Array.isArray(saved.messages)) setMessages(saved.messages);
-    } catch {
-      window.localStorage.removeItem(STORAGE_KEY);
+    let cancelled = false;
+
+    async function resumeActiveJob() {
+      try {
+        const response = await fetch("/api/local-ai/chat", { cache: "no-store" });
+        if (response.status === 204 || cancelled) return;
+        if (!response.ok) return;
+
+        const payload = (await response.json()) as JobSnapshot;
+        if (cancelled) return;
+
+        const restored = normalizeMessages(payload.messages);
+        if (restored.length) setMessages(restored);
+        setProfile(payload.profile);
+        setJobStatus(payload.status === "running" ? "running" : "queued");
+        setActiveJobId(payload.jobId);
+      } catch {
+        // A resume check should not block a new local chat.
+      }
     }
+
+    void resumeActiveJob();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (!activeJobId) return;
 
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const poll = async () => {
+    async function poll() {
       try {
         const response = await fetch(
           `/api/local-ai/chat?jobId=${encodeURIComponent(activeJobId)}`,
           { cache: "no-store" },
         );
-        const payload = (await response.json()) as JobSnapshot & {
-          error?: string;
-          detail?: string;
-        };
+        const payload = (await response.json()) as JobSnapshot & { detail?: string };
 
         if (!response.ok) {
           throw new Error(payload.detail || payload.error || "Could not read local AI job.");
         }
         if (cancelled) return;
 
-        setJobStatus(payload.status);
-
         if (payload.status === "completed") {
           if (payload.text) {
-            setMessages((current) => [
-              ...current,
-              { role: "assistant", content: payload.text || "" },
-            ]);
+            const assistantMessage: ChatMessage = {
+              role: "assistant",
+              content: payload.text,
+            };
+            setMessages((current) => [...current, assistantMessage]);
           }
           setLastMeta({
             model: payload.model,
@@ -91,24 +110,25 @@ export default function LocalAiChat() {
             outputTokens: payload.outputTokens,
           });
           setActiveJobId(null);
-          window.localStorage.removeItem(STORAGE_KEY);
+          setJobStatus("");
           return;
         }
 
         if (payload.status === "failed" || payload.status === "cancelled") {
           setError(payload.error || `Local AI job ${payload.status}.`);
           setActiveJobId(null);
-          window.localStorage.removeItem(STORAGE_KEY);
+          setJobStatus("");
           return;
         }
 
+        setJobStatus(payload.status === "running" ? "running" : "queued");
         timer = setTimeout(poll, 2500);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Could not check local AI job.");
         timer = setTimeout(poll, 5000);
       }
-    };
+    }
 
     void poll();
 
@@ -118,14 +138,15 @@ export default function LocalAiChat() {
     };
   }, [activeJobId]);
 
-  const busy = Boolean(activeJobId);
-  const statusText = useMemo(() => {
-    if (!busy) return "Ready";
-    if (jobStatus === "running") return "Running on your Mac";
-    return "Queued for your Mac";
-  }, [busy, jobStatus]);
+  const busy = activeJobId !== null;
+  const statusText =
+    jobStatus === "running"
+      ? "Running on your Mac"
+      : busy
+        ? "Queued for your Mac"
+        : "Ready";
 
-  async function submit(event: FormEvent) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = input.trim();
     if (!text || busy) return;
@@ -165,11 +186,8 @@ export default function LocalAiChat() {
       }
 
       setActiveJobId(payload.jobId);
-      window.localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ jobId: payload.jobId, profile, messages: nextMessages }),
-      );
     } catch (err) {
+      setJobStatus("");
       setError(err instanceof Error ? err.message : "Could not queue local AI job.");
     }
   }
@@ -179,7 +197,6 @@ export default function LocalAiChat() {
     setMessages([]);
     setLastMeta(null);
     setError("");
-    window.localStorage.removeItem(STORAGE_KEY);
   }
 
   return (
@@ -213,7 +230,7 @@ export default function LocalAiChat() {
               <strong>CoOperative AI Local</strong>
               <p>
                 Ask a planning, coding, debugging, or business-operations question.
-                The request stays in CoOperative's persistent queue until your Mac claims it.
+                Queued work remains in CoOperative AI even if you leave this page.
               </p>
             </div>
           ) : (
@@ -248,7 +265,12 @@ export default function LocalAiChat() {
             <button className="primary" type="submit" disabled={busy || !input.trim()}>
               {busy ? "Working…" : "Send"}
             </button>
-            <button className="text-button" type="button" onClick={clearConversation} disabled={busy}>
+            <button
+              className="text-button"
+              type="button"
+              onClick={clearConversation}
+              disabled={busy}
+            >
               Clear conversation
             </button>
           </div>
