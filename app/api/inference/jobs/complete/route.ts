@@ -11,6 +11,7 @@ type CompletionBody = {
   provider?: unknown;
   referencesUsed?: unknown;
   latencyMs?: unknown;
+  referenceMode?: unknown;
   error?: unknown;
 };
 
@@ -114,6 +115,11 @@ export async function POST(request: Request) {
             ? body.provider.slice(0, 160)
             : "cooperative-worker",
         references_used: referencesUsed,
+        reference_mode:
+          typeof body.referenceMode === "string" &&
+          ["none", "img2img", "ip-adapter"].includes(body.referenceMode)
+            ? body.referenceMode
+            : null,
         latency_ms: latencyMs,
         error: null,
         completed_at: new Date().toISOString(),
