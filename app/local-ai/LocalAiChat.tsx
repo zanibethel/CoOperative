@@ -90,10 +90,11 @@ export default function LocalAiChat() {
 
         if (result.status === "completed") {
           if (result.text) {
-            setMessages((current) => [
-              ...current,
-              { role: "assistant", content: result.text as string },
-            ]);
+            const assistantMessage: ChatMessage = {
+              role: "assistant",
+              content: result.text,
+            };
+            setMessages((current) => [...current, assistantMessage]);
           }
 
           const details = [
