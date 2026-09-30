@@ -66,6 +66,7 @@ export async function GET(request: Request) {
         latencyMs: job.latency_ms,
         seed: job.seed,
         variationMode: job.variation_mode,
+        referenceMode: job.reference_mode,
         error: job.error,
         aspectRatio: job.aspect_ratio,
         createdAt: job.created_at,
