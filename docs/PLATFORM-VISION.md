@@ -10,6 +10,8 @@ CoOperative should discover the current operation, connect to the services the b
 
 The long-term product is a conversational business operating system. The owner should primarily interact with CoOperative, while external providers and AI models remain replaceable infrastructure underneath it.
 
+The canonical implementation sequence for reaching this end state is maintained in `docs/END-STATE-ROADMAP.md`.
+
 ## Economic mission
 
 CoOperative should continuously work toward four outcomes for the customer:
@@ -149,8 +151,9 @@ CoOperative should accumulate structured operational knowledge in code, playbook
 
 The same evidence should improve the ability of future CoOperative-specific models to select profitable playbooks, capabilities, and business actions.
 
-Over time the platform should reduce external AI cost through cheaper models, open-weight options, self-hosted inference, and eventually specialized CoOperative models where evidence supports it.
+Over time the platform should reduce external AI cost through cheaper models, open-weight options, self-hosted inference, business-owned AI connections, AWS/owned compute, and eventually specialized CoOperative models where evidence supports it.
 
+No connected model replaces CoOperative's policy or owner/business direction. See `docs/ai/AI_EXECUTOR_CHARTER.md`.
 
 ## Migration flywheel
 
