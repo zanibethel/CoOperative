@@ -205,3 +205,16 @@ b { color: var(--text); }
     height: 82px;
   }
 }
+
+.streaming-response::after {
+  content: "▍";
+  display: inline-block;
+  margin-left: 2px;
+  opacity: .75;
+  animation: local-ai-cursor 1s steps(1) infinite;
+}
+
+@keyframes local-ai-cursor {
+  0%, 50% { opacity: .75; }
+  51%, 100% { opacity: 0; }
+}
