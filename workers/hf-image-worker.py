@@ -384,7 +384,7 @@ def run_generation(request: ImageRequest):
 
     return {
         "dataUrl": encode_png(image),
-        "model": config["model"],
+        "model": IDENTITY_MODEL_ID if identity_generation else config["model"],
         "profile": request.profile,
         "provider": "cooperative-worker",
         "referencesUsed": references_used,
