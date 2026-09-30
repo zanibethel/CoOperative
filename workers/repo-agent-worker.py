@@ -4,7 +4,7 @@
 # ///
 
 from __future__ import annotations
-import json, os, re, shlex, socket, subprocess, time
+import ast, difflib, json, os, re, shlex, socket, subprocess, time
 from pathlib import Path
 from typing import Any
 import httpx
@@ -241,6 +241,154 @@ def parse_plan(text):
     if not isinstance(value, dict): raise AgentError("Local AI response was not an object.")
     return value
 
+def _diff_counts(original, proposed):
+    before = original.splitlines()
+    after = proposed.splitlines()
+    additions = 0
+    deletions = 0
+    matcher = difflib.SequenceMatcher(a=before, b=after, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in {"replace", "delete"}:
+            deletions += i2 - i1
+        if tag in {"replace", "insert"}:
+            additions += j2 - j1
+    return {
+        "originalLines": len(before),
+        "proposedLines": len(after),
+        "additions": additions,
+        "deletions": deletions,
+        "changedLines": additions + deletions,
+        "deletionRatio": round(deletions / max(1, len(before)), 4),
+    }
+
+def _test_path(relative):
+    low = relative.lower()
+    name = Path(low).name
+    return (
+        "/tests/" in f"/{low}/"
+        or "/test/" in f"/{low}/"
+        or "/__tests__/" in f"/{low}/"
+        or name.startswith("test_")
+        or ".test." in name
+        or ".spec." in name
+    )
+
+def evaluate_plan_scope(repo, objective, plan):
+    files = plan.get("files")
+    if not isinstance(files, list):
+        return {"blocking": True, "signals": ["Plan has no valid files array."], "metrics": []}
+
+    summary = str(plan.get("summary") or "")
+    narrow_request = bool(
+        re.search(
+            r"\b(smallest|minimal|narrow|bounded|surgical|fix|bug|error|regression)\b",
+            objective.lower(),
+        )
+    )
+    metrics = []
+    blocking = []
+    warnings = []
+
+    for item in files:
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not isinstance(item.get("content"), str):
+            blocking.append("Plan contains an invalid file operation.")
+            continue
+        relative = item["path"]
+        path = safe_path(repo, relative)
+        original = ""
+        if path.exists() and path.is_file():
+            try:
+                original = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                original = ""
+        counts = _diff_counts(original, item["content"])
+        counts["path"] = relative
+        metrics.append(counts)
+
+        if (
+            narrow_request
+            and counts["originalLines"] >= 80
+            and counts["deletions"] >= 40
+            and counts["deletionRatio"] >= 0.30
+        ):
+            blocking.append(
+                f"{relative}: bounded-fix proposal would delete "
+                f"{counts['deletions']} of {counts['originalLines']} existing lines "
+                f"({counts['deletionRatio']:.0%})."
+            )
+        if (
+            narrow_request
+            and counts["originalLines"] >= 80
+            and counts["changedLines"] >= max(250, int(counts["originalLines"] * 0.65))
+        ):
+            blocking.append(
+                f"{relative}: bounded-fix proposal changes {counts['changedLines']} lines, "
+                "which exceeds the scope guard for a surgical fix."
+            )
+
+    if re.search(r"\b(test|tests|tested|testing)\b", summary, re.IGNORECASE):
+        changed_paths = [
+            item.get("path")
+            for item in files
+            if isinstance(item, dict) and isinstance(item.get("path"), str)
+        ]
+        if changed_paths and not any(_test_path(path) for path in changed_paths):
+            warnings.append(
+                "Proposal summary claims test work, but no dedicated test/spec file is changed."
+            )
+
+    signals = []
+    for message in blocking + warnings:
+        if message not in signals:
+            signals.append(message)
+    return {
+        "blocking": bool(blocking),
+        "signals": signals,
+        "blockingSignals": blocking,
+        "warnings": warnings,
+        "metrics": metrics,
+        "narrowRequest": narrow_request,
+    }
+
+def run_static_file_checks(repo, changed):
+    results = []
+    for relative in changed:
+        path = safe_path(repo, relative)
+        suffix = path.suffix.lower()
+        if suffix == ".py":
+            try:
+                ast.parse(path.read_text(encoding="utf-8"), filename=relative)
+                results.append({
+                    "command": f"python ast.parse {relative}",
+                    "passed": True,
+                    "skipped": False,
+                    "output": "Python syntax parsed successfully.",
+                })
+            except Exception as exc:
+                results.append({
+                    "command": f"python ast.parse {relative}",
+                    "passed": False,
+                    "skipped": False,
+                    "output": f"Python syntax check failed: {exc}",
+                })
+        elif suffix == ".json":
+            try:
+                json.loads(path.read_text(encoding="utf-8"))
+                results.append({
+                    "command": f"json parse {relative}",
+                    "passed": True,
+                    "skipped": False,
+                    "output": "JSON parsed successfully.",
+                })
+            except Exception as exc:
+                results.append({
+                    "command": f"json parse {relative}",
+                    "passed": False,
+                    "skipped": False,
+                    "output": f"JSON parse failed: {exc}",
+                })
+    return results
+
 def apply_plan(repo, plan, memory_only, memory_files):
     files = plan.get("files")
     if not isinstance(files,list): raise AgentError("Local AI response has no files array.")
@@ -314,10 +462,32 @@ def handle_task(task):
                 f"skipped={item.get('skipped', False)}\n{item.get('output', '')}"
             )
         evidence += "\n\nDETERMINISTIC CHECK RESULTS:\n" + "\n\n".join(check_evidence)
+    learning_context = task.get("learningContext") or []
+    learning_text = ""
+    if isinstance(learning_context, list) and learning_context:
+        learning_lines = [
+            "RECENT HUMAN-DENIED PROPOSALS FOR THIS SAME OWNER/REPOSITORY:",
+            "These are negative examples. Do not copy the rejected approach. Use the signals to avoid repeating it.",
+        ]
+        for item in learning_context[:3]:
+            if not isinstance(item, dict):
+                continue
+            learning_lines.append(
+                "\n".join([
+                    f"- Prior objective: {str(item.get('objective') or '')[:1200]}",
+                    f"  Prior summary: {str(item.get('summary') or '')[:800]}",
+                    f"  Rejection signals: {json.dumps(item.get('signals') or [])[:1800]}",
+                    f"  Prior diff stat: {str(item.get('diffStat') or '')[:800]}",
+                ])
+            )
+        learning_text = "\n".join(learning_lines)[:6000]
+
     messages = [
         {"role":"system","content":system_prompt(agent,mode)},
         {"role":"user","content":(f"AGENT: {agent['name']}\nMODE: {mode}\nREPOSITORY: {repository['githubRepo']}\nOBJECTIVE:\n{objective}\n\nREPOSITORY EVIDENCE:\n{evidence[:14000]}")[:16000]},
     ]
+    if learning_text:
+        messages.append({"role":"user","content":learning_text})
     if len(evidence) > 14000:
         messages.append({"role":"user","content":("ADDITIONAL REPOSITORY EVIDENCE:\n"+evidence[14000:28000])[:16000]})
 
@@ -345,11 +515,83 @@ def handle_task(task):
         return
 
     plan = parse_plan(text)
+    guard = evaluate_plan_scope(target, objective, plan)
+    if guard["blocking"]:
+        progress(
+            task_id,
+            "Deterministic scope guard rejected the first proposal; retrying with bounded-change feedback.",
+            kind="scope_guard_retry",
+            metadata={"signals": guard["signals"], "metrics": guard["metrics"]},
+        )
+        retry_messages = messages + [
+            {
+                "role": "user",
+                "content": (
+                    "DETERMINISTIC SCOPE GUARD REJECTED YOUR FIRST PROPOSAL BEFORE ANY FILE WAS WRITTEN.\n"
+                    f"First summary: {str(plan.get('summary') or '')[:1200]}\n"
+                    f"Signals: {json.dumps(guard['signals'])[:4000]}\n"
+                    "Return a corrected JSON plan. Preserve the existing architecture and unrelated behavior. "
+                    "For a bug fix, change only the lines/files required by evidence. Do not replace an existing worker "
+                    "with a new implementation. If you claim tests, include real test/spec changes or state that tests "
+                    "could not be added from the available evidence."
+                )[:7000],
+            }
+        ]
+        progress(task_id, "Local AI correction requested after scope-guard rejection.", status="waiting_llm")
+        retry_id = queue_llm(task_id, profile, retry_messages, 2400)
+        llm = wait_llm(task_id, retry_id)
+        text = str(llm.get("text") or "")
+        plan = parse_plan(text)
+        guard = evaluate_plan_scope(target, objective, plan)
+        progress(
+            task_id,
+            "Local AI correction completed.",
+            status="running",
+            metadata={
+                "model": llm.get("model"),
+                "latencyMs": llm.get("latencyMs"),
+                "scopeGuardPassed": not guard["blocking"],
+                "signals": guard["signals"],
+            },
+        )
+        if guard["blocking"]:
+            complete(
+                task_id,
+                "failed",
+                branch_name=branch,
+                error="Deterministic scope guard rejected the corrected proposal; no files were written.",
+                result={
+                    "summary": plan.get("summary") or "Rejected unsafe/out-of-scope proposal.",
+                    "guardRejected": True,
+                    "guardSignals": guard["signals"],
+                    "guardMetrics": guard["metrics"],
+                    "repository": repository["githubRepo"],
+                    "worktree": str(target),
+                    "model": llm.get("model"),
+                    "profile": profile,
+                },
+            )
+            return
+    else:
+        progress(
+            task_id,
+            "Deterministic scope guard passed.",
+            kind="scope_guard_passed",
+            metadata={"signals": guard["signals"], "metrics": guard["metrics"]},
+        )
+
     changed = apply_plan(target, plan, mode=="update_memory", list(repository.get("memoryFiles",[])))
     if changed:
         diff_check = run(["git","diff","--check"], target, check=False)
-        checks = [{"command":"git diff --check","passed":diff_check.returncode==0,"output":diff_check.stdout[-8000:]}]
-        if diff_check.returncode == 0: checks.extend(run_checks(target, list(repository.get("checks",[]))))
+        checks = [{
+            "command":"git diff --check",
+            "passed":diff_check.returncode==0,
+            "skipped":False,
+            "output":diff_check.stdout[-8000:],
+        }]
+        checks.extend(run_static_file_checks(target, changed))
+        if diff_check.returncode == 0:
+            checks.extend(run_checks(target, list(repository.get("checks",[]))))
     else:
         checks = []
     diff_stat = run(["git","diff","--stat"], target, check=False).stdout[-12000:]
@@ -365,6 +607,8 @@ def handle_task(task):
         "worktree":str(target),
         "model":llm.get("model"),
         "profile":profile,
+        "scopeGuard":guard,
+        "learningExamplesUsed":len(learning_context) if isinstance(learning_context, list) else 0,
     })
 
 def queue_loop():
