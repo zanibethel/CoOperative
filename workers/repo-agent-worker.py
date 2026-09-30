@@ -66,17 +66,39 @@ def normalize_remote(value):
 
 def ensure_repo(repository):
     WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
-    repo = (WORKSPACE_ROOT / str(repository["localDirName"])).resolve()
+    github_repo = str(repository["githubRepo"])
+    expected = f"https://github.com/{github_repo}".lower()
+
+    candidates = []
+    configured = (WORKSPACE_ROOT / str(repository["localDirName"])).resolve()
+    candidates.append(configured)
+
+    for child in WORKSPACE_ROOT.iterdir():
+        if not child.is_dir() or child == configured:
+            continue
+        if (child / ".git").exists():
+            candidates.append(child.resolve())
+
+    for repo in candidates:
+        if repo != configured and WORKSPACE_ROOT not in repo.parents:
+            continue
+        if not (repo / ".git").exists():
+            continue
+        remote = run(["git","remote","get-url","origin"], repo, check=False).stdout.strip()
+        if remote and normalize_remote(remote) == expected:
+            print(f"Using approved existing checkout {repo}.")
+            return repo
+
+    repo = configured
     if WORKSPACE_ROOT not in repo.parents:
         raise AgentError("Resolved repository path escaped the approved workspace.")
-    github_repo = str(repository["githubRepo"])
-    if not (repo / ".git").exists():
-        if repo.exists() and any(repo.iterdir()):
-            raise AgentError(f"{repo} exists but is not a Git repository; refusing to overwrite it.")
-        print(f"Cloning approved repository {github_repo} to {repo}...")
-        run(["git","clone",f"https://github.com/{github_repo}.git",str(repo)], WORKSPACE_ROOT, timeout=240)
+    if repo.exists() and any(repo.iterdir()):
+        raise AgentError(f"{repo} exists but is not the approved Git repository; refusing to overwrite it.")
+
+    print(f"Cloning approved repository {github_repo} to {repo}...")
+    run(["git","clone",f"https://github.com/{github_repo}.git",str(repo)], WORKSPACE_ROOT, timeout=240)
     remote = run(["git","remote","get-url","origin"], repo).stdout.strip()
-    if normalize_remote(remote) != f"https://github.com/{github_repo}".lower():
+    if normalize_remote(remote) != expected:
         raise AgentError(f"Repository origin mismatch. Expected {github_repo}; found {remote}.")
     return repo
 
@@ -198,6 +220,15 @@ def system_prompt(agent, mode):
             f"At most {MAX_WRITE_FILES} files. Every file content must be complete, not a diff. "
             "If safe work cannot be prepared from evidence, use an empty files array."
         )
+    if mode == "verify":
+        return common + (
+            "Verification is evidence-bound. Every factual finding must name its supporting evidence "
+            "using one of: GIT STATUS, RECENT COMMITS, TRACKED FILES, SEARCH MATCHES, FILE <path>, "
+            "or CHECK <command>. Never mention a tool, file, command, policy, or behavior that is not "
+            "explicitly present in the supplied evidence or objective. A failed or skipped deterministic "
+            "check cannot be described as passing. If evidence is insufficient, say INCONCLUSIVE. "
+            "Separate verified facts from uncertainty and give only evidence-supported next actions."
+        )
     return common + "Analyze the objective using evidence, concrete findings, uncertainty, and the next deterministic action."
 
 def parse_plan(text):
@@ -232,8 +263,21 @@ def run_checks(repo, commands):
         if not allowed:
             results.append({"command":command,"passed":False,"output":"Command is not allowlisted."})
             continue
+        if parts[0] in {"npm","pnpm","yarn"} and not (repo / "node_modules").exists():
+            results.append({
+                "command": command,
+                "passed": False,
+                "skipped": True,
+                "output": "Deterministic check not run: node_modules is not available in this checkout."
+            })
+            continue
         result = run(parts, repo, timeout=300, check=False)
-        results.append({"command":command,"passed":result.returncode==0,"output":result.stdout[-12000:]})
+        results.append({
+            "command":command,
+            "passed":result.returncode==0,
+            "skipped":False,
+            "output":result.stdout[-12000:]
+        })
     return results
 
 def handle_task(task):
@@ -260,6 +304,14 @@ def handle_task(task):
         progress(task_id, "Allowlisted verification checks completed.", metadata={"checks":[{"command":x["command"],"passed":x["passed"]} for x in checks]})
 
     evidence = context["text"]
+    if checks:
+        check_evidence = []
+        for item in checks:
+            check_evidence.append(
+                f"CHECK {item['command']}: passed={item.get('passed', False)} "
+                f"skipped={item.get('skipped', False)}\n{item.get('output', '')}"
+            )
+        evidence += "\n\nDETERMINISTIC CHECK RESULTS:\n" + "\n\n".join(check_evidence)
     messages = [
         {"role":"system","content":system_prompt(agent,mode)},
         {"role":"user","content":(f"AGENT: {agent['name']}\nMODE: {mode}\nREPOSITORY: {repository['githubRepo']}\nOBJECTIVE:\n{objective}\n\nREPOSITORY EVIDENCE:\n{evidence[:14000]}")[:16000]},
@@ -274,7 +326,20 @@ def handle_task(task):
     progress(task_id, "Local AI reasoning completed.", status="running", metadata={"model":llm.get("model"),"latencyMs":llm.get("latencyMs"),"promptTokens":llm.get("promptTokens"),"outputTokens":llm.get("outputTokens")})
 
     if mode in {"inspect","verify"}:
-        complete(task_id, "completed", result={"analysis":text,"checks":checks,"repository":repository["githubRepo"],"model":llm.get("model"),"profile":profile})
+        complete(task_id, "completed", result={
+            "analysis": text,
+            "checks": checks,
+            "verificationPassed": (
+                mode != "verify"
+                or (
+                    bool(checks)
+                    and all(item.get("passed") is True and not item.get("skipped", False) for item in checks)
+                )
+            ),
+            "repository": repository["githubRepo"],
+            "model": llm.get("model"),
+            "profile": profile
+        })
         return
 
     plan = parse_plan(text)
