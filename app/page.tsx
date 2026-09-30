@@ -4,7 +4,7 @@ export default function HomePage() {
   return (
     <main className="shell">
       <nav className="nav">
-        <div className="brand">CO/OPERATIVE</div>
+        <div className="brand">CoOperative AI</div>
         <div className="badge">v0.1 · Intelligence Desk</div>
       </nav>
 
@@ -12,7 +12,7 @@ export default function HomePage() {
         <div className="eyebrow">Human + AI business operations</div>
         <h1>Your business. Your team. Your AI operatives.</h1>
         <p>
-          CoOperative learns how your business works, maps the services you
+          CoOperative AI learns how your business works, maps the services you
           already pay for, finds the work that should be easier, and designs
           lower-cost missions without giving up human control.
         </p>

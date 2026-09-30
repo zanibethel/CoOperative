@@ -36,10 +36,10 @@ elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
 else:
     DEVICE = "cpu"
 
-DTYPE = torch.float16 if DEVICE in {"cuda", "mps"} else torch.float32
+DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN")
 
-app = FastAPI(title="CoOperative Temporary Image Worker", version="0.1.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.2.0")
 
 text_pipe = StableDiffusionPipeline.from_pretrained(
     MODEL_ID,
@@ -98,6 +98,7 @@ def health():
         "ok": True,
         "device": DEVICE,
         "model": MODEL_ID,
+        "dtype": str(DTYPE).replace("torch.", ""),
         "capabilities": ["image_generation", "image_to_image"],
     }
 
@@ -156,7 +157,17 @@ def generate(request: ImageRequest, authorization: str | None = Header(default=N
         if not result.images:
             raise RuntimeError("Model returned no image.")
 
-        image = result.images[0]
+        image = result.images[0].convert("RGB")
+        extrema = image.getextrema()
+        if all(channel_max <= 1 for _, channel_max in extrema):
+            safety_flags = getattr(result, "nsfw_content_detected", None)
+            if safety_flags and any(bool(flag) for flag in safety_flags):
+                raise RuntimeError("Generation was blocked by the model safety checker.")
+            raise RuntimeError(
+                "Model produced an all-black image. On Apple Silicon this usually indicates "
+                "MPS half-precision numerical instability; restart the updated worker so it uses float32."
+            )
+
         return {
             "dataUrl": encode_png(image),
             "model": MODEL_ID,
