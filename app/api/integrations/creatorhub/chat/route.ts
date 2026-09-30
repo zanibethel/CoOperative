@@ -57,6 +57,7 @@ function chooseProfile(message: string) {
 
 function titleFromMessage(message: string) {
   const compact = message.replace(/\s+/g, " ").trim();
+  if (!compact) return "Image question";
   return compact.length > 72 ? `${compact.slice(0, 69)}…` : compact;
 }
 
