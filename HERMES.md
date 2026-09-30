@@ -8,11 +8,12 @@ Before doing platform work, read:
 
 1. `docs/CORE-OPERATING-MODEL.md`
 2. `docs/PLATFORM-VISION.md`
-3. relevant recent entries in `docs/OWNER-INTENT-AUDIT.md`
-4. `docs/LEARNING-LOOP.md`
-5. the relevant GitHub issue/task
+3. `docs/END-STATE-ROADMAP.md`
+4. relevant recent entries in `docs/OWNER-INTENT-AUDIT.md`
+5. `docs/LEARNING-LOOP.md`
+6. the relevant GitHub issue/task
 
-Before proposing a new capability or materially changing an existing one, compare the request against the Owner Intent & Change Audit. Reuse existing work where possible. If the request conflicts with an active prior owner decision, surface the conflict rather than silently building both directions.
+Before proposing a new capability or materially changing an existing one, compare the request against the Owner Intent & Change Audit and the current roadmap. Reuse existing work where possible. If the request conflicts with an active prior owner decision or roadmap priority, surface the conflict rather than silently building both directions.
 
 ## Mission
 
@@ -183,5 +184,7 @@ After the Supabase/Vercel bootstrap pilot is complete, the next priority is to h
 The objective is to remove the owner's MacBook as a required runtime dependency.
 
 Hermes should help create the cloud task system, Telegram webhook path, on-demand execution workspace, durable state, cost/evidence tracking, and approval/resume flow.
+
+The current end-state roadmap refines that direction: AWS should first become an additional governed compute target, while existing Vercel/Supabase systems remain in place until measured economics justify migration.
 
 This is a governed self-bootstrap task: Hermes may build and test the infrastructure, but it does not gain broader permissions merely because it is helping create its successor/runtime. Existing owner gates in this file continue to apply.
