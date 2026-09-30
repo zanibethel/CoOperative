@@ -262,13 +262,13 @@ export default function LocalAiChat() {
                 ? "Queued for Local Vision"
                 : "Queued for your Mac",
             );
-            await wait(1500);
+            await wait(1000);
             continue;
           }
 
           if (result.status === "running") {
             setStatus(runningLabel);
-            await wait(1500);
+            await wait(650);
             continue;
           }
 
