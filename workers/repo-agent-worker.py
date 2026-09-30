@@ -160,6 +160,11 @@ def collect_context(repo, objective, repository):
     recent = run(["git","log","-8","--oneline","--decorate"], repo).stdout[-5000:]
     tracked = run(["git","ls-files"], repo).stdout.splitlines()
     search_lines, candidate_paths = [], []
+    tracked_set = set(tracked)
+    for raw in re.findall(r"[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+", objective):
+        relative = raw.strip(" `'\".,;:()[]{}")
+        if relative in tracked_set and relative not in candidate_paths:
+            candidate_paths.append(relative)
     for term in objective_terms(objective):
         result = run(["git","grep","-n","-I","-m","12","-e",term,"--"], repo, timeout=30, check=False)
         if result.returncode not in {0,1}: continue
