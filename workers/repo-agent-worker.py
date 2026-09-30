@@ -224,9 +224,14 @@ def system_prompt(agent, mode):
     )
     if mode in {"prepare_change","update_memory"}:
         return common + (
-            'Return ONLY valid JSON shaped {"summary":"short explanation","files":[{"path":"relative/path","content":"complete UTF-8 file contents"}]}. '
-            f"At most {MAX_WRITE_FILES} files. Every file content must be complete, not a diff. "
-            "If safe work cannot be prepared from evidence, use an empty files array."
+            "Return ONLY a RAW PLAN using the required delimiters. Do not use JSON or Markdown fences. "
+            "Start with <<<SUMMARY>>> then a short summary then <<<END_SUMMARY>>>. "
+            "For an existing file, use <<<EDIT path/to/file>>>, then <<<OLD>>> exact existing text "
+            "<<<END_OLD>>>, then <<<NEW>>> replacement text <<<END_NEW>>>, then <<<END_EDIT>>>. "
+            "For a genuinely new file only, use <<<FILE path/to/file>>> complete contents <<<END_FILE>>>. "
+            f"Touch at most {MAX_WRITE_FILES} files. Prefer small exact EDIT blocks over rewriting an existing file. "
+            "The OLD block must match repository evidence exactly and uniquely. "
+            "If safe work cannot be prepared, return the summary with no edit or file blocks."
         )
     if mode == "verify":
         return common + (
@@ -239,36 +244,74 @@ def system_prompt(agent, mode):
         )
     return common + "Analyze the objective using evidence, concrete findings, uncertainty, and the next deterministic action."
 
-def parse_plan(text):
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end < start: raise AgentError("Local AI did not return required JSON.")
-    try:
-        value = json.loads(text[start:end+1], strict=False)
-    except json.JSONDecodeError as exc:
-        raise AgentError(f"Local AI returned invalid JSON: {exc}") from exc
-    if not isinstance(value, dict): raise AgentError("Local AI response was not an object.")
+def _raw_block(value):
+    if value.startswith("\n"):
+        value = value[1:]
+    if value.endswith("\n"):
+        value = value[:-1]
     return value
+
+def parse_plan(text):
+    summary_match = re.search(r"<<<SUMMARY>>>\s*(.*?)\s*<<<END_SUMMARY>>>", text, re.DOTALL)
+    if not summary_match:
+        raise AgentError("Local AI did not return the required RAW PLAN summary.")
+    edits = []
+    pattern = re.compile(
+        r"<<<EDIT\s+([^>\n]+)>>>\s*<<<OLD>>>(.*?)<<<END_OLD>>>\s*"
+        r"<<<NEW>>>(.*?)<<<END_NEW>>>\s*<<<END_EDIT>>>",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(text):
+        edits.append({"path":match.group(1).strip(),"old":_raw_block(match.group(2)),"new":_raw_block(match.group(3))})
+    files = []
+    for match in re.finditer(r"<<<FILE\s+([^>\n]+)>>>(.*?)<<<END_FILE>>>", text, re.DOTALL):
+        files.append({"path":match.group(1).strip(),"content":_raw_block(match.group(2))})
+    return {"summary":summary_match.group(1).strip(),"edits":edits,"files":files}
+
+def materialize_plan(repo, raw_plan):
+    grouped = {}
+    for edit in raw_plan.get("edits") or []:
+        if not isinstance(edit, dict):
+            raise AgentError("RAW PLAN contains an invalid edit block.")
+        relative, old, new = edit.get("path"), edit.get("old"), edit.get("new")
+        if not isinstance(relative,str) or not isinstance(old,str) or not isinstance(new,str):
+            raise AgentError("RAW PLAN edit fields are invalid.")
+        grouped.setdefault(relative, []).append((old,new))
+    materialized = []
+    for relative, edits in grouped.items():
+        path = safe_path(repo, relative)
+        if not path.is_file():
+            raise AgentError(f"RAW PLAN edit target does not exist: {relative}")
+        content = path.read_text(encoding="utf-8")
+        for old,new in edits:
+            if not old:
+                raise AgentError(f"RAW PLAN OLD block is empty for {relative}.")
+            count = content.count(old)
+            if count != 1:
+                raise AgentError(f"RAW PLAN OLD block for {relative} matched {count} times; expected exactly 1.")
+            content = content.replace(old,new,1)
+        materialized.append({"path":relative,"content":content})
+    for item in raw_plan.get("files") or []:
+        relative, content = item.get("path"), item.get("content")
+        if not isinstance(relative,str) or not isinstance(content,str):
+            raise AgentError("RAW PLAN file fields are invalid.")
+        path = safe_path(repo, relative)
+        if path.exists():
+            raise AgentError(f"RAW PLAN used FILE for existing path {relative}; use an EDIT block.")
+        materialized.append({"path":relative,"content":content})
+    if len(materialized) > MAX_WRITE_FILES:
+        raise AgentError("Local AI proposed too many files.")
+    return {"summary":str(raw_plan.get("summary") or ""),"files":materialized,"editCount":len(raw_plan.get("edits") or [])}
 
 def parse_plan_with_retry(task_id, profile, messages, llm, text, max_tokens=2400):
     try:
         return parse_plan(text), llm, text, False
     except AgentError as first_error:
-        progress(
-            task_id,
-            "Local AI returned malformed JSON; retrying once for valid structured output.",
-            kind="format_retry",
-            status="waiting_llm",
-            metadata={"error": str(first_error)[:800]},
-        )
+        progress(task_id, "Local AI returned an invalid RAW PLAN; retrying once for the required delimiters.",
+                 kind="format_retry", status="waiting_llm", metadata={"error":str(first_error)[:800]})
         retry_messages = messages + [
             {"role":"assistant","content":text[:10000]},
-            {
-                "role":"user",
-                "content": (
-                    "Return the same intended plan again as strict valid JSON only. "
-                    "Do not add Markdown or commentary. Keep the same scope and escape file-content strings correctly."
-                ),
-            },
+            {"role":"user","content":"Return the same bounded change using ONLY the required RAW PLAN delimiters. Do not use JSON or Markdown fences. Keep the same scope and prefer small exact EDIT blocks."},
         ]
         retry_id = queue_llm(task_id, profile, retry_messages, max_tokens)
         retry_llm = wait_llm(task_id, retry_id)
@@ -276,15 +319,9 @@ def parse_plan_with_retry(task_id, profile, messages, llm, text, max_tokens=2400
         try:
             plan = parse_plan(retry_text)
         except AgentError as second_error:
-            raise AgentError(
-                f"Local AI returned invalid JSON twice. First: {first_error}. Retry: {second_error}"
-            ) from second_error
-        progress(
-            task_id,
-            "Local AI JSON retry succeeded.",
-            status="running",
-            metadata={"model":retry_llm.get("model"),"latencyMs":retry_llm.get("latencyMs")},
-        )
+            raise AgentError(f"Local AI returned an invalid RAW PLAN twice. First: {first_error}. Retry: {second_error}") from second_error
+        progress(task_id, "Local AI RAW PLAN retry succeeded.", status="running",
+                 metadata={"model":retry_llm.get("model"),"latencyMs":retry_llm.get("latencyMs")})
         return plan, retry_llm, retry_text, True
 
 def _diff_counts(original, proposed):
@@ -577,9 +614,10 @@ def handle_task(task):
         })
         return
 
-    plan, llm, text, format_recovered = parse_plan_with_retry(
+    raw_plan, llm, text, format_recovered = parse_plan_with_retry(
         task_id, profile, messages, llm, text, 2400
     )
+    plan = materialize_plan(target, raw_plan)
     guard = evaluate_plan_scope(target, objective, plan)
     if guard["blocking"]:
         progress(
@@ -595,7 +633,7 @@ def handle_task(task):
                     "DETERMINISTIC SCOPE GUARD REJECTED YOUR FIRST PROPOSAL BEFORE ANY FILE WAS WRITTEN.\n"
                     f"First summary: {str(plan.get('summary') or '')[:1200]}\n"
                     f"Signals: {json.dumps(guard['signals'])[:4000]}\n"
-                    "Return a corrected JSON plan. Preserve the existing architecture and unrelated behavior. "
+                    "Return a corrected RAW PLAN using the required delimiters. Preserve the existing architecture and unrelated behavior. "
                     "For a bug fix, change only the lines/files required by evidence. Do not replace an existing worker "
                     "with a new implementation. If you claim tests, include real test/spec changes or state that tests "
                     "could not be added from the available evidence."
@@ -606,10 +644,11 @@ def handle_task(task):
         retry_id = queue_llm(task_id, profile, retry_messages, 2400)
         llm = wait_llm(task_id, retry_id)
         text = str(llm.get("text") or "")
-        plan, llm, text, scope_format_recovered = parse_plan_with_retry(
+        raw_plan, llm, text, scope_format_recovered = parse_plan_with_retry(
             task_id, profile, retry_messages, llm, text, 2400
         )
         format_recovered = format_recovered or scope_format_recovered
+        plan = materialize_plan(target, raw_plan)
         guard = evaluate_plan_scope(target, objective, plan)
         progress(
             task_id,
@@ -678,6 +717,8 @@ def handle_task(task):
         "scopeGuard":guard,
         "learningExamplesUsed":len(learning_context) if isinstance(learning_context, list) else 0,
         "formatRecovered":format_recovered,
+        "planFormat":"raw-edit-v1",
+        "editCount":plan.get("editCount", 0),
         "evidenceFiles":context["files"],
     })
 
