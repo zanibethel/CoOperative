@@ -59,24 +59,27 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const jobId = url.searchParams.get("jobId") || "";
-  if (!jobId) {
-    return NextResponse.json({ error: "jobId is required." }, { status: 400 });
-  }
 
   try {
     const admin = createAdminSupabaseClient();
-    const { data: job, error } = await admin
+    let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,result_text,result_model,result_provider,prompt_tokens,output_tokens,latency_ms,error,created_at,completed_at",
+        "id,status,profile,messages,result_text,result_model,result_provider,prompt_tokens,output_tokens,latency_ms,error,created_at,completed_at",
       )
-      .eq("id", jobId)
-      .eq("client_owner_ref", ownerRef)
-      .maybeSingle();
+      .eq("client_owner_ref", ownerRef);
+
+    query = jobId
+      ? query.eq("id", jobId)
+      : query.in("status", ["queued", "running"]).order("created_at", { ascending: false }).limit(1);
+
+    const { data: job, error } = await query.maybeSingle();
 
     if (error) throw error;
     if (!job) {
-      return NextResponse.json({ error: "Job not found." }, { status: 404 });
+      return jobId
+        ? NextResponse.json({ error: "Job not found." }, { status: 404 })
+        : new Response(null, { status: 204 });
     }
 
     return NextResponse.json(
@@ -84,6 +87,7 @@ export async function GET(request: Request) {
         jobId: job.id,
         status: job.status,
         profile: job.profile,
+        messages: job.messages,
         text: job.result_text,
         model: job.result_model,
         provider: job.result_provider,
