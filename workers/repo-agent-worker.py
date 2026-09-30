@@ -252,19 +252,19 @@ def _raw_block(value):
     return value
 
 def parse_plan(text):
-    summary_match = re.search(r"<<<SUMMARY>>>\\s*(.*?)\\s*<<<END_SUMMARY>>>", text, re.DOTALL)
+    summary_match = re.search(r"<<<SUMMARY>>>\s*(.*?)\s*<<<END_SUMMARY>>>", text, re.DOTALL)
     if not summary_match:
         raise AgentError("Local AI did not return the required RAW PLAN summary.")
     edits = []
     pattern = re.compile(
-        r"<<<EDIT\\s+([^>\\n]+)>>>\\s*<<<OLD>>>(.*?)<<<END_OLD>>>\\s*"
-        r"<<<NEW>>>(.*?)<<<END_NEW>>>\\s*<<<END_EDIT>>>",
+        r"<<<EDIT\s+([^>\n]+)>>>\s*<<<OLD>>>(.*?)<<<END_OLD>>>\s*"
+        r"<<<NEW>>>(.*?)<<<END_NEW>>>\s*<<<END_EDIT>>>",
         re.DOTALL,
     )
     for match in pattern.finditer(text):
         edits.append({"path":match.group(1).strip(),"old":_raw_block(match.group(2)),"new":_raw_block(match.group(3))})
     files = []
-    for match in re.finditer(r"<<<FILE\\s+([^>\\n]+)>>>(.*?)<<<END_FILE>>>", text, re.DOTALL):
+    for match in re.finditer(r"<<<FILE\s+([^>\n]+)>>>(.*?)<<<END_FILE>>>", text, re.DOTALL):
         files.append({"path":match.group(1).strip(),"content":_raw_block(match.group(2))})
     return {"summary":summary_match.group(1).strip(),"edits":edits,"files":files}
 
