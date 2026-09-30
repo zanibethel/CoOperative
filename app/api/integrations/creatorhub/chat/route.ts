@@ -7,15 +7,21 @@ import { AGENT_REGISTRY, AGENT_REPOSITORIES } from "@/lib/agents/registry";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-const requestSchema = z.object({
-  userId: z.string().min(1).max(200),
-  creatorId: z.string().uuid(),
-  creatorName: z.string().min(1).max(200),
-  conversationId: z.string().uuid().optional(),
-  message: z.string().trim().min(1).max(16000),
-  context: z.record(z.string(), z.unknown()).default({}),
-  pageContext: z.string().max(200).optional(),
-});
+const requestSchema = z
+  .object({
+    userId: z.string().min(1).max(200),
+    creatorId: z.string().uuid(),
+    creatorName: z.string().min(1).max(200),
+    conversationId: z.string().uuid().optional(),
+    message: z.string().trim().max(16000).default(""),
+    attachmentIds: z.array(z.string().uuid()).max(4).default([]),
+    context: z.record(z.string(), z.unknown()).default({}),
+    pageContext: z.string().max(200).optional(),
+  })
+  .refine(
+    (value) => Boolean(value.message.trim()) || value.attachmentIds.length > 0,
+    "Message or image attachment is required.",
+  );
 
 function authorized(request: Request) {
   const expected = process.env.COOPERATIVE_INFERENCE_SHARED_SECRET;
@@ -64,7 +70,7 @@ export async function POST(request: Request) {
     const admin = createAdminSupabaseClient();
     const owner = ownerRef(input.userId, input.creatorId);
 
-    if (looksLikeRepoChange(input.message)) {
+    if (looksLikeRepoChange(input.message) && input.attachmentIds.length === 0) {
       const taskId = crypto.randomUUID();
       const repoKey = chooseRepository(input.message);
       const objective = [
@@ -113,7 +119,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const profile = chooseProfile(input.message);
+    const profile = input.attachmentIds.length > 0 ? "quality" : chooseProfile(input.message);
     let conversationId = input.conversationId;
 
     if (conversationId) {
@@ -138,6 +144,39 @@ export async function POST(request: Request) {
       if (error) throw error;
     }
 
+    if (input.attachmentIds.length > 0) {
+      const { data: attachments, error: attachmentError } = await admin
+        .from("local_ai_attachments")
+        .select("id,conversation_id")
+        .eq("owner_ref", owner)
+        .in("id", input.attachmentIds);
+      if (attachmentError) throw attachmentError;
+      if (!attachments || attachments.length !== input.attachmentIds.length) {
+        return NextResponse.json(
+          { error: "One or more image attachments were not found." },
+          { status: 400 },
+        );
+      }
+
+      const belongsElsewhere = attachments.some(
+        (attachment) =>
+          attachment.conversation_id && attachment.conversation_id !== conversationId,
+      );
+      if (belongsElsewhere) {
+        return NextResponse.json(
+          { error: "An image attachment belongs to another conversation." },
+          { status: 409 },
+        );
+      }
+
+      const { error: attachError } = await admin
+        .from("local_ai_attachments")
+        .update({ conversation_id: conversationId })
+        .in("id", input.attachmentIds)
+        .eq("owner_ref", owner);
+      if (attachError) throw attachError;
+    }
+
     const { data: previousMessages, error: historyError } = await admin
       .from("local_ai_messages")
       .select("role,content")
@@ -152,7 +191,7 @@ export async function POST(request: Request) {
       content: [
         "You are CoOperative AI inside CreatorHub.",
         "CreatorHub already checked deterministic/code-first answers before calling you, so use the supplied live context as authoritative and do not invent current state.",
-        "Prefer concise practical answers. If the request is about changing code, do not pretend you changed it; code changes belong to the Repo Engineer agent.",
+        "Prefer concise practical answers. If an image is attached, analyze the visible evidence directly. If the request is about changing code and an image is attached, explain the visual evidence first; a subsequent code-change request can be handed to the Repo Engineer agent.",
         "Do not enable paid fallback or claim a hosted model was used.",
         `Active creator: ${input.creatorName}.`,
         `Current page/module: ${input.pageContext || "CreatorHub dashboard"}.`,
@@ -171,7 +210,14 @@ export async function POST(request: Request) {
     const messages = [
       systemMessage,
       ...history,
-      { role: "user" as const, content: input.message },
+      {
+        role: "user" as const,
+        content:
+          input.message.trim() ||
+          (input.attachmentIds.length > 0
+            ? "Describe and analyze the attached image."
+            : ""),
+      },
     ].slice(-24);
 
     const { error: jobError } = await admin.from("text_inference_jobs").insert({
@@ -180,17 +226,19 @@ export async function POST(request: Request) {
       client_owner_ref: owner,
       conversation_id: conversationId,
       messages,
-      attachment_ids: [],
-      capability: "text",
+      attachment_ids: input.attachmentIds,
+      capability: input.attachmentIds.length > 0 ? "vision" : "text",
       profile,
       max_tokens: profile === "quality" ? 1400 : 800,
       temperature: 0.2,
       routing_mode: profile === "quality" ? "local-quality" : "local-fast",
       task_class: "general",
       route_reason:
-        profile === "quality"
-          ? "CreatorHub complex chat request routed to Local Quality after code-first checks."
-          : "CreatorHub chat request routed to Local Fast after code-first checks.",
+        input.attachmentIds.length > 0
+          ? "CreatorHub image attachment routed to Local Vision after code-first checks."
+          : profile === "quality"
+            ? "CreatorHub complex chat request routed to Local Quality after code-first checks."
+            : "CreatorHub chat request routed to Local Fast after code-first checks.",
       allow_paid_fallback: false,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
@@ -202,8 +250,8 @@ export async function POST(request: Request) {
       conversation_id: conversationId,
       owner_ref: owner,
       role: "user",
-      content: input.message,
-      attachment_ids: [],
+      content: input.message.trim(),
+      attachment_ids: input.attachmentIds,
       job_id: jobId,
     });
     if (messageError) {
@@ -219,7 +267,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        mode: profile === "quality" ? "local-quality" : "local-fast",
+        mode: input.attachmentIds.length > 0 ? "local-quality" : profile === "quality" ? "local-quality" : "local-fast",
         jobId,
         conversationId,
         profile,
