@@ -64,7 +64,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.6.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.6.1")
 
 MODEL_LOCK = threading.Lock()
 loaded_profile: str | None = None
@@ -162,7 +162,10 @@ def ensure_profile(profile: Literal["fast", "quality"]):
     )
     pipe = pipe.to(DEVICE)
 
-    if hasattr(pipe, "enable_attention_slicing"):
+    # IP-Adapter reloads UNet attention processors. SlicedAttnProcessor requires
+    # constructor state that the adapter loader does not preserve, so Local Quality
+    # keeps the default SDPA attention processor when identity guidance is available.
+    if profile != "quality" and hasattr(pipe, "enable_attention_slicing"):
         pipe.enable_attention_slicing()
     if hasattr(pipe, "enable_vae_slicing"):
         pipe.enable_vae_slicing()
@@ -170,7 +173,7 @@ def ensure_profile(profile: Literal["fast", "quality"]):
         pipe.enable_vae_tiling()
 
     img_pipe = AutoPipelineForImage2Image.from_pipe(pipe).to(DEVICE)
-    if hasattr(img_pipe, "enable_attention_slicing"):
+    if profile != "quality" and hasattr(img_pipe, "enable_attention_slicing"):
         img_pipe.enable_attention_slicing()
     if hasattr(img_pipe, "enable_vae_slicing"):
         img_pipe.enable_vae_slicing()
