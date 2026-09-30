@@ -7,6 +7,7 @@ export default function HomePage() {
         <div className="brand">CoOperative AI</div>
         <div className="nav-links">
           <Link href="/local-ai">Local AI</Link>
+          <Link href="/agents">Agents</Link>
           <div className="badge">v0.1 · Intelligence Desk</div>
         </div>
       </nav>
