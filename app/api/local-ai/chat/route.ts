@@ -234,7 +234,7 @@ export async function GET(request: Request) {
     let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,conversation_id,capability,attachment_ids,messages,result_text,result_model,result_provider,prompt_tokens,output_tokens,latency_ms,error,created_at,completed_at",
+        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,error,created_at,completed_at",
       )
       .eq("client_owner_ref", ownerRef);
 
@@ -263,11 +263,13 @@ export async function GET(request: Request) {
         capability: job.capability,
         attachmentIds: job.attachment_ids,
         messages: job.messages,
+        partialText: job.partial_text,
         text: job.result_text,
         model: job.result_model,
         provider: job.result_provider,
         promptTokens: job.prompt_tokens,
         outputTokens: job.output_tokens,
+        firstTokenMs: job.first_token_ms,
         latencyMs: job.latency_ms,
         error: job.error,
         createdAt: job.created_at,

@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from mlx_lm import generate as text_generate
 from mlx_lm import load as text_load
+from mlx_lm import stream_generate as text_stream_generate
 from mlx_lm.sample_utils import make_sampler
 
 FAST_MODEL_ID = os.getenv(
@@ -48,6 +48,10 @@ loaded_key: str | None = None
 loaded_model = None
 loaded_processor = None
 loaded_vlm_config = None
+
+
+class JobCancelled(Exception):
+    pass
 
 
 def require_supported_mac():
@@ -158,7 +162,84 @@ def generation_settings(job: dict):
     return max_tokens, temperature
 
 
-def run_text_generation(job: dict, clean_messages: list[dict]):
+def post_progress(
+    job_id: str,
+    text: str,
+    output_tokens: int | None,
+    first_token_ms: int | None,
+):
+    payload: dict = {
+        "jobId": job_id,
+        "text": text,
+    }
+    if output_tokens is not None:
+        payload["outputTokens"] = output_tokens
+    if first_token_ms is not None:
+        payload["firstTokenMs"] = first_token_ms
+
+    response = httpx.post(
+        f"{QUEUE_URL}/api/inference/text/jobs/progress",
+        headers=queue_headers(),
+        json=payload,
+        timeout=30.0,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    result = response.json()
+    return bool(result.get("cancelled"))
+
+
+def consume_stream(job_id: str, stream, started: float):
+    full_text = ""
+    first_token_ms = None
+    output_tokens = 0
+    last_push_at = time.monotonic()
+    last_push_length = 0
+    last_response = None
+
+    for response in stream:
+        last_response = response
+        piece = getattr(response, "text", "")
+        if not isinstance(piece, str) or not piece:
+            continue
+
+        if full_text and piece.startswith(full_text) and len(piece) > len(full_text):
+            full_text = piece
+        else:
+            full_text += piece
+
+        output_tokens = int(
+            getattr(
+                response,
+                "generation_tokens",
+                getattr(response, "completion_tokens", output_tokens + 1),
+            )
+            or (output_tokens + 1)
+        )
+
+        if first_token_ms is None:
+            first_token_ms = int((time.time() - started) * 1000)
+
+        now = time.monotonic()
+        should_push = (
+            output_tokens == 1
+            or now - last_push_at >= 0.8
+            or len(full_text) - last_push_length >= 180
+        )
+        if should_push:
+            if post_progress(job_id, full_text, output_tokens, first_token_ms):
+                raise JobCancelled()
+            last_push_at = now
+            last_push_length = len(full_text)
+
+    if full_text:
+        if post_progress(job_id, full_text, output_tokens, first_token_ms):
+            raise JobCancelled()
+
+    return full_text, output_tokens, first_token_ms, last_response
+
+
+def run_text_generation(job_id: str, job: dict, clean_messages: list[dict]):
     started = time.time()
     profile = str(job.get("profile", "fast"))
     if profile not in PROFILE_MODELS:
@@ -180,14 +261,15 @@ def run_text_generation(job: dict, clean_messages: list[dict]):
         top_p=0.95 if temperature > 0 else 1.0,
     )
 
-    text = text_generate(
+    stream = text_stream_generate(
         model,
         tokenizer,
         prompt=prompt,
         max_tokens=max_tokens,
         sampler=sampler,
-        verbose=False,
     )
+    text, output_tokens, _, _ = consume_stream(job_id, stream, started)
+
     if not isinstance(text, str) or not text.strip():
         raise RuntimeError("Local text model returned an empty response.")
 
@@ -197,7 +279,7 @@ def run_text_generation(job: dict, clean_messages: list[dict]):
         "profile": profile,
         "provider": "cooperative-mlx-worker",
         "promptTokens": token_count(tokenizer, prompt),
-        "outputTokens": token_count(tokenizer, text),
+        "outputTokens": output_tokens or token_count(tokenizer, text),
         "latencyMs": int((time.time() - started) * 1000),
     }
 
@@ -249,8 +331,13 @@ def vision_prompt(clean_messages: list[dict]):
     return "\n".join(lines)
 
 
-def run_vision_generation(job: dict, clean_messages: list[dict], attachment_ids: list[str]):
-    from mlx_vlm import generate as vision_generate
+def run_vision_generation(
+    job_id: str,
+    job: dict,
+    clean_messages: list[dict],
+    attachment_ids: list[str],
+):
+    from mlx_vlm.generate import stream_generate as vision_stream_generate
     from mlx_vlm.prompt_utils import apply_chat_template
 
     started = time.time()
@@ -272,31 +359,20 @@ def run_vision_generation(job: dict, clean_messages: list[dict], attachment_ids:
             num_images=len(image_paths),
         )
 
-        output = vision_generate(
+        stream = vision_stream_generate(
             model,
             processor,
             formatted_prompt,
-            image_paths,
+            image=image_paths,
             max_tokens=max_tokens,
             temperature=temperature,
-            verbose=False,
         )
-
-    if isinstance(output, str):
-        text = output
-        prompt_tokens = None
-        output_tokens = None
-    else:
-        text = getattr(output, "text", "")
-        prompt_tokens = getattr(output, "prompt_tokens", None)
-        output_tokens = getattr(
-            output,
-            "generation_tokens",
-            getattr(output, "completion_tokens", None),
-        )
+        text, output_tokens, _, last_response = consume_stream(job_id, stream, started)
 
     if not isinstance(text, str) or not text.strip():
         raise RuntimeError("Local vision model returned an empty response.")
+
+    prompt_tokens = getattr(last_response, "prompt_tokens", None) if last_response else None
 
     return {
         "text": text.strip(),
@@ -309,7 +385,7 @@ def run_vision_generation(job: dict, clean_messages: list[dict], attachment_ids:
     }
 
 
-def run_generation(job: dict):
+def run_generation(job_id: str, job: dict):
     clean_messages = clean_messages_from_job(job)
     attachment_ids = job.get("attachmentIds")
     if not isinstance(attachment_ids, list):
@@ -318,12 +394,13 @@ def run_generation(job: dict):
     capability = str(job.get("capability") or "text")
     if capability == "vision" or attachment_ids:
         return run_vision_generation(
+            job_id,
             job,
             clean_messages,
             [str(value) for value in attachment_ids if value],
         )
 
-    return run_text_generation(job, clean_messages)
+    return run_text_generation(job_id, job, clean_messages)
 
 
 def complete_job(job_id: str, payload: dict):
@@ -335,6 +412,7 @@ def complete_job(job_id: str, payload: dict):
         follow_redirects=True,
     )
     response.raise_for_status()
+    return response.json()
 
 
 def queue_loop():
@@ -342,6 +420,7 @@ def queue_loop():
     print(f"Text Fast: {FAST_MODEL_ID}")
     print(f"Text Quality: {QUALITY_MODEL_ID}")
     print(f"Vision: {VISION_MODEL_ID}")
+    print("Live token progress enabled.")
 
     while True:
         job_id = None
@@ -365,12 +444,19 @@ def queue_loop():
             capability = job.get("capability", "text")
             print(f"Claimed async text job {job_id} ({profile}, {capability}).")
 
-            result = run_generation(job)
-            complete_job(job_id, result)
+            result = run_generation(job_id, job)
+            completion = complete_job(job_id, result)
+            if completion.get("status") == "cancelled":
+                print(f"Async text job {job_id} was cancelled.")
+                continue
+
             print(
                 f"Completed async text job {job_id} "
                 f"in {result['latencyMs']} ms using {result['model']}."
             )
+        except JobCancelled:
+            print(f"Async text job {job_id} cancelled by user.")
+            continue
         except KeyboardInterrupt:
             print("Text worker stopped.")
             return
