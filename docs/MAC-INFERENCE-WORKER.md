@@ -129,3 +129,36 @@ Queued local jobs remain persisted while CreatorHub is closed. The Mac claims th
 - Keep Hugging Face and worker tokens in local/server environment variables only.
 - Keep the radio/Nextcloud VPS separate from this test.
 - The Mac is an optional worker; CoOperative should not depend on it being online.
+
+
+## 9. Local text / LLM worker
+
+CoOperative AI also has a separate outbound-polling MLX text worker. It uses the same `INFERENCE_WORKER_TOKEN` and production queue URL, so it does not require a Cloudflare tunnel.
+
+Initial profiles:
+
+```text
+Local Fast    mlx-community/Qwen3-4B-Instruct-2507-4bit
+Local Quality mlx-community/Qwen2.5-7B-Instruct-4bit
+```
+
+Both are environment-overridable:
+
+```bash
+export TEXT_FAST_MODEL_ID="mlx-community/Qwen3-4B-Instruct-2507-4bit"
+export TEXT_QUALITY_MODEL_ID="mlx-community/Qwen2.5-7B-Instruct-4bit"
+uv run workers/mlx-text-worker.py
+```
+
+The first use of each profile downloads the model. The worker loads only one text profile at a time and unloads the previous text model when switching profiles.
+
+On the current 16 GB M1 test machine, validate image and text workloads separately first. Do not keep a large image model and Local Quality LLM busy simultaneously until memory behavior has been measured.
+
+Text jobs flow:
+
+```text
+approved caller -> CoOperative AI text queue -> Mac/MLX worker
+                -> CoOperative AI result -> caller
+```
+
+See `docs/LOCAL-TEXT-BENCHMARK.md` before promoting a replacement model.
