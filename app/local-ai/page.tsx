@@ -6,7 +6,10 @@ export default function LocalAiPage() {
     <main className="shell">
       <nav className="nav">
         <Link className="brand" href="/">CoOperative AI</Link>
-        <div className="badge">Local Intelligence</div>
+        <div className="nav-links">
+          <Link href="/agents">Agents</Link>
+          <div className="badge">Local Intelligence</div>
+        </div>
       </nav>
 
       <section className="compact-hero">
