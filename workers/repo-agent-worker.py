@@ -557,7 +557,9 @@ def handle_task(task):
         })
         return
 
-    plan = parse_plan(text)
+    plan, llm, text, format_recovered = parse_plan_with_retry(
+        task_id, profile, messages, llm, text, 2400
+    )
     guard = evaluate_plan_scope(target, objective, plan)
     if guard["blocking"]:
         progress(
@@ -584,7 +586,10 @@ def handle_task(task):
         retry_id = queue_llm(task_id, profile, retry_messages, 2400)
         llm = wait_llm(task_id, retry_id)
         text = str(llm.get("text") or "")
-        plan = parse_plan(text)
+        plan, llm, text, scope_format_recovered = parse_plan_with_retry(
+            task_id, profile, retry_messages, llm, text, 2400
+        )
+        format_recovered = format_recovered or scope_format_recovered
         guard = evaluate_plan_scope(target, objective, plan)
         progress(
             task_id,
@@ -652,6 +657,8 @@ def handle_task(task):
         "profile":profile,
         "scopeGuard":guard,
         "learningExamplesUsed":len(learning_context) if isinstance(learning_context, list) else 0,
+        "formatRecovered":format_recovered,
+        "evidenceFiles":context["files"],
     })
 
 def queue_loop():
