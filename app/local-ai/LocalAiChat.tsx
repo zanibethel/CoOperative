@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -10,6 +10,8 @@ type ChatMessage = {
 type JobResult = {
   jobId?: string;
   status?: string;
+  profile?: "fast" | "quality";
+  messages?: unknown;
   text?: string | null;
   model?: string | null;
   latencyMs?: number | null;
@@ -19,8 +21,37 @@ type JobResult = {
   detail?: string | null;
 };
 
+const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readMessages(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.filter((message): message is ChatMessage => {
+    if (!message || typeof message !== "object") return false;
+    const candidate = message as { role?: unknown; content?: unknown };
+    return (
+      (candidate.role === "user" || candidate.role === "assistant") &&
+      typeof candidate.content === "string"
+    );
+  });
+}
+
+function resultMeta(result: JobResult) {
+  const details = [
+    result.model,
+    typeof result.latencyMs === "number"
+      ? `${(result.latencyMs / 1000).toFixed(1)}s`
+      : null,
+    typeof result.promptTokens === "number" && typeof result.outputTokens === "number"
+      ? `${result.promptTokens} in / ${result.outputTokens} out`
+      : null,
+  ].filter(Boolean);
+
+  return details.join(" · ");
 }
 
 export default function LocalAiChat() {
@@ -31,6 +62,131 @@ export default function LocalAiChat() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [meta, setMeta] = useState("");
+  const activePollRef = useRef<string | null>(null);
+
+  const pollJob = useCallback(
+    async (jobId: string, fallbackMessages: ChatMessage[] = []) => {
+      if (activePollRef.current === jobId) return;
+
+      activePollRef.current = jobId;
+      setBusy(true);
+      setError("");
+
+      try {
+        for (;;) {
+          const response = await fetch(
+            `/api/local-ai/chat?jobId=${encodeURIComponent(jobId)}`,
+            { cache: "no-store" },
+          );
+          const result = (await response.json()) as JobResult;
+
+          if (activePollRef.current !== jobId) return;
+
+          if (!response.ok) {
+            throw new Error(result.detail || result.error || "Could not read local AI job.");
+          }
+
+          if (result.profile === "fast" || result.profile === "quality") {
+            setProfile(result.profile);
+          }
+
+          const persistedMessages = readMessages(result.messages);
+          if (persistedMessages.length > 0) {
+            setMessages(persistedMessages);
+          } else if (fallbackMessages.length > 0) {
+            setMessages(fallbackMessages);
+          }
+
+          if (result.status === "queued") {
+            setStatus("Queued for your Mac");
+            await wait(2500);
+            continue;
+          }
+
+          if (result.status === "running") {
+            setStatus("Running on your Mac");
+            await wait(2500);
+            continue;
+          }
+
+          if (result.status === "completed") {
+            const baseMessages =
+              persistedMessages.length > 0 ? persistedMessages : fallbackMessages;
+
+            if (result.text) {
+              setMessages([
+                ...baseMessages,
+                { role: "assistant", content: result.text },
+              ]);
+            } else {
+              setMessages(baseMessages);
+            }
+
+            setMeta(resultMeta(result));
+            setStatus("Ready");
+            window.localStorage.removeItem(ACTIVE_JOB_KEY);
+            break;
+          }
+
+          throw new Error(
+            result.error ||
+              `Local AI job ended with status ${result.status || "unknown"}.`,
+          );
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Local AI request failed.");
+        setStatus("Ready");
+      } finally {
+        if (activePollRef.current === jobId) {
+          activePollRef.current = null;
+          setBusy(false);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resume() {
+      const savedJobId = window.localStorage.getItem(ACTIVE_JOB_KEY);
+      if (savedJobId) {
+        await pollJob(savedJobId);
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/local-ai/chat", { cache: "no-store" });
+        if (cancelled || response.status === 204) return;
+
+        const active = (await response.json()) as JobResult;
+        if (!response.ok || !active.jobId) return;
+
+        const persistedMessages = readMessages(active.messages);
+        if (persistedMessages.length > 0) {
+          setMessages(persistedMessages);
+        }
+        if (active.profile === "fast" || active.profile === "quality") {
+          setProfile(active.profile);
+        }
+
+        window.localStorage.setItem(ACTIVE_JOB_KEY, active.jobId);
+        await pollJob(active.jobId, persistedMessages);
+      } catch {
+        if (!cancelled) {
+          setStatus("Ready");
+        }
+      }
+    }
+
+    void resume();
+
+    return () => {
+      cancelled = true;
+      activePollRef.current = null;
+    };
+  }, [pollJob]);
 
   async function send() {
     const text = input.trim();
@@ -63,59 +219,11 @@ export default function LocalAiChat() {
         throw new Error(queued.detail || queued.error || "Could not queue local AI job.");
       }
 
-      for (;;) {
-        await wait(2500);
-
-        const response = await fetch(
-          `/api/local-ai/chat?jobId=${encodeURIComponent(queued.jobId)}`,
-          { cache: "no-store" },
-        );
-        const result = (await response.json()) as JobResult;
-
-        if (!response.ok) {
-          throw new Error(result.detail || result.error || "Could not read local AI job.");
-        }
-
-        if (result.status === "queued") {
-          setStatus("Queued for your Mac");
-          continue;
-        }
-
-        if (result.status === "running") {
-          setStatus("Running on your Mac");
-          continue;
-        }
-
-        if (result.status === "completed") {
-          if (result.text) {
-            const assistantMessage: ChatMessage = {
-              role: "assistant",
-              content: result.text,
-            };
-            setMessages((current) => [...current, assistantMessage]);
-          }
-
-          const details = [
-            result.model,
-            typeof result.latencyMs === "number"
-              ? `${(result.latencyMs / 1000).toFixed(1)}s`
-              : null,
-            typeof result.promptTokens === "number" && typeof result.outputTokens === "number"
-              ? `${result.promptTokens} in / ${result.outputTokens} out`
-              : null,
-          ].filter(Boolean);
-
-          setMeta(details.join(" · "));
-          setStatus("Ready");
-          break;
-        }
-
-        throw new Error(result.error || `Local AI job ended with status ${result.status || "unknown"}.`);
-      }
+      window.localStorage.setItem(ACTIVE_JOB_KEY, queued.jobId);
+      await pollJob(queued.jobId, requestMessages);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Local AI request failed.");
       setStatus("Ready");
-    } finally {
       setBusy(false);
     }
   }
@@ -193,6 +301,7 @@ export default function LocalAiChat() {
               type="button"
               onClick={() => {
                 if (!busy) {
+                  window.localStorage.removeItem(ACTIVE_JOB_KEY);
                   setMessages([]);
                   setMeta("");
                   setError("");
