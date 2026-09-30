@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("text_inference_jobs")
-      .select("id,status")
+      .select("id,status,client_owner_ref,conversation_id")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -86,6 +86,29 @@ export async function POST(request: Request) {
       .eq("id", jobId);
 
     if (updateError) throw updateError;
+
+    if (job.conversation_id) {
+      const { error: messageError } = await supabase.from("local_ai_messages").upsert(
+        {
+          conversation_id: job.conversation_id,
+          owner_ref: job.client_owner_ref,
+          role: "assistant",
+          content: body.text.trim(),
+          job_id: jobId,
+        },
+        { onConflict: "job_id,role" },
+      );
+
+      if (messageError) throw messageError;
+
+      const { error: conversationError } = await supabase
+        .from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", job.conversation_id)
+        .eq("owner_ref", job.client_owner_ref);
+
+      if (conversationError) throw conversationError;
+    }
 
     return NextResponse.json({ ok: true, status: "completed" });
   } catch (error) {
