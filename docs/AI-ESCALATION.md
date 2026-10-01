@@ -148,15 +148,20 @@ Implemented in the first escalation layer:
 - business-owned preference when qualified;
 - explicit paid permission;
 - automatic spend ceiling;
-- unknown-cost approval gate.
+- unknown-cost approval gate;
+- first paid execution adapter for OpenAI Responses API;
+- guarded execution endpoint at `/api/inference/text/escalation/execute`;
+- environment-controlled qualification, benchmark, model, pricing, context, and business-owned flags.
+
+The OpenAI adapter is inert unless it is explicitly enabled, configured, benchmark-qualified, and the evaluator returns `escalate`. Merely having an API key does not authorize paid execution.
 
 Not yet implemented:
 
-- provider connector execution;
+- automatic repo-agent/local-chat invocation after a local miss;
+- additional provider adapters such as Anthropic/AWS/business-hosted endpoints;
 - persistent per-model benchmark registry;
 - per-tenant automatic spend budgets;
-- automatic post-local-result invocation;
 - cost ledger for paid model calls;
 - independent verification of paid-model output.
 
-Those are the next layers. The evaluator is intentionally separate from provider execution so CoOperative can change GPT/Claude/Gemini/AWS/open-weight providers without changing policy logic.
+The evaluator remains separate from provider execution so CoOperative can change GPT/Claude/Gemini/AWS/open-weight providers without changing policy logic.
