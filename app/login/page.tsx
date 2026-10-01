@@ -2,11 +2,9 @@
 
 import Link from "next/link";
 import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,41 +24,48 @@ export default function LoginPage() {
 
     const supabase = createClient();
 
-    if (mode === "login") {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) {
+          setMessage(error.message);
+          setLoading(false);
+          return;
+        }
+
+        window.location.assign(nextPath);
+        return;
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`,
+        },
+      });
+
       if (error) {
         setMessage(error.message);
         setLoading(false);
         return;
       }
 
-      router.push(nextPath);
-      router.refresh();
-      return;
-    }
+      if (data.session) {
+        window.location.assign(nextPath);
+        return;
+      }
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`,
-      },
-    });
-
-    if (error) {
-      setMessage(error.message);
+      setMessage("Account created. Check your email to confirm your account, then return here to sign in.");
       setLoading(false);
-      return;
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Sign-in could not complete. Please try again.",
+      );
+      setLoading(false);
     }
-
-    if (data.session) {
-      router.push(nextPath);
-      router.refresh();
-      return;
-    }
-
-    setMessage("Account created. Check your email to confirm your account, then return here to sign in.");
-    setLoading(false);
   }
 
   return (
