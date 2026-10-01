@@ -28,5 +28,10 @@ Write-Host "Starting CoOperative Unison node $($env:UNISON_NODE_ID)"
 Write-Host "Idle-only mode: $IdleMinutes minute(s)"
 Write-Host "Queue: $QueueUrl"
 
-& uv run "$PSScriptRoot\hf-image-worker.py"
+$logPath = Join-Path $PSScriptRoot "unison.log"
+Write-Host "Log: $logPath"
+
+& uv run "$PSScriptRoot\hf-image-worker.py" 2>&1 |
+  Tee-Object -FilePath $logPath -Append
+
 exit $LASTEXITCODE
