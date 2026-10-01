@@ -43,7 +43,7 @@ The alpha is for trusted/private machines only.
 
 `workers/install-unison-windows.ps1` stores the alpha configuration in the current Windows user's environment and creates an on-logon scheduled task. The source folder must stay at the same path for this alpha installer.
 
-The image worker defaults to idle-only mode on Windows. It will not claim a new queue job until the configured Windows inactivity threshold is met. A job already running is allowed to finish; preemption is a later phase.
+The image worker defaults to idle-only mode on Windows. It does not preload the image model, will not claim a new queue job until the configured Windows inactivity threshold is met, and releases loaded model/GPU memory when Windows becomes active again. A job already running is allowed to finish; preemption is a later phase. CPU/GPU percentage values are reported policy ceilings in this alpha; hard runtime enforcement is a later scheduler/runtime step.
 
 Example from the repository root:
 
