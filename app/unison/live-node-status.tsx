@@ -23,6 +23,7 @@ type LiveNode = {
     memoryTotalMb?: number;
     gpus?: Array<{ name?: string; memoryTotalMb?: number | null }>;
   } | null;
+  capabilities?: string[] | null;
 };
 
 type StatusPayload = {
@@ -34,6 +35,7 @@ type StatusPayload = {
     busy: number;
     paused: number;
     starting: number;
+    error: number;
     offline: number;
   };
   nodes?: LiveNode[];
@@ -56,6 +58,7 @@ function stateLabel(status: string) {
   if (status === "busy") return "Busy";
   if (status === "paused") return "Paused";
   if (status === "starting") return "Starting";
+  if (status === "error") return "Error";
   return "Offline";
 }
 
@@ -167,6 +170,7 @@ export default function LiveNodeStatus({
           <span><small>Idle</small><strong>{counts.idle}</strong></span>
           <span><small>Busy</small><strong>{counts.busy}</strong></span>
           <span><small>Starting</small><strong>{counts.starting}</strong></span>
+          <span><small>Error</small><strong>{counts.error}</strong></span>
           <span><small>Offline</small><strong>{counts.offline}</strong></span>
         </div>
       ) : null}
@@ -175,6 +179,12 @@ export default function LiveNodeStatus({
         <div className="unison-live-list">
           {nodes.map((node) => {
             const gpu = node.resources?.gpus?.[0]?.name;
+            const startupError = node.capabilities?.find((item) =>
+              item.startsWith("startup_error:"),
+            )?.slice("startup_error:".length);
+            const startupExitCode = node.capabilities?.find((item) =>
+              item.startsWith("startup_exit_code:"),
+            )?.slice("startup_exit_code:".length);
             return (
               <div className="unison-live-node" key={node.id}>
                 <div>
@@ -197,6 +207,17 @@ export default function LiveNodeStatus({
                       ? `Worker ${node.workerVersion}`
                       : "Worker not checked in yet"}
                   </small>
+                  {node.status === "starting" ? (
+                    <small>Preparing Python/AI runtime…</small>
+                  ) : null}
+                  {node.status === "error" ? (
+                    <small className="unison-live-node-error">
+                      {startupError ||
+                        (startupExitCode
+                          ? `Worker exited with code ${startupExitCode}`
+                          : "Worker startup failed.")}
+                    </small>
+                  ) : null}
                 </div>
               </div>
             );
