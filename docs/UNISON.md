@@ -42,14 +42,21 @@ The alpha is for trusted/private machines only.
 
 ## Windows gaming-PC alpha
 
-`workers/install-unison-windows.ps1` stores the alpha configuration in the current Windows user's environment and creates an on-logon scheduled task. The source folder must stay at the same path for this alpha installer.
+For a machine that does not already have the repository, use `workers/bootstrap-unison-windows.ps1`. It installs `uv` through Windows Package Manager when needed, downloads the worker into `%LOCALAPPDATA%\\CoOperative\\Unison`, pairs the node, creates an on-logon scheduled task, starts it in the background, and writes output to `unison.log`.
+
+`workers/install-unison-windows.ps1` performs the local pairing/configuration step and can still be used directly from a repository checkout.
 
 The image worker defaults to idle-only mode on Windows. It does not preload the image model, will not claim a new queue job until the configured Windows inactivity threshold is met, and releases loaded model/GPU memory when Windows becomes active again. A job already running is allowed to finish; preemption is a later phase. CPU/GPU percentage values are reported policy ceilings in this alpha; hard runtime enforcement is a later scheduler/runtime step.
 
-Example from the repository root:
+Example bootstrap on a Windows PC:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\workers\install-unison-windows.ps1 `
+$bootstrap = "$env:TEMP\\unison-bootstrap.ps1"
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/zanibethel/CoOperative/main/workers/bootstrap-unison-windows.ps1" `
+  -OutFile $bootstrap
+
+powershell -ExecutionPolicy Bypass -File $bootstrap `
   -PairCode "<one-time pairing code>" `
   -NodeName "Gaming PC" `
   -IdleMinutes 5

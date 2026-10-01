@@ -82,5 +82,6 @@ Write-Host "Class: $($pairing.nodeClass)"
 Write-Host "Startup task: $taskName"
 Write-Host "The worker will only claim new jobs after $IdleMinutes minute(s) of Windows inactivity."
 Write-Host ""
-Write-Host "Starting the node now..."
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher -QueueUrl $QueueUrl -NodeName $NodeName -IdleMinutes $IdleMinutes
+Write-Host "Starting the node in the background..."
+schtasks.exe /Run /TN $taskName | Out-Null
+Write-Host "Unison is running. Log: $(Join-Path $PSScriptRoot 'unison.log')"
