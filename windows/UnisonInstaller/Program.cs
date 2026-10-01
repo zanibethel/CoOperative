@@ -340,7 +340,7 @@ internal sealed class InstallerForm : Form
             {
                 SetStatus(
                     "Existing Unison node found",
-                    "Checking the current node before changing anything. A healthy worker will not be restarted."
+                    "Checking the current node before changing anything. A healthy current worker will not be restarted."
                 );
 
                 var healthy = await HasFreshRealHeartbeatAsync(
@@ -509,10 +509,27 @@ internal sealed class InstallerForm : Form
                 root.TryGetProperty("fresh", out var freshElement) &&
                 freshElement.ValueKind == JsonValueKind.True;
 
+            var capabilities =
+                root.TryGetProperty("capabilities", out var capabilitiesElement) &&
+                capabilitiesElement.ValueKind == JsonValueKind.Array
+                    ? capabilitiesElement
+                        .EnumerateArray()
+                        .Where(item => item.ValueKind == JsonValueKind.String)
+                        .Select(item => item.GetString() ?? "")
+                        .ToArray()
+                    : [];
+
+            var hasWindowsText =
+                capabilities.Contains("text_generation", StringComparer.OrdinalIgnoreCase);
+            var currentWindowsRuntime =
+                workerVersion.StartsWith("windows-unison-0.9.", StringComparison.OrdinalIgnoreCase);
+
             return fresh &&
                 !workerVersion.Equals("paired", StringComparison.OrdinalIgnoreCase) &&
                 !workerVersion.StartsWith("starting-", StringComparison.OrdinalIgnoreCase) &&
-                !workerVersion.StartsWith("startup-failed-", StringComparison.OrdinalIgnoreCase);
+                !workerVersion.StartsWith("startup-failed-", StringComparison.OrdinalIgnoreCase) &&
+                hasWindowsText &&
+                currentWindowsRuntime;
         }
         catch
         {
