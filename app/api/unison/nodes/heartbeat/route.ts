@@ -16,8 +16,35 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const supabase = createAdminSupabaseClient();
 
-    const { error } = await supabase.from("unison_nodes").upsert(
-      {
+    const { data: existing, error: lookupError } = await supabase
+      .from("unison_nodes")
+      .select("id")
+      .eq("id", input.nodeId)
+      .maybeSingle();
+
+    if (lookupError) throw lookupError;
+
+    if (existing) {
+      const { error } = await supabase
+        .from("unison_nodes")
+        .update({
+          display_name: input.displayName,
+          state: input.state,
+          platform: input.platform,
+          capabilities: input.capabilities,
+          resources: input.resources,
+          policy: input.policy,
+          worker_version: input.workerVersion,
+          last_seen_at: now,
+          updated_at: now,
+        })
+        .eq("id", input.nodeId);
+
+      if (error) throw error;
+    } else {
+      // Only the temporary legacy shared credential can authorize a node that
+      // does not already have a per-node token record.
+      const { error } = await supabase.from("unison_nodes").insert({
         id: input.nodeId,
         display_name: input.displayName,
         owner_ref: input.ownerRef,
@@ -30,11 +57,10 @@ export async function POST(request: Request) {
         worker_version: input.workerVersion,
         last_seen_at: now,
         updated_at: now,
-      },
-      { onConflict: "id" },
-    );
+      });
 
-    if (error) throw error;
+      if (error) throw error;
+    }
 
     return NextResponse.json(
       {
