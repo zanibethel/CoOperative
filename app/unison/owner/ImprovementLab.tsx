@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Evidence = {
   generatedAt: string;
+  generatedAtLocal?: string;
+  displayTimeZone?: string;
   chat: {
     conversations: number;
     messages: number;
@@ -102,6 +104,23 @@ function wait(ms: number) {
 
 function integer(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+const OWNER_DISPLAY_TIME_ZONE = "America/Chicago";
+
+function localTimestamp(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: OWNER_DISPLAY_TIME_ZONE,
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
 }
 
 export default function ImprovementLab() {
@@ -381,7 +400,12 @@ export default function ImprovementLab() {
       </div>
 
       {evidence ? (
-        <div className="owner-improvement-metrics">
+        <>
+          <p className="owner-improvement-note">
+            Evidence captured {evidence.generatedAtLocal || localTimestamp(evidence.generatedAt)}
+            {" · "}Central Time
+          </p>
+          <div className="owner-improvement-metrics">
           <span>
             <small>Inference jobs</small>
             <strong>{integer(evidence.inference.totalJobs)}</strong>
@@ -407,7 +431,8 @@ export default function ImprovementLab() {
             <strong>{integer(verificationNotRun)}</strong>
             <em>jobs marked not run</em>
           </span>
-        </div>
+          </div>
+        </>
       ) : null}
 
       <div className="owner-improvement-chat">
@@ -507,6 +532,9 @@ export default function ImprovementLab() {
                       : ""}
                     {typeof report.latencyMs === "number"
                       ? ` · ${(report.latencyMs / 1000).toFixed(1)}s`
+                      : ""}
+                    {report.completedAt
+                      ? ` · completed ${localTimestamp(report.completedAt)}`
                       : ""}
                   </p>
                 </details>
