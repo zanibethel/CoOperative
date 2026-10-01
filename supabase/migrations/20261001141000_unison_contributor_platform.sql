@@ -63,9 +63,9 @@ alter table public.unison_usage_ledger enable row level security;
 revoke all on table public.unison_usage_ledger from anon, authenticated;
 grant all on table public.unison_usage_ledger to service_role;
 
-create unique index if not exists unison_usage_source_job_unique
-  on public.unison_usage_ledger(source_job_type, source_job_id)
-  where source_job_id is not null;
+alter table public.unison_usage_ledger
+  add constraint unison_usage_source_job_unique
+  unique (source_job_type, source_job_id);
 
 create index if not exists unison_usage_contributor_created_idx
   on public.unison_usage_ledger(contributor_user_id, created_at desc);
