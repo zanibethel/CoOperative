@@ -582,6 +582,27 @@ Workers should receive:
 
 This remains another execution provider beneath CoOperative, not a replacement for the optimizer.
 
+## Phase 11.5 — owner-reviewed AI improvement reports
+
+**Goal:** let CoOperative use its own qualified models to review accumulated platform evidence and continuously prepare improvements for owner approval.
+
+Build:
+
+- comprehensive execution telemetry across Chat, agents, Unison nodes, providers, costs, failures, verification outcomes, and human interventions;
+- an Improvement Report compiler routed to owned/local models first;
+- evidence-backed summaries of recurring failures, wasted tokens/compute, routing mistakes, provider/model performance, reusable reasoning patterns, and opportunities to replace AI with deterministic code;
+- bounded proposal generation for code, playbooks, routing, evals, prompts/context, connectors, and curated model-training candidates;
+- owner-dashboard Chat cards for **Approve / Deny / Defer / Tell me more**;
+- isolated branch/PR generation for approved code/playbook changes;
+- curated training/eval dataset generation for owned models;
+- benchmark gates requiring an improved model to beat the current production model before promotion;
+- strict tenant/privacy boundaries so raw customer data is not silently pooled into shared model training;
+- no autonomous merge, deployment, or model promotion beyond explicit policy/approval.
+
+Owned/local models are the default report compilers when qualified. Stronger paid models are escalation candidates only when policy, benchmark evidence, budget, and approval allow them.
+
+**Exit criteria:** the owner can open the Owner Dashboard chat, review an evidence-backed improvement report created primarily by CoOperative-owned models, ask follow-up questions, approve selected changes, and have those approved changes enter the normal guarded build/eval pipeline.
+
 ## Phase 12 — autonomous improvement flywheel
 
 **Goal:** common business improvements become progressively cheaper and more reliable.
@@ -643,7 +664,8 @@ Until changed by a new explicit owner decision, prioritize:
 11. build migration planner/executor;
 12. run the radio-station cost-optimization pilot;
 13. add verified-savings ledger/business model;
-14. expand into broader business migrations and human-workforce execution.
+14. build owner-facing owned-model Improvement Reports and approval flow in Owner Dashboard chat;
+15. expand into broader business migrations and human-workforce execution.
 
 # Non-goals
 
