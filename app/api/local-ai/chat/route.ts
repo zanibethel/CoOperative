@@ -53,79 +53,6 @@ export async function POST(request: Request) {
     const input = chatRequestSchema.parse(await request.json());
     const admin = createAdminSupabaseClient();
     const ownerRef = owner.ownerRef;
-    const requestedCapability = input.attachmentIds.length > 0 ? "vision" : "text";
-    let preferredNodeId: string | null = null;
-    let targetNodeId: string | null = null;
-    let nodeRouteNote = "";
-
-    if (input.nodeRouting !== "default") {
-      if (requestedCapability !== "text") {
-        if (input.nodeRouting === "require-node") {
-          return NextResponse.json(
-            { error: "The selected Unison node route does not support image-understanding chat yet." },
-            { status: 409 },
-          );
-        }
-      } else {
-        const { data: ownedNodes, error: nodesError } = await admin
-          .from("unison_nodes")
-          .select("id,display_name,state,capabilities,policy,last_seen_at")
-          .eq("contributor_user_id", owner.userId)
-          .order("last_seen_at", { ascending: false });
-
-        if (nodesError) throw nodesError;
-
-        const freshAfter = Date.now() - 90_000;
-        const textNodes = (ownedNodes || []).filter((node) => {
-          const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
-          const policy =
-            node.policy && typeof node.policy === "object"
-              ? (node.policy as { allowText?: unknown })
-              : {};
-          const seenAt = Date.parse(node.last_seen_at || "");
-          return (
-            capabilities.includes("text_generation") &&
-            policy.allowText !== false &&
-            Number.isFinite(seenAt) &&
-            seenAt >= freshAfter &&
-            node.state !== "paused"
-          );
-        });
-
-        if (input.nodeRouting === "require-node") {
-          if (!input.requiredNodeId) {
-            return NextResponse.json(
-              { error: "Choose an owned Unison node to require." },
-              { status: 400 },
-            );
-          }
-
-          const selected = textNodes.find((node) => node.id === input.requiredNodeId);
-          if (!selected) {
-            return NextResponse.json(
-              { error: "That owned Unison node is not currently available for text generation." },
-              { status: 409 },
-            );
-          }
-
-          targetNodeId = selected.id;
-          nodeRouteNote = ` Required owned node ${selected.display_name || selected.id}.`;
-        } else {
-          const statePriority: Record<string, number> = { idle: 0, online: 1, busy: 2 };
-          const selected = [...textNodes].sort(
-            (a, b) => (statePriority[a.state] ?? 9) - (statePriority[b.state] ?? 9),
-          )[0];
-          if (selected) {
-            preferredNodeId = selected.id;
-            nodeRouteNote =
-              ` Preferred owned node ${selected.display_name || selected.id} for the first 15 seconds.`;
-          } else {
-            nodeRouteNote = " No fresh owned text node was available, so normal local routing remains eligible.";
-          }
-        }
-      }
-    }
-
     const businessContext = await buildBusinessChatContext(
       owner.userId,
       input.businessId,
@@ -217,6 +144,80 @@ export async function POST(request: Request) {
         currentAttachmentIds = latestImageMessage.attachment_ids.slice(0, 4);
       }
     }
+
+    const requestedCapability = currentAttachmentIds.length > 0 ? "vision" : "text";
+    let preferredNodeId: string | null = null;
+    let targetNodeId: string | null = null;
+    let nodeRouteNote = "";
+
+    if (input.nodeRouting !== "default") {
+      if (requestedCapability !== "text") {
+        if (input.nodeRouting === "require-node") {
+          return NextResponse.json(
+            { error: "The selected Unison node route does not support image-understanding chat yet." },
+            { status: 409 },
+          );
+        }
+      } else {
+        const { data: ownedNodes, error: nodesError } = await admin
+          .from("unison_nodes")
+          .select("id,display_name,state,capabilities,policy,last_seen_at")
+          .eq("contributor_user_id", owner.userId)
+          .order("last_seen_at", { ascending: false });
+
+        if (nodesError) throw nodesError;
+
+        const freshAfter = Date.now() - 90_000;
+        const textNodes = (ownedNodes || []).filter((node) => {
+          const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
+          const policy =
+            node.policy && typeof node.policy === "object"
+              ? (node.policy as { allowText?: unknown })
+              : {};
+          const seenAt = Date.parse(node.last_seen_at || "");
+          return (
+            capabilities.includes("text_generation") &&
+            policy.allowText !== false &&
+            Number.isFinite(seenAt) &&
+            seenAt >= freshAfter &&
+            node.state !== "paused"
+          );
+        });
+
+        if (input.nodeRouting === "require-node") {
+          if (!input.requiredNodeId) {
+            return NextResponse.json(
+              { error: "Choose an owned Unison node to require." },
+              { status: 400 },
+            );
+          }
+
+          const selected = textNodes.find((node) => node.id === input.requiredNodeId);
+          if (!selected) {
+            return NextResponse.json(
+              { error: "That owned Unison node is not currently available for text generation." },
+              { status: 409 },
+            );
+          }
+
+          targetNodeId = selected.id;
+          nodeRouteNote = ` Required owned node ${selected.display_name || selected.id}.`;
+        } else {
+          const statePriority: Record<string, number> = { idle: 0, online: 1, busy: 2 };
+          const selected = [...textNodes].sort(
+            (a, b) => (statePriority[a.state] ?? 9) - (statePriority[b.state] ?? 9),
+          )[0];
+          if (selected) {
+            preferredNodeId = selected.id;
+            nodeRouteNote =
+              ` Preferred owned node ${selected.display_name || selected.id} for the first 15 seconds.`;
+          } else {
+            nodeRouteNote = " No fresh owned text node was available, so normal local routing remains eligible.";
+          }
+        }
+      }
+    }
+
 
     const history = [...(previousMessages || [])]
       .reverse()
