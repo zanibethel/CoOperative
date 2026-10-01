@@ -238,7 +238,8 @@ export function evaluatePaidEscalation(
   const budget = evidence.automaticPaidBudgetUsd ?? 0;
   const effectivelyFree =
     candidate.businessOwned === true &&
-    (marginalCost === undefined || marginalCost <= 0);
+    typeof marginalCost === "number" &&
+    marginalCost === 0;
 
   if (effectivelyFree) {
     return {
