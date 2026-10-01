@@ -161,8 +161,9 @@ export default function JoinClient({
             <div className="eyebrow">Add this Windows PC</div>
             <h2>Install Unison on this computer.</h2>
             <p>
-              CoOperative will create a one-time device credential and prepare a personalized installer.
-              No pairing code or PowerShell command needs to be copied manually.
+              CoOperative links the physical PC to the contributor who authorizes setup. New installs
+              run machine-wide, so the node keeps working across Windows profiles and only accepts
+              work after the whole PC is idle. Windows will request one administrator approval.
             </p>
           </div>
 
@@ -174,14 +175,15 @@ export default function JoinClient({
               Download latest Setup.exe
             </a>
             <button className="secondary-button" type="button" onClick={installThisPc} disabled={working}>
-              {working ? "Preparing fallback…" : "Use current installer fallback"}
+              {working ? "Preparing fallback…" : "Legacy per-profile fallback"}
             </button>
           </div>
           <p>
             This downloads the current Windows installer directly from the official CoOperative
-            release, avoiding the large-file web proxy. Setup opens your browser for secure account
-            approval, preserves an existing node identity when present, and waits for a verified
-            text-capable heartbeat before showing Connected.
+            release. Setup opens your browser first so the correct contributor authorizes the PC,
+            then requests administrator approval to install the worker for the whole machine.
+            Existing machine-wide identities are preserved, and Setup waits for a verified
+            whole-PC-idle-capable heartbeat before showing Connected.
           </p>
 
           <details>
