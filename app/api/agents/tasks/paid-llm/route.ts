@@ -7,10 +7,12 @@ import {
   type EscalationEvidence,
 } from "@/lib/inference/escalation-evaluator";
 import {
+  configuredBusinessOpenAiCandidate,
   configuredOpenAiCandidate,
   executeOpenAiPaidText,
 } from "@/lib/inference/openai-paid-executor";
 import { localWorkerAuthorized } from "@/lib/agents/server";
+import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 
 export const runtime = "nodejs";
 export const maxDuration = 210;
@@ -95,8 +97,19 @@ export async function POST(request: Request) {
       requiredSuccessRate: 0.8,
     };
 
-    const openAi = configuredOpenAiCandidate(evidence);
-    const candidates = openAi ? [openAi] : [];
+    const businessOpenAiService =
+      await businessOwnedServiceCredentialForOwner(
+        task.owner_ref,
+        "openai-api",
+      );
+    const businessOpenAi = businessOpenAiService
+      ? configuredBusinessOpenAiCandidate(evidence)
+      : null;
+    const platformOpenAi = configuredOpenAiCandidate(evidence);
+    const candidates = [businessOpenAi, platformOpenAi].filter(
+      (candidate): candidate is NonNullable<typeof candidate> =>
+        Boolean(candidate),
+    );
     const decision = evaluatePaidEscalation(evidence, candidates);
 
     if (
@@ -122,20 +135,40 @@ export async function POST(request: Request) {
       );
     }
 
+    const usingBusinessOwnedAi =
+      decision.candidate.id === "business-openai";
+
+    if (usingBusinessOwnedAi && !businessOpenAiService) {
+      return NextResponse.json(
+        { error: "The business-owned AI connection is no longer available." },
+        { status: 409 },
+      );
+    }
+
     await admin.from("agent_task_events").insert({
       task_id: task.id,
       owner_ref: task.owner_ref,
       kind: "paid_llm_started",
-      message: "Approved stronger-model reasoning started.",
+      message: usingBusinessOwnedAi
+        ? "Approved reasoning started on the business-owned AI account."
+        : "Approved stronger-model reasoning started.",
       metadata: {
         provider,
         model,
+        executorSource: usingBusinessOwnedAi
+          ? "business-connected-service"
+          : "cooperative-platform",
         approvedMaxCostUsd,
         estimatedCostUsd: decision.candidate.estimatedMarginalCostUsd,
       },
     });
 
-    const result = await executeOpenAiPaidText(evidence);
+    const result = await executeOpenAiPaidText(evidence, {
+      apiKey: usingBusinessOwnedAi
+        ? businessOpenAiService?.credential
+        : undefined,
+      model: decision.candidate.model,
+    });
 
     if (
       typeof result.estimatedCostUsd === "number" &&
@@ -177,6 +210,9 @@ export async function POST(request: Request) {
         outputTokens: result.outputTokens,
         estimatedCostUsd: result.estimatedCostUsd,
         approvedMaxCostUsd,
+        executorSource: usingBusinessOwnedAi
+          ? "business-connected-service"
+          : "cooperative-platform",
       },
     });
 
