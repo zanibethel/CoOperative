@@ -126,14 +126,6 @@ export default function AgentConsole() {
     return () => window.clearInterval(timer);
   }, [tasks, refreshTasks]);
 
-  useEffect(() => {
-    if (!selectedAgent) return;
-    if (!selectedAgent.modes.includes(mode)) {
-      setMode(selectedAgent.modes[0] || "inspect");
-    }
-    setProfile(selectedAgent.preferredProfile);
-  }, [selectedAgent, mode]);
-
   async function queueTask() {
     const trimmed = objective.trim();
     if (!trimmed || submitting) return;
@@ -174,7 +166,19 @@ export default function AgentConsole() {
             <span>Agent</span>
             <select
               value={agentKey}
-              onChange={(event) => setAgentKey(event.target.value)}
+              onChange={(event) => {
+                const nextKey = event.target.value;
+                setAgentKey(nextKey);
+                const nextAgent = agents.find((agent) => agent.key === nextKey);
+                if (nextAgent) {
+                  setMode((currentMode) =>
+                    nextAgent.modes.includes(currentMode)
+                      ? currentMode
+                      : nextAgent.modes[0] || "inspect",
+                  );
+                  setProfile(nextAgent.preferredProfile);
+                }
+              }}
             >
               {agents.map((agent) => (
                 <option value={agent.key} key={agent.key}>
