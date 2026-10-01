@@ -84,6 +84,15 @@ export async function POST(request: Request) {
         };
       });
 
+    const taskResult =
+      task.result && typeof task.result === "object"
+        ? (task.result as Record<string, unknown>)
+        : {};
+    const executorApproval =
+      taskResult.executorApproval && typeof taskResult.executorApproval === "object"
+        ? (taskResult.executorApproval as Record<string, unknown>)
+        : null;
+
     await admin.from("agent_task_events").insert({
       task_id: task.id,
       owner_ref: task.owner_ref,
@@ -92,6 +101,7 @@ export async function POST(request: Request) {
       metadata: {
         workerId,
         deniedExamplesLoaded: learningContext.length,
+        paidExecutorApproved: Boolean(executorApproval),
       },
     });
 
@@ -106,6 +116,7 @@ export async function POST(request: Request) {
       agent,
       repository,
       learningContext,
+      executorApproval,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Could not claim agent task.";

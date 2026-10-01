@@ -214,6 +214,37 @@ def wait_llm(task_id, job_id):
             raise AgentError(result.get("error") or f"Local AI job {result.get('status')}.")
         time.sleep(1.5)
 
+def run_reasoning(task_id, profile, messages, max_tokens, executor_approval=None):
+    if isinstance(executor_approval, dict):
+        response = post(
+            "/api/agents/tasks/paid-llm",
+            {
+                "taskId": task_id,
+                "messages": messages,
+                "maxTokens": max_tokens,
+                "temperature": 0.1,
+            },
+            timeout=210.0,
+        )
+        result = response.json()
+        if result.get("status") != "completed":
+            raise AgentError(result.get("error") or "Approved stronger-model reasoning did not complete.")
+        return {
+            "text": result.get("text"),
+            "model": result.get("model"),
+            "provider": result.get("provider"),
+            "promptTokens": result.get("promptTokens"),
+            "outputTokens": result.get("outputTokens"),
+            "estimatedCostUsd": result.get("estimatedCostUsd"),
+            "latencyMs": None,
+            "executor": "paid-approved",
+        }
+
+    job_id = queue_llm(task_id, profile, messages, max_tokens)
+    result = wait_llm(task_id, job_id)
+    result["executor"] = "local"
+    return result
+
 def system_prompt(agent, mode):
     common = (
         "You are a bounded CoOperative local repo agent. Use supplied repository evidence only. "
@@ -303,7 +334,7 @@ def materialize_plan(repo, raw_plan):
         raise AgentError("Local AI proposed too many files.")
     return {"summary":str(raw_plan.get("summary") or ""),"files":materialized,"editCount":len(raw_plan.get("edits") or [])}
 
-def parse_plan_with_retry(task_id, profile, messages, llm, text, max_tokens=2400):
+def parse_plan_with_retry(task_id, profile, messages, llm, text, max_tokens=2400, executor_approval=None):
     try:
         return parse_plan(text), llm, text, False
     except AgentError as first_error:
@@ -313,8 +344,13 @@ def parse_plan_with_retry(task_id, profile, messages, llm, text, max_tokens=2400
             {"role":"assistant","content":text[:10000]},
             {"role":"user","content":"Return the same bounded change using ONLY the required RAW PLAN delimiters. Do not use JSON or Markdown fences. Keep the same scope and prefer small exact EDIT blocks."},
         ]
-        retry_id = queue_llm(task_id, profile, retry_messages, max_tokens)
-        retry_llm = wait_llm(task_id, retry_id)
+        retry_llm = run_reasoning(
+            task_id,
+            profile,
+            retry_messages,
+            max_tokens,
+            executor_approval=executor_approval,
+        )
         retry_text = str(retry_llm.get("text") or "")
         try:
             plan = parse_plan(retry_text)
@@ -518,6 +554,8 @@ def handle_task(task):
     agent, repository = task["agent"], task["repository"]
     mode, objective = str(task["mode"]), str(task["objective"])
     profile = str(task.get("requestedProfile") or agent.get("preferredProfile") or "fast")
+    executor_approval = task.get("executorApproval")
+    use_paid_executor = isinstance(executor_approval, dict)
 
     source = ensure_repo(repository)
     progress(task_id, f"Approved repo resolved at {source}.", metadata={"githubRepo":repository["githubRepo"]})
@@ -591,11 +629,39 @@ def handle_task(task):
     if len(evidence) > 14000:
         messages.append({"role":"user","content":("ADDITIONAL REPOSITORY EVIDENCE:\n"+evidence[14000:28000])[:16000]})
 
-    progress(task_id, "Local AI reasoning requested.", status="waiting_llm")
-    llm_id = queue_llm(task_id, profile, messages, 2400 if mode in {"prepare_change","update_memory"} else 1400)
-    llm = wait_llm(task_id, llm_id)
+    progress(
+        task_id,
+        "Approved stronger-model reasoning requested." if use_paid_executor else "Local AI reasoning requested.",
+        status="waiting_llm",
+        metadata={
+            "executor": "paid-approved" if use_paid_executor else "local",
+            "provider": executor_approval.get("provider") if use_paid_executor else None,
+            "model": executor_approval.get("model") if use_paid_executor else None,
+            "approvedMaxCostUsd": executor_approval.get("approvedMaxCostUsd") if use_paid_executor else None,
+        },
+    )
+    llm = run_reasoning(
+        task_id,
+        profile,
+        messages,
+        2400 if mode in {"prepare_change","update_memory"} else 1400,
+        executor_approval=executor_approval,
+    )
     text = str(llm.get("text") or "")
-    progress(task_id, "Local AI reasoning completed.", status="running", metadata={"model":llm.get("model"),"latencyMs":llm.get("latencyMs"),"promptTokens":llm.get("promptTokens"),"outputTokens":llm.get("outputTokens")})
+    progress(
+        task_id,
+        "Approved stronger-model reasoning completed." if use_paid_executor else "Local AI reasoning completed.",
+        status="running",
+        metadata={
+            "executor": llm.get("executor"),
+            "provider": llm.get("provider"),
+            "model": llm.get("model"),
+            "latencyMs": llm.get("latencyMs"),
+            "promptTokens": llm.get("promptTokens"),
+            "outputTokens": llm.get("outputTokens"),
+            "estimatedCostUsd": llm.get("estimatedCostUsd"),
+        },
+    )
 
     if mode in {"inspect","verify"}:
         complete(task_id, "completed", result={
@@ -615,7 +681,13 @@ def handle_task(task):
         return
 
     raw_plan, llm, text, format_recovered = parse_plan_with_retry(
-        task_id, profile, messages, llm, text, 2400
+        task_id,
+        profile,
+        messages,
+        llm,
+        text,
+        2400,
+        executor_approval=executor_approval,
     )
     plan = materialize_plan(target, raw_plan)
     guard = evaluate_plan_scope(target, objective, plan)
@@ -640,12 +712,29 @@ def handle_task(task):
                 )[:7000],
             }
         ]
-        progress(task_id, "Local AI correction requested after scope-guard rejection.", status="waiting_llm")
-        retry_id = queue_llm(task_id, profile, retry_messages, 2400)
-        llm = wait_llm(task_id, retry_id)
+        progress(
+            task_id,
+            "Approved stronger-model correction requested after scope-guard rejection."
+            if use_paid_executor
+            else "Local AI correction requested after scope-guard rejection.",
+            status="waiting_llm",
+        )
+        llm = run_reasoning(
+            task_id,
+            profile,
+            retry_messages,
+            2400,
+            executor_approval=executor_approval,
+        )
         text = str(llm.get("text") or "")
         raw_plan, llm, text, scope_format_recovered = parse_plan_with_retry(
-            task_id, profile, retry_messages, llm, text, 2400
+            task_id,
+            profile,
+            retry_messages,
+            llm,
+            text,
+            2400,
+            executor_approval=executor_approval,
         )
         format_recovered = format_recovered or scope_format_recovered
         plan = materialize_plan(target, raw_plan)
@@ -720,6 +809,10 @@ def handle_task(task):
         "planFormat":"raw-edit-v1",
         "editCount":plan.get("editCount", 0),
         "evidenceFiles":context["files"],
+        "executor": llm.get("executor"),
+        "provider": llm.get("provider"),
+        "estimatedCostUsd": llm.get("estimatedCostUsd"),
+        "executorApproval": executor_approval if use_paid_executor else None,
     })
 
 def queue_loop():
