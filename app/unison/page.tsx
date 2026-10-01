@@ -1,6 +1,10 @@
 import Link from "next/link";
 
-export default function UnisonPage() {
+import { getUnisonViewer } from "@/lib/unison/access";
+
+export default async function UnisonPage() {
+  const viewer = await getUnisonViewer();
+
   return (
     <main className="shell">
       <nav className="nav">
@@ -8,6 +12,7 @@ export default function UnisonPage() {
         <div className="nav-links">
           <Link href="/">CoOperative</Link>
           <Link href="/unison/dashboard">Contributor dashboard</Link>
+          {viewer?.isOwner ? <Link href="/unison/owner">Owner dashboard</Link> : null}
           <div className="badge">People-owned compute</div>
         </div>
       </nav>
