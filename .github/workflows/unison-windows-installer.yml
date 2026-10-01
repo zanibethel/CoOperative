@@ -55,12 +55,16 @@ jobs:
           Copy-Item $source "artifacts/CoOperative-Unison-Setup.exe" -Force
 
       - name: Sign installer when certificate is configured
-        if: ${{ github.event_name != 'pull_request' && secrets.WINDOWS_CERT_BASE64 != '' }}
+        if: ${{ github.event_name != 'pull_request' }}
         shell: pwsh
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_BASE64)) {
+            Write-Host "No Windows signing certificate is configured; publishing unsigned preview."
+            exit 0
+          }
           $certPath = Join-Path $env:RUNNER_TEMP "unison-signing.pfx"
           [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
