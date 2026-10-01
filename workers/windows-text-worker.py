@@ -504,14 +504,18 @@ def queue_loop():
     while True:
         job_id = None
         try:
-            if not node_available():
-                time.sleep(QUEUE_POLL_SECONDS)
-                continue
+            idle_available = node_available()
 
             response = httpx.post(
                 f"{QUEUE_URL}/api/inference/text/jobs/claim",
                 headers=queue_headers(),
-                json={"workerId": WORKER_ID},
+                json={
+                    "workerId": WORKER_ID,
+                    # If the PC is active, only an explicitly pinned chat owned
+                    # by this contributor may bypass the idle gate. Background
+                    # and community work remain idle-only.
+                    "interactiveOnly": not idle_available,
+                },
                 timeout=30.0,
                 follow_redirects=True,
             )
@@ -522,9 +526,11 @@ def queue_loop():
             response.raise_for_status()
             job = response.json()
             job_id = str(job["jobId"])
+            interactive_local = bool(job.get("interactiveLocal"))
             print(
-                f"Claimed async text job {job_id} "
-                f"({job.get('profile', 'fast')}, {job.get('capability', 'text')}).",
+                f"Claimed {'interactive local chat' if interactive_local else 'async text'} "
+                f"job {job_id} ({job.get('profile', 'fast')}, "
+                f"{job.get('capability', 'text')}).",
                 flush=True,
             )
 
