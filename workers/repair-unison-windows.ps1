@@ -55,6 +55,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/workers"
 $workerFiles = @(
   "hf-image-worker.py",
+  "windows-text-worker.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
   "control-unison-windows.ps1",
@@ -124,7 +125,11 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
   Where-Object {
     $_.CommandLine -and
     $_.CommandLine -like "*CoOperative*Unison*" -and
-    $_.CommandLine -like "*hf-image-worker.py*"
+    (
+      $_.CommandLine -like "*hf-image-worker.py*" -or
+      $_.CommandLine -like "*windows-text-worker.py*" -or
+      $_.CommandLine -like "*start-unison-windows.ps1*"
+    )
   } |
   ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
