@@ -30,6 +30,7 @@ foreach ($name in @(
   "UNISON_SHARED_UV_EXE",
   "UNISON_OLLAMA_EXE",
   "UNISON_OLLAMA_URL",
+  "UNISON_LOCAL_CHAT_PORT",
   "OLLAMA_HOST",
   "UNISON_CREDENTIAL_PATH",
   "UV_CACHE_DIR",
@@ -110,8 +111,12 @@ $textLogPath = Join-Path $PSScriptRoot "unison-text.log"
 $textErrorLogPath = Join-Path $PSScriptRoot "unison-text-error.log"
 $textReadyPath = Join-Path $PSScriptRoot "text-worker.ready"
 $textBusyPath = Join-Path $PSScriptRoot "text-worker.busy"
+$localChatLogPath = Join-Path $PSScriptRoot "local-chat.log"
+$localChatErrorLogPath = Join-Path $PSScriptRoot "local-chat-error.log"
+$localChatReadyPath = Join-Path $PSScriptRoot "local-chat.ready"
+$localChatBusyPath = Join-Path $PSScriptRoot "local-chat.busy"
 
-Remove-Item -Force $textReadyPath,$textBusyPath -ErrorAction SilentlyContinue
+Remove-Item -Force $textReadyPath,$textBusyPath,$localChatReadyPath,$localChatBusyPath -ErrorAction SilentlyContinue
 
 function Send-StartupHeartbeat(
   [string]$WorkerVersion,
@@ -176,6 +181,39 @@ function Last-Diagnostic([string]$Primary, [string]$Fallback, [int]$ExitCode) {
     $diagnostic = "Worker exited with code $ExitCode."
   }
   return $diagnostic
+}
+
+function Start-LocalChatRuntime() {
+  $localChatPath = Join-Path $PSScriptRoot "windows-local-chat.py"
+  if (-not (Test-Path $localChatPath)) {
+    Add-Content -Path $localChatErrorLogPath -Value "Local chat worker file is missing."
+    return $null
+  }
+
+  Remove-Item -Force $localChatReadyPath,$localChatBusyPath -ErrorAction SilentlyContinue
+  $process = Start-Process `
+    -FilePath $uvExe `
+    -ArgumentList @("run", "`"$localChatPath`"") `
+    -WorkingDirectory $PSScriptRoot `
+    -RedirectStandardOutput $localChatLogPath `
+    -RedirectStandardError $localChatErrorLogPath `
+    -PassThru `
+    -WindowStyle Hidden
+
+  $deadline = (Get-Date).AddSeconds(45)
+  while ((Get-Date) -lt $deadline -and -not $process.HasExited) {
+    if (Test-Path $localChatReadyPath) {
+      return $process
+    }
+    Start-Sleep -Milliseconds 500
+    $process.Refresh()
+  }
+
+  if (-not $process.HasExited) {
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+  }
+  Add-Content -Path $localChatErrorLogPath -Value "Local personal chat did not become ready."
+  return $null
 }
 
 function Start-TextRuntime([int]$MaxAttempts = 3) {
@@ -256,6 +294,13 @@ Write-Host "Log: $logPath"
 
 Send-StartupHeartbeat -WorkerVersion "starting-windows-0.4" -Capabilities @("startup_phase:text-runtime")
 
+$localChatProcess = Start-LocalChatRuntime
+if ($localChatProcess) {
+  Write-Host "Personal Local AI chat ready at http://127.0.0.1:$($(if ($env:UNISON_LOCAL_CHAT_PORT) { $env:UNISON_LOCAL_CHAT_PORT } else { '11436' }))/"
+} else {
+  Write-Host "Personal Local AI chat did not start; community compute can still continue."
+}
+
 $textProcess = Start-TextRuntime -MaxAttempts 3
 if (-not $textProcess) {
   $diagnostic = Last-Diagnostic $textErrorLogPath $textLogPath 1
@@ -274,6 +319,9 @@ $textCapabilities = @(
 )
 if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
   $textCapabilities += @("machine_wide", "whole_pc_idle")
+}
+if (Test-Path $localChatReadyPath) {
+  $textCapabilities += "local_personal_chat"
 }
 $textReadyVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
   "windows-unison-1.0.0-machine-text-only"
@@ -325,6 +373,9 @@ while (-not $imageProcess.HasExited -and -not $textProcess.HasExited) {
     if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
       $imageStartingCapabilities += @("machine_wide", "whole_pc_idle")
     }
+    if (Test-Path $localChatReadyPath) {
+      $imageStartingCapabilities += "local_personal_chat"
+    }
 
     $imageStartingVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
       "windows-unison-1.0.0-machine-text-only"
@@ -353,6 +404,9 @@ if ($textExitedFirst) {
   if (-not $imageProcess.HasExited) {
     Stop-Process -Id $imageProcess.Id -Force -ErrorAction SilentlyContinue
   }
+  if ($localChatProcess -and -not $localChatProcess.HasExited) {
+    Stop-Process -Id $localChatProcess.Id -Force -ErrorAction SilentlyContinue
+  }
 
   Send-StartupHeartbeat `
     -WorkerVersion "startup-failed-windows-0.5" `
@@ -379,6 +433,9 @@ if ($imageExitedFirst) {
   )
   if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
     $degradedCapabilities += @("machine_wide", "whole_pc_idle")
+  }
+  if (Test-Path $localChatReadyPath) {
+    $degradedCapabilities += "local_personal_chat"
   }
 
   while (-not $textProcess.HasExited) {
