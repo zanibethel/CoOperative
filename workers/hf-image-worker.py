@@ -428,6 +428,10 @@ def queue_loop():
         job_id = None
         try:
             if not node_available():
+                if loaded_profile is not None:
+                    with MODEL_LOCK:
+                        clear_model()
+                    print("Unison node is in active use; released model memory.", flush=True)
                 time.sleep(QUEUE_POLL_SECONDS)
                 continue
 
@@ -590,4 +594,8 @@ if __name__ == "__main__":
     elif QUEUE_URL:
         print("COOPERATIVE_QUEUE_URL is set, but INFERENCE_WORKER_TOKEN is missing; queue polling disabled.")
 
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    uvicorn.run(
+        app,
+        host=os.getenv("WORKER_BIND_HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8000")),
+    )
