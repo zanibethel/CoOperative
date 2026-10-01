@@ -26,7 +26,20 @@ export async function GET() {
     return NextResponse.json({ error: "Could not load contributor profile." }, { status: 502 });
   }
 
-  return NextResponse.json({ contributor: data ?? null });
+  const { data: nodes, error: nodeError } = await admin
+    .from("unison_nodes")
+    .select("id,display_name,state,last_seen_at,worker_version")
+    .eq("contributor_user_id", identity.userId)
+    .order("created_at", { ascending: false });
+
+  if (nodeError) {
+    return NextResponse.json({ error: "Could not load contributor nodes." }, { status: 502 });
+  }
+
+  return NextResponse.json({
+    contributor: data ?? null,
+    nodes: nodes ?? [],
+  });
 }
 
 export async function POST(request: Request) {
