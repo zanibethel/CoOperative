@@ -311,6 +311,30 @@ Benchmark current models and stronger open-weight candidates before promoting th
 
 **Exit criteria:** model/router changes require evidence that they improve the target workload.
 
+## Phase 2.5 — governed stronger-model escalation
+
+**Goal:** let CoOperative recognize when local reasoning is not reliable enough and deliberately select a stronger qualified executor.
+
+Build:
+
+- deterministic escalation scoring from verification/failure evidence;
+- benchmark-qualified executor registry;
+- business-owned AI candidates;
+- explicit marginal-cost estimates;
+- owner/tenant automatic-spend budgets;
+- approval-required path when cost is unknown or above budget;
+- provider-neutral execution adapter contract;
+- actual-cost and verified-outcome logging;
+- independent verification of escalated results.
+
+The local model is not the sole judge of its own capability. Escalation should be based on deterministic evidence plus measured model performance.
+
+Unknown cost must never auto-run. No surprise paid fallback remains a hard rule.
+
+**Current progress:** deterministic evaluator and authenticated evaluation endpoint implemented; provider execution is the next layer.
+
+**Exit criteria:** after a verified local miss, CoOperative can select a benchmark-qualified stronger executor, obtain approval when required, execute through a configured connector, and record cost + verified outcome.
+
 ## Phase 3 — stronger owned reasoning models
 
 **Goal:** raise local/owned reasoning quality before depending on paid frontier APIs.
@@ -557,15 +581,16 @@ Until changed by a new explicit owner decision, prioritize:
 1. stabilize current Mac/local workers and agent recovery;
 2. finish the current image/agent test loop;
 3. implement runtime Reasoning Envelope enforcement;
-4. build CoOperative eval/benchmark harness;
-5. benchmark stronger open-weight reasoning models;
-6. build AWS execution target and prove Mac-independent inference;
-7. add business-owned AI connector contract;
-8. build service/cost discovery;
-9. build migration planner/executor;
-10. run the radio-station cost-optimization pilot;
-11. add verified-savings ledger/business model;
-12. expand into broader business migrations and human-workforce execution.
+4. finish the governed escalation evaluator and connect the first stronger executor;
+5. build CoOperative eval/benchmark harness and use it to qualify escalation candidates;
+6. benchmark stronger open-weight reasoning models;
+7. build AWS execution target and prove Mac-independent inference;
+8. add business-owned AI connector contract;
+9. build service/cost discovery;
+10. build migration planner/executor;
+11. run the radio-station cost-optimization pilot;
+12. add verified-savings ledger/business model;
+13. expand into broader business migrations and human-workforce execution.
 
 # Non-goals
 
