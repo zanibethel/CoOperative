@@ -24,6 +24,12 @@ if ($ExpectedNodeId -and $nodeId -ne $ExpectedNodeId) {
   throw "This repair file targets node '$ExpectedNodeId', but this PC is paired as '$nodeId'. Open the dashboard on the intended PC."
 }
 
+$uvCandidate = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
+if (-not (Get-Command uv -ErrorAction SilentlyContinue) -and (Test-Path $uvCandidate)) {
+  $uvDir = Split-Path $uvCandidate
+  $env:Path = "$uvDir;$env:Path"
+}
+
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     throw "Unison needs uv, and Windows Package Manager is not available to install it automatically."
@@ -36,7 +42,6 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
     [Environment]::GetEnvironmentVariable("Path", "User")
 
-  $uvCandidate = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
   if (-not (Get-Command uv -ErrorAction SilentlyContinue) -and (Test-Path $uvCandidate)) {
     $uvDir = Split-Path $uvCandidate
     $env:Path = "$uvDir;$env:Path"
@@ -96,9 +101,12 @@ $startupDir = [Environment]::GetFolderPath("Startup")
 $startupLauncher = Join-Path $startupDir "CoOperative-Unison.vbs"
 Copy-Item -Force $hiddenLauncher $startupLauncher
 
-# Remove the older scheduled-task startup path if it exists. Startup-folder
-# launch is per-user, does not require elevation, and is less fragile with paths.
-schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
+# Remove the older scheduled-task startup path only when it actually exists.
+# A missing legacy task is normal and must never abort repair.
+$legacyTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($legacyTask) {
+  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+}
 
 $protocolRoot = "HKCU:\Software\Classes\cooperative-unison"
 $commandKey = Join-Path $protocolRoot "shell\open\command"
