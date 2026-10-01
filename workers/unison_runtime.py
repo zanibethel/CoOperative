@@ -38,7 +38,11 @@ QUEUE_URL = os.getenv(
     "COOPERATIVE_QUEUE_URL",
     "https://co-operative-mu.vercel.app",
 ).rstrip("/")
-NODE_TOKEN = os.getenv("UNISON_NODE_SHARED_SECRET") or os.getenv("INFERENCE_WORKER_TOKEN")
+NODE_TOKEN = (
+    os.getenv("UNISON_NODE_TOKEN")
+    or os.getenv("UNISON_NODE_SHARED_SECRET")
+    or os.getenv("INFERENCE_WORKER_TOKEN")
+)
 NODE_ID = (
     os.getenv("UNISON_NODE_ID")
     or os.getenv("COOPERATIVE_WORKER_ID")
