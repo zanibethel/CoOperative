@@ -114,16 +114,21 @@ function Send-StartupHeartbeat(
 }
 
 function Last-Diagnostic([string]$Primary, [string]$Fallback, [int]$ExitCode) {
-  $tail = ""
+  $lines = @()
   if (Test-Path $Primary) {
-    $tail = (Get-Content $Primary -Tail 12 -ErrorAction SilentlyContinue) -join " | "
+    $lines = @(Get-Content $Primary -Tail 40 -ErrorAction SilentlyContinue)
   }
-  if (-not $tail -and (Test-Path $Fallback)) {
-    $tail = (Get-Content $Fallback -Tail 12 -ErrorAction SilentlyContinue) -join " | "
+  if ($lines.Count -eq 0 -and (Test-Path $Fallback)) {
+    $lines = @(Get-Content $Fallback -Tail 40 -ErrorAction SilentlyContinue)
   }
-  $diagnostic = ($tail -replace "[\r\n]+", " " -replace "\s+", " ").Trim()
-  if ($diagnostic.Length -gt 95) {
-    $diagnostic = $diagnostic.Substring(0, 95)
+
+  $diagnostic = $lines |
+    ForEach-Object { ($_ -replace "[\r\n]+", " " -replace "\s+", " ").Trim() } |
+    Where-Object { $_ } |
+    Select-Object -Last 1
+
+  if ($diagnostic -and $diagnostic.Length -gt 140) {
+    $diagnostic = $diagnostic.Substring(0, 140)
   }
   if (-not $diagnostic) {
     $diagnostic = "Worker exited with code $ExitCode."
@@ -131,51 +136,92 @@ function Last-Diagnostic([string]$Primary, [string]$Fallback, [int]$ExitCode) {
   return $diagnostic
 }
 
+function Start-TextRuntime([int]$MaxAttempts = 3) {
+  $textWorkerPath = Join-Path $PSScriptRoot "windows-text-worker.py"
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    Remove-Item -Force $textReadyPath,$textBusyPath -ErrorAction SilentlyContinue
+
+    if ($attempt -gt 1) {
+      Add-Content -Path $textErrorLogPath -Value "Retrying Windows text runtime startup (attempt $attempt of $MaxAttempts)."
+      Start-Sleep -Seconds 3
+    }
+
+    $process = Start-Process `
+      -FilePath $uvExe `
+      -ArgumentList @("run", "`"$textWorkerPath`"") `
+      -WorkingDirectory $PSScriptRoot `
+      -RedirectStandardOutput $textLogPath `
+      -RedirectStandardError $textErrorLogPath `
+      -PassThru `
+      -WindowStyle Hidden
+
+    $startedAt = Get-Date
+    $lastHeartbeat = Get-Date
+
+    while (-not (Test-Path $textReadyPath) -and -not $process.HasExited) {
+      Start-Sleep -Seconds 2
+      $process.Refresh()
+
+      if (((Get-Date) - $lastHeartbeat).TotalSeconds -ge 20) {
+        Send-StartupHeartbeat -WorkerVersion "starting-windows-0.4" -Capabilities @(
+          "startup_phase:text-runtime",
+          "startup_attempt:$attempt"
+        )
+        $lastHeartbeat = Get-Date
+      }
+
+      if (((Get-Date) - $startedAt).TotalMinutes -ge 10) {
+        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        break
+      }
+    }
+
+    if (-not $process.HasExited -and (Test-Path $textReadyPath)) {
+      Start-Sleep -Seconds 2
+      $process.Refresh()
+      if (-not $process.HasExited) {
+        return $process
+      }
+    }
+
+    if (-not $process.HasExited) {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    }
+
+    try { $process.WaitForExit() } catch {}
+    $exitCode = 1
+    try { $exitCode = $process.ExitCode } catch {}
+    $diagnostic = Last-Diagnostic $textErrorLogPath $textLogPath $exitCode
+    Add-Content -Path $textErrorLogPath -Value "Text runtime attempt $attempt exited: $diagnostic"
+
+    Send-StartupHeartbeat `
+      -WorkerVersion "starting-windows-0.4" `
+      -Capabilities @(
+        "startup_phase:text-runtime-retry",
+        "startup_attempt:$attempt",
+        "startup_error:$diagnostic"
+      )
+  }
+
+  return $null
+}
+
 Write-Host "Starting CoOperative Unison node $($env:UNISON_NODE_ID)"
 Write-Host "Idle-only mode: $IdleMinutes minute(s)"
 Write-Host "Queue: $QueueUrl"
 Write-Host "Log: $logPath"
 
-Send-StartupHeartbeat -WorkerVersion "starting-windows-0.3" -Capabilities @("startup_phase:text-runtime")
+Send-StartupHeartbeat -WorkerVersion "starting-windows-0.4" -Capabilities @("startup_phase:text-runtime")
 
-$textWorkerPath = Join-Path $PSScriptRoot "windows-text-worker.py"
-$textProcess = Start-Process `
-  -FilePath $uvExe `
-  -ArgumentList @("run", "`"$textWorkerPath`"") `
-  -WorkingDirectory $PSScriptRoot `
-  -RedirectStandardOutput $textLogPath `
-  -RedirectStandardError $textErrorLogPath `
-  -PassThru `
-  -WindowStyle Hidden
-
-$textStartedAt = Get-Date
-$lastStartingHeartbeat = Get-Date
-while (-not (Test-Path $textReadyPath) -and -not $textProcess.HasExited) {
-  Start-Sleep -Seconds 3
-  $textProcess.Refresh()
-
-  if (((Get-Date) - $lastStartingHeartbeat).TotalSeconds -ge 20) {
-    Send-StartupHeartbeat -WorkerVersion "starting-windows-0.3" -Capabilities @("startup_phase:text-runtime")
-    $lastStartingHeartbeat = Get-Date
-  }
-
-  if (((Get-Date) - $textStartedAt).TotalMinutes -ge 10) {
-    Stop-Process -Id $textProcess.Id -Force -ErrorAction SilentlyContinue
-    Send-StartupHeartbeat `
-      -WorkerVersion "startup-failed-windows-0.3" `
-      -Capabilities @("startup_error:Text runtime startup timed out") `
-      -State "paused"
-    exit 1
-  }
-}
-
-if ($textProcess.HasExited) {
-  $diagnostic = Last-Diagnostic $textErrorLogPath $textLogPath $textProcess.ExitCode
+$textProcess = Start-TextRuntime -MaxAttempts 3
+if (-not $textProcess) {
+  $diagnostic = Last-Diagnostic $textErrorLogPath $textLogPath 1
   Send-StartupHeartbeat `
-    -WorkerVersion "startup-failed-windows-0.3" `
-    -Capabilities @("startup_exit_code:$($textProcess.ExitCode)", "startup_error:$diagnostic") `
+    -WorkerVersion "startup-failed-windows-0.4" `
+    -Capabilities @("startup_exit_code:1", "startup_error:$diagnostic") `
     -State "paused"
-  exit $textProcess.ExitCode
+  exit 1
 }
 
 $textCapabilities = @(
@@ -220,7 +266,7 @@ while (-not $imageProcess.HasExited -and -not $textProcess.HasExited) {
 
   if (-not $runtimeStarted -and ((Get-Date) - $lastStartingHeartbeat).TotalSeconds -ge 20) {
     Send-StartupHeartbeat `
-      -WorkerVersion "starting-windows-0.3" `
+      -WorkerVersion "starting-windows-0.4" `
       -Capabilities @(
         "text_generation",
         "text_fast_profile",
@@ -246,7 +292,7 @@ $exitCode = $failedProcess.ExitCode
 $diagnostic = Last-Diagnostic $primaryError $fallbackLog $exitCode
 
 Send-StartupHeartbeat `
-  -WorkerVersion "startup-failed-windows-0.3" `
+  -WorkerVersion "startup-failed-windows-0.4" `
   -Capabilities @("startup_exit_code:$exitCode", "startup_error:$diagnostic") `
   -State "paused"
 
