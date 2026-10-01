@@ -6,6 +6,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$machineNodeId = [Environment]::GetEnvironmentVariable("UNISON_NODE_ID", "Machine")
+if ($machineNodeId) {
+  if ($ExpectedNodeId -and $machineNodeId -ne $ExpectedNodeId) {
+    throw "This repair targets node '$ExpectedNodeId', but this PC is paired machine-wide as '$machineNodeId'."
+  }
+
+  $machineRepair = Join-Path $env:TEMP "repair-cooperative-unison-machine.ps1"
+  Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/workers/repair-unison-windows-machine.ps1" -OutFile $machineRepair
+  $argsLine = '-NoProfile -ExecutionPolicy Bypass -File "{0}" -ExpectedNodeId "{1}" -QueueUrl "{2}" -Revision "{3}"' -f $machineRepair,$machineNodeId,$QueueUrl,$Revision
+  $process = Start-Process powershell.exe -Verb RunAs -ArgumentList $argsLine -Wait -PassThru
+  exit $process.ExitCode
+}
+
 function Get-UserEnv([string]$Name) {
   return [Environment]::GetEnvironmentVariable($Name, "User")
 }

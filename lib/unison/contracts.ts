@@ -56,6 +56,7 @@ export const unisonNodeHeartbeatSchema = z.object({
     idleThresholdSeconds: z.number().int().min(0).max(86400).default(300),
     allowImage: z.boolean().default(false),
     allowText: z.boolean().default(false),
+    idleScope: z.enum(["session", "machine"]).default("session"),
   }),
   workerVersion: z.string().min(1).max(80),
 });

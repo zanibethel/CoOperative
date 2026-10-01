@@ -31,6 +31,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Windows worker scripts
+        shell: pwsh
+        run: |
+          $scripts = Get-ChildItem workers -Filter "*windows*.ps1" -File
+          foreach ($script in $scripts) {
+            [void][ScriptBlock]::Create((Get-Content $script.FullName -Raw))
+            Write-Host "Validated $($script.Name)"
+          }
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:

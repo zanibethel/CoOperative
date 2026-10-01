@@ -526,6 +526,8 @@ def unison_capabilities():
                 "text_quality_profile",
             ]
         )
+    if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine":
+        capabilities.extend(["machine_wide", "whole_pc_idle"])
     return capabilities
 
 
@@ -590,7 +592,13 @@ def generate(request: ImageRequest, authorization: str | None = Header(default=N
 if __name__ == "__main__":
     start_heartbeat_thread(
         unison_capabilities(),
-        "windows-unison-0.9.3" if platform.system() == "Windows" else "image-worker-0.9.0",
+        (
+            "windows-unison-1.0.0-machine"
+            if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
+            else "windows-unison-0.9.3"
+            if platform.system() == "Windows"
+            else "image-worker-0.9.0"
+        ),
         busy_provider=unison_busy,
     )
     print("UNISON_RUNTIME_STARTED", flush=True)

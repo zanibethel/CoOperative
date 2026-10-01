@@ -5,8 +5,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$installDir = Join-Path $env:LOCALAPPDATA "CoOperative\Unison"
-$taskName = "CoOperative Unison Node"
+$machineNodeId = [Environment]::GetEnvironmentVariable("UNISON_NODE_ID", "Machine")
+$machineWide = -not [string]::IsNullOrWhiteSpace($machineNodeId)
+$installDir = if ($machineWide) {
+  Join-Path $env:ProgramData "CoOperative\Unison"
+} else {
+  Join-Path $env:LOCALAPPDATA "CoOperative\Unison"
+}
+$taskName = if ($machineWide) { "CoOperative Unison Machine Node" } else { "CoOperative Unison Node" }
 $action = ""
 
 if ($Uri -match "^cooperative-unison://([^/?#]+)") {
@@ -15,8 +21,39 @@ if ($Uri -match "^cooperative-unison://([^/?#]+)") {
   $action = $Uri.ToLowerInvariant()
 }
 
+if ($machineWide) {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+  $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  if (-not $isAdmin) {
+    $self = $MyInvocation.MyCommand.Path
+    $argsLine = '-NoProfile -ExecutionPolicy Bypass -File "{0}" "{1}"' -f $self,$Uri
+    $process = Start-Process powershell.exe -Verb RunAs -ArgumentList $argsLine -Wait -PassThru
+    exit $process.ExitCode
+  }
+}
+
 switch ($action) {
   "restart" {
+    if ($machineWide) {
+      Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+      Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+          $_.CommandLine -and (
+            $_.CommandLine -like "*hf-image-worker.py*" -or
+            $_.CommandLine -like "*windows-text-worker.py*" -or
+            $_.CommandLine -like "*start-unison-windows.ps1*"
+          )
+        } |
+        ForEach-Object {
+          Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+
+      Start-Sleep -Seconds 1
+      Start-ScheduledTask -TaskName $taskName
+      break
+    }
+
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
       Where-Object {
         $_.CommandLine -and
@@ -41,7 +78,8 @@ switch ($action) {
     & $wscript //B //Nologo $launcher
   }
   "repair" {
-    $repair = Join-Path $installDir "repair-unison-windows.ps1"
+    $repairName = if ($machineWide) { "repair-unison-windows-machine.ps1" } else { "repair-unison-windows.ps1" }
+    $repair = Join-Path $installDir $repairName
     if (-not (Test-Path $repair)) {
       throw "The Unison repair tool is missing. Download Repair connection from the dashboard."
     }

@@ -34,6 +34,36 @@ internal static class Program
         Application.Run(new InstallerForm());
     }
 
+    internal static bool MachineWideConfigured =>
+        !string.IsNullOrWhiteSpace(
+            Environment.GetEnvironmentVariable("UNISON_NODE_ID", EnvironmentVariableTarget.Machine)
+        );
+
+    internal static EnvironmentVariableTarget NodeEnvironmentTarget =>
+        MachineWideConfigured ? EnvironmentVariableTarget.Machine : EnvironmentVariableTarget.User;
+
+    internal static string WorkerInstallDir =>
+        MachineWideConfigured
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "CoOperative",
+                "Unison"
+            )
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CoOperative",
+                "Unison"
+            );
+
+    internal static string? ReadNodeEnvironment(string name)
+    {
+        if (MachineWideConfigured)
+        {
+            return Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
+        }
+        return Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+    }
+
     internal static void OpenUrl(string url)
     {
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
@@ -45,16 +75,17 @@ internal sealed class UnisonTrayContext : ApplicationContext
     private readonly NotifyIcon _notifyIcon = new();
     private readonly ToolStripMenuItem _statusItem;
     private readonly System.Windows.Forms.Timer _timer;
-    private readonly string _installDir =
+    private readonly string _shellDir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CoOperative", "Unison");
+    private readonly string _workerDir = Program.WorkerInstallDir;
     private bool _refreshing;
 
     public UnisonTrayContext()
     {
-        var iconPath = Path.Combine(_installDir, "unison.ico");
+        var iconPath = Path.Combine(_shellDir, "unison.ico");
         if (!File.Exists(iconPath))
         {
-            Directory.CreateDirectory(_installDir);
+            Directory.CreateDirectory(_shellDir);
             InstallerForm.CreateUnisonIcon(iconPath);
         }
 
@@ -93,8 +124,13 @@ internal sealed class UnisonTrayContext : ApplicationContext
 
         try
         {
-            var nodeId = Environment.GetEnvironmentVariable("UNISON_NODE_ID", EnvironmentVariableTarget.User);
-            var nodeToken = Environment.GetEnvironmentVariable("UNISON_NODE_TOKEN", EnvironmentVariableTarget.User);
+            var nodeId = Program.ReadNodeEnvironment("UNISON_NODE_ID");
+            var nodeToken = Program.ReadNodeEnvironment("UNISON_NODE_TOKEN");
+            if (Program.MachineWideConfigured && string.IsNullOrWhiteSpace(nodeToken))
+            {
+                SetStatus("Machine-wide");
+                return;
+            }
             if (string.IsNullOrWhiteSpace(nodeId) || string.IsNullOrWhiteSpace(nodeToken))
             {
                 SetStatus("Not linked");
@@ -170,7 +206,7 @@ internal sealed class UnisonTrayContext : ApplicationContext
 
     private void RunControl(string action)
     {
-        var control = Path.Combine(_installDir, "control-unison-windows.ps1");
+        var control = Path.Combine(_workerDir, "control-unison-windows.ps1");
         if (!File.Exists(control))
         {
             MessageBox.Show(
@@ -255,7 +291,7 @@ internal sealed class InstallerForm : Form
         _status.Left = 37;
         _status.Top = 125;
 
-        _detail.Text = "This installer runs per-user and does not require administrator access.";
+        _detail.Text = "New installs run machine-wide. Windows will request one administrator approval after you link the contributor account.";
         _detail.ForeColor = Color.FromArgb(181, 198, 213);
         _detail.AutoSize = false;
         _detail.Width = 530;
@@ -324,50 +360,67 @@ internal sealed class InstallerForm : Form
 
         try
         {
-            var existingNodeId = Environment.GetEnvironmentVariable(
+            var machineNodeId = Environment.GetEnvironmentVariable(
+                "UNISON_NODE_ID",
+                EnvironmentVariableTarget.Machine
+            );
+            var existingMachineWide = !string.IsNullOrWhiteSpace(machineNodeId);
+
+            if (existingMachineWide)
+            {
+                SetStatus(
+                    "Existing machine-wide Unison node found",
+                    "Refreshing the shared worker while preserving this PC's node identity."
+                );
+
+                await RunExistingRepairAsync(machineNodeId!, true);
+
+                var machineShellNote = await InstallShellIntegrationAsync();
+                SetStatus(
+                    "Repaired and connected",
+                    "This machine-wide Unison node kept its identity and runs independently of Windows profiles. " +
+                    "Desktop, Start Menu, and tray integration are ready." +
+                    machineShellNote
+                );
+                CompleteUi();
+                return;
+            }
+
+            var userNodeId = Environment.GetEnvironmentVariable(
                 "UNISON_NODE_ID",
                 EnvironmentVariableTarget.User
             );
-            var existingNodeToken = Environment.GetEnvironmentVariable(
+            var userNodeToken = Environment.GetEnvironmentVariable(
                 "UNISON_NODE_TOKEN",
                 EnvironmentVariableTarget.User
             );
-            var hasExistingNode =
-                !string.IsNullOrWhiteSpace(existingNodeId) &&
-                !string.IsNullOrWhiteSpace(existingNodeToken);
+            var hasLegacyNode =
+                !string.IsNullOrWhiteSpace(userNodeId) &&
+                !string.IsNullOrWhiteSpace(userNodeToken);
 
-            if (hasExistingNode)
+            if (hasLegacyNode)
             {
                 SetStatus(
-                    "Existing Unison node found",
-                    "Checking the current node before changing anything. A healthy current worker will not be restarted."
+                    "Existing legacy Unison node found",
+                    "Checking this profile's current preview node before changing anything."
                 );
 
-                var healthy = await HasFreshRealHeartbeatAsync(
-                    existingNodeId!,
-                    existingNodeToken!
-                );
-
+                var healthy = await HasFreshRealHeartbeatAsync(userNodeId!, userNodeToken!);
                 if (!healthy)
                 {
                     SetStatus(
                         "Repairing existing Unison node…",
                         "The saved node identity will be preserved while the worker files and startup path are refreshed."
                     );
-                    await RunExistingRepairAsync(existingNodeId!);
-
-                    SetStatus(
-                        "Starting local AI runtime…",
-                        "Waiting for CoOperative to verify a fresh heartbeat from the repaired node."
-                    );
-                    await WaitForRealHeartbeatAsync();
+                    await RunExistingRepairAsync(userNodeId!, false);
+                    await WaitForRealHeartbeatAsync(false);
                 }
 
-                var upgradeShellNote = await InstallShellIntegrationAsync();
+                var legacyShellNote = await InstallShellIntegrationAsync();
                 SetStatus(
                     healthy ? "Updated" : "Repaired and connected",
-                    "This existing Unison node kept its identity. Desktop, Start Menu, and tray integration are ready." +
-                    upgradeShellNote
+                    "This legacy per-profile Unison node kept its identity. Desktop, Start Menu, and tray integration are ready." +
+                    legacyShellNote
                 );
                 CompleteUi();
                 return;
@@ -376,24 +429,22 @@ internal sealed class InstallerForm : Form
             var pairingCode = await ReceiveBrowserPairingAsync();
 
             SetStatus(
-                "Installing Unison…",
-                "Installing the worker and preserving your per-device credential. PowerShell stays hidden in the background."
+                "Installing machine-wide Unison…",
+                "Windows will request administrator approval. The compute worker will run for the whole PC, not just this Windows profile."
             );
 
             await RunBootstrapAsync(pairingCode);
 
             SetStatus(
-                "Starting local AI runtime…",
-                "The worker is installed. Waiting for CoOperative to verify a fresh heartbeat from this PC."
+                "Machine-wide local AI verified",
+                "The elevated installer confirmed a fresh whole-PC-idle-capable heartbeat from this PC."
             );
-
-            await WaitForRealHeartbeatAsync();
 
             var shellNote = await InstallShellIntegrationAsync();
 
             SetStatus(
                 "Connected",
-                "This PC is online in Unison. It will only accept new work after the configured Windows idle period." +
+                "This PC is online as a machine-wide Unison node. It only accepts new work after every signed-in Windows session has been idle for the configured period." +
                 shellNote
             );
             CompleteUi();
@@ -522,7 +573,8 @@ internal sealed class InstallerForm : Form
             var hasWindowsText =
                 capabilities.Contains("text_generation", StringComparer.OrdinalIgnoreCase);
             var currentWindowsRuntime =
-                workerVersion.StartsWith("windows-unison-0.9.", StringComparison.OrdinalIgnoreCase);
+                workerVersion.StartsWith("windows-unison-0.9.", StringComparison.OrdinalIgnoreCase) ||
+                workerVersion.StartsWith("windows-unison-1.", StringComparison.OrdinalIgnoreCase);
 
             return fresh &&
                 !workerVersion.Equals("paired", StringComparison.OrdinalIgnoreCase) &&
@@ -537,15 +589,48 @@ internal sealed class InstallerForm : Form
         }
     }
 
-    private async Task RunExistingRepairAsync(string expectedNodeId)
+    private async Task RunExistingRepairAsync(string expectedNodeId, bool machineWide)
     {
-        var repair = Path.Combine(Path.GetTempPath(), "cooperative-unison-repair.ps1");
+        var repairName = machineWide
+            ? "repair-unison-windows-machine.ps1"
+            : "repair-unison-windows.ps1";
+        var repair = Path.Combine(Path.GetTempPath(), $"cooperative-{repairName}");
         using (var http = new HttpClient())
         {
             var bytes = await http.GetByteArrayAsync(
-                "https://raw.githubusercontent.com/zanibethel/CoOperative/main/workers/repair-unison-windows.ps1"
+                $"https://raw.githubusercontent.com/zanibethel/CoOperative/main/workers/{repairName}"
             );
             await File.WriteAllBytesAsync(repair, bytes);
+        }
+
+        if (machineWide)
+        {
+            var arguments =
+                $"-NoProfile -ExecutionPolicy Bypass -File \"{repair}\" -ExpectedNodeId \"{expectedNodeId}\"";
+            var elevated = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                UseShellExecute = true,
+                Verb = "runas",
+                Arguments = arguments,
+                WindowStyle = ProcessWindowStyle.Normal,
+            };
+
+            using var process = Process.Start(elevated)
+                ?? throw new InvalidOperationException("Could not start the machine-wide Unison repair.");
+            await process.WaitForExitAsync();
+            await File.AppendAllTextAsync(
+                _logPath,
+                $"[{DateTimeOffset.Now:u}] Machine-wide repair exit {process.ExitCode}\r\n"
+            );
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Machine-wide Unison repair failed with exit code {process.ExitCode}."
+                );
+            }
+            return;
         }
 
         var start = new ProcessStartInfo
@@ -565,88 +650,77 @@ internal sealed class InstallerForm : Form
         start.ArgumentList.Add("-ExpectedNodeId");
         start.ArgumentList.Add(expectedNodeId);
 
-        using var process = Process.Start(start)
+        using var legacyProcess = Process.Start(start)
             ?? throw new InvalidOperationException("Could not start the Unison repair.");
 
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        var outputTask = legacyProcess.StandardOutput.ReadToEndAsync();
+        var errorTask = legacyProcess.StandardError.ReadToEndAsync();
+        await legacyProcess.WaitForExitAsync();
 
         var output = await outputTask;
         var error = await errorTask;
         await File.AppendAllTextAsync(
             _logPath,
-            $"[{DateTimeOffset.Now:u}] Existing-node repair exit {process.ExitCode}\r\n{output}\r\n{error}\r\n"
+            $"[{DateTimeOffset.Now:u}] Existing-node repair exit {legacyProcess.ExitCode}\r\n{output}\r\n{error}\r\n"
         );
 
-        if (process.ExitCode != 0)
+        if (legacyProcess.ExitCode != 0)
         {
             var detail =
                 LastNonEmptyLine(error) ??
                 LastNonEmptyLine(output) ??
-                $"Exit code {process.ExitCode}";
+                $"Exit code {legacyProcess.ExitCode}";
             throw new InvalidOperationException($"Existing-node repair failed: {detail}");
         }
     }
 
     private async Task RunBootstrapAsync(string pairingCode)
     {
-        var bootstrap = Path.Combine(Path.GetTempPath(), "cooperative-unison-bootstrap.ps1");
+        var bootstrap = Path.Combine(Path.GetTempPath(), "cooperative-unison-machine-bootstrap.ps1");
 
         using (var http = new HttpClient())
         {
-            var bytes = await http.GetByteArrayAsync($"{BaseUrl}/api/unison/download/windows");
+            var bytes = await http.GetByteArrayAsync(
+                "https://raw.githubusercontent.com/zanibethel/CoOperative/main/workers/bootstrap-unison-windows-machine.ps1"
+            );
             await File.WriteAllBytesAsync(bootstrap, bytes);
         }
 
+        var arguments =
+            $"-NoProfile -ExecutionPolicy Bypass -File \"{bootstrap}\" -PairCode \"{pairingCode}\" -NodeName \"{Environment.MachineName}\" -IdleMinutes 5";
         var start = new ProcessStartInfo
         {
             FileName = "powershell.exe",
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            UseShellExecute = true,
+            Verb = "runas",
+            Arguments = arguments,
+            WindowStyle = ProcessWindowStyle.Normal,
         };
 
-        start.ArgumentList.Add("-NoProfile");
-        start.ArgumentList.Add("-ExecutionPolicy");
-        start.ArgumentList.Add("Bypass");
-        start.ArgumentList.Add("-File");
-        start.ArgumentList.Add(bootstrap);
-        start.ArgumentList.Add("-PairCode");
-        start.ArgumentList.Add(pairingCode);
-        start.ArgumentList.Add("-NodeName");
-        start.ArgumentList.Add(Environment.MachineName);
-        start.ArgumentList.Add("-IdleMinutes");
-        start.ArgumentList.Add("5");
-
-        using var process = Process.Start(start) ??
-            throw new InvalidOperationException("Could not start the Unison bootstrap.");
-
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = process.StandardError.ReadToEndAsync();
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start machine-wide Unison setup.");
 
         await process.WaitForExitAsync();
-
-        var output = await outputTask;
-        var error = await errorTask;
         await File.AppendAllTextAsync(
             _logPath,
-            $"[{DateTimeOffset.Now:u}] Bootstrap exit {process.ExitCode}\r\n{output}\r\n{error}\r\n"
+            $"[{DateTimeOffset.Now:u}] Machine-wide bootstrap exit {process.ExitCode}\r\n"
         );
 
         if (process.ExitCode != 0)
         {
-            var detail = LastNonEmptyLine(error) ?? LastNonEmptyLine(output) ?? $"Exit code {process.ExitCode}";
-            throw new InvalidOperationException($"Worker installation failed: {detail}");
+            throw new InvalidOperationException(
+                $"Machine-wide worker installation failed with exit code {process.ExitCode}."
+            );
         }
     }
 
-    private async Task WaitForRealHeartbeatAsync()
+    private async Task WaitForRealHeartbeatAsync(bool machineWide)
     {
-        var nodeId = Environment.GetEnvironmentVariable("UNISON_NODE_ID", EnvironmentVariableTarget.User);
-        var nodeToken = Environment.GetEnvironmentVariable("UNISON_NODE_TOKEN", EnvironmentVariableTarget.User);
+        var target = machineWide
+            ? EnvironmentVariableTarget.Machine
+            : EnvironmentVariableTarget.User;
+        var nodeId = Environment.GetEnvironmentVariable("UNISON_NODE_ID", target);
+        var nodeToken = Environment.GetEnvironmentVariable("UNISON_NODE_TOKEN", target);
 
         if (string.IsNullOrWhiteSpace(nodeId) || string.IsNullOrWhiteSpace(nodeToken))
         {
@@ -709,16 +783,19 @@ internal sealed class InstallerForm : Form
                         "text_generation",
                         StringComparer.OrdinalIgnoreCase
                     );
-                    var currentWindowsRuntime = workerVersion.StartsWith(
-                        "windows-unison-0.9.",
-                        StringComparison.OrdinalIgnoreCase
-                    );
+                    var currentWindowsRuntime =
+                        workerVersion.StartsWith("windows-unison-0.9.", StringComparison.OrdinalIgnoreCase) ||
+                        workerVersion.StartsWith("windows-unison-1.", StringComparison.OrdinalIgnoreCase);
+                    var hasMachineWideCapability =
+                        capabilities.Contains("machine_wide", StringComparer.OrdinalIgnoreCase) &&
+                        capabilities.Contains("whole_pc_idle", StringComparer.OrdinalIgnoreCase);
 
                     if (fresh &&
                         !workerVersion.Equals("paired", StringComparison.OrdinalIgnoreCase) &&
                         !workerVersion.StartsWith("starting-", StringComparison.OrdinalIgnoreCase) &&
                         hasWindowsText &&
-                        currentWindowsRuntime)
+                        currentWindowsRuntime &&
+                        (!machineWide || hasMachineWideCapability))
                     {
                         return;
                     }
