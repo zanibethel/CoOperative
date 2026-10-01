@@ -324,6 +324,55 @@ internal sealed class InstallerForm : Form
 
         try
         {
+            var existingNodeId = Environment.GetEnvironmentVariable(
+                "UNISON_NODE_ID",
+                EnvironmentVariableTarget.User
+            );
+            var existingNodeToken = Environment.GetEnvironmentVariable(
+                "UNISON_NODE_TOKEN",
+                EnvironmentVariableTarget.User
+            );
+            var hasExistingNode =
+                !string.IsNullOrWhiteSpace(existingNodeId) &&
+                !string.IsNullOrWhiteSpace(existingNodeToken);
+
+            if (hasExistingNode)
+            {
+                SetStatus(
+                    "Existing Unison node found",
+                    "Checking the current node before changing anything. A healthy worker will not be restarted."
+                );
+
+                var healthy = await HasFreshRealHeartbeatAsync(
+                    existingNodeId!,
+                    existingNodeToken!
+                );
+
+                if (!healthy)
+                {
+                    SetStatus(
+                        "Repairing existing Unison node…",
+                        "The saved node identity will be preserved while the worker files and startup path are refreshed."
+                    );
+                    await RunExistingRepairAsync(existingNodeId!);
+
+                    SetStatus(
+                        "Starting local AI runtime…",
+                        "Waiting for CoOperative to verify a fresh heartbeat from the repaired node."
+                    );
+                    await WaitForRealHeartbeatAsync();
+                }
+
+                var upgradeShellNote = await InstallShellIntegrationAsync();
+                SetStatus(
+                    healthy ? "Updated" : "Repaired and connected",
+                    "This existing Unison node kept its identity. Desktop, Start Menu, and tray integration are ready." +
+                    upgradeShellNote
+                );
+                CompleteUi();
+                return;
+            }
+
             var pairingCode = await ReceiveBrowserPairingAsync();
 
             SetStatus(
@@ -426,6 +475,101 @@ internal sealed class InstallerForm : Form
         }
 
         throw new TimeoutException("Browser authorization timed out. Reopen setup and try again.");
+    }
+
+    private async Task<bool> HasFreshRealHeartbeatAsync(
+        string nodeId,
+        string nodeToken
+    )
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"{BaseUrl}/api/unison/nodes/self-status"
+        );
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", nodeToken);
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new { nodeId }),
+            Encoding.UTF8,
+            "application/json"
+        );
+
+        try
+        {
+            using var response = await http.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return false;
+
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var root = json.RootElement;
+            var workerVersion =
+                root.TryGetProperty("workerVersion", out var versionElement)
+                    ? versionElement.GetString() ?? ""
+                    : "";
+            var fresh =
+                root.TryGetProperty("fresh", out var freshElement) &&
+                freshElement.ValueKind == JsonValueKind.True;
+
+            return fresh &&
+                !workerVersion.Equals("paired", StringComparison.OrdinalIgnoreCase) &&
+                !workerVersion.StartsWith("starting-", StringComparison.OrdinalIgnoreCase) &&
+                !workerVersion.StartsWith("startup-failed-", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task RunExistingRepairAsync(string expectedNodeId)
+    {
+        var repair = Path.Combine(Path.GetTempPath(), "cooperative-unison-repair.ps1");
+        using (var http = new HttpClient())
+        {
+            var bytes = await http.GetByteArrayAsync(
+                "https://raw.githubusercontent.com/zanibethel/CoOperative/main/workers/repair-unison-windows.ps1"
+            );
+            await File.WriteAllBytesAsync(repair, bytes);
+        }
+
+        var start = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-ExecutionPolicy");
+        start.ArgumentList.Add("Bypass");
+        start.ArgumentList.Add("-File");
+        start.ArgumentList.Add(repair);
+        start.ArgumentList.Add("-ExpectedNodeId");
+        start.ArgumentList.Add(expectedNodeId);
+
+        using var process = Process.Start(start)
+            ?? throw new InvalidOperationException("Could not start the Unison repair.");
+
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        var output = await outputTask;
+        var error = await errorTask;
+        await File.AppendAllTextAsync(
+            _logPath,
+            $"[{DateTimeOffset.Now:u}] Existing-node repair exit {process.ExitCode}\r\n{output}\r\n{error}\r\n"
+        );
+
+        if (process.ExitCode != 0)
+        {
+            var detail =
+                LastNonEmptyLine(error) ??
+                LastNonEmptyLine(output) ??
+                $"Exit code {process.ExitCode}";
+            throw new InvalidOperationException($"Existing-node repair failed: {detail}");
+        }
     }
 
     private async Task RunBootstrapAsync(string pairingCode)
