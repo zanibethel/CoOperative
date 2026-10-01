@@ -67,6 +67,7 @@ type JobResult = {
   status?: string;
   profile?: Profile;
   capability?: "text" | "vision";
+  provider?: string | null;
   conversationId?: string | null;
   conversationTitle?: string | null;
   messages?: unknown;
@@ -106,13 +107,14 @@ function readMessages(value: unknown): ChatMessage[] {
 
 function resultMeta(result: JobResult) {
   const details = [
-    result.capability === "vision" ? "Local Vision" : null,
+    result.provider,
     result.model,
+    result.capability === "vision" ? "vision" : "text",
     typeof result.firstTokenMs === "number"
       ? `${(result.firstTokenMs / 1000).toFixed(1)}s first token`
       : null,
     typeof result.latencyMs === "number"
-      ? `${(result.latencyMs / 1000).toFixed(1)}s`
+      ? `${(result.latencyMs / 1000).toFixed(1)}s total`
       : null,
     typeof result.promptTokens === "number" && typeof result.outputTokens === "number"
       ? `${result.promptTokens} in / ${result.outputTokens} out`
@@ -120,6 +122,23 @@ function resultMeta(result: JobResult) {
   ].filter(Boolean);
 
   return details.join(" · ");
+}
+
+function executionStep(
+  status: string,
+  capability?: "text" | "vision",
+  streaming = false,
+) {
+  if (streaming) return "Responding…";
+  if (status === "Preparing context…") return status;
+  if (status === "Selecting an execution path…") return status;
+  if (status === "Waiting for local capacity…") return status;
+  if (status === "Using local vision…") return status;
+  if (status === "Using local AI…") return status;
+  if (status === "Stopping…") return status;
+  if (status === "Copied") return status;
+  if (status === "Ready") return "Ready";
+  return capability === "vision" ? "Using local vision…" : "Using local AI…";
 }
 
 function loadBrowserImage(file: File) {
@@ -300,14 +319,10 @@ export default function LocalAiChat() {
           }
 
           const runningLabel =
-            result.capability === "vision" ? "Running Vision on your Mac" : "Running on your Mac";
+            result.capability === "vision" ? "Using local vision…" : "Using local AI…";
 
           if (result.status === "queued") {
-            setStatus(
-              result.capability === "vision"
-                ? "Queued for Local Vision"
-                : "Queued for your Mac",
-            );
+            setStatus("Waiting for local capacity…");
             await wait(1000);
             continue;
           }
@@ -600,9 +615,10 @@ export default function LocalAiChat() {
     setMeta("");
     setStreamingText("");
     setBusy(true);
-    setStatus(currentAttachments.length > 0 ? "Queued for Local Vision" : "Queued for your Mac");
+    setStatus("Preparing context…");
 
     try {
+      setStatus("Selecting an execution path…");
       const queuedResponse = await fetch("/api/local-ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -757,36 +773,43 @@ export default function LocalAiChat() {
       <div className="local-ai-toolbar card">
         <div>
           <strong>{conversationTitle}</strong>
-          <p>
-            Runs on the connected Mac. Images automatically switch to Local Vision.
-            No paid model fallback from this screen.
-          </p>
+          <p>Ask CoOperative what you need. Routing and model choice stay in the background.</p>
         </div>
-        <label className="field">
-          <span>Text profile</span>
-          <select
-            value={profile}
-            onChange={(event) => setProfile(event.target.value as Profile)}
-            disabled={busy}
-          >
-            <option value="fast">Local Fast · Qwen3 4B</option>
-            <option value="quality">Local Quality · Qwen2.5 7B</option>
-          </select>
-        </label>
         <div className="local-ai-status">
           <span className={busy ? "status-dot active" : "status-dot"} />
-          {status}
+          {executionStep(status, undefined, Boolean(streamingText))}
         </div>
+        <details className="local-ai-execution-details">
+          <summary>Execution details</summary>
+          <div className="local-ai-execution-panel">
+            <label className="field">
+              <span>Local model preference</span>
+              <select
+                value={profile}
+                onChange={(event) => setProfile(event.target.value as Profile)}
+                disabled={busy}
+              >
+                <option value="fast">Fast local model</option>
+                <option value="quality">Higher-quality local model</option>
+              </select>
+            </label>
+            <small>
+              CoOperative currently keeps this chat local. Future routing can use code/playbooks,
+              business-owned AI, Unison, or approved paid AI when those paths are actually enabled.
+            </small>
+            {meta ? <small>{meta}</small> : null}
+          </div>
+        </details>
       </div>
 
       <div className="local-ai-chat card">
         <div className="local-ai-messages">
           {messages.length === 0 ? (
             <div className="local-ai-empty">
-              <strong>CoOperative AI Local</strong>
+              <strong>CoOperative</strong>
               <p>
-                Ask anything or attach a screenshot/photo. Conversations and images
-                stay tied to your saved thread.
+                Ask anything about the active business or project, or attach an image.
+                CoOperative will choose the appropriate execution path behind the scenes.
               </p>
             </div>
           ) : (
@@ -828,11 +851,15 @@ export default function LocalAiChat() {
           {busy ? (
             <div className="chat-bubble assistant pending">
               <div className="chat-bubble-head">
-                <span>CoOperative AI</span>
+                <span>CoOperative</span>
               </div>
-              <div className={streamingText ? "streaming-response" : undefined}>
-                {streamingText || `${status}…`}
+              <div className="execution-trace">
+                <span className="execution-trace-dot" />
+                <span>{executionStep(status, undefined, Boolean(streamingText))}</span>
               </div>
+              {streamingText ? (
+                <div className="streaming-response">{streamingText}</div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -924,7 +951,12 @@ export default function LocalAiChat() {
         </div>
 
         {error ? <p className="error">{error}</p> : null}
-        {meta ? <p className="local-ai-meta">{meta}</p> : null}
+        {meta ? (
+          <details className="local-ai-response-details">
+            <summary>Response details</summary>
+            <p className="local-ai-meta">{meta}</p>
+          </details>
+        ) : null}
       </div>
     </section>
   );

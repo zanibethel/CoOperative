@@ -6,7 +6,7 @@ export default function HomePage() {
       <nav className="nav">
         <div className="brand">CoOperative AI</div>
         <div className="nav-links">
-          <Link href="/local-ai">Local AI</Link>
+          <Link href="/chat">Chat</Link>
           <Link href="/agents">Agents</Link>
           <Link href="/unison">Unison</Link>
           <div className="badge">v0.1 · Intelligence Desk</div>
@@ -22,7 +22,8 @@ export default function HomePage() {
           lower-cost missions without giving up human control.
         </p>
         <div className="cta-row">
-          <Link className="cta" href="/intake">Begin mission briefing →</Link>
+          <Link className="cta" href="/chat">Chat with CoOperative →</Link>
+          <Link className="secondary-cta" href="/intake">Begin mission briefing →</Link>
           <Link className="secondary-cta" href="/services">Map current services →</Link>
         </div>
       </section>
