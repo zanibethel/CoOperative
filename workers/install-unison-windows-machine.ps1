@@ -22,6 +22,33 @@ function Set-MachineEnv([string]$Name, [string]$Value) {
   Set-Item -Path "Env:$Name" -Value $Value
 }
 
+function Protect-UnisonDirectory([string]$Path) {
+  $systemSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-18")
+  $adminsSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-32-544")
+  $usersSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-32-545")
+  $inherit = [Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit"
+  $none = [Security.AccessControl.PropagationFlags]::None
+  $allow = [Security.AccessControl.AccessControlType]::Allow
+
+  $acl = [Security.AccessControl.DirectorySecurity]::new()
+  $acl.SetAccessRuleProtection($true, $false)
+  $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($systemSid, "FullControl", $inherit, $none, $allow))
+  $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($adminsSid, "FullControl", $inherit, $none, $allow))
+  $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($usersSid, "ReadAndExecute", $inherit, $none, $allow))
+  Set-Acl -Path $Path -AclObject $acl
+}
+
+function Protect-CredentialFile([string]$Path) {
+  $systemSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-18")
+  $adminsSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-32-544")
+  $allow = [Security.AccessControl.AccessControlType]::Allow
+  $acl = [Security.AccessControl.FileSecurity]::new()
+  $acl.SetAccessRuleProtection($true, $false)
+  $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($systemSid, "FullControl", $allow))
+  $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($adminsSid, "FullControl", $allow))
+  Set-Acl -Path $Path -AclObject $acl
+}
+
 $installDir = Join-Path $env:ProgramData "CoOperative\Unison"
 $runtimeDir = Join-Path $installDir "runtime"
 $uvExe = Join-Path $runtimeDir "uv\uv.exe"
@@ -32,6 +59,7 @@ $ollamaDir = Join-Path $runtimeDir "ollama"
 $taskName = "CoOperative Unison Machine Node"
 
 New-Item -ItemType Directory -Force -Path $installDir,$runtimeDir,$modelsDir | Out-Null
+Protect-UnisonDirectory $installDir
 
 if (-not (Test-Path $uvExe)) {
   throw "The shared Unison uv runtime is missing."
@@ -111,12 +139,24 @@ if ($ollamaExe) {
   $adaptiveHeavyModel = $adaptiveFastModel
 }
 
+$credentialPath = Join-Path $installDir "node-credential.json"
+@{
+  nodeId = $existingNodeId
+  nodeToken = $nodeToken
+  ownerRef = [string]$pairing.ownerRef
+  nodeClass = [string]$pairing.nodeClass
+} | ConvertTo-Json | Set-Content -Path $credentialPath -Encoding UTF8
+Protect-CredentialFile $credentialPath
+
+# Never place the machine credential in a user-readable environment variable.
+[Environment]::SetEnvironmentVariable("UNISON_NODE_TOKEN", $null, "Machine")
+[Environment]::SetEnvironmentVariable("UNISON_NODE_OWNER_REF", $null, "Machine")
+
 $values = @{
-  "UNISON_NODE_TOKEN" = $nodeToken
   "UNISON_NODE_ID" = $existingNodeId
   "UNISON_NODE_NAME" = $NodeName
-  "UNISON_NODE_OWNER_REF" = [string]$pairing.ownerRef
   "UNISON_NODE_CLASS" = [string]$pairing.nodeClass
+  "UNISON_CREDENTIAL_PATH" = $credentialPath
   "UNISON_INSTALL_SCOPE" = "machine"
   "UNISON_IDLE_ONLY" = "true"
   "UNISON_IDLE_THRESHOLD_SECONDS" = [string]([Math]::Max(0, $IdleMinutes) * 60)
@@ -173,8 +213,40 @@ Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Silent
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Description "CoOperative Unison machine-wide idle compute node" | Out-Null
 Start-ScheduledTask -TaskName $taskName
 
+Write-Host "Verifying the machine-wide heartbeat..."
+$verified = $false
+$deadline = (Get-Date).AddMinutes(12)
+while ((Get-Date) -lt $deadline) {
+  try {
+    $status = Invoke-RestMethod -Method Post -Uri "$QueueUrl/api/unison/nodes/self-status" -Headers @{ Authorization = "Bearer $nodeToken" } -ContentType "application/json" -Body (@{ nodeId = $existingNodeId } | ConvertTo-Json)
+    $caps = @($status.capabilities)
+    if ([string]$status.workerVersion -like "startup-failed-*") {
+      $startupError = $caps | Where-Object { $_ -like "startup_error:*" } | Select-Object -First 1
+      if ($startupError) { throw $startupError.Substring("startup_error:".Length) }
+      throw "The machine-wide worker reported a startup failure."
+    }
+    if (
+      $status.fresh -eq $true -and
+      [string]$status.workerVersion -like "windows-unison-1.*" -and
+      $caps -contains "text_generation" -and
+      $caps -contains "machine_wide" -and
+      $caps -contains "whole_pc_idle"
+    ) {
+      $verified = $true
+      break
+    }
+  } catch {
+    Write-Host "Waiting for verified machine-wide heartbeat: $($_.Exception.Message)"
+  }
+  Start-Sleep -Seconds 4
+}
+
+if (-not $verified) {
+  throw "Machine-wide Unison started, but a verified whole-PC-idle heartbeat was not received in time."
+}
+
 Write-Host ""
-Write-Host "Machine-wide Unison node installed."
+Write-Host "Machine-wide Unison node installed and verified."
 Write-Host "Node ID: $existingNodeId"
 Write-Host "Owner: $($pairing.ownerRef)"
 Write-Host "Startup: Windows SYSTEM scheduled task"
