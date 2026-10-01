@@ -310,7 +310,8 @@ def run_generation(request: ImageRequest):
         if request.seed is not None
         else int.from_bytes(os.urandom(4), "big") % 2147483648
     )
-    generator = torch.Generator(device="cpu").manual_seed(seed)
+    def seeded_generator():
+        return torch.Generator(device="cpu").manual_seed(seed)
 
     with MODEL_LOCK:
         identity_generation = (
@@ -318,10 +319,6 @@ def run_generation(request: ImageRequest):
             and request.profile == "quality"
             and request.variationMode != "preserve"
         )
-        if identity_generation:
-            ensure_identity_profile()
-        else:
-            ensure_profile(request.profile)
 
         common = dict(
             prompt=request.prompt,
@@ -330,55 +327,86 @@ def run_generation(request: ImageRequest):
             guidance_scale=guidance,
         )
 
+        model_used = config["model"]
+
         if identity_generation:
+            # Stability first: use one identity reference until multi-reference
+            # IP-Adapter support is proven reliable on every local runtime.
+            identity_image = decode_data_url(request.references[0].dataUrl)
             scale = identity_scale(request.variationMode)
 
-            identity_images = [
-                decode_data_url(reference.dataUrl)
-                for reference in request.references[:2]
-            ]
-            if len(identity_images) == 1:
+            try:
+                ensure_identity_profile()
                 text_pipe.set_ip_adapter_scale(scale)
-                ip_adapter_image = identity_images[0]
-            else:
-                text_pipe.set_ip_adapter_scale(
-                    [[scale for _ in identity_images]]
+                result = text_pipe(
+                    width=width,
+                    height=height,
+                    ip_adapter_image=identity_image,
+                    generator=seeded_generator(),
+                    **common,
                 )
-                ip_adapter_image = [identity_images]
-
-            result = text_pipe(
-                width=width,
-                height=height,
-                ip_adapter_image=ip_adapter_image,
-                generator=generator,
-                **common,
-            )
-            references_used = len(identity_images)
-            reference_mode = "ip-adapter"
-        elif request.references:
-            if identity_adapter_loaded and hasattr(image_pipe, "set_ip_adapter_scale"):
-                image_pipe.set_ip_adapter_scale(0.0)
-            source = decode_data_url(request.references[0].dataUrl)
-            source = source.resize((width, height), Image.Resampling.LANCZOS)
-            result = image_pipe(
-                image=source,
-                strength=strength,
-                generator=generator,
-                **common,
-            )
-            references_used = 1
-            reference_mode = "img2img"
+                references_used = 1
+                reference_mode = "ip-adapter"
+                model_used = IDENTITY_MODEL_ID
+                print("Local image path: single-reference IP-Adapter succeeded.", flush=True)
+            except Exception as identity_error:
+                print(
+                    "Local image identity path failed; falling back to quality img2img: "
+                    + str(identity_error)[:800],
+                    flush=True,
+                )
+                try:
+                    ensure_profile(request.profile)
+                    source = identity_image.resize((width, height), Image.Resampling.LANCZOS)
+                    result = image_pipe(
+                        image=source,
+                        strength=strength,
+                        generator=seeded_generator(),
+                        **common,
+                    )
+                    references_used = 1
+                    reference_mode = "img2img"
+                    model_used = config["model"]
+                    print("Local image path: img2img fallback succeeded.", flush=True)
+                except Exception as img2img_error:
+                    print(
+                        "Local image img2img fallback failed; using text-to-image fallback: "
+                        + str(img2img_error)[:800],
+                        flush=True,
+                    )
+                    ensure_profile(request.profile)
+                    result = text_pipe(
+                        width=width,
+                        height=height,
+                        generator=seeded_generator(),
+                        **common,
+                    )
+                    references_used = 0
+                    reference_mode = "none"
+                    model_used = config["model"]
+                    print("Local image path: text-to-image fallback succeeded.", flush=True)
         else:
-            if identity_adapter_loaded and hasattr(text_pipe, "set_ip_adapter_scale"):
-                text_pipe.set_ip_adapter_scale(0.0)
-            result = text_pipe(
-                width=width,
-                height=height,
-                generator=generator,
-                **common,
-            )
-            references_used = 0
-            reference_mode = "none"
+            ensure_profile(request.profile)
+            if request.references:
+                source = decode_data_url(request.references[0].dataUrl)
+                source = source.resize((width, height), Image.Resampling.LANCZOS)
+                result = image_pipe(
+                    image=source,
+                    strength=strength,
+                    generator=seeded_generator(),
+                    **common,
+                )
+                references_used = 1
+                reference_mode = "img2img"
+            else:
+                result = text_pipe(
+                    width=width,
+                    height=height,
+                    generator=seeded_generator(),
+                    **common,
+                )
+                references_used = 0
+                reference_mode = "none"
 
     if not result.images:
         raise RuntimeError("Model returned no image.")
@@ -395,7 +423,7 @@ def run_generation(request: ImageRequest):
 
     return {
         "dataUrl": encode_png(image),
-        "model": IDENTITY_MODEL_ID if identity_generation else config["model"],
+        "model": model_used,
         "profile": request.profile,
         "provider": "cooperative-worker",
         "referencesUsed": references_used,
@@ -516,7 +544,7 @@ def unison_capabilities():
         "seeded_variation",
         "variation_modes",
         "ip_adapter_identity",
-        "multi_reference_identity",
+        "single_reference_identity",
     ]
     if platform.system() == "Windows" and TEXT_READY_MARKER.exists():
         capabilities.extend(
@@ -567,7 +595,7 @@ def capabilities():
         },
         "capabilities": {
             "imageGeneration": True,
-            "referenceImages": 2,
+            "referenceImages": 1,
             "textGeneration": platform.system() == "Windows" and TEXT_READY_MARKER.exists(),
             "profiles": ["fast", "quality"],
             "asyncQueue": bool(QUEUE_URL and WORKER_TOKEN),
@@ -575,7 +603,7 @@ def capabilities():
             "seededVariation": True,
             "identityConditioning": "sdxl-ip-adapter-plus",
             "identityModel": IDENTITY_MODEL_ID,
-            "multiReferenceIdentity": 2,
+            "multiReferenceIdentity": 0,
         },
     }
 
@@ -597,7 +625,7 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.9.0"
+            else "image-worker-0.9.1"
         ),
         busy_provider=unison_busy,
     )
