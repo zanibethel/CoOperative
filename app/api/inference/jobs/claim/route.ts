@@ -1,25 +1,21 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { authorizeUnisonNode } from "@/lib/unison/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-function workerAuthorized(request: Request) {
-  const expected = process.env.INFERENCE_LOCAL_TOKEN;
-  return Boolean(expected) && request.headers.get("authorization") === `Bearer ${expected}`;
-}
-
 export async function POST(request: Request) {
-  if (!workerAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const body = (await request.json().catch(() => ({}))) as { workerId?: unknown };
     const workerId =
       typeof body.workerId === "string" && body.workerId.trim()
         ? body.workerId.trim().slice(0, 160)
         : "local-worker";
+
+    if (!(await authorizeUnisonNode(request, workerId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const supabase = createAdminSupabaseClient();
     const { data, error } = await supabase.rpc("claim_next_image_inference_job", {
