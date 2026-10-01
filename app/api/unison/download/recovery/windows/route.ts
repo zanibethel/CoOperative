@@ -83,7 +83,7 @@ export async function GET(request: Request) {
       "title Restart CoOperative Unison",
       "echo.",
       "echo Restarting CoOperative Unison...",
-      `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $expected='${expectedNodeId}'; $actual=[Environment]::GetEnvironmentVariable('UNISON_NODE_ID','User'); if (-not $actual) { throw 'This Windows profile does not have a paired Unison node.' }; if ($actual -ne $expected) { throw ('This PC is paired as ' + $actual + ', not ' + $expected) }; $dir=Join-Path $env:LOCALAPPDATA 'CoOperative\\Unison'; $control=Join-Path $dir 'control-unison-windows.ps1'; if (-not (Test-Path $control)) { throw 'Restart helper is missing. Use Repair connection first.' }; & $control 'restart'"`,
+      `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $expected='${expectedNodeId}'; $machine=[Environment]::GetEnvironmentVariable('UNISON_NODE_ID','Machine'); $user=[Environment]::GetEnvironmentVariable('UNISON_NODE_ID','User'); $actual=if($machine){$machine}else{$user}; if (-not $actual) { throw 'This PC does not have a paired Unison node.' }; if ($actual -ne $expected) { throw ('This PC is paired as ' + $actual + ', not ' + $expected) }; $dir=if($machine){Join-Path $env:ProgramData 'CoOperative\\Unison'}else{Join-Path $env:LOCALAPPDATA 'CoOperative\\Unison'}; $control=Join-Path $dir 'control-unison-windows.ps1'; if (-not (Test-Path $control)) { throw 'Restart helper is missing. Use Repair connection first.' }; & $control 'restart'"`,
       "if errorlevel 1 (",
       "  echo.",
       "  echo Restart did not finish. Try Repair connection from the dashboard.",
