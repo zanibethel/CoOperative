@@ -6,6 +6,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$machineScope = [Environment]::GetEnvironmentVariable("UNISON_INSTALL_SCOPE", "Machine") -eq "machine"
+
 foreach ($name in @(
   "UNISON_NODE_TOKEN",
   "UNISON_NODE_ID",
@@ -27,17 +29,36 @@ foreach ($name in @(
   "WINDOWS_TEXT_HEAVY_MODEL_ID",
   "UNISON_SHARED_UV_EXE",
   "UNISON_OLLAMA_EXE",
+  "UNISON_OLLAMA_URL",
+  "OLLAMA_HOST",
+  "UNISON_CREDENTIAL_PATH",
   "UV_CACHE_DIR",
   "UV_PYTHON_INSTALL_DIR",
   "OLLAMA_MODELS"
 )) {
   $value = [Environment]::GetEnvironmentVariable($name, "Machine")
-  if (-not $value) {
+  if (-not $machineScope -and -not $value) {
     $value = [Environment]::GetEnvironmentVariable($name, "User")
   }
   if ($value) {
     Set-Item -Path "Env:$name" -Value $value
   }
+}
+
+if ($machineScope) {
+  $credentialPath = $env:UNISON_CREDENTIAL_PATH
+  if (-not $credentialPath) {
+    $credentialPath = Join-Path $env:ProgramData "CoOperative\Unison\node-credential.json"
+  }
+  if (-not (Test-Path $credentialPath)) {
+    throw "The protected machine-wide Unison credential is missing."
+  }
+
+  $credential = Get-Content $credentialPath -Raw | ConvertFrom-Json
+  $env:UNISON_NODE_ID = [string]$credential.nodeId
+  $env:UNISON_NODE_TOKEN = [string]$credential.nodeToken
+  $env:UNISON_NODE_OWNER_REF = [string]$credential.ownerRef
+  $env:UNISON_NODE_CLASS = [string]$credential.nodeClass
 }
 
 $uvExe = $null
