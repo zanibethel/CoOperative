@@ -1,23 +1,20 @@
 import { NextResponse } from "next/server";
 
 import { businessSummariesForUser } from "@/lib/ai/business-context";
-import { createClient } from "@/lib/supabase/server";
+import { authenticatedUserId } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const userId = await authenticatedUserId();
 
-  if (!user) {
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    const businesses = await businessSummariesForUser(user.id);
+    const businesses = await businessSummariesForUser(userId);
     return NextResponse.json(
       { businesses },
       { headers: { "Cache-Control": "no-store" } },
