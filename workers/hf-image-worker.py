@@ -63,7 +63,7 @@ else:
     DEVICE = "cpu"
 
 DTYPE = torch.float16 if DEVICE in {"cuda", "mps"} else torch.float32
-WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN")
+WORKER_TOKEN = os.getenv("UNISON_NODE_TOKEN") or os.getenv("INFERENCE_WORKER_TOKEN")
 QUEUE_URL = os.getenv("COOPERATIVE_QUEUE_URL", "https://co-operative-mu.vercel.app").rstrip("/")
 QUEUE_POLL_SECONDS = max(2, int(os.getenv("COOPERATIVE_QUEUE_POLL_SECONDS", "3")))
 WORKER_ID = (
@@ -404,7 +404,7 @@ def run_generation(request: ImageRequest):
 
 def queue_headers():
     if not WORKER_TOKEN:
-        raise RuntimeError("INFERENCE_WORKER_TOKEN is required for async queue polling.")
+        raise RuntimeError("A Unison node or inference worker token is required for async queue polling.")
     return {
         "Authorization": f"Bearer {WORKER_TOKEN}",
         "Content-Type": "application/json",
@@ -415,7 +415,7 @@ def complete_job(job_id: str, payload: dict):
     response = httpx.post(
         f"{QUEUE_URL}/api/inference/jobs/complete",
         headers=queue_headers(),
-        json={"jobId": job_id, **payload},
+        json={"jobId": job_id, "workerId": WORKER_ID, **payload},
         timeout=120.0,
         follow_redirects=True,
     )
@@ -496,7 +496,7 @@ def require_worker_token(authorization: str | None):
     if not WORKER_TOKEN:
         raise HTTPException(
             status_code=503,
-            detail="INFERENCE_WORKER_TOKEN is required before image generation can be exposed.",
+            detail="A Unison node or inference worker token is required before image generation can be exposed.",
         )
     if authorization != f"Bearer {WORKER_TOKEN}":
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -592,7 +592,7 @@ if __name__ == "__main__":
     if QUEUE_URL and WORKER_TOKEN:
         threading.Thread(target=queue_loop, daemon=True, name="cooperative-queue").start()
     elif QUEUE_URL:
-        print("COOPERATIVE_QUEUE_URL is set, but INFERENCE_WORKER_TOKEN is missing; queue polling disabled.")
+        print("COOPERATIVE_QUEUE_URL is set, but no node/worker token is configured; queue polling disabled.")
 
     uvicorn.run(
         app,
