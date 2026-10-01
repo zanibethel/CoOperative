@@ -97,7 +97,10 @@ export default function LiveNodeStatus({
 
   useEffect(() => {
     mounted.current = true;
-    void load();
+
+    const initial = window.setTimeout(() => {
+      void load();
+    }, 0);
 
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") {
@@ -112,6 +115,7 @@ export default function LiveNodeStatus({
 
     return () => {
       mounted.current = false;
+      window.clearTimeout(initial);
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
