@@ -30,6 +30,7 @@ export default function JoinClient({
   const [pairing, setPairing] = useState<Pairing | null>(null);
   const [message, setMessage] = useState("");
   const [working, setWorking] = useState(false);
+  const [installWaiting, setInstallWaiting] = useState(false);
 
   const expiresLabel = useMemo(() => {
     if (!pairing) return "";
@@ -66,6 +67,37 @@ export default function JoinClient({
     if (!response.ok) throw new Error(payload.error || "Could not create pairing code.");
     return payload as Pairing;
   }
+
+  async function contributorNodes() {
+    const response = await fetch("/api/unison/contributor", { cache: "no-store" });
+    const payload = (await response.json()) as {
+      nodes?: ContributorNode[];
+      error?: string;
+    };
+    if (!response.ok) throw new Error(payload.error || "Could not check node status.");
+    return payload.nodes || [];
+  }
+
+  async function waitForNewOnlineNode(existingNodeIds: Set<string>) {
+    const deadline = Date.now() + 15 * 60_000;
+
+    while (Date.now() < deadline) {
+      const nodes = await contributorNodes();
+      const connected = nodes.find((node) => {
+        if (existingNodeIds.has(node.id)) return false;
+        if (!node.worker_version || node.worker_version === "paired") return false;
+
+        const lastSeen = Date.parse(node.last_seen_at);
+        return Number.isFinite(lastSeen) && Date.now() - lastSeen <= 90_000;
+      });
+
+      if (connected) return connected;
+      await new Promise((resolve) => window.setTimeout(resolve, 3000));
+    }
+
+    return null;
+  }
+
 
   async function createPairingCode() {
     setWorking(true);
