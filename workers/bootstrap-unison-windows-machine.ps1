@@ -12,6 +12,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Protect-UnisonDirectory([string]$Path) {
+  $systemSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-18")
+  $adminsSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-32-544")
+  $usersSid = [Security.Principal.SecurityIdentifier]::new("S-1-5-32-545")
+  $inherit = [Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit"
+  $none = [Security.AccessControl.PropagationFlags]::None
+  $allow = [Security.AccessControl.AccessControlType]::Allow
+  $acl = [Security.AccessControl.DirectorySecurity]::new()
+  $acl.SetAccessRuleProtection($true, $false)
+  $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($systemSid, "FullControl", $inherit, $none, $allow))
+  $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($adminsSid, "FullControl", $inherit, $none, $allow))
+  $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($usersSid, "ReadAndExecute", $inherit, $none, $allow))
+  Set-Acl -Path $Path -AclObject $acl
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -24,6 +39,7 @@ $uvDir = Join-Path $runtimeDir "uv"
 $uvExe = Join-Path $uvDir "uv.exe"
 
 New-Item -ItemType Directory -Force -Path $installDir,$runtimeDir,$uvDir | Out-Null
+Protect-UnisonDirectory $installDir
 
 if (-not (Test-Path $uvExe)) {
   Write-Host "Installing the shared Unison Python runtime..."
