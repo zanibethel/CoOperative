@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { getUnisonViewer } from "@/lib/unison/access";
+import UnisonNodeActions from "./node-actions";
+import LiveNodeStatus from "../live-node-status";
 
 function hours(seconds: number) {
   if (!seconds) return "0h";
@@ -75,6 +77,11 @@ export default async function UnisonContributorDashboard() {
         </p>
       </section>
 
+      <LiveNodeStatus
+        scope="mine"
+        title="Your nodes"
+      />
+
       <section className="metrics unison-metrics">
         <div className="metric"><span>Devices online</span><strong>{onlineNodes}/{nodeRows.length}</strong></div>
         <div className="metric"><span>Completed jobs</span><strong>{completed.length}</strong></div>
@@ -117,6 +124,7 @@ export default async function UnisonContributorDashboard() {
                     <span>{resources.memoryTotalMb ? `${Math.round(resources.memoryTotalMb / 1024)} GB RAM` : "RAM pending"}</span>
                     <span>Last seen {new Date(node.last_seen_at).toLocaleString()}</span>
                   </div>
+                  <UnisonNodeActions nodeId={node.id} status={status} />
                 </article>
               );
             })}

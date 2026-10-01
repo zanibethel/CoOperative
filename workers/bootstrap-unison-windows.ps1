@@ -43,7 +43,9 @@ $workerFiles = @(
   "hf-image-worker.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
-  "install-unison-windows.ps1"
+  "install-unison-windows.ps1",
+  "control-unison-windows.ps1",
+  "repair-unison-windows.ps1"
 )
 
 Write-Host "Downloading CoOperative Unison worker files..."

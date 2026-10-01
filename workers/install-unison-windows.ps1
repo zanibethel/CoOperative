@@ -84,6 +84,16 @@ Set-Content -Path $hiddenLauncher -Value $vbs -Encoding ASCII
 $taskCommand = "wscript.exe //B //Nologo `"$hiddenLauncher`""
 schtasks.exe /Create /F /SC ONLOGON /TN $taskName /TR $taskCommand | Out-Null
 
+$protocolRoot = "HKCU:\Software\Classes\cooperative-unison"
+$commandKey = Join-Path $protocolRoot "shell\open\command"
+New-Item -Path $commandKey -Force | Out-Null
+Set-Item -Path $protocolRoot -Value "URL:CoOperative Unison"
+New-ItemProperty -Path $protocolRoot -Name "URL Protocol" -Value "" -PropertyType String -Force | Out-Null
+
+$control = Join-Path $PSScriptRoot "control-unison-windows.ps1"
+$protocolCommand = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$control`" `"%1`""
+Set-Item -Path $commandKey -Value $protocolCommand
+
 Write-Host ""
 Write-Host "Unison node paired and installed."
 Write-Host "Node ID: $existingNodeId"
