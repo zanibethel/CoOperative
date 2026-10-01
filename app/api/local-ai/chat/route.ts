@@ -21,6 +21,8 @@ const chatRequestSchema = z
     profile: z.enum(["fast", "quality"]).default("fast"),
     maxTokens: z.number().int().min(16).max(4096).default(768),
     temperature: z.number().min(0).max(2).default(0.2),
+    nodeRouting: z.enum(["default", "prefer-owned", "require-node"]).default("default"),
+    requiredNodeId: z.string().min(1).max(160).optional(),
   })
   .refine(
     (value) => Boolean(value.message.trim()) || value.attachmentIds.length > 0,
@@ -51,6 +53,79 @@ export async function POST(request: Request) {
     const input = chatRequestSchema.parse(await request.json());
     const admin = createAdminSupabaseClient();
     const ownerRef = owner.ownerRef;
+    const requestedCapability = input.attachmentIds.length > 0 ? "vision" : "text";
+    let preferredNodeId: string | null = null;
+    let targetNodeId: string | null = null;
+    let nodeRouteNote = "";
+
+    if (input.nodeRouting !== "default") {
+      if (requestedCapability !== "text") {
+        if (input.nodeRouting === "require-node") {
+          return NextResponse.json(
+            { error: "The selected Unison node route does not support image-understanding chat yet." },
+            { status: 409 },
+          );
+        }
+      } else {
+        const { data: ownedNodes, error: nodesError } = await admin
+          .from("unison_nodes")
+          .select("id,display_name,state,capabilities,policy,last_seen_at")
+          .eq("contributor_user_id", owner.userId)
+          .order("last_seen_at", { ascending: false });
+
+        if (nodesError) throw nodesError;
+
+        const freshAfter = Date.now() - 90_000;
+        const textNodes = (ownedNodes || []).filter((node) => {
+          const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
+          const policy =
+            node.policy && typeof node.policy === "object"
+              ? (node.policy as { allowText?: unknown })
+              : {};
+          const seenAt = Date.parse(node.last_seen_at || "");
+          return (
+            capabilities.includes("text_generation") &&
+            policy.allowText !== false &&
+            Number.isFinite(seenAt) &&
+            seenAt >= freshAfter &&
+            node.state !== "paused"
+          );
+        });
+
+        if (input.nodeRouting === "require-node") {
+          if (!input.requiredNodeId) {
+            return NextResponse.json(
+              { error: "Choose an owned Unison node to require." },
+              { status: 400 },
+            );
+          }
+
+          const selected = textNodes.find((node) => node.id === input.requiredNodeId);
+          if (!selected) {
+            return NextResponse.json(
+              { error: "That owned Unison node is not currently available for text generation." },
+              { status: 409 },
+            );
+          }
+
+          targetNodeId = selected.id;
+          nodeRouteNote = ` Required owned node ${selected.display_name || selected.id}.`;
+        } else {
+          const statePriority: Record<string, number> = { idle: 0, online: 1, busy: 2 };
+          const selected = [...textNodes].sort(
+            (a, b) => (statePriority[a.state] ?? 9) - (statePriority[b.state] ?? 9),
+          )[0];
+          if (selected) {
+            preferredNodeId = selected.id;
+            nodeRouteNote =
+              ` Preferred owned node ${selected.display_name || selected.id} for the first 15 seconds.`;
+          } else {
+            nodeRouteNote = " No fresh owned text node was available, so normal local routing remains eligible.";
+          }
+        }
+      }
+    }
+
     const businessContext = await buildBusinessChatContext(
       owner.userId,
       input.businessId,
@@ -188,14 +263,17 @@ export async function POST(request: Request) {
       attachment_ids: currentAttachmentIds,
       capability: currentAttachmentIds.length > 0 ? "vision" : "text",
       profile: input.profile,
+      routing_preference: input.nodeRouting,
+      preferred_node_id: preferredNodeId,
+      target_node_id: targetNodeId,
       max_tokens: input.maxTokens,
       temperature: input.temperature,
       routing_mode: input.profile === "quality" ? "local-quality" : "local-fast",
       task_class: "general",
       route_reason:
         input.profile === "quality"
-          ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}`
-          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}`,
+          ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}`
+          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}`,
       allow_paid_fallback: false,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
@@ -237,6 +315,9 @@ export async function POST(request: Request) {
         conversationId,
         conversationTitle,
         business: businessContext?.business ?? null,
+        routingPreference: input.nodeRouting,
+        preferredNodeId,
+        targetNodeId,
       },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
@@ -265,7 +346,7 @@ export async function GET(request: Request) {
     let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,error,created_at,completed_at",
+        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,error,created_at,completed_at",
       )
       .eq("client_owner_ref", ownerRef);
 
@@ -302,6 +383,11 @@ export async function GET(request: Request) {
         outputTokens: job.output_tokens,
         firstTokenMs: job.first_token_ms,
         latencyMs: job.latency_ms,
+        workerId: job.worker_id,
+        routingPreference: job.routing_preference || "default",
+        preferredNodeId: job.preferred_node_id,
+        targetNodeId: job.target_node_id,
+        routeReason: job.route_reason,
         error: job.error,
         createdAt: job.created_at,
         completedAt: job.completed_at,
