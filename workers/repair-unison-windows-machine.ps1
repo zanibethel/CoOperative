@@ -26,10 +26,18 @@ $runtimeDir = Join-Path $installDir "runtime"
 $uvExe = Get-MachineEnv "UNISON_SHARED_UV_EXE"
 $taskName = "CoOperative Unison Machine Node"
 
-$nodeId = Get-MachineEnv "UNISON_NODE_ID"
-$nodeToken = Get-MachineEnv "UNISON_NODE_TOKEN"
+$credentialPath = Get-MachineEnv "UNISON_CREDENTIAL_PATH"
+if (-not $credentialPath) {
+  $credentialPath = Join-Path $installDir "node-credential.json"
+}
+if (-not (Test-Path $credentialPath)) {
+  throw "This PC does not have a protected machine-wide Unison credential."
+}
+$credential = Get-Content $credentialPath -Raw | ConvertFrom-Json
+$nodeId = [string]$credential.nodeId
+$nodeToken = [string]$credential.nodeToken
 if (-not $nodeId -or -not $nodeToken) {
-  throw "This PC does not have a machine-wide Unison credential."
+  throw "The protected machine-wide Unison credential is incomplete."
 }
 if ($ExpectedNodeId -and $nodeId -ne $ExpectedNodeId) {
   throw "This repair targets node '$ExpectedNodeId', but this PC is paired as '$nodeId'."
@@ -140,7 +148,39 @@ Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Silent
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $taskPrincipal -Settings $settings -Description "CoOperative Unison machine-wide idle compute node" | Out-Null
 Start-ScheduledTask -TaskName $taskName
 
+Write-Host "Verifying repaired machine-wide heartbeat..."
+$verified = $false
+$deadline = (Get-Date).AddMinutes(12)
+while ((Get-Date) -lt $deadline) {
+  try {
+    $status = Invoke-RestMethod -Method Post -Uri "$QueueUrl/api/unison/nodes/self-status" -Headers @{ Authorization = "Bearer $nodeToken" } -ContentType "application/json" -Body (@{ nodeId = $nodeId } | ConvertTo-Json)
+    $caps = @($status.capabilities)
+    if ([string]$status.workerVersion -like "startup-failed-*") {
+      $startupError = $caps | Where-Object { $_ -like "startup_error:*" } | Select-Object -First 1
+      if ($startupError) { throw $startupError.Substring("startup_error:".Length) }
+      throw "The machine-wide worker reported a startup failure."
+    }
+    if (
+      $status.fresh -eq $true -and
+      [string]$status.workerVersion -like "windows-unison-1.*" -and
+      $caps -contains "text_generation" -and
+      $caps -contains "machine_wide" -and
+      $caps -contains "whole_pc_idle"
+    ) {
+      $verified = $true
+      break
+    }
+  } catch {
+    Write-Host "Waiting for repaired machine-wide heartbeat: $($_.Exception.Message)"
+  }
+  Start-Sleep -Seconds 4
+}
+
+if (-not $verified) {
+  throw "Machine-wide repair restarted Unison, but a verified whole-PC-idle heartbeat was not received in time."
+}
+
 Write-Host ""
-Write-Host "Machine-wide Unison repair complete."
+Write-Host "Machine-wide Unison repair complete and verified."
 Write-Host "Node: $nodeId"
 Write-Host "Whole-PC idle detection remains enabled."
