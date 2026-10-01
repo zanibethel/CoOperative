@@ -20,8 +20,10 @@ foreach ($name in @(
   "COOPERATIVE_QUEUE_URL",
   "PRELOAD_PROFILE",
   "WORKER_BIND_HOST",
+  "WINDOWS_TEXT_BACKEND",
   "WINDOWS_TEXT_FAST_MODEL_ID",
-  "WINDOWS_TEXT_QUALITY_MODEL_ID"
+  "WINDOWS_TEXT_QUALITY_MODEL_ID",
+  "WINDOWS_TEXT_HEAVY_MODEL_ID"
 )) {
   $value = [Environment]::GetEnvironmentVariable($name, "User")
   if ($value) {
@@ -320,7 +322,7 @@ if ($imageExitedFirst) {
   while (-not $textProcess.HasExited) {
     $state = if (Test-Path $textBusyPath) { "busy" } else { "online" }
     Send-StartupHeartbeat `
-      -WorkerVersion "windows-unison-0.9.2-text-only" `
+      -WorkerVersion "windows-unison-0.9.3-text-only" `
       -Capabilities $degradedCapabilities `
       -State $state
 
