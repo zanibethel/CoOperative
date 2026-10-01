@@ -34,6 +34,34 @@ internal static class Program
         Application.Run(new InstallerForm());
     }
 
+    internal static bool MachineWideConfigured =>
+        !string.IsNullOrWhiteSpace(
+            Environment.GetEnvironmentVariable("UNISON_NODE_ID", EnvironmentVariableTarget.Machine)
+        );
+
+    internal static EnvironmentVariableTarget NodeEnvironmentTarget =>
+        MachineWideConfigured ? EnvironmentVariableTarget.Machine : EnvironmentVariableTarget.User;
+
+    internal static string WorkerInstallDir =>
+        MachineWideConfigured
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "CoOperative",
+                "Unison"
+            )
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CoOperative",
+                "Unison"
+            );
+
+    internal static string? ReadNodeEnvironment(string name)
+    {
+        var machine = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
+        if (!string.IsNullOrWhiteSpace(machine)) return machine;
+        return Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
+    }
+
     internal static void OpenUrl(string url)
     {
         Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
@@ -45,16 +73,17 @@ internal sealed class UnisonTrayContext : ApplicationContext
     private readonly NotifyIcon _notifyIcon = new();
     private readonly ToolStripMenuItem _statusItem;
     private readonly System.Windows.Forms.Timer _timer;
-    private readonly string _installDir =
+    private readonly string _shellDir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CoOperative", "Unison");
+    private readonly string _workerDir = Program.WorkerInstallDir;
     private bool _refreshing;
 
     public UnisonTrayContext()
     {
-        var iconPath = Path.Combine(_installDir, "unison.ico");
+        var iconPath = Path.Combine(_shellDir, "unison.ico");
         if (!File.Exists(iconPath))
         {
-            Directory.CreateDirectory(_installDir);
+            Directory.CreateDirectory(_shellDir);
             InstallerForm.CreateUnisonIcon(iconPath);
         }
 
@@ -93,8 +122,8 @@ internal sealed class UnisonTrayContext : ApplicationContext
 
         try
         {
-            var nodeId = Environment.GetEnvironmentVariable("UNISON_NODE_ID", EnvironmentVariableTarget.User);
-            var nodeToken = Environment.GetEnvironmentVariable("UNISON_NODE_TOKEN", EnvironmentVariableTarget.User);
+            var nodeId = Program.ReadNodeEnvironment("UNISON_NODE_ID");
+            var nodeToken = Program.ReadNodeEnvironment("UNISON_NODE_TOKEN");
             if (string.IsNullOrWhiteSpace(nodeId) || string.IsNullOrWhiteSpace(nodeToken))
             {
                 SetStatus("Not linked");
@@ -170,7 +199,7 @@ internal sealed class UnisonTrayContext : ApplicationContext
 
     private void RunControl(string action)
     {
-        var control = Path.Combine(_installDir, "control-unison-windows.ps1");
+        var control = Path.Combine(_workerDir, "control-unison-windows.ps1");
         if (!File.Exists(control))
         {
             MessageBox.Show(
@@ -319,7 +348,7 @@ internal sealed class InstallerForm : Form
 
     private async Task RunInstallAsync()
     {
-        Directory.CreateDirectory(_installDir);
+        Directory.CreateDirectory(_shellDir);
         _logPath = Path.Combine(_installDir, "installer.log");
 
         try
@@ -761,7 +790,7 @@ internal sealed class InstallerForm : Form
                 File.Copy(sourceExe, installedExe, overwrite: true);
             }
 
-            var iconPath = Path.Combine(_installDir, "unison.ico");
+            var iconPath = Path.Combine(_shellDir, "unison.ico");
             CreateUnisonIcon(iconPath);
 
             var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
