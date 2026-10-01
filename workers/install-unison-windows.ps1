@@ -85,7 +85,10 @@ $startupDir = [Environment]::GetFolderPath("Startup")
 $startupLauncher = Join-Path $startupDir "CoOperative-Unison.vbs"
 Copy-Item -Force $hiddenLauncher $startupLauncher
 
-schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
+$legacyTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+if ($legacyTask) {
+  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+}
 
 $protocolRoot = "HKCU:\Software\Classes\cooperative-unison"
 $commandKey = Join-Path $protocolRoot "shell\open\command"
