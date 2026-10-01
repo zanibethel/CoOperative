@@ -10,6 +10,14 @@ type Pairing = {
   command: string;
 };
 
+type ContributorNode = {
+  id: string;
+  display_name: string;
+  state: string;
+  last_seen_at: string;
+  worker_version: string;
+};
+
 export default function JoinClient({
   initialName,
   alreadyJoined,
