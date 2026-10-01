@@ -12,6 +12,9 @@ import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registr
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
+const OWNER_IMPROVEMENT_ROUTE_REASON =
+  "Owner Improvement Report compiled from aggregate internal telemetry. Owned/local Quality model only; paid fallback disabled.";
+
 const requestSchema = z.object({
   action: z.literal("generate_report").default("generate_report"),
 });
@@ -69,8 +72,7 @@ export async function POST(request: Request) {
       temperature: 0.1,
       routing_mode: "local-quality",
       task_class: "reasoning",
-      route_reason:
-        "Owner Improvement Report compiled from aggregate internal telemetry. Owned/local Quality model only; paid fallback disabled.",
+      route_reason: OWNER_IMPROVEMENT_ROUTE_REASON,
       allow_paid_fallback: false,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
@@ -121,8 +123,40 @@ export async function GET(request: Request) {
 
     if (!jobId) {
       const evidence = await collectOwnerImprovementEvidence(owner.userId);
+      const { data: latestReport, error: latestError } = await admin
+        .from("text_inference_jobs")
+        .select(
+          "id,status,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,error,created_at,completed_at",
+        )
+        .eq("client_owner_ref", owner.ownerRef)
+        .eq("route_reason", OWNER_IMPROVEMENT_ROUTE_REASON)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestError) throw latestError;
+
       return NextResponse.json(
-        { evidence },
+        {
+          evidence,
+          latestReport: latestReport
+            ? {
+                jobId: latestReport.id,
+                status: latestReport.status,
+                partialText: latestReport.partial_text,
+                text: latestReport.result_text,
+                model: latestReport.result_model,
+                provider: latestReport.result_provider,
+                promptTokens: latestReport.prompt_tokens,
+                outputTokens: latestReport.output_tokens,
+                firstTokenMs: latestReport.first_token_ms,
+                latencyMs: latestReport.latency_ms,
+                error: latestReport.error,
+                createdAt: latestReport.created_at,
+                completedAt: latestReport.completed_at,
+              }
+            : null,
+        },
         { headers: { "Cache-Control": "no-store" } },
       );
     }
