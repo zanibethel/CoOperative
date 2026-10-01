@@ -502,7 +502,7 @@ export async function GET(request: Request) {
     const { data: job, error } = await admin
       .from("text_inference_jobs")
       .select(
-        "id,status,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,error,created_at,completed_at",
+        "id,status,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,error,route_reason,created_at,completed_at",
       )
       .eq("id", jobId)
       .eq("client_owner_ref", owner.ownerRef)
