@@ -138,6 +138,10 @@ def generation_settings(job: dict):
 
 
 def ollama_executable() -> str | None:
+    configured = os.getenv("UNISON_OLLAMA_EXE")
+    if configured and Path(configured).is_file():
+        return configured
+
     direct = shutil.which("ollama")
     if direct:
         return direct
