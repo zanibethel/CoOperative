@@ -99,9 +99,108 @@ Write-Host "Idle-only mode: $IdleMinutes minute(s)"
 Write-Host "Queue: $QueueUrl"
 
 $logPath = Join-Path $PSScriptRoot "unison.log"
+$errorLogPath = Join-Path $PSScriptRoot "unison-error.log"
 Write-Host "Log: $logPath"
 
-& $uvExe run "$PSScriptRoot\hf-image-worker.py" 2>&1 |
-  Tee-Object -FilePath $logPath -Append
+function Send-StartupHeartbeat(
+  [string]$WorkerVersion,
+  [string[]]$Capabilities = @(),
+  [string]$State = "online"
+) {
+  try {
+    $heartbeat = @{
+      nodeId = $env:UNISON_NODE_ID
+      displayName = $NodeName
+      ownerRef = $(if ($env:UNISON_NODE_OWNER_REF) { $env:UNISON_NODE_OWNER_REF } else { "platform-private" })
+      nodeClass = $(if ($env:UNISON_NODE_CLASS) { $env:UNISON_NODE_CLASS } else { "private" })
+      state = $State
+      platform = @{
+        system = "Windows"
+        release = [Environment]::OSVersion.VersionString
+        machine = $env:PROCESSOR_ARCHITECTURE
+      }
+      capabilities = $Capabilities
+      resources = @{}
+      policy = @{
+        idleOnly = $true
+        idleThresholdSeconds = [Math]::Max(0, $IdleMinutes) * 60
+        allowImage = $false
+        allowText = $false
+      }
+      workerVersion = $WorkerVersion
+    } | ConvertTo-Json -Depth 6
 
-exit $LASTEXITCODE
+    Invoke-RestMethod `
+      -Method Post `
+      -Uri "$QueueUrl/api/unison/nodes/heartbeat" `
+      -Headers @{ Authorization = "Bearer $($env:UNISON_NODE_TOKEN)" } `
+      -ContentType "application/json" `
+      -Body $heartbeat | Out-Null
+  } catch {
+    Add-Content -Path $errorLogPath -Value "Heartbeat report failed: $($_.Exception.Message)"
+  }
+}
+
+$workerPath = Join-Path $PSScriptRoot "hf-image-worker.py"
+$workerProcess = Start-Process `
+  -FilePath $uvExe `
+  -ArgumentList @("run", "`"$workerPath`"") `
+  -WorkingDirectory $PSScriptRoot `
+  -RedirectStandardOutput $logPath `
+  -RedirectStandardError $errorLogPath `
+  -PassThru `
+  -WindowStyle Hidden
+
+$runtimeStarted = $false
+$lastStartingHeartbeat = Get-Date
+
+while (-not $workerProcess.HasExited) {
+  Start-Sleep -Seconds 3
+  $workerProcess.Refresh()
+
+  if (-not $runtimeStarted -and (Test-Path $logPath)) {
+    $runtimeStarted = Select-String `
+      -Path $logPath `
+      -Pattern "UNISON_RUNTIME_STARTED" `
+      -SimpleMatch `
+      -Quiet `
+      -ErrorAction SilentlyContinue
+
+    if ($runtimeStarted) {
+      Write-Host "Python worker runtime started. Normal worker heartbeats are now active."
+    }
+  }
+
+  if (-not $runtimeStarted -and ((Get-Date) - $lastStartingHeartbeat).TotalSeconds -ge 20) {
+    Send-StartupHeartbeat -WorkerVersion "starting-windows-0.2" -Capabilities @("startup_phase:dependencies")
+    $lastStartingHeartbeat = Get-Date
+  }
+}
+
+$exitCode = $workerProcess.ExitCode
+if ($exitCode -ne 0) {
+  $errorTail = ""
+  if (Test-Path $errorLogPath) {
+    $errorTail = (Get-Content $errorLogPath -Tail 12 -ErrorAction SilentlyContinue) -join " | "
+  }
+  if (-not $errorTail -and (Test-Path $logPath)) {
+    $errorTail = (Get-Content $logPath -Tail 12 -ErrorAction SilentlyContinue) -join " | "
+  }
+
+  $diagnostic = ($errorTail -replace "[\r\n]+", " " -replace "\s+", " ").Trim()
+  if ($diagnostic.Length -gt 95) {
+    $diagnostic = $diagnostic.Substring(0, 95)
+  }
+  if (-not $diagnostic) {
+    $diagnostic = "Worker exited with code $exitCode."
+  }
+
+  Send-StartupHeartbeat `
+    -WorkerVersion "startup-failed-windows-0.2" `
+    -Capabilities @("startup_exit_code:$exitCode", "startup_error:$diagnostic") `
+    -State "paused"
+
+  exit $exitCode
+}
+
+exit 0
