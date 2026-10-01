@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
 import { AGENT_REGISTRY, AGENT_REPOSITORIES } from "@/lib/agents/registry";
+import { evaluateAgentTaskEscalation } from "@/lib/inference/agent-escalation";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -306,12 +307,21 @@ export async function GET(request: Request) {
     if (taskId) {
       const { data: task, error } = await admin
         .from("agent_tasks")
-        .select("id,status,result,error,branch_name,updated_at,completed_at")
+        .select("id,status,objective,requested_profile,result,error,branch_name,updated_at,completed_at")
         .eq("id", taskId)
         .eq("owner_ref", owner)
         .maybeSingle();
       if (error) throw error;
       if (!task) return NextResponse.json({ error: "Agent task not found." }, { status: 404 });
+
+      let escalation = null;
+      if (task.status === "failed") {
+        escalation = await evaluateAgentTaskEscalation(admin, task, {
+          allowPaidFallback: false,
+          automaticPaidBudgetUsd: 0,
+          requiredSuccessRate: 0.8,
+        });
+      }
 
       return NextResponse.json(
         {
@@ -321,6 +331,7 @@ export async function GET(request: Request) {
           branchName: task.branch_name,
           result: task.result,
           error: task.error,
+          escalation,
           updatedAt: task.updated_at,
           completedAt: task.completed_at,
         },
