@@ -3,6 +3,10 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { textInferenceMessageSchema } from "@/lib/inference/contracts";
 import { localWorkerAuthorized } from "@/lib/agents/server";
+import {
+  preferredOwnedTextNode,
+  userIdFromOwnerRef,
+} from "@/lib/unison/owned-text-routing";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -25,7 +29,7 @@ export async function POST(request: Request) {
     const admin = createAdminSupabaseClient();
     const { data: task, error: taskError } = await admin
       .from("agent_tasks")
-      .select("id,status")
+      .select("id,status,owner_ref")
       .eq("id", input.taskId)
       .maybeSingle();
 
@@ -38,6 +42,10 @@ export async function POST(request: Request) {
       );
     }
 
+    const ownerUserId = userIdFromOwnerRef(task.owner_ref);
+    const ownedNode = ownerUserId
+      ? await preferredOwnedTextNode(admin, ownerUserId)
+      : null;
     const jobId = crypto.randomUUID();
     const { error } = await admin.from("text_inference_jobs").insert({
       id: jobId,
@@ -56,6 +64,8 @@ export async function POST(request: Request) {
       model_registry_revision: "2026-09-30.2",
       verification_status: "not_run",
       capability: "text",
+      routing_preference: ownedNode ? "prefer-owned" : "default",
+      preferred_node_id: ownedNode?.id ?? null,
     });
     if (error) throw error;
 
@@ -65,7 +75,14 @@ export async function POST(request: Request) {
     }).eq("id", input.taskId);
 
     return NextResponse.json(
-      { jobId, status: "queued", profile: input.profile },
+      {
+        jobId,
+        status: "queued",
+        profile: input.profile,
+        ownedNodePreferred: Boolean(ownedNode),
+        preferredNodeId: ownedNode?.id ?? null,
+        preferredNodeName: ownedNode?.displayName ?? null,
+      },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
@@ -93,7 +110,7 @@ export async function GET(request: Request) {
     const admin = createAdminSupabaseClient();
     const { data: job, error } = await admin
       .from("text_inference_jobs")
-      .select("id,status,profile,partial_text,result_text,result_model,prompt_tokens,output_tokens,latency_ms,error")
+      .select("id,status,profile,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,latency_ms,worker_id,routing_preference,preferred_node_id,error")
       .eq("id", jobId)
       .eq("agent_task_id", taskId)
       .maybeSingle();
@@ -114,6 +131,10 @@ export async function GET(request: Request) {
       partialText: job.partial_text,
       text: job.result_text,
       model: job.result_model,
+      provider: job.result_provider,
+      workerId: job.worker_id,
+      routingPreference: job.routing_preference,
+      preferredNodeId: job.preferred_node_id,
       promptTokens: job.prompt_tokens,
       outputTokens: job.output_tokens,
       latencyMs: job.latency_ms,
