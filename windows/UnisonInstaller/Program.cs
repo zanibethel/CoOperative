@@ -684,14 +684,41 @@ internal sealed class InstallerForm : Form
                         root.TryGetProperty("fresh", out var freshElement) &&
                         freshElement.ValueKind == JsonValueKind.True;
 
+                    var capabilities =
+                        root.TryGetProperty("capabilities", out var capabilitiesElement) &&
+                        capabilitiesElement.ValueKind == JsonValueKind.Array
+                            ? capabilitiesElement
+                                .EnumerateArray()
+                                .Where(item => item.ValueKind == JsonValueKind.String)
+                                .Select(item => item.GetString() ?? "")
+                                .ToArray()
+                            : [];
+
                     if (workerVersion.StartsWith("startup-failed-", StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new InvalidOperationException("The local worker reported a startup failure.");
+                        var startupError = capabilities
+                            .FirstOrDefault(item => item.StartsWith("startup_error:", StringComparison.OrdinalIgnoreCase));
+                        var detail = startupError is null
+                            ? "The local worker reported a startup failure."
+                            : "The local worker reported a startup failure: " +
+                                startupError["startup_error:".Length..];
+                        throw new InvalidOperationException(detail);
                     }
+
+                    var hasWindowsText = capabilities.Contains(
+                        "text_generation",
+                        StringComparer.OrdinalIgnoreCase
+                    );
+                    var currentWindowsRuntime = workerVersion.StartsWith(
+                        "windows-unison-0.9.",
+                        StringComparison.OrdinalIgnoreCase
+                    );
 
                     if (fresh &&
                         !workerVersion.Equals("paired", StringComparison.OrdinalIgnoreCase) &&
-                        !workerVersion.StartsWith("starting-", StringComparison.OrdinalIgnoreCase))
+                        !workerVersion.StartsWith("starting-", StringComparison.OrdinalIgnoreCase) &&
+                        hasWindowsText &&
+                        currentWindowsRuntime)
                     {
                         return;
                     }
