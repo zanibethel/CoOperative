@@ -11,8 +11,9 @@ CoOperative AI routes text work above the existing persistent local queue. The q
   - requests above 1024 requested output tokens -> Quality
   - requests above 12,000 estimated input characters -> Quality
   - otherwise -> Fast
-- `allowPaidFallback` is only a recorded permission for a future escalation layer.
-- The current router never executes a hosted fallback automatically.
+- `allowPaidFallback` is a permission input to the governed escalation layer.
+- CoOperative now has a deterministic escalation evaluator that can decide whether a stronger business-owned or paid executor is justified.
+- The current router still does not execute an external paid model automatically because no paid executor connector is wired into this text path yet.
 - `humanApprovalRequired` is preserved as an execution-governance flag. It does not prevent the local model from analyzing or drafting a proposed action.
 
 ## Registry
@@ -38,6 +39,21 @@ Each routed job records:
 
 This gives CoOperative evidence for future benchmarking and promotion/rollback without blindly retraining model weights.
 
-## Next layer
+## Escalation layer
 
-The next layer should add result verification and escalation policy. A local result should only escalate when verification indicates a real miss and policy allows the additional provider/cost. Hosted execution must remain explicit and auditable.
+The first governed escalation evaluator is implemented in `lib/inference/escalation-evaluator.ts` and exposed through the authenticated `/api/inference/text/escalation` endpoint.
+
+It uses deterministic evidence such as verification failure, repeated local failures, structured-output failures, scope-guard rejection, task class, and context size. It then filters candidate executors by availability, benchmark qualification, task support, context capacity, and cost policy.
+
+Decisions are one of:
+
+- stay local;
+- no qualified stronger executor;
+- ask for approval;
+- escalate within an explicitly authorized budget.
+
+Unknown paid cost requires approval. Business-owned AI can be preferred when it is qualified and has no known incremental cost.
+
+See `docs/AI-ESCALATION.md`.
+
+The next execution layer is to connect qualified external/business-owned executors and record actual per-call cost and verified outcome.
