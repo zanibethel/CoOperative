@@ -75,10 +75,12 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.8.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.9.0")
 
 MODEL_LOCK = threading.Lock()
 UNISON_BUSY = threading.Event()
+TEXT_READY_MARKER = Path(__file__).with_name("text-worker.ready")
+TEXT_BUSY_MARKER = Path(__file__).with_name("text-worker.busy")
 loaded_profile: str | None = None
 text_pipe = None
 image_pipe = None
@@ -502,6 +504,33 @@ def require_worker_token(authorization: str | None):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+def unison_capabilities():
+    capabilities = [
+        "image_generation",
+        "image_to_image",
+        "fast_profile",
+        "quality_profile",
+        "async_queue",
+        "seeded_variation",
+        "variation_modes",
+        "ip_adapter_identity",
+        "multi_reference_identity",
+    ]
+    if platform.system() == "Windows" and TEXT_READY_MARKER.exists():
+        capabilities.extend(
+            [
+                "text_generation",
+                "text_fast_profile",
+                "text_quality_profile",
+            ]
+        )
+    return capabilities
+
+
+def unison_busy():
+    return UNISON_BUSY.is_set() or TEXT_BUSY_MARKER.exists()
+
+
 @app.get("/health")
 def health():
     return {
@@ -520,17 +549,7 @@ def health():
             "url": QUEUE_URL or None,
             "workerId": WORKER_ID,
         },
-        "capabilities": [
-            "image_generation",
-            "image_to_image",
-            "fast_profile",
-            "quality_profile",
-            "async_queue",
-            "seeded_variation",
-            "variation_modes",
-            "ip_adapter_identity",
-            "multi_reference_identity",
-        ],
+        "capabilities": unison_capabilities(),
     }
 
 
@@ -545,7 +564,7 @@ def capabilities():
         "capabilities": {
             "imageGeneration": True,
             "referenceImages": 2,
-            "textGeneration": False,
+            "textGeneration": platform.system() == "Windows" and TEXT_READY_MARKER.exists(),
             "profiles": ["fast", "quality"],
             "asyncQueue": bool(QUEUE_URL and WORKER_TOKEN),
             "variationModes": ["preserve", "balanced", "new-scene"],
@@ -568,19 +587,9 @@ def generate(request: ImageRequest, authorization: str | None = Header(default=N
 
 if __name__ == "__main__":
     start_heartbeat_thread(
-        [
-            "image_generation",
-            "image_to_image",
-            "fast_profile",
-            "quality_profile",
-            "async_queue",
-            "seeded_variation",
-            "variation_modes",
-            "ip_adapter_identity",
-            "multi_reference_identity",
-        ],
-        "image-worker-0.8.0",
-        busy_provider=UNISON_BUSY.is_set,
+        unison_capabilities(),
+        "windows-unison-0.9.0" if platform.system() == "Windows" else "image-worker-0.9.0",
+        busy_provider=unison_busy,
     )
     print("UNISON_RUNTIME_STARTED", flush=True)
 
