@@ -18,6 +18,21 @@ function round(value: number, digits = 0) {
   return Math.round(value * factor) / factor;
 }
 
+const OWNER_DISPLAY_TIME_ZONE = "America/Chicago";
+
+function formatOwnerLocalTimestamp(date: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: OWNER_DISPLAY_TIME_ZONE,
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    timeZoneName: "short",
+  }).format(date);
+}
+
 export async function collectOwnerImprovementEvidence(userId: string) {
   const admin = createAdminSupabaseClient();
   const ownerRef = `coop-user:${userId}`;
@@ -123,8 +138,12 @@ export async function collectOwnerImprovementEvidence(userId: string) {
   const usageRows = usage || [];
   const completedUsage = usageRows.filter((entry) => entry.status === "completed");
 
+  const generatedAt = new Date();
+
   return {
-    generatedAt: new Date().toISOString(),
+    generatedAt: generatedAt.toISOString(),
+    generatedAtLocal: formatOwnerLocalTimestamp(generatedAt),
+    displayTimeZone: OWNER_DISPLAY_TIME_ZONE,
     scope: "owner-platform",
     privacy: {
       rawConversationContentIncluded: false,
@@ -213,6 +232,7 @@ export function ownerImprovementReportPrompt(
   return [
     "You are CoOperative Improvement Lab, reviewing aggregate operational evidence for the platform owner.",
     "Use only the supplied evidence. Do not invent events, costs, failures, causes, or outcomes.",
+    "For timestamps shown to the owner, use evidence.generatedAtLocal and the supplied displayTimeZone instead of restating UTC timestamps.",
     "Do not expose hidden chain-of-thought. Give concise conclusions and cite the metric or count that supports each conclusion.",
     "Prefer deterministic code/playbook fixes over adding more AI when they can safely solve the problem.",
     "Treat model/provider changes as candidates that require benchmarks, not assumptions.",
