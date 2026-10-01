@@ -15,6 +15,62 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   throw "uv is required. Install it with: winget install -e --id astral-sh.uv"
 }
 
+function Find-Ollama {
+  $command = Get-Command ollama -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+
+  $candidates = @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
+    (Join-Path $env:ProgramFiles "Ollama\ollama.exe")
+  )
+  foreach ($candidate in $candidates) {
+    if ($candidate -and (Test-Path $candidate)) { return $candidate }
+  }
+  return $null
+}
+
+$adaptiveBackend = "transformers"
+$adaptiveFastModel = "Qwen/Qwen2.5-1.5B-Instruct"
+$adaptiveQualityModel = $adaptiveFastModel
+$adaptiveHeavyModel = $adaptiveFastModel
+$modelPlanner = Join-Path $PSScriptRoot "windows-model-plan.py"
+$modelPlanPath = Join-Path $PSScriptRoot "text-model-plan.json"
+
+if (Test-Path $modelPlanner) {
+  Write-Host "Profiling this PC for adaptive local AI..."
+  & uv run $modelPlanner | Out-Null
+
+  if (Test-Path $modelPlanPath) {
+    try {
+      $plan = Get-Content $modelPlanPath -Raw | ConvertFrom-Json
+      $ollama = Find-Ollama
+
+      if (-not $ollama -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "Installing the quantized local AI runtime..."
+        winget install -e --id Ollama.Ollama --accept-package-agreements --accept-source-agreements --silent
+        $env:Path =
+          [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+          [Environment]::GetEnvironmentVariable("Path", "User")
+        $ollama = Find-Ollama
+      }
+
+      if ($ollama) {
+        $adaptiveBackend = "ollama"
+        $adaptiveFastModel = [string]$plan.models.fast
+        $adaptiveQualityModel = [string]$plan.models.quality
+        $adaptiveHeavyModel = [string]$plan.models.heavy
+        Write-Host "Adaptive model plan: Fast=$adaptiveFastModel Quality=$adaptiveQualityModel Heavy=$adaptiveHeavyModel"
+        Write-Host "Fast will be fetched when first needed; larger models stay lazy until routed work requires them."
+      } else {
+        Write-Host "Ollama is unavailable; keeping the proven 1.5B Transformers fallback."
+      }
+    } catch {
+      Write-Host "Adaptive model planning could not be applied: $($_.Exception.Message)"
+      Write-Host "Continuing with the proven 1.5B fallback."
+    }
+  }
+}
+
 $existingNodeId = [Environment]::GetEnvironmentVariable("UNISON_NODE_ID", "User")
 if (-not $existingNodeId) {
   $safeComputer = ($env:COMPUTERNAME -replace '[^A-Za-z0-9._:-]', '-').ToLowerInvariant()
@@ -61,6 +117,10 @@ $values = @{
   "COOPERATIVE_QUEUE_URL" = $QueueUrl
   "PRELOAD_PROFILE" = "none"
   "WORKER_BIND_HOST" = "127.0.0.1"
+  "WINDOWS_TEXT_BACKEND" = $adaptiveBackend
+  "WINDOWS_TEXT_FAST_MODEL_ID" = $adaptiveFastModel
+  "WINDOWS_TEXT_QUALITY_MODEL_ID" = $adaptiveQualityModel
+  "WINDOWS_TEXT_HEAVY_MODEL_ID" = $adaptiveHeavyModel
 }
 
 foreach ($entry in $values.GetEnumerator()) {
