@@ -69,9 +69,19 @@ foreach ($entry in $values.GetEnumerator()) {
 }
 
 $launcher = Join-Path $PSScriptRoot "start-unison-windows.ps1"
+$hiddenLauncher = Join-Path $PSScriptRoot "start-unison-hidden.vbs"
 $taskName = "CoOperative Unison Node"
-$taskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$launcher`" -QueueUrl `"$QueueUrl`" -NodeName `"$NodeName`" -IdleMinutes $IdleMinutes"
 
+$escapedLauncher = $launcher.Replace('"', '""')
+$escapedQueueUrl = $QueueUrl.Replace('"', '""')
+$escapedNodeName = $NodeName.Replace('"', '""')
+$vbs = @"
+Set shell = CreateObject("WScript.Shell")
+shell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ""$escapedLauncher"" -QueueUrl ""$escapedQueueUrl"" -NodeName ""$escapedNodeName"" -IdleMinutes $IdleMinutes", 0, False
+"@
+Set-Content -Path $hiddenLauncher -Value $vbs -Encoding ASCII
+
+$taskCommand = "wscript.exe //B //Nologo `"$hiddenLauncher`""
 schtasks.exe /Create /F /SC ONLOGON /TN $taskName /TR $taskCommand | Out-Null
 
 Write-Host ""
@@ -84,4 +94,5 @@ Write-Host "The worker will only claim new jobs after $IdleMinutes minute(s) of 
 Write-Host ""
 Write-Host "Starting the node in the background..."
 schtasks.exe /Run /TN $taskName | Out-Null
-Write-Host "Unison is running. Log: $(Join-Path $PSScriptRoot 'unison.log')"
+Write-Host "Unison is installed and running in the background."
+Write-Host "Log: $(Join-Path $PSScriptRoot 'unison.log')"
