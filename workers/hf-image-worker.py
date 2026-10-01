@@ -588,7 +588,7 @@ def generate(request: ImageRequest, authorization: str | None = Header(default=N
 if __name__ == "__main__":
     start_heartbeat_thread(
         unison_capabilities(),
-        "windows-unison-0.9.1" if platform.system() == "Windows" else "image-worker-0.9.0",
+        "windows-unison-0.9.2" if platform.system() == "Windows" else "image-worker-0.9.0",
         busy_provider=unison_busy,
     )
     print("UNISON_RUNTIME_STARTED", flush=True)
@@ -604,8 +604,13 @@ if __name__ == "__main__":
     elif QUEUE_URL:
         print("COOPERATIVE_QUEUE_URL is set, but no node/worker token is configured; queue polling disabled.")
 
+    # Windows Unison workers use the outbound async queue, so they do not need a
+    # fixed public listener. An ephemeral loopback port avoids collisions with a
+    # stale/older worker during in-place upgrades.
+    default_host = "127.0.0.1" if platform.system() == "Windows" else "0.0.0.0"
+    default_port = "0" if platform.system() == "Windows" else "8000"
     uvicorn.run(
         app,
-        host=os.getenv("WORKER_BIND_HOST", "0.0.0.0"),
-        port=int(os.getenv("PORT", "8000")),
+        host=os.getenv("WORKER_BIND_HOST", default_host),
+        port=int(os.getenv("PORT", default_port)),
     )

@@ -230,7 +230,7 @@ $textCapabilities = @(
   "text_quality_profile",
   "async_queue"
 )
-Send-StartupHeartbeat -WorkerVersion "starting-windows-text-ready-0.3" -Capabilities $textCapabilities
+Send-StartupHeartbeat -WorkerVersion "starting-windows-text-ready-0.5" -Capabilities $textCapabilities
 Write-Host "Windows text runtime started."
 
 $imageWorkerPath = Join-Path $PSScriptRoot "hf-image-worker.py"
@@ -278,22 +278,68 @@ while (-not $imageProcess.HasExited -and -not $textProcess.HasExited) {
   }
 }
 
-if (-not $imageProcess.HasExited) {
-  Stop-Process -Id $imageProcess.Id -Force -ErrorAction SilentlyContinue
-}
-if (-not $textProcess.HasExited) {
-  Stop-Process -Id $textProcess.Id -Force -ErrorAction SilentlyContinue
+# Capture which runtime actually exited before stopping its peer. The previous
+# launcher stopped the healthy text worker first and then accidentally blamed it
+# for an image-runtime exit, producing misleading diagnostics such as
+# UNISON_TEXT_RUNTIME_STARTED.
+$textExitedFirst = $textProcess.HasExited
+$imageExitedFirst = $imageProcess.HasExited
+
+if ($textExitedFirst) {
+  $exitCode = $textProcess.ExitCode
+  $diagnostic = Last-Diagnostic $textErrorLogPath $textLogPath $exitCode
+
+  if (-not $imageProcess.HasExited) {
+    Stop-Process -Id $imageProcess.Id -Force -ErrorAction SilentlyContinue
+  }
+
+  Send-StartupHeartbeat `
+    -WorkerVersion "startup-failed-windows-0.5" `
+    -Capabilities @("startup_exit_code:$exitCode", "startup_error:$diagnostic") `
+    -State "paused"
+
+  exit $exitCode
 }
 
-$failedProcess = if ($textProcess.HasExited) { $textProcess } else { $imageProcess }
-$primaryError = if ($textProcess.HasExited) { $textErrorLogPath } else { $errorLogPath }
-$fallbackLog = if ($textProcess.HasExited) { $textLogPath } else { $logPath }
-$exitCode = $failedProcess.ExitCode
-$diagnostic = Last-Diagnostic $primaryError $fallbackLog $exitCode
+if ($imageExitedFirst) {
+  $imageExitCode = $imageProcess.ExitCode
+  $imageDiagnostic = Last-Diagnostic $errorLogPath $logPath $imageExitCode
+  Add-Content -Path $errorLogPath -Value "Image runtime exited while text remained healthy: $imageDiagnostic"
+
+  # Keep useful text compute online even when the image side needs repair.
+  # The text worker continues enforcing idle-only policy before claiming jobs.
+  $degradedCapabilities = @(
+    "text_generation",
+    "text_fast_profile",
+    "text_quality_profile",
+    "async_queue",
+    "degraded:image-runtime",
+    "image_error:$imageDiagnostic"
+  )
+
+  while (-not $textProcess.HasExited) {
+    $state = if (Test-Path $textBusyPath) { "busy" } else { "online" }
+    Send-StartupHeartbeat `
+      -WorkerVersion "windows-unison-0.9.2-text-only" `
+      -Capabilities $degradedCapabilities `
+      -State $state
+
+    Start-Sleep -Seconds 20
+    $textProcess.Refresh()
+  }
+
+  $textExitCode = $textProcess.ExitCode
+  $textDiagnostic = Last-Diagnostic $textErrorLogPath $textLogPath $textExitCode
+  Send-StartupHeartbeat `
+    -WorkerVersion "startup-failed-windows-0.5" `
+    -Capabilities @("startup_exit_code:$textExitCode", "startup_error:$textDiagnostic") `
+    -State "paused"
+
+  exit $textExitCode
+}
 
 Send-StartupHeartbeat `
-  -WorkerVersion "startup-failed-windows-0.4" `
-  -Capabilities @("startup_exit_code:$exitCode", "startup_error:$diagnostic") `
+  -WorkerVersion "startup-failed-windows-0.5" `
+  -Capabilities @("startup_error:Combined runtime ended unexpectedly") `
   -State "paused"
-
-exit $exitCode
+exit 1
