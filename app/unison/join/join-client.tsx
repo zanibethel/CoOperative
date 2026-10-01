@@ -103,7 +103,8 @@ export default function JoinClient({
             <h2>Create a one-time pairing code.</h2>
             <p>
               The code enrolls one computer and is exchanged for a unique device credential.
-              It does not expose CoOperative’s platform-wide secrets.
+              It does not expose CoOperative’s platform-wide secrets. The recommended setup is:
+              create the code, copy the install command, then paste that command into PowerShell on this PC.
             </p>
           </div>
 
@@ -112,7 +113,7 @@ export default function JoinClient({
               {working ? "Working…" : "Create pairing code"}
             </button>
             <a className="secondary-cta" href="/api/unison/download/windows">
-              Download Windows bootstrap
+              Download installer script
             </a>
           </div>
 
@@ -127,6 +128,10 @@ export default function JoinClient({
                   Copy install command
                 </button>
               </div>
+              <p>
+                Recommended: open PowerShell on this Windows PC, paste the full command below,
+                and press Enter. It downloads the installer and automatically uses this one-time pairing code.
+              </p>
               <pre className="agent-output">{pairing.command}</pre>
             </div>
           ) : null}
