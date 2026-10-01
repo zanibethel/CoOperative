@@ -12,6 +12,7 @@ foreach ($name in @(
   "UNISON_NODE_NAME",
   "UNISON_NODE_OWNER_REF",
   "UNISON_NODE_CLASS",
+  "UNISON_INSTALL_SCOPE",
   "UNISON_IDLE_ONLY",
   "UNISON_IDLE_THRESHOLD_SECONDS",
   "UNISON_MAX_CPU_PERCENT",
@@ -23,29 +24,46 @@ foreach ($name in @(
   "WINDOWS_TEXT_BACKEND",
   "WINDOWS_TEXT_FAST_MODEL_ID",
   "WINDOWS_TEXT_QUALITY_MODEL_ID",
-  "WINDOWS_TEXT_HEAVY_MODEL_ID"
+  "WINDOWS_TEXT_HEAVY_MODEL_ID",
+  "UNISON_SHARED_UV_EXE",
+  "UNISON_OLLAMA_EXE",
+  "UV_CACHE_DIR",
+  "UV_PYTHON_INSTALL_DIR",
+  "OLLAMA_MODELS"
 )) {
-  $value = [Environment]::GetEnvironmentVariable($name, "User")
+  $value = [Environment]::GetEnvironmentVariable($name, "Machine")
+  if (-not $value) {
+    $value = [Environment]::GetEnvironmentVariable($name, "User")
+  }
   if ($value) {
     Set-Item -Path "Env:$name" -Value $value
   }
 }
 
-$uvCommand = Get-Command uv -ErrorAction SilentlyContinue
-$uvCandidate = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
-
-if (-not $uvCommand -and (Test-Path $uvCandidate)) {
-  $uvCommand = Get-Item $uvCandidate
+$uvExe = $null
+if ($env:UNISON_SHARED_UV_EXE -and (Test-Path $env:UNISON_SHARED_UV_EXE)) {
+  $uvExe = $env:UNISON_SHARED_UV_EXE
 }
 
-if (-not $uvCommand) {
+if (-not $uvExe) {
+  $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
+  $uvCandidate = Join-Path $env:USERPROFILE ".local\bin\uv.exe"
+
+  if (-not $uvCommand -and (Test-Path $uvCandidate)) {
+    $uvCommand = Get-Item $uvCandidate
+  }
+
+  if ($uvCommand) {
+    $uvExe = $uvCommand.Source
+    if (-not $uvExe) {
+      $uvExe = $uvCommand.FullName
+    }
+  }
+}
+
+if (-not $uvExe) {
   Write-Host "uv is required but could not be found."
   exit 1
-}
-
-$uvExe = $uvCommand.Source
-if (-not $uvExe) {
-  $uvExe = $uvCommand.FullName
 }
 
 if (
@@ -100,6 +118,7 @@ function Send-StartupHeartbeat(
         idleThresholdSeconds = [Math]::Max(0, $IdleMinutes) * 60
         allowImage = $allowImage
         allowText = $allowText
+        idleScope = $(if ($env:UNISON_INSTALL_SCOPE -eq "machine") { "machine" } else { "session" })
       }
       workerVersion = $WorkerVersion
     } | ConvertTo-Json -Depth 6
@@ -232,6 +251,9 @@ $textCapabilities = @(
   "text_quality_profile",
   "async_queue"
 )
+if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
+  $textCapabilities += @("machine_wide", "whole_pc_idle")
+}
 Send-StartupHeartbeat -WorkerVersion "starting-windows-text-ready-0.5" -Capabilities $textCapabilities
 Write-Host "Windows text runtime started."
 
@@ -318,11 +340,19 @@ if ($imageExitedFirst) {
     "degraded:image-runtime",
     "image_error:$imageDiagnostic"
   )
+  if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
+    $degradedCapabilities += @("machine_wide", "whole_pc_idle")
+  }
 
   while (-not $textProcess.HasExited) {
     $state = if (Test-Path $textBusyPath) { "busy" } else { "online" }
+    $degradedVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
+      "windows-unison-1.0.0-machine-text-only"
+    } else {
+      "windows-unison-0.9.3-text-only"
+    }
     Send-StartupHeartbeat `
-      -WorkerVersion "windows-unison-0.9.3-text-only" `
+      -WorkerVersion $degradedVersion `
       -Capabilities $degradedCapabilities `
       -State $state
 
