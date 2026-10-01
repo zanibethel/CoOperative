@@ -36,6 +36,8 @@ $values = @{
   "UNISON_MAX_GPU_PERCENT" = [string]([Math]::Min(100, [Math]::Max(1, $MaxGpuPercent)))
   "UNISON_MAX_MEMORY_MB" = [string]([Math]::Max(256, $MaxMemoryMb))
   "COOPERATIVE_QUEUE_URL" = $QueueUrl
+  "PRELOAD_PROFILE" = "none"
+  "WORKER_BIND_HOST" = "127.0.0.1"
 }
 
 foreach ($entry in $values.GetEnumerator()) {
