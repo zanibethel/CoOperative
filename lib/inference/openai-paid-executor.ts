@@ -72,14 +72,16 @@ function estimateCostUsd(
   );
 }
 
-export function configuredOpenAiCandidate(
+function buildOpenAiCandidate(
   evidence: EscalationEvidence,
+  options: { businessOwned: boolean; requirePlatformKey: boolean },
 ): PaidExecutorCandidate | null {
   if (!envBool("OPENAI_ESCALATION_ENABLED")) return null;
 
   const apiKey = process.env.OPENAI_API_KEY;
   const model = process.env.OPENAI_ESCALATION_MODEL_ID;
-  if (!apiKey || !model) return null;
+  if (options.requirePlatformKey && !apiKey) return null;
+  if (!model) return null;
 
   const inputUsdPerMillion = envNumber(
     "OPENAI_ESCALATION_INPUT_USD_PER_MILLION",
@@ -102,14 +104,14 @@ export function configuredOpenAiCandidate(
   );
 
   return {
-    id: "openai-escalation",
+    id: options.businessOwned ? "business-openai" : "openai-escalation",
     provider: "openai",
     model,
     available: true,
     qualified:
       envBool("OPENAI_ESCALATION_QUALIFIED") &&
       typeof benchmarkSuccessRate === "number",
-    businessOwned: envBool("OPENAI_ESCALATION_BUSINESS_OWNED"),
+    businessOwned: options.businessOwned,
     supportedTaskClasses: [
       "general",
       "summary",
@@ -131,6 +133,24 @@ export function configuredOpenAiCandidate(
   };
 }
 
+export function configuredOpenAiCandidate(
+  evidence: EscalationEvidence,
+): PaidExecutorCandidate | null {
+  return buildOpenAiCandidate(evidence, {
+    businessOwned: false,
+    requirePlatformKey: true,
+  });
+}
+
+export function configuredBusinessOpenAiCandidate(
+  evidence: EscalationEvidence,
+): PaidExecutorCandidate | null {
+  return buildOpenAiCandidate(evidence, {
+    businessOwned: true,
+    requirePlatformKey: false,
+  });
+}
+
 function collectOutputText(payload: OpenAiResponsesPayload) {
   const parts: string[] = [];
 
@@ -148,9 +168,10 @@ function collectOutputText(payload: OpenAiResponsesPayload) {
 
 export async function executeOpenAiPaidText(
   evidence: EscalationEvidence,
+  options: { apiKey?: string; model?: string } = {},
 ): Promise<PaidTextExecutionResult> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.OPENAI_ESCALATION_MODEL_ID;
+  const apiKey = options.apiKey || process.env.OPENAI_API_KEY;
+  const model = options.model || process.env.OPENAI_ESCALATION_MODEL_ID;
 
   if (!envBool("OPENAI_ESCALATION_ENABLED") || !apiKey || !model) {
     throw new Error("OpenAI escalation executor is not configured.");

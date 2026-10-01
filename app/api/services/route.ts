@@ -4,6 +4,7 @@ import {
   ConnectedServiceUpdateSchema,
 } from "@/lib/domain/schemas";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 async function getContext() {
   const supabase = await createClient();
@@ -94,7 +95,8 @@ export async function POST(request: Request) {
       service_name: input.serviceName,
       external_account_label: input.externalAccountLabel || null,
       connection_method: input.connectionMethod,
-      connection_status: "manual",
+      connection_status:
+        input.connectionMethod === "manual" ? "manual" : "not-connected",
       monthly_cost_cents: Math.round(input.monthlyCost * 100),
       billing_frequency: input.billingFrequency,
       features_used: input.featuresUsed,
@@ -162,6 +164,34 @@ export async function DELETE(request: Request) {
 
   if (!id) {
     return NextResponse.json({ error: "Missing service id" }, { status: 400 });
+  }
+
+  const { data: service, error: serviceError } = await supabase
+    .from("connected_services")
+    .select("id,credential_reference")
+    .eq("id", id)
+    .eq("organization_id", organization.id)
+    .maybeSingle();
+
+  if (serviceError) {
+    return NextResponse.json({ error: serviceError.message }, { status: 500 });
+  }
+  if (!service) {
+    return NextResponse.json({ error: "Service not found." }, { status: 404 });
+  }
+
+  if (service.credential_reference) {
+    const admin = createAdminSupabaseClient();
+    const { error: clearError } = await admin.rpc(
+      "clear_connected_service_credential",
+      { p_service_id: service.id },
+    );
+    if (clearError) {
+      return NextResponse.json(
+        { error: "Could not securely remove the service credential." },
+        { status: 502 },
+      );
+    }
   }
 
   const { error } = await supabase

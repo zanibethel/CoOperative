@@ -55,6 +55,8 @@ export default function ServicesPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [connectingId, setConnectingId] = useState<string | null>(null);
+  const [credentials, setCredentials] = useState<Record<string, string>>({});
 
   async function fetchServices() {
     const response = await fetch("/api/services", { cache: "no-store" });
@@ -164,6 +166,52 @@ export default function ServicesPage() {
     }
   }
 
+  async function connectAiService(id: string) {
+    const credential = credentials[id]?.trim() || "";
+    if (!credential) {
+      setError("Enter the API credential for this business account.");
+      return;
+    }
+
+    setConnectingId(id);
+    setError("");
+    try {
+      const response = await fetch("/api/services/credential", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ serviceId: id, credential }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Unable to connect service");
+
+      setCredentials((current) => ({ ...current, [id]: "" }));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to connect service");
+    } finally {
+      setConnectingId(null);
+    }
+  }
+
+  async function disconnectAiService(id: string) {
+    setConnectingId(id);
+    setError("");
+    try {
+      const response = await fetch("/api/services/credential", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ serviceId: id }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Unable to disconnect service");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to disconnect service");
+    } finally {
+      setConnectingId(null);
+    }
+  }
+
   async function remove(id: string) {
     setError("");
     const response = await fetch(`/api/services?id=${encodeURIComponent(id)}`, {
@@ -194,6 +242,11 @@ export default function ServicesPage() {
           Add the services that currently run the business. As connectors become
           available, CoOperative will sync usage and compare what you actually use
           against cheaper integrations and native replacements.
+        </p>
+        <p className="muted-note">
+          API-capable AI accounts can also be connected as business-owned compute.
+          Paid chat subscriptions and API access can be separate products, so
+          CoOperative only uses credentials you explicitly authorize here.
         </p>
       </section>
 
@@ -301,9 +354,61 @@ export default function ServicesPage() {
                 ) : null}
                 <p>
                   {connectorAvailable
-                    ? "This provider has an approved connector and can move to account authorization."
+                    ? service.connection_method === "api"
+                      ? "This AI provider can be connected with an API-capable business credential. The credential is stored encrypted and is never shown to the AI model."
+                      : "This provider has an approved connector and can move to account authorization."
                     : "Tracked now. Direct connection will appear here after the provider connector passes review."}
                 </p>
+
+                {connectorAvailable && service.connection_method === "api" ? (
+                  service.connection_status === "connected" ? (
+                    <div className="service-connect-row">
+                      <span className="agent-status completed">Connected</span>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        disabled={connectingId === service.id}
+                        onClick={() => void disconnectAiService(service.id)}
+                      >
+                        {connectingId === service.id ? "Disconnecting…" : "Disconnect"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="service-connect-box">
+                      <div className="field">
+                        <label>Business API credential</label>
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          placeholder="Paste the provider API credential"
+                          value={credentials[service.id] || ""}
+                          onChange={(event) =>
+                            setCredentials((current) => ({
+                              ...current,
+                              [service.id]: event.target.value,
+                            }))
+                          }
+                        />
+                        <small>
+                          CoOperative verifies it directly with the provider, encrypts it in the server-side vault, and does not display it again.
+                        </small>
+                      </div>
+                      <button
+                        className="primary"
+                        type="button"
+                        disabled={connectingId === service.id}
+                        onClick={() => void connectAiService(service.id)}
+                      >
+                        {connectingId === service.id ? "Verifying…" : "Connect business AI"}
+                      </button>
+                    </div>
+                  )
+                ) : null}
+
+                {provider?.connection_method === "oauth" && provider.connection_status !== "available" ? (
+                  <p><b>OAuth:</b> connector registration pending for this provider.</p>
+                ) : null}
+
                 <button className="text-button" type="button" onClick={() => void remove(service.id)}>Remove</button>
               </div>
             );
