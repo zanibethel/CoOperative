@@ -8,6 +8,7 @@ import {
   ownerImprovementReportPrompt,
 } from "@/lib/ai/owner-improvement-evidence";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
+import { preferredOwnedTextNode } from "@/lib/unison/owned-text-routing";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -171,6 +172,7 @@ export async function POST(request: Request) {
 
       if (input.action === "tell_more") {
         const evidence = await collectOwnerImprovementEvidence(owner.userId);
+        const ownedNode = await preferredOwnedTextNode(admin, owner.userId);
         const followUpJobId = crypto.randomUUID();
         const { error: followUpError } = await admin
           .from("text_inference_jobs")
@@ -209,6 +211,8 @@ export async function POST(request: Request) {
             human_approval_required: false,
             model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
             verification_status: "not_run",
+            routing_preference: ownedNode ? "prefer-owned" : "default",
+            preferred_node_id: ownedNode?.id ?? null,
           });
 
         if (followUpError) throw followUpError;
@@ -221,6 +225,8 @@ export async function POST(request: Request) {
           metadata: {
             reportJobId: input.reportJobId,
             followUpJobId,
+            ownedNodePreferred: Boolean(ownedNode),
+            preferredNodeId: ownedNode?.id ?? null,
           },
         });
 
@@ -380,6 +386,7 @@ export async function POST(request: Request) {
     }
 
     const evidence = await collectOwnerImprovementEvidence(owner.userId);
+    const ownedNode = await preferredOwnedTextNode(admin, owner.userId);
     const jobId = crypto.randomUUID();
 
     const { error } = await admin.from("text_inference_jobs").insert({
@@ -407,6 +414,8 @@ export async function POST(request: Request) {
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
+      routing_preference: ownedNode ? "prefer-owned" : "default",
+      preferred_node_id: ownedNode?.id ?? null,
     });
 
     if (error) throw error;
@@ -423,6 +432,9 @@ export async function POST(request: Request) {
           route: "local-quality",
           paidFallback: false,
           modelRegistryRevision: TEXT_MODEL_REGISTRY_REVISION,
+          ownedNodePreferred: Boolean(ownedNode),
+          preferredNodeId: ownedNode?.id ?? null,
+          preferredNodeName: ownedNode?.displayName ?? null,
         },
       },
       { status: 202, headers: { "Cache-Control": "no-store" } },
@@ -459,7 +471,7 @@ export async function GET(request: Request) {
       const { data: latestReport, error: latestError } = await admin
         .from("text_inference_jobs")
         .select(
-          "id,status,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,error,route_reason,created_at,completed_at",
+          "id,status,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,error,route_reason,created_at,completed_at",
         )
         .eq("client_owner_ref", owner.ownerRef)
         .eq("route_reason", OWNER_IMPROVEMENT_ROUTE_REASON)
@@ -489,6 +501,9 @@ export async function GET(request: Request) {
                 outputTokens: latestReport.output_tokens,
                 firstTokenMs: latestReport.first_token_ms,
                 latencyMs: latestReport.latency_ms,
+                workerId: latestReport.worker_id,
+                routingPreference: latestReport.routing_preference,
+                preferredNodeId: latestReport.preferred_node_id,
                 error: latestReport.error,
                 createdAt: latestReport.created_at,
                 completedAt: latestReport.completed_at,
@@ -502,7 +517,7 @@ export async function GET(request: Request) {
     const { data: job, error } = await admin
       .from("text_inference_jobs")
       .select(
-        "id,status,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,error,route_reason,created_at,completed_at",
+        "id,status,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,error,route_reason,created_at,completed_at",
       )
       .eq("id", jobId)
       .eq("client_owner_ref", owner.ownerRef)
@@ -531,6 +546,9 @@ export async function GET(request: Request) {
         outputTokens: job.output_tokens,
         firstTokenMs: job.first_token_ms,
         latencyMs: job.latency_ms,
+        workerId: job.worker_id,
+        routingPreference: job.routing_preference,
+        preferredNodeId: job.preferred_node_id,
         error: job.error,
         createdAt: job.created_at,
         completedAt: job.completed_at,
