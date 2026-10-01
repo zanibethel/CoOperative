@@ -284,7 +284,7 @@ internal sealed class InstallerForm : Form
         _status.Left = 37;
         _status.Top = 125;
 
-        _detail.Text = "This installer runs per-user and does not require administrator access.";
+        _detail.Text = "New installs run machine-wide. Windows will request one administrator approval after you link the contributor account.";
         _detail.ForeColor = Color.FromArgb(181, 198, 213);
         _detail.AutoSize = false;
         _detail.Width = 530;
@@ -348,19 +348,33 @@ internal sealed class InstallerForm : Form
 
     private async Task RunInstallAsync()
     {
-        Directory.CreateDirectory(_shellDir);
+        Directory.CreateDirectory(_installDir);
         _logPath = Path.Combine(_installDir, "installer.log");
 
         try
         {
-            var existingNodeId = Environment.GetEnvironmentVariable(
+            var machineNodeId = Environment.GetEnvironmentVariable(
+                "UNISON_NODE_ID",
+                EnvironmentVariableTarget.Machine
+            );
+            var machineNodeToken = Environment.GetEnvironmentVariable(
+                "UNISON_NODE_TOKEN",
+                EnvironmentVariableTarget.Machine
+            );
+            var userNodeId = Environment.GetEnvironmentVariable(
                 "UNISON_NODE_ID",
                 EnvironmentVariableTarget.User
             );
-            var existingNodeToken = Environment.GetEnvironmentVariable(
+            var userNodeToken = Environment.GetEnvironmentVariable(
                 "UNISON_NODE_TOKEN",
                 EnvironmentVariableTarget.User
             );
+
+            var existingMachineWide =
+                !string.IsNullOrWhiteSpace(machineNodeId) &&
+                !string.IsNullOrWhiteSpace(machineNodeToken);
+            var existingNodeId = existingMachineWide ? machineNodeId : userNodeId;
+            var existingNodeToken = existingMachineWide ? machineNodeToken : userNodeToken;
             var hasExistingNode =
                 !string.IsNullOrWhiteSpace(existingNodeId) &&
                 !string.IsNullOrWhiteSpace(existingNodeToken);
@@ -383,19 +397,22 @@ internal sealed class InstallerForm : Form
                         "Repairing existing Unison node…",
                         "The saved node identity will be preserved while the worker files and startup path are refreshed."
                     );
-                    await RunExistingRepairAsync(existingNodeId!);
+                    await RunExistingRepairAsync(existingNodeId!, existingMachineWide);
 
                     SetStatus(
                         "Starting local AI runtime…",
                         "Waiting for CoOperative to verify a fresh heartbeat from the repaired node."
                     );
-                    await WaitForRealHeartbeatAsync();
+                    await WaitForRealHeartbeatAsync(existingMachineWide);
                 }
 
                 var upgradeShellNote = await InstallShellIntegrationAsync();
                 SetStatus(
                     healthy ? "Updated" : "Repaired and connected",
-                    "This existing Unison node kept its identity. Desktop, Start Menu, and tray integration are ready." +
+                    (existingMachineWide
+                        ? "This machine-wide Unison node kept its identity and runs independently of Windows profiles. "
+                        : "This legacy per-profile Unison node kept its identity. ") +
+                    "Desktop, Start Menu, and tray integration are ready." +
                     upgradeShellNote
                 );
                 CompleteUi();
@@ -405,24 +422,24 @@ internal sealed class InstallerForm : Form
             var pairingCode = await ReceiveBrowserPairingAsync();
 
             SetStatus(
-                "Installing Unison…",
-                "Installing the worker and preserving your per-device credential. PowerShell stays hidden in the background."
+                "Installing machine-wide Unison…",
+                "Windows will request administrator approval. The compute worker will run for the whole PC, not just this Windows profile."
             );
 
             await RunBootstrapAsync(pairingCode);
 
             SetStatus(
-                "Starting local AI runtime…",
-                "The worker is installed. Waiting for CoOperative to verify a fresh heartbeat from this PC."
+                "Starting machine-wide local AI…",
+                "The SYSTEM worker is installed. Waiting for CoOperative to verify a fresh heartbeat from this PC."
             );
 
-            await WaitForRealHeartbeatAsync();
+            await WaitForRealHeartbeatAsync(true);
 
             var shellNote = await InstallShellIntegrationAsync();
 
             SetStatus(
                 "Connected",
-                "This PC is online in Unison. It will only accept new work after the configured Windows idle period." +
+                "This PC is online as a machine-wide Unison node. It only accepts new work after every signed-in Windows session has been idle for the configured period." +
                 shellNote
             );
             CompleteUi();
