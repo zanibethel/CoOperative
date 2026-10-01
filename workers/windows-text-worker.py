@@ -79,6 +79,7 @@ QUALITY_MODEL_ID = os.getenv("WINDOWS_TEXT_QUALITY_MODEL_ID") or str(
 HEAVY_MODEL_ID = os.getenv("WINDOWS_TEXT_HEAVY_MODEL_ID") or str(
     PLAN_MODELS.get("heavy") or QUALITY_MODEL_ID
 )
+OLLAMA_URL = os.getenv("UNISON_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 PROFILE_MODELS = {
     "fast": FAST_MODEL_ID,
     "quality": QUALITY_MODEL_ID,
@@ -158,7 +159,7 @@ def ollama_executable() -> str | None:
 
 def ollama_ready() -> bool:
     try:
-        response = httpx.get("http://127.0.0.1:11434/api/version", timeout=2.5)
+        response = httpx.get(f"{OLLAMA_URL}/api/version", timeout=2.5)
         return response.is_success
     except Exception:
         return False
@@ -196,7 +197,7 @@ def ensure_ollama_server() -> None:
 def ensure_ollama_model(model_id: str) -> None:
     ensure_ollama_server()
     try:
-        tags = httpx.get("http://127.0.0.1:11434/api/tags", timeout=10).json()
+        tags = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=10).json()
         names = {
             str(model.get("name") or "")
             for model in tags.get("models", [])
@@ -209,7 +210,7 @@ def ensure_ollama_model(model_id: str) -> None:
 
     print(f"Pulling adaptive Windows text model {model_id}...", flush=True)
     response = httpx.post(
-        "http://127.0.0.1:11434/api/pull",
+        f"{OLLAMA_URL}/api/pull",
         json={"name": model_id, "stream": False},
         timeout=None,
     )
@@ -255,7 +256,7 @@ def run_ollama_generation(
     ensure_ollama_model(model_id)
     started = time.time()
     response = httpx.post(
-        "http://127.0.0.1:11434/api/chat",
+        f"{OLLAMA_URL}/api/chat",
         json={
             "model": model_id,
             "messages": messages,
