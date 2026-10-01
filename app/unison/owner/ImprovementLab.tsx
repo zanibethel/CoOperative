@@ -52,9 +52,22 @@ type ReportJob = {
   completedAt?: string | null;
 };
 
+type ReviewTask = {
+  id: string;
+  status: string;
+  result?: {
+    decision?: "pending" | "approved" | "denied" | "deferred";
+    preparedTaskId?: string;
+    decidedAt?: string;
+    preparedAt?: string;
+  } | null;
+};
+
 type ImprovementPayload = {
   evidence?: Evidence;
   latestReport?: ReportJob | null;
+  review?: ReviewTask | null;
+  taskId?: string;
   jobId?: string;
   status?: string;
   compiler?: {
@@ -85,6 +98,8 @@ function integer(value: number) {
 export default function ImprovementLab() {
   const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [report, setReport] = useState<ReportJob | null>(null);
+  const [review, setReview] = useState<ReviewTask | null>(null);
+  const [detailReport, setDetailReport] = useState<ReportJob | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Loading evidence…");
   const [error, setError] = useState("");
@@ -175,6 +190,7 @@ export default function ImprovementLab() {
 
       setEvidence(payload.evidence || null);
       setReport(payload.latestReport || null);
+      setReview(payload.review || null);
 
       const latest = payload.latestReport;
       if (latest?.status === "queued" || latest?.status === "running") {
@@ -224,6 +240,8 @@ export default function ImprovementLab() {
         jobId: payload.jobId,
         status: payload.status || "queued",
       });
+      setReview(payload.review || null);
+      setDetailReport(null);
       setStatus("Queued for owned/local Quality model.");
       setBusy(false);
       await pollReport(payload.jobId);
@@ -233,6 +251,96 @@ export default function ImprovementLab() {
         err instanceof Error ? err.message : "Could not queue improvement report.",
       );
       setStatus("Report unavailable.");
+    }
+  }
+
+  async function reviewAction(
+    action: "tell_more" | "review" | "prepare_change",
+    decision?: "approved" | "denied" | "deferred",
+  ) {
+    if (!report?.jobId) return;
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const response = await fetch("/api/owner/improvements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          reportJobId: report.jobId,
+          ...(decision ? { decision } : {}),
+        }),
+      });
+      const payload = (await response.json()) as ImprovementPayload;
+
+      if (!response.ok) {
+        throw new Error(
+          payload.detail || payload.error || "Could not update improvement review.",
+        );
+      }
+
+      if (payload.review) setReview(payload.review);
+
+      if (action === "tell_more" && payload.jobId) {
+        setStatus("Owned/local Quality is expanding the report…");
+        const followUpId = payload.jobId;
+
+        for (;;) {
+          const pollResponse = await fetch(
+            `/api/owner/improvements?jobId=${encodeURIComponent(followUpId)}`,
+            { cache: "no-store" },
+          );
+          const next = (await pollResponse.json()) as ImprovementPayload;
+
+          if (!pollResponse.ok) {
+            throw new Error(
+              next.detail || next.error || "Could not read report follow-up.",
+            );
+          }
+
+          const detail: ReportJob = {
+            jobId: followUpId,
+            status: next.status || "queued",
+            partialText: next.partialText,
+            text: next.text,
+            model: next.model,
+            provider: next.provider,
+            promptTokens: next.promptTokens,
+            outputTokens: next.outputTokens,
+            firstTokenMs: next.firstTokenMs,
+            latencyMs: next.latencyMs,
+            error: next.error,
+          };
+          setDetailReport(detail);
+
+          if (detail.status === "completed") {
+            setStatus("Extra detail ready for review.");
+            break;
+          }
+          if (detail.status === "failed" || detail.status === "cancelled") {
+            throw new Error(detail.error || "Report follow-up did not complete.");
+          }
+          await wait(1000);
+        }
+      } else if (action === "prepare_change") {
+        setStatus("Approved report queued for Repo Engineer preparation.");
+      } else if (decision) {
+        setStatus(
+          decision === "approved"
+            ? "Report approved for bounded preparation."
+            : decision === "denied"
+              ? "Report denied."
+              : "Report deferred.",
+        );
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not update improvement review.",
+      );
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -294,6 +402,78 @@ export default function ImprovementLab() {
             <div>
               <strong>CoOperative Improvement Lab</strong>
               <pre>{visibleReport}</pre>
+              {detailReport?.text || detailReport?.partialText ? (
+                <div className="owner-improvement-followup">
+                  <strong>More detail</strong>
+                  <pre>{detailReport.text || detailReport.partialText}</pre>
+                </div>
+              ) : null}
+
+              {report?.status === "completed" ? (
+                <div className="owner-improvement-review-actions">
+                  <div className="cta-row">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => void reviewAction("tell_more")}
+                      disabled={busy}
+                    >
+                      Tell me more
+                    </button>
+                    <button
+                      className="primary"
+                      type="button"
+                      onClick={() => void reviewAction("review", "approved")}
+                      disabled={busy || review?.result?.decision === "approved"}
+                    >
+                      {review?.result?.decision === "approved" ? "Approved" : "Approve"}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => void reviewAction("review", "deferred")}
+                      disabled={busy}
+                    >
+                      Defer
+                    </button>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => void reviewAction("review", "denied")}
+                      disabled={busy}
+                    >
+                      Deny
+                    </button>
+                  </div>
+
+                  {review?.result?.decision === "approved" ? (
+                    <div className="cta-row">
+                      <button
+                        className="primary"
+                        type="button"
+                        onClick={() => void reviewAction("prepare_change")}
+                        disabled={busy || Boolean(review.result?.preparedTaskId)}
+                      >
+                        {review.result?.preparedTaskId
+                          ? "Change preparation queued"
+                          : "Prepare change"}
+                      </button>
+                      {review.result?.preparedTaskId ? (
+                        <a className="secondary-cta" href="/agents">
+                          View agent work
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {review?.result?.decision ? (
+                    <p className="owner-improvement-decision">
+                      Review state: <strong>{review.result.decision}</strong>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
               {report?.status === "completed" ? (
                 <details>
                   <summary>Report execution details</summary>
@@ -345,9 +525,9 @@ export default function ImprovementLab() {
       </div>
 
       <p className="owner-improvement-note">
-        Review-only v1: this can identify and propose improvements, but it cannot merge
-        code, deploy changes, spend money, or promote/retrain a model. Approval actions
-        will be layered onto this report pipeline next.
+        Owner review is now persisted. Approval only authorizes bounded change
+        preparation; it still cannot merge code, deploy, spend money, change secrets,
+        or promote/retrain a model without the later guarded approval gates.
       </p>
 
       {error ? <p className="error">{error}</p> : null}

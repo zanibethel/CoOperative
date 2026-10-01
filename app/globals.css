@@ -478,3 +478,22 @@ b { color: var(--text); }
   color: var(--muted);
   font-size: .82rem;
 }
+
+.owner-improvement-review-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+.owner-improvement-followup {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.owner-improvement-followup pre {
+  margin-bottom: 0;
+}
+.owner-improvement-decision {
+  margin: 0;
+  color: var(--muted);
+  font-size: .82rem;
+}
