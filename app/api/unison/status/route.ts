@@ -5,11 +5,16 @@ import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 export const runtime = "nodejs";
 
-function statusOf(node: { state: string; last_seen_at: string }) {
+function statusOf(node: {
+  state: string;
+  last_seen_at: string;
+  worker_version: string;
+}) {
   const lastSeen = Date.parse(node.last_seen_at);
   if (!Number.isFinite(lastSeen) || Date.now() - lastSeen > 90_000) {
     return "offline";
   }
+  if (node.worker_version?.startsWith("starting-")) return "starting";
   return node.state;
 }
 
@@ -123,6 +128,7 @@ export async function GET(request: Request) {
     idle: rows.filter((node) => node.status === "idle").length,
     busy: rows.filter((node) => node.status === "busy").length,
     paused: rows.filter((node) => node.status === "paused").length,
+    starting: rows.filter((node) => node.status === "starting").length,
     offline: rows.filter((node) => node.status === "offline").length,
   };
 
