@@ -81,8 +81,11 @@ shell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass
 "@
 Set-Content -Path $hiddenLauncher -Value $vbs -Encoding ASCII
 
-$taskCommand = "wscript.exe //B //Nologo `"$hiddenLauncher`""
-schtasks.exe /Create /F /SC ONLOGON /TN $taskName /TR $taskCommand | Out-Null
+$startupDir = [Environment]::GetFolderPath("Startup")
+$startupLauncher = Join-Path $startupDir "CoOperative-Unison.vbs"
+Copy-Item -Force $hiddenLauncher $startupLauncher
+
+schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
 
 $protocolRoot = "HKCU:\Software\Classes\cooperative-unison"
 $commandKey = Join-Path $protocolRoot "shell\open\command"
@@ -99,10 +102,11 @@ Write-Host "Unison node paired and installed."
 Write-Host "Node ID: $existingNodeId"
 Write-Host "Owner: $($pairing.ownerRef)"
 Write-Host "Class: $($pairing.nodeClass)"
-Write-Host "Startup task: $taskName"
+Write-Host "Startup: Windows Startup folder"
 Write-Host "The worker will only claim new jobs after $IdleMinutes minute(s) of Windows inactivity."
 Write-Host ""
 Write-Host "Starting the node in the background..."
-schtasks.exe /Run /TN $taskName | Out-Null
+$wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
+& $wscript //B //Nologo $hiddenLauncher
 Write-Host "Unison is installed and running in the background."
 Write-Host "Log: $(Join-Path $PSScriptRoot 'unison.log')"
