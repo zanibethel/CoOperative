@@ -1,17 +1,13 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { createClient } from "@/lib/supabase/server";
+import { authenticatedUserId } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 async function currentOwnerRef() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user ? `coop-user:${user.id}` : null;
+  const userId = await authenticatedUserId();
+  return userId ? `coop-user:${userId}` : null;
 }
 
 export async function GET(request: Request) {
