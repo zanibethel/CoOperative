@@ -1,26 +1,18 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { authorizeUnisonNode } from "@/lib/unison/auth";
 import { unisonNodeHeartbeatSchema } from "@/lib/unison/contracts";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-function nodeAuthorized(request: Request) {
-  const expected =
-    process.env.UNISON_NODE_SHARED_SECRET ||
-    process.env.INFERENCE_LOCAL_TOKEN;
-
-  return Boolean(expected) &&
-    request.headers.get("authorization") === `Bearer ${expected}`;
-}
-
 export async function POST(request: Request) {
-  if (!nodeAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const input = unisonNodeHeartbeatSchema.parse(await request.json());
+
+    if (!(await authorizeUnisonNode(request, input.nodeId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const now = new Date().toISOString();
     const supabase = createAdminSupabaseClient();
 
