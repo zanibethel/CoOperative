@@ -6,6 +6,27 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+foreach ($name in @(
+  "UNISON_NODE_TOKEN",
+  "UNISON_NODE_ID",
+  "UNISON_NODE_NAME",
+  "UNISON_NODE_OWNER_REF",
+  "UNISON_NODE_CLASS",
+  "UNISON_IDLE_ONLY",
+  "UNISON_IDLE_THRESHOLD_SECONDS",
+  "UNISON_MAX_CPU_PERCENT",
+  "UNISON_MAX_GPU_PERCENT",
+  "UNISON_MAX_MEMORY_MB",
+  "COOPERATIVE_QUEUE_URL",
+  "PRELOAD_PROFILE",
+  "WORKER_BIND_HOST"
+)) {
+  $value = [Environment]::GetEnvironmentVariable($name, "User")
+  if ($value) {
+    Set-Item -Path "Env:$name" -Value $value
+  }
+}
+
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   Write-Host "uv is required. Install it first with: winget install -e --id astral-sh.uv"
   exit 1
