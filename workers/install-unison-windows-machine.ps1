@@ -134,6 +134,8 @@ $values = @{
   "UV_CACHE_DIR" = $env:UV_CACHE_DIR
   "UV_PYTHON_INSTALL_DIR" = $env:UV_PYTHON_INSTALL_DIR
   "OLLAMA_MODELS" = $modelsDir
+  "UNISON_OLLAMA_URL" = "http://127.0.0.1:11435"
+  "OLLAMA_HOST" = "127.0.0.1:11435"
 }
 
 if ($ollamaExe) {
