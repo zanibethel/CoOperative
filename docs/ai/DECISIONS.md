@@ -41,6 +41,12 @@ Where appropriate, CoOperative may support a shared-savings commercial model in 
 ## First business optimization pilot
 The current intended first real cost-migration pilot is the owner's father's radio-station hosting, reportedly around $1,500/year, after exact provider, plan, capabilities, traffic, licensing/reporting requirements, and current cost are verified.
 
+## Unison Windows distribution
+
+The current CMD/PowerShell installer is a temporary bootstrap/debug path, not the intended public product. After the first Windows Unison node is proven reliable, package the proven logic into a branded, Authenticode-signed **CoOperative Unison Setup.exe** (or MSI where appropriate).
+
+The normal user flow should not require PowerShell, pairing-code copy/paste, or raw scripts. Installation should verify a real node heartbeat before claiming success. Prefer a per-user tray/background agent for node status, pause/resume, restart, repair, update, dashboard access, and uninstall, while preserving outbound-only networking and per-node credentials. Keep raw scripts only as advanced/debug fallbacks.
+
 ## Canonical roadmap
 The current execution sequence and end-state definition live in `docs/END-STATE-ROADMAP.md`. New platform work should be compared against that roadmap and explicit newer owner decisions.
 
