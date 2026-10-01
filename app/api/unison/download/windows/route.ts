@@ -1,5 +1,5 @@
 const BOOTSTRAP_URL =
-  "https://raw.githubusercontent.com/zanibethel/CoOperative/main/workers/bootstrap-unison-windows.ps1";
+  "https://raw.githubusercontent.com/zanibethel/CoOperative/main/workers/bootstrap-unison-windows-machine.ps1";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
