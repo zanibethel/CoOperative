@@ -19,7 +19,9 @@ foreach ($name in @(
   "UNISON_MAX_MEMORY_MB",
   "COOPERATIVE_QUEUE_URL",
   "PRELOAD_PROFILE",
-  "WORKER_BIND_HOST"
+  "WORKER_BIND_HOST",
+  "WINDOWS_TEXT_FAST_MODEL_ID",
+  "WINDOWS_TEXT_QUALITY_MODEL_ID"
 )) {
   $value = [Environment]::GetEnvironmentVariable($name, "User")
   if ($value) {
@@ -61,46 +63,14 @@ $env:UNISON_NODE_NAME = $NodeName
 $env:UNISON_IDLE_ONLY = "true"
 $env:UNISON_IDLE_THRESHOLD_SECONDS = [string]([Math]::Max(0, $IdleMinutes) * 60)
 
-try {
-  $startupHeartbeat = @{
-    nodeId = $env:UNISON_NODE_ID
-    displayName = $NodeName
-    ownerRef = $(if ($env:UNISON_NODE_OWNER_REF) { $env:UNISON_NODE_OWNER_REF } else { "platform-private" })
-    nodeClass = $(if ($env:UNISON_NODE_CLASS) { $env:UNISON_NODE_CLASS } else { "private" })
-    state = "online"
-    platform = @{
-      system = "Windows"
-      release = [Environment]::OSVersion.VersionString
-      machine = $env:PROCESSOR_ARCHITECTURE
-    }
-    capabilities = @()
-    resources = @{}
-    policy = @{
-      idleOnly = $true
-      idleThresholdSeconds = [Math]::Max(0, $IdleMinutes) * 60
-      allowImage = $false
-      allowText = $false
-    }
-    workerVersion = "starting-windows-0.1"
-  } | ConvertTo-Json -Depth 6
-
-  Invoke-RestMethod `
-    -Method Post `
-    -Uri "$QueueUrl/api/unison/nodes/heartbeat" `
-    -Headers @{ Authorization = "Bearer $($env:UNISON_NODE_TOKEN)" } `
-    -ContentType "application/json" `
-    -Body $startupHeartbeat | Out-Null
-} catch {
-  Write-Host "Startup check-in failed: $($_.Exception.Message)"
-}
-
-Write-Host "Starting CoOperative Unison node $($env:UNISON_NODE_ID)"
-Write-Host "Idle-only mode: $IdleMinutes minute(s)"
-Write-Host "Queue: $QueueUrl"
-
 $logPath = Join-Path $PSScriptRoot "unison.log"
 $errorLogPath = Join-Path $PSScriptRoot "unison-error.log"
-Write-Host "Log: $logPath"
+$textLogPath = Join-Path $PSScriptRoot "unison-text.log"
+$textErrorLogPath = Join-Path $PSScriptRoot "unison-text-error.log"
+$textReadyPath = Join-Path $PSScriptRoot "text-worker.ready"
+$textBusyPath = Join-Path $PSScriptRoot "text-worker.busy"
+
+Remove-Item -Force $textReadyPath,$textBusyPath -ErrorAction SilentlyContinue
 
 function Send-StartupHeartbeat(
   [string]$WorkerVersion,
@@ -108,6 +78,8 @@ function Send-StartupHeartbeat(
   [string]$State = "online"
 ) {
   try {
+    $allowImage = $Capabilities -contains "image_generation"
+    $allowText = $Capabilities -contains "text_generation"
     $heartbeat = @{
       nodeId = $env:UNISON_NODE_ID
       displayName = $NodeName
@@ -124,8 +96,8 @@ function Send-StartupHeartbeat(
       policy = @{
         idleOnly = $true
         idleThresholdSeconds = [Math]::Max(0, $IdleMinutes) * 60
-        allowImage = $false
-        allowText = $false
+        allowImage = $allowImage
+        allowText = $allowText
       }
       workerVersion = $WorkerVersion
     } | ConvertTo-Json -Depth 6
@@ -141,10 +113,84 @@ function Send-StartupHeartbeat(
   }
 }
 
-$workerPath = Join-Path $PSScriptRoot "hf-image-worker.py"
-$workerProcess = Start-Process `
+function Last-Diagnostic([string]$Primary, [string]$Fallback, [int]$ExitCode) {
+  $tail = ""
+  if (Test-Path $Primary) {
+    $tail = (Get-Content $Primary -Tail 12 -ErrorAction SilentlyContinue) -join " | "
+  }
+  if (-not $tail -and (Test-Path $Fallback)) {
+    $tail = (Get-Content $Fallback -Tail 12 -ErrorAction SilentlyContinue) -join " | "
+  }
+  $diagnostic = ($tail -replace "[\r\n]+", " " -replace "\s+", " ").Trim()
+  if ($diagnostic.Length -gt 95) {
+    $diagnostic = $diagnostic.Substring(0, 95)
+  }
+  if (-not $diagnostic) {
+    $diagnostic = "Worker exited with code $ExitCode."
+  }
+  return $diagnostic
+}
+
+Write-Host "Starting CoOperative Unison node $($env:UNISON_NODE_ID)"
+Write-Host "Idle-only mode: $IdleMinutes minute(s)"
+Write-Host "Queue: $QueueUrl"
+Write-Host "Log: $logPath"
+
+Send-StartupHeartbeat -WorkerVersion "starting-windows-0.3" -Capabilities @("startup_phase:text-runtime")
+
+$textWorkerPath = Join-Path $PSScriptRoot "windows-text-worker.py"
+$textProcess = Start-Process `
   -FilePath $uvExe `
-  -ArgumentList @("run", "`"$workerPath`"") `
+  -ArgumentList @("run", "`"$textWorkerPath`"") `
+  -WorkingDirectory $PSScriptRoot `
+  -RedirectStandardOutput $textLogPath `
+  -RedirectStandardError $textErrorLogPath `
+  -PassThru `
+  -WindowStyle Hidden
+
+$textStartedAt = Get-Date
+$lastStartingHeartbeat = Get-Date
+while (-not (Test-Path $textReadyPath) -and -not $textProcess.HasExited) {
+  Start-Sleep -Seconds 3
+  $textProcess.Refresh()
+
+  if (((Get-Date) - $lastStartingHeartbeat).TotalSeconds -ge 20) {
+    Send-StartupHeartbeat -WorkerVersion "starting-windows-0.3" -Capabilities @("startup_phase:text-runtime")
+    $lastStartingHeartbeat = Get-Date
+  }
+
+  if (((Get-Date) - $textStartedAt).TotalMinutes -ge 10) {
+    Stop-Process -Id $textProcess.Id -Force -ErrorAction SilentlyContinue
+    Send-StartupHeartbeat `
+      -WorkerVersion "startup-failed-windows-0.3" `
+      -Capabilities @("startup_error:Text runtime startup timed out") `
+      -State "paused"
+    exit 1
+  }
+}
+
+if ($textProcess.HasExited) {
+  $diagnostic = Last-Diagnostic $textErrorLogPath $textLogPath $textProcess.ExitCode
+  Send-StartupHeartbeat `
+    -WorkerVersion "startup-failed-windows-0.3" `
+    -Capabilities @("startup_exit_code:$($textProcess.ExitCode)", "startup_error:$diagnostic") `
+    -State "paused"
+  exit $textProcess.ExitCode
+}
+
+$textCapabilities = @(
+  "text_generation",
+  "text_fast_profile",
+  "text_quality_profile",
+  "async_queue"
+)
+Send-StartupHeartbeat -WorkerVersion "starting-windows-text-ready-0.3" -Capabilities $textCapabilities
+Write-Host "Windows text runtime started."
+
+$imageWorkerPath = Join-Path $PSScriptRoot "hf-image-worker.py"
+$imageProcess = Start-Process `
+  -FilePath $uvExe `
+  -ArgumentList @("run", "`"$imageWorkerPath`"") `
   -WorkingDirectory $PSScriptRoot `
   -RedirectStandardOutput $logPath `
   -RedirectStandardError $errorLogPath `
@@ -154,9 +200,10 @@ $workerProcess = Start-Process `
 $runtimeStarted = $false
 $lastStartingHeartbeat = Get-Date
 
-while (-not $workerProcess.HasExited) {
+while (-not $imageProcess.HasExited -and -not $textProcess.HasExited) {
   Start-Sleep -Seconds 3
-  $workerProcess.Refresh()
+  $imageProcess.Refresh()
+  $textProcess.Refresh()
 
   if (-not $runtimeStarted -and (Test-Path $logPath)) {
     $runtimeStarted = Select-String `
@@ -167,40 +214,40 @@ while (-not $workerProcess.HasExited) {
       -ErrorAction SilentlyContinue
 
     if ($runtimeStarted) {
-      Write-Host "Python worker runtime started. Normal worker heartbeats are now active."
+      Write-Host "Image runtime started. Combined Unison heartbeats are now active."
     }
   }
 
   if (-not $runtimeStarted -and ((Get-Date) - $lastStartingHeartbeat).TotalSeconds -ge 20) {
-    Send-StartupHeartbeat -WorkerVersion "starting-windows-0.2" -Capabilities @("startup_phase:dependencies")
+    Send-StartupHeartbeat `
+      -WorkerVersion "starting-windows-0.3" `
+      -Capabilities @(
+        "text_generation",
+        "text_fast_profile",
+        "text_quality_profile",
+        "async_queue",
+        "startup_phase:image-runtime"
+      )
     $lastStartingHeartbeat = Get-Date
   }
 }
 
-$exitCode = $workerProcess.ExitCode
-if ($exitCode -ne 0) {
-  $errorTail = ""
-  if (Test-Path $errorLogPath) {
-    $errorTail = (Get-Content $errorLogPath -Tail 12 -ErrorAction SilentlyContinue) -join " | "
-  }
-  if (-not $errorTail -and (Test-Path $logPath)) {
-    $errorTail = (Get-Content $logPath -Tail 12 -ErrorAction SilentlyContinue) -join " | "
-  }
-
-  $diagnostic = ($errorTail -replace "[\r\n]+", " " -replace "\s+", " ").Trim()
-  if ($diagnostic.Length -gt 95) {
-    $diagnostic = $diagnostic.Substring(0, 95)
-  }
-  if (-not $diagnostic) {
-    $diagnostic = "Worker exited with code $exitCode."
-  }
-
-  Send-StartupHeartbeat `
-    -WorkerVersion "startup-failed-windows-0.2" `
-    -Capabilities @("startup_exit_code:$exitCode", "startup_error:$diagnostic") `
-    -State "paused"
-
-  exit $exitCode
+if (-not $imageProcess.HasExited) {
+  Stop-Process -Id $imageProcess.Id -Force -ErrorAction SilentlyContinue
+}
+if (-not $textProcess.HasExited) {
+  Stop-Process -Id $textProcess.Id -Force -ErrorAction SilentlyContinue
 }
 
-exit 0
+$failedProcess = if ($textProcess.HasExited) { $textProcess } else { $imageProcess }
+$primaryError = if ($textProcess.HasExited) { $textErrorLogPath } else { $errorLogPath }
+$fallbackLog = if ($textProcess.HasExited) { $textLogPath } else { $logPath }
+$exitCode = $failedProcess.ExitCode
+$diagnostic = Last-Diagnostic $primaryError $fallbackLog $exitCode
+
+Send-StartupHeartbeat `
+  -WorkerVersion "startup-failed-windows-0.3" `
+  -Capabilities @("startup_exit_code:$exitCode", "startup_error:$diagnostic") `
+  -State "paused"
+
+exit $exitCode

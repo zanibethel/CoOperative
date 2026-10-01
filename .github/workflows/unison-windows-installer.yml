@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "windows/UnisonInstaller/**"
+      - "workers/**"
       - ".github/workflows/unison-windows-installer.yml"
       - "app/unison/install/connect/**"
       - "app/api/unison/nodes/self-status/**"
@@ -12,6 +13,7 @@ on:
     branches: [main]
     paths:
       - "windows/UnisonInstaller/**"
+      - "workers/**"
       - ".github/workflows/unison-windows-installer.yml"
       - "app/unison/install/connect/**"
       - "app/api/unison/nodes/self-status/**"

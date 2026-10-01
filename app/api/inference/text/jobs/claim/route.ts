@@ -1,19 +1,11 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { authorizeUnisonNode } from "@/lib/unison/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-function workerAuthorized(request: Request) {
-  const expected = process.env.INFERENCE_LOCAL_TOKEN;
-  return Boolean(expected) && request.headers.get("authorization") === `Bearer ${expected}`;
-}
-
 export async function POST(request: Request) {
-  if (!workerAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const body = (await request.json().catch(() => ({}))) as { workerId?: unknown };
     const workerId =
@@ -21,9 +13,14 @@ export async function POST(request: Request) {
         ? body.workerId.trim().slice(0, 160)
         : "local-text-worker";
 
+    if (!(await authorizeUnisonNode(request, workerId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const supabase = createAdminSupabaseClient();
     const { data, error } = await supabase.rpc("claim_next_text_inference_job", {
       p_worker_id: workerId,
+      p_node_id: workerId,
     });
     if (error) throw error;
 
@@ -41,6 +38,9 @@ export async function POST(request: Request) {
         attachmentIds: Array.isArray(job.attachment_ids) ? job.attachment_ids : [],
         maxTokens: job.max_tokens,
         temperature: Number(job.temperature),
+        routingPreference: job.routing_preference || "default",
+        preferredNodeId: job.preferred_node_id || null,
+        targetNodeId: job.target_node_id || null,
       },
       { headers: { "Cache-Control": "no-store" } },
     );

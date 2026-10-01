@@ -3,6 +3,24 @@
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 
 type Profile = "fast" | "quality";
+type NodeRouting = "default" | "prefer-owned" | "require-node";
+
+type OwnedNode = {
+  id: string;
+  displayName: string;
+  state: string;
+  workerVersion?: string | null;
+  lastSeenAt?: string | null;
+  fresh: boolean;
+  textCapable: boolean;
+  availableForText: boolean;
+};
+
+type NodesResult = {
+  nodes?: OwnedNode[];
+  error?: string;
+  detail?: string;
+};
 
 type BusinessSummary = {
   id: string;
@@ -78,6 +96,11 @@ type JobResult = {
   latencyMs?: number | null;
   promptTokens?: number | null;
   outputTokens?: number | null;
+  workerId?: string | null;
+  routingPreference?: NodeRouting;
+  preferredNodeId?: string | null;
+  targetNodeId?: string | null;
+  routeReason?: string | null;
   error?: string | null;
   detail?: string | null;
 };
@@ -110,6 +133,7 @@ function resultMeta(result: JobResult) {
     result.provider,
     result.model,
     result.capability === "vision" ? "vision" : "text",
+    result.workerId ? `worker ${result.workerId}` : null,
     typeof result.firstTokenMs === "number"
       ? `${(result.firstTokenMs / 1000).toFixed(1)}s first token`
       : null,
@@ -211,6 +235,9 @@ export default function LocalAiChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
+  const [ownedNodes, setOwnedNodes] = useState<OwnedNode[]>([]);
+  const [nodeRouting, setNodeRouting] = useState<NodeRouting>("prefer-owned");
+  const [requiredNodeId, setRequiredNodeId] = useState("");
   const [selectedBusinessId, setSelectedBusinessId] = useState<string>("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversationTitle, setConversationTitle] = useState("New chat");
@@ -226,6 +253,22 @@ export default function LocalAiChat() {
   const [uploadingImages, setUploadingImages] = useState(false);
   const activePollRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const refreshOwnedNodes = useCallback(async () => {
+    const response = await fetch("/api/local-ai/nodes", { cache: "no-store" });
+    const result = (await response.json()) as NodesResult;
+    if (!response.ok) {
+      throw new Error(result.detail || result.error || "Could not load owned Unison nodes.");
+    }
+
+    const items = result.nodes || [];
+    setOwnedNodes(items);
+    const available = items.filter((node) => node.availableForText);
+    setRequiredNodeId((current) =>
+      available.some((node) => node.id === current) ? current : available[0]?.id || "",
+    );
+    return items;
+  }, []);
 
   const refreshBusinesses = useCallback(async () => {
     const response = await fetch("/api/local-ai/businesses", { cache: "no-store" });
@@ -390,7 +433,7 @@ export default function LocalAiChat() {
 
     async function initialize() {
       try {
-        await refreshBusinesses();
+        await Promise.all([refreshBusinesses(), refreshOwnedNodes()]);
         const threads = await refreshConversations();
         const savedJobId = window.localStorage.getItem(ACTIVE_JOB_KEY);
 
@@ -448,7 +491,7 @@ export default function LocalAiChat() {
       cancelled = true;
       activePollRef.current = null;
     };
-  }, [loadConversation, pollJob, refreshBusinesses, refreshConversations]);
+  }, [loadConversation, pollJob, refreshBusinesses, refreshConversations, refreshOwnedNodes]);
 
   async function removeAttachment(attachment: ImageAttachment) {
     setAttachments((current) => current.filter((item) => item.id !== attachment.id));
@@ -630,6 +673,8 @@ export default function LocalAiChat() {
           profile,
           maxTokens: profile === "quality" ? 1200 : 768,
           temperature: 0.2,
+          nodeRouting,
+          requiredNodeId: nodeRouting === "require-node" ? requiredNodeId : undefined,
         }),
       });
 
@@ -793,9 +838,46 @@ export default function LocalAiChat() {
                 <option value="quality">Higher-quality local model</option>
               </select>
             </label>
+            <label className="field">
+              <span>Owned-node routing</span>
+              <select
+                value={nodeRouting}
+                onChange={(event) => setNodeRouting(event.target.value as NodeRouting)}
+                disabled={busy}
+              >
+                <option value="prefer-owned">Prefer owned nodes</option>
+                <option value="default">Normal local queue</option>
+                <option value="require-node">Require this node</option>
+              </select>
+            </label>
+            {nodeRouting === "require-node" ? (
+              <label className="field">
+                <span>Required Unison node</span>
+                <select
+                  value={requiredNodeId}
+                  onChange={(event) => setRequiredNodeId(event.target.value)}
+                  disabled={busy || !ownedNodes.some((node) => node.availableForText)}
+                >
+                  {ownedNodes.filter((node) => node.availableForText).length === 0 ? (
+                    <option value="">No owned text node online</option>
+                  ) : null}
+                  {ownedNodes
+                    .filter((node) => node.availableForText)
+                    .map((node) => (
+                      <option value={node.id} key={node.id}>
+                        {node.displayName} · {node.state}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            ) : null}
             <small>
-              CoOperative currently keeps this chat local. Future routing can use code/playbooks,
-              business-owned AI, Unison, or approved paid AI when those paths are actually enabled.
+              Prefer owned nodes gives your fresh text-capable Unison nodes first claim for 15 seconds.
+              Require this node prevents another worker from taking the job.
+            </small>
+            <small>
+              CoOperative keeps paid fallback disabled here. Owned/local execution stays inside the
+              existing approval and spending gates.
             </small>
             {meta ? <small>{meta}</small> : null}
           </div>

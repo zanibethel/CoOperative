@@ -41,6 +41,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/workers"
 $workerFiles = @(
   "hf-image-worker.py",
+  "windows-text-worker.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
   "install-unison-windows.ps1",

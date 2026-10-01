@@ -11,7 +11,7 @@ export type TextTaskClass =
   | "reasoning"
   | "long-context";
 
-export const TEXT_MODEL_REGISTRY_REVISION = "2026-10-01.1";
+export const TEXT_MODEL_REGISTRY_REVISION = "2026-10-01.2";
 
 export const TEXT_MODEL_REGISTRY = {
   fast: {
@@ -109,6 +109,14 @@ export function publicTextModelRegistry() {
     revision: TEXT_MODEL_REGISTRY_REVISION,
     profiles: Object.values(TEXT_MODEL_REGISTRY),
     capabilities: [TEXT_VISION_MODEL],
+    ownedNodeBackends: [
+      {
+        runtime: "transformers-windows-cpu",
+        defaultModelId: "Qwen/Qwen2.5-1.5B-Instruct",
+        capabilities: ["text_generation", "text_fast_profile", "text_quality_profile"],
+        purpose: "Windows CPU text generation on owned Unison nodes.",
+      },
+    ],
     policy: {
       localFirst: true,
       manualLocalFallback: "never-paid",
