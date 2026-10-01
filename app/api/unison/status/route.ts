@@ -10,6 +10,8 @@ function statusOf(node: {
   last_seen_at: string;
   worker_version: string;
 }) {
+  if (node.worker_version?.startsWith("startup-failed-")) return "error";
+
   const lastSeen = Date.parse(node.last_seen_at);
   if (!Number.isFinite(lastSeen) || Date.now() - lastSeen > 90_000) {
     return "offline";
@@ -50,7 +52,7 @@ export async function GET(request: Request) {
   let query = admin
     .from("unison_nodes")
     .select(
-      "id,display_name,contributor_user_id,node_class,state,platform,resources,policy,worker_version,last_seen_at,first_seen_at",
+      "id,display_name,contributor_user_id,node_class,state,platform,resources,capabilities,policy,worker_version,last_seen_at,first_seen_at",
     )
     .order("last_seen_at", { ascending: false });
 
@@ -117,6 +119,7 @@ export async function GET(request: Request) {
         : null,
       platform: node.platform,
       resources: node.resources,
+      capabilities: node.capabilities,
       policy: node.policy,
       firstSeenAt: node.first_seen_at,
     };
@@ -129,6 +132,7 @@ export async function GET(request: Request) {
     busy: rows.filter((node) => node.status === "busy").length,
     paused: rows.filter((node) => node.status === "paused").length,
     starting: rows.filter((node) => node.status === "starting").length,
+    error: rows.filter((node) => node.status === "error").length,
     offline: rows.filter((node) => node.status === "offline").length,
   };
 

@@ -582,6 +582,7 @@ if __name__ == "__main__":
         "image-worker-0.8.0",
         busy_provider=UNISON_BUSY.is_set,
     )
+    print("UNISON_RUNTIME_STARTED", flush=True)
 
     if PRELOAD_PROFILE in {"fast", "quality"}:
         try:
