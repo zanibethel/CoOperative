@@ -10,17 +10,207 @@ namespace CoOperative.Unison.Installer;
 
 internal static class Program
 {
+    internal const string BaseUrl = "https://co-operative-mu.vercel.app";
+
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
+
+        if (args.Any(arg => arg.Equals("--dashboard", StringComparison.OrdinalIgnoreCase)))
+        {
+            OpenUrl($"{BaseUrl}/unison/dashboard");
+            return;
+        }
+
+        if (args.Any(arg => arg.Equals("--tray", StringComparison.OrdinalIgnoreCase)))
+        {
+            using var mutex = new Mutex(true, "CoOperative.Unison.TrayAgent", out var createdNew);
+            if (!createdNew) return;
+            Application.Run(new UnisonTrayContext());
+            return;
+        }
+
         Application.Run(new InstallerForm());
+    }
+
+    internal static void OpenUrl(string url)
+    {
+        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+    }
+}
+
+internal sealed class UnisonTrayContext : ApplicationContext
+{
+    private readonly NotifyIcon _notifyIcon = new();
+    private readonly ToolStripMenuItem _statusItem;
+    private readonly System.Windows.Forms.Timer _timer;
+    private readonly string _installDir =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CoOperative", "Unison");
+    private bool _refreshing;
+
+    public UnisonTrayContext()
+    {
+        var iconPath = Path.Combine(_installDir, "unison.ico");
+        if (!File.Exists(iconPath))
+        {
+            Directory.CreateDirectory(_installDir);
+            InstallerForm.CreateUnisonIcon(iconPath);
+        }
+
+        _statusItem = new ToolStripMenuItem("Status: checking…") { Enabled = false };
+
+        var menu = new ContextMenuStrip();
+        menu.Items.Add(_statusItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Open dashboard", null, (_, _) => Program.OpenUrl($"{Program.BaseUrl}/unison/dashboard"));
+        menu.Items.Add("Restart node", null, (_, _) => RunControl("restart"));
+        menu.Items.Add("Repair connection", null, (_, _) => RunControl("repair"));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Exit tray", null, (_, _) =>
+        {
+            _notifyIcon.Visible = false;
+            ExitThread();
+        });
+
+        _notifyIcon.Icon = new Icon(iconPath);
+        _notifyIcon.Text = "CoOperative Unison";
+        _notifyIcon.Visible = true;
+        _notifyIcon.ContextMenuStrip = menu;
+        _notifyIcon.DoubleClick += (_, _) => Program.OpenUrl($"{Program.BaseUrl}/unison/dashboard");
+
+        _timer = new System.Windows.Forms.Timer { Interval = 20_000 };
+        _timer.Tick += async (_, _) => await RefreshStatusAsync();
+        _timer.Start();
+
+        _ = RefreshStatusAsync();
+    }
+
+    private async Task RefreshStatusAsync()
+    {
+        if (_refreshing) return;
+        _refreshing = true;
+
+        try
+        {
+            var nodeId = Environment.GetEnvironmentVariable("UNISON_NODE_ID", EnvironmentVariableTarget.User);
+            var nodeToken = Environment.GetEnvironmentVariable("UNISON_NODE_TOKEN", EnvironmentVariableTarget.User);
+            if (string.IsNullOrWhiteSpace(nodeId) || string.IsNullOrWhiteSpace(nodeToken))
+            {
+                SetStatus("Not linked");
+                return;
+            }
+
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(12) };
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{Program.BaseUrl}/api/unison/nodes/self-status"
+            );
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", nodeToken);
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(new { nodeId }),
+                Encoding.UTF8,
+                "application/json"
+            );
+
+            using var response = await http.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                SetStatus("Connection issue");
+                return;
+            }
+
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var root = json.RootElement;
+            var state = root.TryGetProperty("state", out var stateElement)
+                ? stateElement.GetString() ?? "unknown"
+                : "unknown";
+            var workerVersion = root.TryGetProperty("workerVersion", out var versionElement)
+                ? versionElement.GetString() ?? ""
+                : "";
+
+            if (workerVersion.StartsWith("starting-", StringComparison.OrdinalIgnoreCase))
+            {
+                SetStatus("Starting");
+            }
+            else if (workerVersion.StartsWith("startup-failed-", StringComparison.OrdinalIgnoreCase))
+            {
+                SetStatus("Error");
+            }
+            else
+            {
+                SetStatus(
+                    string.IsNullOrWhiteSpace(state)
+                        ? "Unknown"
+                        : char.ToUpperInvariant(state[0]) + state[1..]
+                );
+            }
+        }
+        catch
+        {
+            SetStatus("Connection issue");
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+
+    private void SetStatus(string state)
+    {
+        if (_statusItem.Owner?.InvokeRequired == true)
+        {
+            _statusItem.Owner.Invoke(() => SetStatus(state));
+            return;
+        }
+
+        _statusItem.Text = $"Status: {state}";
+        _notifyIcon.Text = $"CoOperative Unison · {state}";
+    }
+
+    private void RunControl(string action)
+    {
+        var control = Path.Combine(_installDir, "control-unison-windows.ps1");
+        if (!File.Exists(control))
+        {
+            MessageBox.Show(
+                "The Unison control helper is missing. Open the dashboard and run Repair connection.",
+                "CoOperative Unison",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
+            return;
+        }
+
+        var start = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+        };
+        start.ArgumentList.Add("-NoProfile");
+        start.ArgumentList.Add("-ExecutionPolicy");
+        start.ArgumentList.Add("Bypass");
+        start.ArgumentList.Add("-File");
+        start.ArgumentList.Add(control);
+        start.ArgumentList.Add(action);
+        Process.Start(start);
+    }
+
+    protected override void ExitThreadCore()
+    {
+        _timer.Stop();
+        _timer.Dispose();
+        _notifyIcon.Visible = false;
+        _notifyIcon.Dispose();
+        base.ExitThreadCore();
     }
 }
 
 internal sealed class InstallerForm : Form
 {
-    private const string BaseUrl = "https://co-operative-mu.vercel.app";
+    private const string BaseUrl = Program.BaseUrl;
     private readonly Label _status = new();
     private readonly Label _detail = new();
     private readonly ProgressBar _progress = new();
@@ -86,7 +276,7 @@ internal sealed class InstallerForm : Form
         _dashboard.Width = 145;
         _dashboard.Height = 36;
         _dashboard.Visible = false;
-        _dashboard.Click += (_, _) => OpenUrl($"{BaseUrl}/unison/dashboard");
+        _dashboard.Click += (_, _) => Program.OpenUrl($"{BaseUrl}/unison/dashboard");
 
         _close.Text = "Close";
         _close.Left = 194;
@@ -150,9 +340,12 @@ internal sealed class InstallerForm : Form
 
             await WaitForRealHeartbeatAsync();
 
+            var shellNote = await InstallShellIntegrationAsync();
+
             SetStatus(
                 "Connected",
-                "This PC is online in Unison. It will only accept new work after the configured Windows idle period."
+                "This PC is online in Unison. It will only accept new work after the configured Windows idle period." +
+                shellNote
             );
             CompleteUi();
         }
@@ -185,7 +378,7 @@ internal sealed class InstallerForm : Form
         var link =
             $"{BaseUrl}/unison/install/connect?port={port}&nonce={Uri.EscapeDataString(nonce)}";
 
-        OpenUrl(link);
+        Program.OpenUrl(link);
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
@@ -362,10 +555,136 @@ internal sealed class InstallerForm : Form
         throw new TimeoutException("The worker installed, but CoOperative did not receive a real heartbeat in time.");
     }
 
-    private static void OpenUrl(string url)
+    private async Task<string> InstallShellIntegrationAsync()
     {
-        Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        try
+        {
+            var sourceExe = Environment.ProcessPath;
+            if (string.IsNullOrWhiteSpace(sourceExe) || !File.Exists(sourceExe))
+            {
+                throw new InvalidOperationException("Could not locate the running installer executable.");
+            }
+
+            var installedExe = Path.Combine(_installDir, "CoOperative-Unison.exe");
+            if (!Path.GetFullPath(sourceExe).Equals(
+                    Path.GetFullPath(installedExe),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                File.Copy(sourceExe, installedExe, overwrite: true);
+            }
+
+            var iconPath = Path.Combine(_installDir, "unison.ico");
+            CreateUnisonIcon(iconPath);
+
+            var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            CreateShortcut(
+                Path.Combine(desktop, "CoOperative Unison.lnk"),
+                installedExe,
+                "--dashboard",
+                "Open your CoOperative Unison dashboard",
+                iconPath
+            );
+
+            var programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+            var startMenuDir = Path.Combine(programs, "CoOperative");
+            Directory.CreateDirectory(startMenuDir);
+            CreateShortcut(
+                Path.Combine(startMenuDir, "CoOperative Unison.lnk"),
+                installedExe,
+                "--dashboard",
+                "Open your CoOperative Unison dashboard",
+                iconPath
+            );
+
+            var startup = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
+            CreateShortcut(
+                Path.Combine(startup, "CoOperative Unison Tray.lnk"),
+                installedExe,
+                "--tray",
+                "Start the CoOperative Unison tray controller",
+                iconPath
+            );
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = installedExe,
+                Arguments = "--tray",
+                UseShellExecute = true,
+                WorkingDirectory = _installDir,
+            });
+
+            await File.AppendAllTextAsync(
+                _logPath,
+                $"[{DateTimeOffset.Now:u}] Desktop/start-menu shortcuts and tray controller installed.\r\n"
+            );
+
+            return " A desktop shortcut and tray controller are installed.";
+        }
+        catch (Exception ex)
+        {
+            await File.AppendAllTextAsync(
+                _logPath,
+                $"[{DateTimeOffset.Now:u}] SHELL INTEGRATION WARNING: {ex}\r\n"
+            );
+            return " The node is connected, but Windows shortcut/tray setup needs repair.";
+        }
     }
+
+    private static void CreateShortcut(
+        string shortcutPath,
+        string targetPath,
+        string arguments,
+        string description,
+        string iconPath
+    )
+    {
+        var shellType = Type.GetTypeFromProgID("WScript.Shell")
+            ?? throw new InvalidOperationException("Windows shortcut service is unavailable.");
+        dynamic shell = Activator.CreateInstance(shellType)
+            ?? throw new InvalidOperationException("Could not create Windows shortcut service.");
+        dynamic shortcut = shell.CreateShortcut(shortcutPath);
+        shortcut.TargetPath = targetPath;
+        shortcut.Arguments = arguments;
+        shortcut.WorkingDirectory = Path.GetDirectoryName(targetPath);
+        shortcut.Description = description;
+        shortcut.IconLocation = iconPath;
+        shortcut.Save();
+    }
+
+    internal static void CreateUnisonIcon(string iconPath)
+    {
+        using var bitmap = new Bitmap(64, 64);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        graphics.Clear(Color.Transparent);
+
+        using var outer = new Pen(Color.FromArgb(31, 218, 255), 7);
+        using var inner = new Pen(Color.FromArgb(118, 239, 255), 3);
+        graphics.DrawEllipse(outer, 8, 8, 48, 48);
+        graphics.DrawArc(inner, 18, 17, 28, 30, 18, 144);
+        graphics.DrawArc(inner, 18, 17, 28, 30, 198, 144);
+
+        using var font = new Font("Segoe UI Semibold", 20, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var brush = new SolidBrush(Color.White);
+        var text = "U";
+        var size = graphics.MeasureString(text, font);
+        graphics.DrawString(text, font, brush, 32 - size.Width / 2, 32 - size.Height / 2 - 1);
+
+        var handle = bitmap.GetHicon();
+        try
+        {
+            using var icon = Icon.FromHandle(handle);
+            using var stream = File.Create(iconPath);
+            icon.Save(stream);
+        }
+        finally
+        {
+            DestroyIcon(handle);
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr handle);
 
     private static string? LastNonEmptyLine(string value)
     {
