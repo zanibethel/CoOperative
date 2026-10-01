@@ -80,7 +80,7 @@ internal sealed class UnisonTrayContext : ApplicationContext
 
     public UnisonTrayContext()
     {
-        var iconPath = Path.Combine(_installDir, "unison.ico");
+        var iconPath = Path.Combine(_shellDir, "unison.ico");
         if (!File.Exists(iconPath))
         {
             Directory.CreateDirectory(_shellDir);
