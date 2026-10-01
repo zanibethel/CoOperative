@@ -296,7 +296,8 @@ Send-StartupHeartbeat -WorkerVersion "starting-windows-0.4" -Capabilities @("sta
 
 $localChatProcess = Start-LocalChatRuntime
 if ($localChatProcess) {
-  Write-Host "Personal Local AI chat ready at http://127.0.0.1:$($(if ($env:UNISON_LOCAL_CHAT_PORT) { $env:UNISON_LOCAL_CHAT_PORT } else { '11436' }))/"
+  $localChatPort = if ($env:UNISON_LOCAL_CHAT_PORT) { $env:UNISON_LOCAL_CHAT_PORT } else { "11436" }
+  Write-Host "Personal Local AI chat ready at http://127.0.0.1:$localChatPort/"
 } else {
   Write-Host "Personal Local AI chat did not start; community compute can still continue."
 }
