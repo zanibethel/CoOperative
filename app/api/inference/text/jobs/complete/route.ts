@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { authorizeUnisonNode } from "@/lib/unison/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 type CompletionBody = {
   jobId?: unknown;
+  workerId?: unknown;
   text?: unknown;
   model?: unknown;
   provider?: unknown;
@@ -15,48 +17,143 @@ type CompletionBody = {
   error?: unknown;
 };
 
-function workerAuthorized(request: Request) {
-  const expected = process.env.INFERENCE_LOCAL_TOKEN;
-  return Boolean(expected) && request.headers.get("authorization") === `Bearer ${expected}`;
+type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
+
+function asCount(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.round(value))
+    : null;
+}
+
+async function recordUnisonTextUsage(
+  supabase: AdminClient,
+  input: {
+    jobId: string;
+    workerId: string | null;
+    claimedAt: string | null;
+    status: "completed" | "failed";
+    completedAt: string;
+    latencyMs: number | null;
+  },
+) {
+  if (!input.workerId) return;
+
+  try {
+    const { data: node, error: nodeError } = await supabase
+      .from("unison_nodes")
+      .select("contributor_user_id,resources")
+      .eq("id", input.workerId)
+      .maybeSingle();
+
+    if (nodeError || !node?.contributor_user_id) return;
+
+    const claimedMs = input.claimedAt ? Date.parse(input.claimedAt) : NaN;
+    const completedMs = Date.parse(input.completedAt);
+    const elapsedSeconds =
+      Number.isFinite(claimedMs) && Number.isFinite(completedMs)
+        ? Math.max(0, Math.ceil((completedMs - claimedMs) / 1000))
+        : 0;
+    const computeSeconds =
+      input.latencyMs !== null
+        ? Math.max(0, Math.ceil(input.latencyMs / 1000))
+        : elapsedSeconds;
+
+    const resources = (node.resources || {}) as { gpus?: Array<unknown> };
+    const gpuSeconds = resources.gpus?.length ? computeSeconds : 0;
+
+    const { error } = await supabase.from("unison_usage_ledger").upsert(
+      {
+        contributor_user_id: node.contributor_user_id,
+        node_id: input.workerId,
+        source_job_type: "text_generation",
+        source_job_id: input.jobId,
+        status: input.status,
+        compute_seconds: computeSeconds,
+        gpu_seconds: gpuSeconds,
+        cpu_seconds: gpuSeconds ? 0 : computeSeconds,
+        earned_cents: 0,
+        estimated_external_cost_cents: 0,
+        started_at: input.claimedAt,
+        completed_at: input.completedAt,
+      },
+      { onConflict: "source_job_type,source_job_id" },
+    );
+
+    if (error) {
+      console.error("Could not record Unison text contribution", {
+        jobId: input.jobId,
+        workerId: input.workerId,
+        detail: error.message.slice(0, 500),
+      });
+    }
+  } catch (error) {
+    console.error("Could not record Unison text contribution", {
+      jobId: input.jobId,
+      workerId: input.workerId,
+      detail: error instanceof Error ? error.message.slice(0, 500) : "Unknown ledger error",
+    });
+  }
 }
 
 export async function POST(request: Request) {
-  if (!workerAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const body = (await request.json()) as CompletionBody;
     const jobId = typeof body.jobId === "string" ? body.jobId : "";
+    const workerId =
+      typeof body.workerId === "string" && body.workerId.trim()
+        ? body.workerId.trim().slice(0, 160)
+        : null;
+
     if (!jobId) {
       return NextResponse.json({ error: "jobId is required." }, { status: 400 });
+    }
+
+    if (!(await authorizeUnisonNode(request, workerId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("text_inference_jobs")
-      .select("id,status,client_owner_ref,conversation_id")
+      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at")
       .eq("id", jobId)
       .maybeSingle();
 
     if (jobError) throw jobError;
     if (!job) return NextResponse.json({ error: "Job not found." }, { status: 404 });
+    if (workerId && job.worker_id && job.worker_id !== workerId) {
+      return NextResponse.json(
+        { error: "This job is leased to a different node." },
+        { status: 409 },
+      );
+    }
     if (job.status === "cancelled") {
       return NextResponse.json({ ok: true, status: "cancelled" });
     }
 
     if (typeof body.error === "string" && body.error.trim()) {
+      const completedAt = new Date().toISOString();
       const { error: updateError } = await supabase
         .from("text_inference_jobs")
         .update({
           status: "failed",
           error: body.error.slice(0, 1200),
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          completed_at: completedAt,
+          updated_at: completedAt,
         })
         .eq("id", jobId);
 
       if (updateError) throw updateError;
+
+      await recordUnisonTextUsage(supabase, {
+        jobId,
+        workerId,
+        claimedAt: job.claimed_at,
+        status: "failed",
+        completedAt,
+        latencyMs: null,
+      });
+
       return NextResponse.json({ ok: true, status: "failed" });
     }
 
@@ -64,11 +161,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid completion payload." }, { status: 400 });
     }
 
-    const asCount = (value: unknown) =>
-      typeof value === "number" && Number.isFinite(value)
-        ? Math.max(0, Math.round(value))
-        : null;
-
+    const latencyMs = asCount(body.latencyMs);
+    const completedAt = new Date().toISOString();
     const { error: updateError } = await supabase
       .from("text_inference_jobs")
       .update({
@@ -79,17 +173,26 @@ export async function POST(request: Request) {
         result_provider:
           typeof body.provider === "string"
             ? body.provider.slice(0, 160)
-            : "cooperative-mlx-worker",
+            : "cooperative-local-text-worker",
         prompt_tokens: asCount(body.promptTokens),
         output_tokens: asCount(body.outputTokens),
-        latency_ms: asCount(body.latencyMs),
+        latency_ms: latencyMs,
         error: null,
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        completed_at: completedAt,
+        updated_at: completedAt,
       })
       .eq("id", jobId);
 
     if (updateError) throw updateError;
+
+    await recordUnisonTextUsage(supabase, {
+      jobId,
+      workerId,
+      claimedAt: job.claimed_at,
+      status: "completed",
+      completedAt,
+      latencyMs,
+    });
 
     if (job.conversation_id) {
       const { error: messageError } = await supabase.from("local_ai_messages").upsert(
@@ -107,7 +210,7 @@ export async function POST(request: Request) {
 
       const { error: conversationError } = await supabase
         .from("local_ai_conversations")
-        .update({ updated_at: new Date().toISOString() })
+        .update({ updated_at: completedAt })
         .eq("id", job.conversation_id)
         .eq("owner_ref", job.client_owner_ref);
 
