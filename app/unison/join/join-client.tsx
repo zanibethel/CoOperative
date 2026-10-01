@@ -167,6 +167,39 @@ export default function JoinClient({
             </p>
           </div>
 
+          <div className="card">
+            <div className="eyebrow">Install steps</div>
+            <ol>
+              <li>
+                Make sure you are signed in to the CoOperative account that should own this
+                computer&apos;s Unison contributions.
+              </li>
+              <li>
+                Click <strong>Download latest Setup.exe</strong> below.
+              </li>
+              <li>
+                If Chrome or Windows asks whether to keep the file, confirm it only when the
+                download came from this Unison page. The preview installer is not code-signed yet,
+                so Windows may show an additional warning.
+              </li>
+              <li>
+                Open <strong>CoOperative-Unison-Setup.exe</strong>.
+              </li>
+              <li>
+                Setup will open your browser. Approve linking this PC to the contributor account
+                shown there.
+              </li>
+              <li>
+                Approve the Windows administrator prompt. This installs Unison for the whole PC,
+                not just the current Windows profile.
+              </li>
+              <li>
+                Leave Setup open until it says <strong>Connected</strong>. After that, you can
+                switch Windows users normally.
+              </li>
+            </ol>
+          </div>
+
           <div className="cta-row">
             <a
               className="primary"
@@ -179,11 +212,12 @@ export default function JoinClient({
             </button>
           </div>
           <p>
-            This downloads the current Windows installer directly from the official CoOperative
-            release. Setup opens your browser first so the correct contributor authorizes the PC,
-            then requests administrator approval to install the worker for the whole machine.
-            Existing machine-wide identities are preserved, and Setup waits for a verified
-            whole-PC-idle-capable heartbeat before showing Connected.
+            After setup, the dashboard should show <strong>Whole-PC idle</strong>. Unison then runs
+            independently of the signed-in Windows profile and only accepts new work after the
+            entire computer has been idle for the configured period.
+          </p>
+          <p>
+            <strong>Use the legacy per-profile fallback only if the normal Setup.exe cannot run.</strong>
           </p>
 
           <details>
