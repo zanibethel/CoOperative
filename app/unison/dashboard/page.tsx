@@ -122,6 +122,10 @@ export default async function UnisonContributorDashboard() {
                   recordedAt?: string;
                 };
               };
+              const policy = (node.policy || {}) as {
+                idleScope?: "session" | "machine";
+                idleThresholdSeconds?: number;
+              };
               const status = nodeStatus(node);
               return (
                 <article className="card unison-device" key={node.id}>
@@ -137,6 +141,8 @@ export default async function UnisonContributorDashboard() {
                   <div className="service-tags">
                     <span>{resources.cpuLogical || "?"} logical CPUs</span>
                     <span>{resources.memoryTotalMb ? `${Math.round(resources.memoryTotalMb / 1024)} GB RAM` : "RAM pending"}</span>
+                    <span>{policy.idleScope === "machine" ? "Whole-PC idle" : "Profile idle"}</span>
+                    <span>{node.worker_version || "Worker version pending"}</span>
                     <span>Last seen {new Date(node.last_seen_at).toLocaleString()}</span>
                   </div>
                   {resources.textModelPlan?.models ? (
