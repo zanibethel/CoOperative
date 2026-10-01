@@ -19,6 +19,8 @@ CoOperative should be able to use that capability when it is technically availab
 
 The goal is to avoid paying twice for equivalent compute while preserving CoOperative's reasoning context, policies, evidence, verification, and approval boundaries.
 
+AI executors must also inherit the economic principles in `docs/BUSINESS-ECONOMIC-MODEL.md`: customer budget ceilings, no surprise paid fallback, qualified owned/self-hosted preference, projected-vs-verified-vs-realized savings discipline, proof before cancellation, and sustainable CoOperative margin.
+
 ## Core rule
 
 > A connected AI executor may contribute reasoning or generation, but it must operate inside CoOperative's decision context. It does not replace CoOperative's policies, evidence, or owner direction.

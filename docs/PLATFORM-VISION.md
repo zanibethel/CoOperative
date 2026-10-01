@@ -12,6 +12,8 @@ The long-term product is a conversational business operating system. The owner s
 
 The canonical implementation sequence for reaching this end state is maintained in `docs/END-STATE-ROADMAP.md`.
 
+The canonical customer/platform economic contract is maintained in `docs/BUSINESS-ECONOMIC-MODEL.md`. Business optimization, routing, savings reporting, funded balances, and pricing work should remain consistent with it.
+
 ## Economic mission
 
 CoOperative should continuously work toward four outcomes for the customer:

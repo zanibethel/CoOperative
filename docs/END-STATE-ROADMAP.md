@@ -4,6 +4,8 @@ Last updated: 2026-09-30
 
 This document is the canonical bridge between CoOperative's long-term product vision and the concrete sequence of work required to reach it.
 
+The commercial/economic north star is defined in `docs/BUSINESS-ECONOMIC-MODEL.md`: remain inside the customer's explicit budget, prove equal-or-better lower-cost replacements, report projected/verified/realized savings separately, and preserve sustainable CoOperative margin.
+
 It should be read together with:
 
 - `docs/PLATFORM-VISION.md`
@@ -506,9 +508,9 @@ Steps:
 
 **Exit criteria:** verified annual savings while preserving required station functionality.
 
-## Phase 10 — Savings Ledger & aligned business model
+## Phase 10 — Savings, Budget & CoOperative Balance Ledger
 
-**Goal:** make economic value measurable and billable without misaligned incentives.
+**Goal:** make customer budgets, funded CoOperative balance, economic value, and platform margin measurable and enforceable without misaligned incentives.
 
 Track:
 
@@ -573,6 +575,24 @@ mature case
 ```
 
 The strongest long-term advantage is not owning a particular model. It is owning the accumulated migration intelligence, capability maps, code, policies, evidence, benchmarks, economic data, and verified playbooks.
+
+## Conversation-first business workspace
+
+**Goal:** make chat the primary business control surface while preserving deterministic policy, approvals, evidence, and execution underneath it.
+
+Target shell:
+
+- conversations remain the center of the experience;
+- a business/project selector establishes the active tenant and initiative;
+- connected services and available capabilities are discoverable beside chat;
+- Budget & Savings shows baseline spend, CoOperative balance, hard budget ceiling, current managed spend, and savings state;
+- Approvals collects consequential or paid actions;
+- Activity/Evidence explains what ran, what it cost, why it was routed there, and how it was verified;
+- chat receives the active business's relevant service map, economic envelope, policies, and project state through a bounded reasoning context.
+
+The interface may borrow familiar interaction patterns from modern AI assistants, but CoOperative's differentiator is that chat can inspect, propose, execute, verify, and report against real business economics.
+
+**Exit criteria:** a business owner can stay primarily in chat while understanding and acting on projects, connected services, budgets/savings, approvals, and execution evidence without navigating unrelated technical dashboards.
 
 # Near-term priority order
 

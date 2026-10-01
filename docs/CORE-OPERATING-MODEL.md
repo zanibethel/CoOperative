@@ -12,6 +12,8 @@ The owner should not need to understand APIs, OAuth, webhooks, AI models, hostin
 
 CoOperative owns the experience. Providers are replaceable infrastructure underneath it.
 
+The canonical business economic contract is `docs/BUSINESS-ECONOMIC-MODEL.md`. Customer budget ceilings, funded balance, verified/realized savings, and sustainable CoOperative margin are platform constraints, not optional recommendation criteria.
+
 ## Business economic mandate
 
 CoOperative exists to improve the economic health of the customer's business.
