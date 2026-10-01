@@ -20,10 +20,14 @@ export default function UnisonNodeActions({
   const online = status !== "offline";
 
   useEffect(() => {
-    if (monitoring && online) {
+    if (!(monitoring && online)) return;
+
+    const timer = window.setTimeout(() => {
       setMessage("Node is online.");
       setMonitoring(false);
-    }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [monitoring, online]);
 
   useEffect(() => {
