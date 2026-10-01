@@ -92,8 +92,13 @@ shell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass
 "@
 Set-Content -Path $hiddenLauncher -Value $vbs -Encoding ASCII
 
-$taskCommand = "wscript.exe //B //Nologo `"$hiddenLauncher`""
-schtasks.exe /Create /F /SC ONLOGON /TN $taskName /TR $taskCommand | Out-Null
+$startupDir = [Environment]::GetFolderPath("Startup")
+$startupLauncher = Join-Path $startupDir "CoOperative-Unison.vbs"
+Copy-Item -Force $hiddenLauncher $startupLauncher
+
+# Remove the older scheduled-task startup path if it exists. Startup-folder
+# launch is per-user, does not require elevation, and is less fragile with paths.
+schtasks.exe /Delete /TN $taskName /F 2>$null | Out-Null
 
 $protocolRoot = "HKCU:\Software\Classes\cooperative-unison"
 $commandKey = Join-Path $protocolRoot "shell\open\command"
@@ -106,9 +111,20 @@ $protocolCommand = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPoli
 Set-Item -Path $commandKey -Value $protocolCommand
 
 Write-Host "Restarting Unison..."
-schtasks.exe /End /TN $taskName 2>$null | Out-Null
-Start-Sleep -Seconds 2
-schtasks.exe /Run /TN $taskName | Out-Null
+
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+  Where-Object {
+    $_.CommandLine -and
+    $_.CommandLine -like "*CoOperative*Unison*" -and
+    $_.CommandLine -like "*hf-image-worker.py*"
+  } |
+  ForEach-Object {
+    Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+
+Start-Sleep -Seconds 1
+$wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
+& $wscript //B //Nologo $hiddenLauncher
 
 Write-Host ""
 Write-Host "Repair complete."
