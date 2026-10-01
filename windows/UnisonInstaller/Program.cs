@@ -11,6 +11,7 @@ namespace CoOperative.Unison.Installer;
 internal static class Program
 {
     internal const string BaseUrl = "https://co-operative-mu.vercel.app";
+    internal const string LocalChatUrl = "http://127.0.0.1:11436/";
 
     [STAThread]
     private static void Main(string[] args)
@@ -20,6 +21,12 @@ internal static class Program
         if (args.Any(arg => arg.Equals("--dashboard", StringComparison.OrdinalIgnoreCase)))
         {
             OpenUrl($"{BaseUrl}/unison/dashboard");
+            return;
+        }
+
+        if (args.Any(arg => arg.Equals("--local-chat", StringComparison.OrdinalIgnoreCase)))
+        {
+            OpenUrl(LocalChatUrl);
             return;
         }
 
@@ -94,6 +101,7 @@ internal sealed class UnisonTrayContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Open Local AI chat", null, (_, _) => Program.OpenUrl(Program.LocalChatUrl));
         menu.Items.Add("Open dashboard", null, (_, _) => Program.OpenUrl($"{Program.BaseUrl}/unison/dashboard"));
         menu.Items.Add("Restart node", null, (_, _) => RunControl("restart"));
         menu.Items.Add("Repair connection", null, (_, _) => RunControl("repair"));
@@ -379,7 +387,7 @@ internal sealed class InstallerForm : Form
                 SetStatus(
                     "Repaired and connected",
                     "This machine-wide Unison node kept its identity and runs independently of Windows profiles. " +
-                    "Desktop, Start Menu, and tray integration are ready." +
+                    "Personal Local AI, desktop, Start Menu, and tray integration are ready." +
                     machineShellNote
                 );
                 CompleteUi();
@@ -444,7 +452,7 @@ internal sealed class InstallerForm : Form
 
             SetStatus(
                 "Connected",
-                "This PC is online as a machine-wide Unison node. It only accepts new work after every signed-in Windows session has been idle for the configured period." +
+                "This PC is online as a machine-wide Unison node. Personal Local AI is available while the PC is in use; contributed work only starts after every signed-in Windows session has been idle for the configured period." +
                 shellNote
             );
             CompleteUi();
@@ -849,6 +857,13 @@ internal sealed class InstallerForm : Form
                 "Open your CoOperative Unison dashboard",
                 iconPath
             );
+            CreateShortcut(
+                Path.Combine(desktop, "CoOperative Local AI.lnk"),
+                installedExe,
+                "--local-chat",
+                "Open private Local AI chat on this PC",
+                iconPath
+            );
 
             var programs = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
             var startMenuDir = Path.Combine(programs, "CoOperative");
@@ -858,6 +873,13 @@ internal sealed class InstallerForm : Form
                 installedExe,
                 "--dashboard",
                 "Open your CoOperative Unison dashboard",
+                iconPath
+            );
+            CreateShortcut(
+                Path.Combine(startMenuDir, "CoOperative Local AI.lnk"),
+                installedExe,
+                "--local-chat",
+                "Open private Local AI chat on this PC",
                 iconPath
             );
 
@@ -880,10 +902,10 @@ internal sealed class InstallerForm : Form
 
             await File.AppendAllTextAsync(
                 _logPath,
-                $"[{DateTimeOffset.Now:u}] Desktop/start-menu shortcuts and tray controller installed.\r\n"
+                $"[{DateTimeOffset.Now:u}] Local AI + dashboard desktop/start-menu shortcuts and tray controller installed.\r\n"
             );
 
-            return " A desktop shortcut and tray controller are installed.";
+            return " Desktop shortcuts for Unison and Personal Local AI plus the tray controller are installed.";
         }
         catch (Exception ex)
         {
