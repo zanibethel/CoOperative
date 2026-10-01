@@ -51,12 +51,13 @@ export async function POST() {
   }
 
   const bootstrapUrl =
-    "https://raw.githubusercontent.com/zanibethel/CoOperative/main/workers/bootstrap-unison-windows.ps1";
+    "https://raw.githubusercontent.com/zanibethel/CoOperative/main/workers/bootstrap-unison-windows-machine.ps1";
 
   const command = [
     `$bootstrap = "$env:TEMP\\unison-bootstrap.ps1"`,
     `Invoke-WebRequest -Uri "${bootstrapUrl}" -OutFile $bootstrap`,
-    `powershell -ExecutionPolicy Bypass -File $bootstrap -PairCode "${pairingCode}" -NodeName "$env:COMPUTERNAME" -IdleMinutes 5`,
+    `$args = '-NoProfile -ExecutionPolicy Bypass -File "' + $bootstrap + '" -PairCode "${pairingCode}" -NodeName "' + $env:COMPUTERNAME + '" -IdleMinutes 5'`,
+    `Start-Process powershell.exe -Verb RunAs -ArgumentList $args -Wait`,
   ].join("\n");
 
   return NextResponse.json(
