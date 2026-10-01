@@ -42,7 +42,7 @@ internal static class Program
 
 internal sealed class UnisonTrayContext : ApplicationContext
 {
-    private readonly NotifyIcon _notifyIcon;
+    private readonly NotifyIcon _notifyIcon = new();
     private readonly ToolStripMenuItem _statusItem;
     private readonly System.Windows.Forms.Timer _timer;
     private readonly string _installDir =
@@ -73,13 +73,10 @@ internal sealed class UnisonTrayContext : ApplicationContext
             ExitThread();
         });
 
-        _notifyIcon = new NotifyIcon
-        {
-            Icon = new Icon(iconPath),
-            Text = "CoOperative Unison",
-            Visible = true,
-            ContextMenuStrip = menu,
-        };
+        _notifyIcon.Icon = new Icon(iconPath);
+        _notifyIcon.Text = "CoOperative Unison";
+        _notifyIcon.Visible = true;
+        _notifyIcon.ContextMenuStrip = menu;
         _notifyIcon.DoubleClick += (_, _) => Program.OpenUrl($"{Program.BaseUrl}/unison/dashboard");
 
         _timer = new System.Windows.Forms.Timer { Interval = 20_000 };
@@ -279,7 +276,7 @@ internal sealed class InstallerForm : Form
         _dashboard.Width = 145;
         _dashboard.Height = 36;
         _dashboard.Visible = false;
-        _dashboard.Click += (_, _) => OpenUrl($"{BaseUrl}/unison/dashboard");
+        _dashboard.Click += (_, _) => Program.OpenUrl($"{BaseUrl}/unison/dashboard");
 
         _close.Text = "Close";
         _close.Left = 194;
