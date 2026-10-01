@@ -47,6 +47,14 @@ The current CMD/PowerShell installer is a temporary bootstrap/debug path, not th
 
 The normal user flow should not require PowerShell, pairing-code copy/paste, or raw scripts. Installation should verify a real node heartbeat before claiming success. Prefer a per-user tray/background agent for node status, pause/resume, restart, repair, update, dashboard access, and uninstall, while preserving outbound-only networking and per-node credentials. Keep raw scripts only as advanced/debug fallbacks.
 
+## Owner-reviewed owned-model improvement reports
+
+CoOperative should eventually use its own benchmark-qualified models as the default analyzers for accumulated execution evidence. These models should compile improvement reports and bounded proposals for code, playbooks, routing, evals, prompts/context, connectors, and curated model-training candidates.
+
+The Owner Dashboard chat is the primary approval surface. The owner should be able to ask for more evidence and choose Approve, Deny, or Defer. Approval may authorize preparation/testing, but high-impact code deployment or model promotion remains subject to the applicable guarded approval policy.
+
+Do not blindly retrain on raw conversations or tenant data. Training candidates must be curated, rights-compatible, de-identified/generalized where appropriate, benchmarked, and promoted only when they outperform the current owned model on relevant evals.
+
 ## Canonical roadmap
 The current execution sequence and end-state definition live in `docs/END-STATE-ROADMAP.md`. New platform work should be compared against that roadmap and explicit newer owner decisions.
 
