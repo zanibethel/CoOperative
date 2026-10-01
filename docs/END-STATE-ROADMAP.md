@@ -258,6 +258,38 @@ Remaining:
 
 **Exit criteria:** a local worker can run text, vision, image, and repo-agent jobs repeatedly without manual database repair.
 
+## Phase 0.5 — production-quality Unison Windows installer
+
+**Goal:** turn the proven Windows node bootstrap into a normal, trustworthy consumer installation experience after the first Windows node is reliably heartbeating.
+
+Sequence:
+
+1. prove the current Windows worker can repeatedly reach `Starting → Online/Idle` and survive restart/login on a real PC;
+2. freeze the working bootstrap/repair logic instead of hiding unresolved worker bugs inside a GUI;
+3. package that proven flow as a branded **CoOperative Unison Setup.exe** (or MSI where appropriate);
+4. code-sign the installer with Authenticode so Windows can identify the publisher and SmartScreen friction is minimized;
+5. keep installation per-user unless a future capability genuinely requires a Windows service;
+6. install a lightweight Unison tray/background agent for status, pause/resume, restart, repair, update, dashboard, and uninstall;
+7. preserve outbound-only node networking and per-node credentials—do not open an inbound remote-control port;
+8. verify the first heartbeat before showing installation success;
+9. support automatic agent/worker updates with rollback/recovery;
+10. keep the raw CMD/PowerShell bootstrap only as an advanced/debug fallback.
+
+Target user experience:
+
+```text
+Sign in to CoOperative
+  → Install on this PC
+  → download CoOperative Unison Setup.exe
+  → double-click
+  → branded install/progress
+  → node pairs automatically
+  → "Connected" only after a verified heartbeat
+  → existing browser/session opens the contributor dashboard
+```
+
+**Exit criteria:** a normal Windows user can install, repair, restart, update, and uninstall a Unison node without manually opening PowerShell, copying pairing codes, or interacting with CMD scripts.
+
 ## Phase 1 — enforce the CoOperative reasoning layer
 
 **Goal:** make CoOperative's direction and reasoning discipline part of runtime behavior, not documentation only.
@@ -599,18 +631,19 @@ The interface may borrow familiar interaction patterns from modern AI assistants
 Until changed by a new explicit owner decision, prioritize:
 
 1. stabilize current Mac/local workers and agent recovery;
-2. finish the current image/agent test loop;
-3. implement runtime Reasoning Envelope enforcement;
-4. finish the governed escalation evaluator and connect the first stronger executor;
-5. build CoOperative eval/benchmark harness and use it to qualify escalation candidates;
-6. benchmark stronger open-weight reasoning models;
-7. build AWS execution target and prove Mac-independent inference;
-8. add business-owned AI connector contract;
-9. build service/cost discovery;
-10. build migration planner/executor;
-11. run the radio-station cost-optimization pilot;
-12. add verified-savings ledger/business model;
-13. expand into broader business migrations and human-workforce execution.
+2. prove the first Windows Unison node is reliably heartbeating, then build the branded signed Unison Windows installer/tray agent described in Phase 0.5;
+3. finish the current image/agent test loop;
+4. implement runtime Reasoning Envelope enforcement;
+5. finish the governed escalation evaluator and connect the first stronger executor;
+6. build CoOperative eval/benchmark harness and use it to qualify escalation candidates;
+7. benchmark stronger open-weight reasoning models;
+8. build AWS execution target and prove Mac-independent inference;
+9. add business-owned AI connector contract;
+10. build service/cost discovery;
+11. build migration planner/executor;
+12. run the radio-station cost-optimization pilot;
+13. add verified-savings ledger/business model;
+14. expand into broader business migrations and human-workforce execution.
 
 # Non-goals
 
