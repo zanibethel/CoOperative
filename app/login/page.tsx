@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -12,6 +12,14 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [nextPath, setNextPath] = useState("/onboarding");
+
+  useEffect(() => {
+    const candidate = new URLSearchParams(window.location.search).get("next");
+    if (candidate?.startsWith("/") && !candidate.startsWith("//")) {
+      setNextPath(candidate);
+    }
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -28,7 +36,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/onboarding");
+      router.push(nextPath);
       router.refresh();
       return;
     }
@@ -37,7 +45,7 @@ export default function LoginPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`,
       },
     });
 
@@ -48,7 +56,7 @@ export default function LoginPage() {
     }
 
     if (data.session) {
-      router.push("/onboarding");
+      router.push(nextPath);
       router.refresh();
       return;
     }
