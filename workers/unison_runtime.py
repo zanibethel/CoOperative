@@ -69,10 +69,119 @@ class _LastInputInfo(ctypes.Structure):
     _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
 
 
-def windows_idle_seconds() -> float | None:
-    if platform.system() != "Windows":
+class _WTSSessionInfo(ctypes.Structure):
+    _fields_ = [
+        ("SessionId", ctypes.c_uint32),
+        ("pWinStationName", ctypes.c_wchar_p),
+        ("State", ctypes.c_int),
+    ]
+
+
+class _WTSInfo(ctypes.Structure):
+    _fields_ = [
+        ("State", ctypes.c_int),
+        ("SessionId", ctypes.c_uint32),
+        ("IncomingBytes", ctypes.c_uint32),
+        ("OutgoingBytes", ctypes.c_uint32),
+        ("IncomingFrames", ctypes.c_uint32),
+        ("OutgoingFrames", ctypes.c_uint32),
+        ("IncomingCompressedBytes", ctypes.c_uint32),
+        ("OutgoingCompressedBytes", ctypes.c_uint32),
+        ("WinStationName", ctypes.c_wchar * 33),
+        ("Domain", ctypes.c_wchar * 18),
+        ("UserName", ctypes.c_wchar * 21),
+        ("ConnectTime", ctypes.c_longlong),
+        ("DisconnectTime", ctypes.c_longlong),
+        ("LastInputTime", ctypes.c_longlong),
+        ("LogonTime", ctypes.c_longlong),
+        ("CurrentTime", ctypes.c_longlong),
+    ]
+
+
+def _windows_machine_idle_seconds() -> float | None:
+    """Return the least-idle interactive Windows session.
+
+    Machine-wide Unison runs outside any one user's desktop session. GetLastInputInfo
+    is session-scoped, so a service could otherwise think the PC is idle while another
+    signed-in user is actively gaming. WTSInfo exposes LastInputTime for every
+    interactive session; the minimum idle time keeps the node unavailable whenever
+    anyone is using the computer.
+    """
+    try:
+        wts = ctypes.WinDLL("wtsapi32", use_last_error=True)
+        sessions_ptr = ctypes.POINTER(_WTSSessionInfo)()
+        count = ctypes.c_uint32()
+
+        enumerate_sessions = wts.WTSEnumerateSessionsW
+        enumerate_sessions.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.POINTER(_WTSSessionInfo)),
+            ctypes.POINTER(ctypes.c_uint32),
+        ]
+        enumerate_sessions.restype = ctypes.c_bool
+
+        query_session = wts.WTSQuerySessionInformationW
+        query_session.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_void_p),
+            ctypes.POINTER(ctypes.c_uint32),
+        ]
+        query_session.restype = ctypes.c_bool
+
+        free_memory = wts.WTSFreeMemory
+        free_memory.argtypes = [ctypes.c_void_p]
+        free_memory.restype = None
+
+        if not enumerate_sessions(None, 0, 1, ctypes.byref(sessions_ptr), ctypes.byref(count)):
+            return None
+
+        idle_values: list[float] = []
+        try:
+            for index in range(int(count.value)):
+                session = sessions_ptr[index]
+                buffer = ctypes.c_void_p()
+                returned = ctypes.c_uint32()
+                # WTSInfo = 18
+                if not query_session(
+                    None,
+                    session.SessionId,
+                    18,
+                    ctypes.byref(buffer),
+                    ctypes.byref(returned),
+                ):
+                    continue
+                try:
+                    if returned.value < ctypes.sizeof(_WTSInfo):
+                        continue
+                    info = ctypes.cast(buffer, ctypes.POINTER(_WTSInfo)).contents
+                    if not str(info.UserName).strip():
+                        continue
+                    if info.CurrentTime <= 0 or info.LastInputTime <= 0:
+                        continue
+                    idle_values.append(
+                        max(0.0, (info.CurrentTime - info.LastInputTime) / 10_000_000.0)
+                    )
+                finally:
+                    if buffer:
+                        free_memory(buffer)
+        finally:
+            if sessions_ptr:
+                free_memory(sessions_ptr)
+
+        if idle_values:
+            return min(idle_values)
+
+        # No interactive users are signed in, so the whole machine is available.
+        return 1_000_000_000.0
+    except Exception:
         return None
 
+
+def _windows_session_idle_seconds() -> float | None:
     try:
         info = _LastInputInfo()
         info.cbSize = ctypes.sizeof(_LastInputInfo)
@@ -82,6 +191,18 @@ def windows_idle_seconds() -> float | None:
         return max(0.0, (now_ms - info.dwTime) / 1000.0)
     except Exception:
         return None
+
+
+def windows_idle_seconds() -> float | None:
+    if platform.system() != "Windows":
+        return None
+
+    if os.getenv("UNISON_INSTALL_SCOPE", "").strip().lower() == "machine":
+        machine_idle = _windows_machine_idle_seconds()
+        if machine_idle is not None:
+            return machine_idle
+
+    return _windows_session_idle_seconds()
 
 
 def node_available() -> bool:
@@ -252,6 +373,11 @@ def heartbeat_payload(
             "idleThresholdSeconds": IDLE_THRESHOLD_SECONDS,
             "allowImage": "image_generation" in capabilities,
             "allowText": "text_generation" in capabilities,
+            "idleScope": (
+                "machine"
+                if os.getenv("UNISON_INSTALL_SCOPE", "").strip().lower() == "machine"
+                else "session"
+            ),
         },
         "workerVersion": worker_version,
     }
