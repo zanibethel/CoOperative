@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { authorizeUnisonNode } from "@/lib/unison/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 type CompletionBody = {
   jobId?: unknown;
+  workerId?: unknown;
   dataUrl?: unknown;
   model?: unknown;
   provider?: unknown;
@@ -14,11 +16,6 @@ type CompletionBody = {
   referenceMode?: unknown;
   error?: unknown;
 };
-
-function workerAuthorized(request: Request) {
-  const expected = process.env.INFERENCE_LOCAL_TOKEN;
-  return Boolean(expected) && request.headers.get("authorization") === `Bearer ${expected}`;
-}
 
 function parseDataUrl(value: string) {
   const prefixMatch = value.match(/^data:(image\/(?:png|jpeg|webp));base64,/);
@@ -42,26 +39,38 @@ function parseDataUrl(value: string) {
 }
 
 export async function POST(request: Request) {
-  if (!workerAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const body = (await request.json()) as CompletionBody;
     const jobId = typeof body.jobId === "string" ? body.jobId : "";
+    const workerId =
+      typeof body.workerId === "string" && body.workerId.trim()
+        ? body.workerId.trim().slice(0, 160)
+        : null;
+
     if (!jobId) {
       return NextResponse.json({ error: "jobId is required." }, { status: 400 });
+    }
+
+    if (!(await authorizeUnisonNode(request, workerId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("inference_jobs")
-      .select("id,status")
+      .select("id,status,worker_id")
       .eq("id", jobId)
       .maybeSingle();
 
     if (jobError) throw jobError;
     if (!job) return NextResponse.json({ error: "Job not found." }, { status: 404 });
+
+    if (workerId && job.worker_id && job.worker_id !== workerId) {
+      return NextResponse.json(
+        { error: "This job is leased to a different node." },
+        { status: 409 },
+      );
+    }
 
     if (typeof body.error === "string" && body.error.trim()) {
       const { error: updateError } = await supabase

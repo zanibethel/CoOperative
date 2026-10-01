@@ -1,31 +1,50 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { authorizeUnisonNode } from "@/lib/unison/auth";
 import { unisonNodeHeartbeatSchema } from "@/lib/unison/contracts";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-function nodeAuthorized(request: Request) {
-  const expected =
-    process.env.UNISON_NODE_SHARED_SECRET ||
-    process.env.INFERENCE_LOCAL_TOKEN;
-
-  return Boolean(expected) &&
-    request.headers.get("authorization") === `Bearer ${expected}`;
-}
-
 export async function POST(request: Request) {
-  if (!nodeAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
     const input = unisonNodeHeartbeatSchema.parse(await request.json());
+
+    if (!(await authorizeUnisonNode(request, input.nodeId))) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     const now = new Date().toISOString();
     const supabase = createAdminSupabaseClient();
 
-    const { error } = await supabase.from("unison_nodes").upsert(
-      {
+    const { data: existing, error: lookupError } = await supabase
+      .from("unison_nodes")
+      .select("id")
+      .eq("id", input.nodeId)
+      .maybeSingle();
+
+    if (lookupError) throw lookupError;
+
+    if (existing) {
+      const { error } = await supabase
+        .from("unison_nodes")
+        .update({
+          display_name: input.displayName,
+          state: input.state,
+          platform: input.platform,
+          capabilities: input.capabilities,
+          resources: input.resources,
+          policy: input.policy,
+          worker_version: input.workerVersion,
+          last_seen_at: now,
+          updated_at: now,
+        })
+        .eq("id", input.nodeId);
+
+      if (error) throw error;
+    } else {
+      // Only the temporary legacy shared credential can authorize a node that
+      // does not already have a per-node token record.
+      const { error } = await supabase.from("unison_nodes").insert({
         id: input.nodeId,
         display_name: input.displayName,
         owner_ref: input.ownerRef,
@@ -38,11 +57,10 @@ export async function POST(request: Request) {
         worker_version: input.workerVersion,
         last_seen_at: now,
         updated_at: now,
-      },
-      { onConflict: "id" },
-    );
+      });
 
-    if (error) throw error;
+      if (error) throw error;
+    }
 
     return NextResponse.json(
       {

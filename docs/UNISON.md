@@ -34,7 +34,8 @@ A node is treated as offline by the diagnostics API after 90 seconds without a h
 The alpha is for trusted/private machines only.
 
 - Node metadata is server-only. The table has RLS enabled and no `anon` or `authenticated` grants.
-- Workload workers authenticate to CoOperative with a server-configured node/shared token.
+- New nodes enroll with a short-lived, one-time pairing code and receive a unique random node credential. Only the credential hash is stored server-side.
+- Existing trusted workers may temporarily continue using the legacy shared worker credential during migration.
 - Customer credentials and long-term worker memory are not sent to nodes.
 - The current image queue sends only the prompt, signed short-lived reference URLs, and workload parameters required for that job.
 - Community/public enrollment must not ship until nodes receive per-node credentials, signed workload manifests, stronger sandboxing, revocation, reputation, and accounting.
@@ -49,20 +50,18 @@ Example from the repository root:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\workers\install-unison-windows.ps1 `
-  -Token "<private node token>" `
+  -PairCode "<one-time pairing code>" `
   -NodeName "Gaming PC" `
-  -OwnerRef "family-private" `
-  -NodeClass private `
   -IdleMinutes 5
 ```
 
-Do not commit the token or paste it into source files.
+The pairing code is single-use. The installer exchanges it for a unique node credential and stores that credential in the current Windows user's environment. Do not commit either value to source files.
 
 ## Next phases
 
 1. **Private-node validation** — Mac + Windows nodes, heartbeat, hardware detection, idle-aware dispatch, failover, usage evidence.
 2. **Capability scheduler** — match jobs to GPU/CPU/RAM, privacy class, business ownership, cost ceiling, availability, and reliability.
-3. **Per-node enrollment** — one-time pairing code, unique credentials, rotation/revocation, signed manifests, secure auto-update.
+3. **Enrollment hardening** — credential rotation/revocation UI, signed workload manifests, secure auto-update, and device attestation where useful.
 4. **Isolation** — container/VM/WASM execution profiles and workload-specific sandboxes.
 5. **Accounting** — measured compute units, electricity-aware estimates, owner cost avoided, community earnings, platform margin.
 6. **Community beta** — opt-in providers, reputation, minimum pricing, payouts, abuse controls, dispute handling.
