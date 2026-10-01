@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { getUnisonViewer } from "@/lib/unison/access";
 import UnisonNodeActions from "./node-actions";
+import LiveNodeStatus from "../live-node-status";
 
 function hours(seconds: number) {
   if (!seconds) return "0h";
@@ -75,6 +76,11 @@ export default async function UnisonContributorDashboard() {
           remain at zero until a rate is deliberately published.
         </p>
       </section>
+
+      <LiveNodeStatus
+        scope="mine"
+        title="Your nodes"
+      />
 
       <section className="metrics unison-metrics">
         <div className="metric"><span>Devices online</span><strong>{onlineNodes}/{nodeRows.length}</strong></div>
