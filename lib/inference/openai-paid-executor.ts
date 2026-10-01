@@ -106,7 +106,9 @@ export function configuredOpenAiCandidate(
     provider: "openai",
     model,
     available: true,
-    qualified: envBool("OPENAI_ESCALATION_QUALIFIED"),
+    qualified:
+      envBool("OPENAI_ESCALATION_QUALIFIED") &&
+      typeof benchmarkSuccessRate === "number",
     businessOwned: envBool("OPENAI_ESCALATION_BUSINESS_OWNED"),
     supportedTaskClasses: [
       "general",
