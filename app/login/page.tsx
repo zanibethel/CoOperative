@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -12,19 +12,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [nextPath, setNextPath] = useState("/onboarding");
-
-  useEffect(() => {
-    const candidate = new URLSearchParams(window.location.search).get("next");
-    if (candidate?.startsWith("/") && !candidate.startsWith("//")) {
-      setNextPath(candidate);
-    }
-  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
     setMessage("");
+
+    const candidate = new URLSearchParams(window.location.search).get("next");
+    const nextPath =
+      candidate?.startsWith("/") && !candidate.startsWith("//")
+        ? candidate
+        : "/onboarding";
 
     const supabase = createClient();
 
