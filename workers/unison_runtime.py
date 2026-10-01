@@ -201,6 +201,9 @@ def windows_idle_seconds() -> float | None:
         machine_idle = _windows_machine_idle_seconds()
         if machine_idle is not None:
             return machine_idle
+        # Fail closed: a machine-wide worker must never infer idleness from
+        # session 0 if whole-PC detection is unavailable.
+        return 0.0
 
     return _windows_session_idle_seconds()
 
