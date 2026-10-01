@@ -84,6 +84,10 @@ The connector hides provider-specific details behind stable CoOperative capabili
 ### 9. Improvement Lab
 Analyzes evidence across deployments, researches new capabilities, improves playbooks/scripts, finds cheaper providers/models, discovers reusable growth patterns, and proposes platform changes.
 
+The Improvement Lab should use qualified CoOperative-owned/local models first to compile recurring usage evidence into owner-facing reports and bounded change proposals. The Owner Dashboard chat is the primary review surface: the owner can ask questions, inspect evidence, and Approve / Deny / Defer proposed code, playbook, routing, eval, connector, or curated model-improvement changes.
+
+Approved changes still pass through the normal isolated branch, test, verification, and deployment/model-promotion gates. Raw tenant data must not silently become shared training data.
+
 Hermes serves as the privileged Platform Operative / Improvement Engineer. It can research, prepare connectors/code, run tests, and propose changes. Its autonomy should expand only within governed risk classes.
 
 ## Product expansion areas
