@@ -169,18 +169,19 @@ export default function JoinClient({
           <div className="cta-row">
             <a
               className="primary"
-              href="/api/unison/download/installer/windows"
+              href="https://github.com/zanibethel/CoOperative/releases/download/unison-windows-preview/CoOperative-Unison-Setup.exe"
             >
-              Try polished Setup.exe preview
+              Download latest Setup.exe
             </a>
             <button className="secondary-button" type="button" onClick={installThisPc} disabled={working}>
               {working ? "Preparing fallback…" : "Use current installer fallback"}
             </button>
           </div>
           <p>
-            The Setup.exe preview opens your browser for secure account approval, installs
-            the proven worker silently, and waits for a verified heartbeat before showing
-            Connected. The current CMD flow remains available while the preview is tested.
+            This downloads the current Windows installer directly from the official CoOperative
+            release, avoiding the large-file web proxy. Setup opens your browser for secure account
+            approval, preserves an existing node identity when present, and waits for a verified
+            text-capable heartbeat before showing Connected.
           </p>
 
           <details>
