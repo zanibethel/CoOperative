@@ -17,6 +17,80 @@ type CompletionBody = {
   error?: unknown;
 };
 
+type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
+
+async function recordUnisonUsage(
+  supabase: AdminClient,
+  input: {
+    jobId: string;
+    workerId: string | null;
+    claimedAt: string | null;
+    status: "completed" | "failed";
+    completedAt: string;
+    latencyMs: number | null;
+  },
+) {
+  if (!input.workerId) return;
+
+  try {
+    const { data: node, error: nodeError } = await supabase
+      .from("unison_nodes")
+      .select("contributor_user_id,resources")
+      .eq("id", input.workerId)
+      .maybeSingle();
+
+    if (nodeError || !node?.contributor_user_id) return;
+
+    const claimedMs = input.claimedAt ? Date.parse(input.claimedAt) : NaN;
+    const completedMs = Date.parse(input.completedAt);
+    const elapsedSeconds =
+      Number.isFinite(claimedMs) && Number.isFinite(completedMs)
+        ? Math.max(0, Math.ceil((completedMs - claimedMs) / 1000))
+        : 0;
+    const computeSeconds =
+      input.latencyMs !== null
+        ? Math.max(0, Math.ceil(input.latencyMs / 1000))
+        : elapsedSeconds;
+
+    const resources = (node.resources || {}) as {
+      gpus?: Array<unknown>;
+    };
+    const gpuSeconds = resources.gpus?.length ? computeSeconds : 0;
+
+    const { error } = await supabase.from("unison_usage_ledger").upsert(
+      {
+        contributor_user_id: node.contributor_user_id,
+        node_id: input.workerId,
+        source_job_type: "image_generation",
+        source_job_id: input.jobId,
+        status: input.status,
+        compute_seconds: computeSeconds,
+        gpu_seconds: gpuSeconds,
+        cpu_seconds: gpuSeconds ? 0 : computeSeconds,
+        earned_cents: 0,
+        estimated_external_cost_cents: 0,
+        started_at: input.claimedAt,
+        completed_at: input.completedAt,
+      },
+      { onConflict: "source_job_type,source_job_id" },
+    );
+
+    if (error) {
+      console.error("Could not record Unison contribution", {
+        jobId: input.jobId,
+        workerId: input.workerId,
+        detail: error.message.slice(0, 500),
+      });
+    }
+  } catch (error) {
+    console.error("Could not record Unison contribution", {
+      jobId: input.jobId,
+      workerId: input.workerId,
+      detail: error instanceof Error ? error.message.slice(0, 500) : "Unknown ledger error",
+    });
+  }
+}
+
 function parseDataUrl(value: string) {
   const prefixMatch = value.match(/^data:(image\/(?:png|jpeg|webp));base64,/);
   if (!prefixMatch) throw new Error("Unsupported generated image format.");
@@ -58,7 +132,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("inference_jobs")
-      .select("id,status,worker_id")
+      .select("id,status,worker_id,claimed_at")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -73,17 +147,28 @@ export async function POST(request: Request) {
     }
 
     if (typeof body.error === "string" && body.error.trim()) {
+      const completedAt = new Date().toISOString();
       const { error: updateError } = await supabase
         .from("inference_jobs")
         .update({
           status: "failed",
           error: body.error.slice(0, 1200),
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          completed_at: completedAt,
+          updated_at: completedAt,
         })
         .eq("id", jobId);
 
       if (updateError) throw updateError;
+
+      await recordUnisonUsage(supabase, {
+        jobId,
+        workerId,
+        claimedAt: job.claimed_at,
+        status: "failed",
+        completedAt,
+        latencyMs: null,
+      });
+
       return NextResponse.json({ ok: true, status: "failed" });
     }
 
@@ -113,6 +198,7 @@ export async function POST(request: Request) {
         ? Math.max(0, Math.round(body.latencyMs))
         : null;
 
+    const completedAt = new Date().toISOString();
     const { error: updateError } = await supabase
       .from("inference_jobs")
       .update({
@@ -131,12 +217,21 @@ export async function POST(request: Request) {
             : null,
         latency_ms: latencyMs,
         error: null,
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        completed_at: completedAt,
+        updated_at: completedAt,
       })
       .eq("id", jobId);
 
     if (updateError) throw updateError;
+
+    await recordUnisonUsage(supabase, {
+      jobId,
+      workerId,
+      claimedAt: job.claimed_at,
+      status: "completed",
+      completedAt,
+      latencyMs,
+    });
 
     return NextResponse.json({ ok: true, status: "completed" });
   } catch (error) {

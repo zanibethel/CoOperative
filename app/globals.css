@@ -285,3 +285,29 @@ b { color: var(--text); }
   .agent-task-head { align-items: flex-start; }
   .agent-status { max-width: 42%; text-align: center; }
 }
+
+
+/* Unison */
+.unison-stack { display: grid; gap: 18px; margin-top: 28px; }
+.unison-info-card { margin-top: 32px; display: flex; align-items: center; justify-content: space-between; gap: 22px; }
+.unison-info-card .secondary-cta { flex: 0 0 auto; margin-top: 0; }
+.unison-metrics { grid-template-columns: repeat(3, 1fr); }
+.unison-list { display: grid; gap: 12px; }
+.unison-device { display: grid; gap: 12px; }
+.unison-command { display: grid; gap: 12px; border-top: 1px solid var(--line); padding-top: 16px; }
+.unison-table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+.unison-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+.unison-table th,
+.unison-table td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: .84rem; }
+.unison-table th { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; background: var(--panel-2); }
+.unison-table tbody tr:last-child td { border-bottom: 0; }
+.unison-table td > span { color: var(--muted); font-size: .78rem; }
+.unison-table td strong { color: var(--text); }
+.unison-device .agent-status { text-transform: capitalize; }
+.unison-device .agent-status.completed { color: var(--accent-2); }
+.unison-device .agent-status.running { color: var(--accent); }
+
+@media (max-width: 760px) {
+  .unison-info-card { align-items: stretch; flex-direction: column; }
+  .unison-metrics { grid-template-columns: 1fr 1fr; }
+}

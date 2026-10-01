@@ -8,6 +8,7 @@ export default function HomePage() {
         <div className="nav-links">
           <Link href="/local-ai">Local AI</Link>
           <Link href="/agents">Agents</Link>
+          <Link href="/unison">Unison</Link>
           <div className="badge">v0.1 · Intelligence Desk</div>
         </div>
       </nav>

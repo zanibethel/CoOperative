@@ -18,6 +18,12 @@ export default function LoginPage() {
     setLoading(true);
     setMessage("");
 
+    const candidate = new URLSearchParams(window.location.search).get("next");
+    const nextPath =
+      candidate?.startsWith("/") && !candidate.startsWith("//")
+        ? candidate
+        : "/onboarding";
+
     const supabase = createClient();
 
     if (mode === "login") {
@@ -28,7 +34,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/onboarding");
+      router.push(nextPath);
       router.refresh();
       return;
     }
@@ -37,7 +43,7 @@ export default function LoginPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback?next=/onboarding`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`,
       },
     });
 
@@ -48,7 +54,7 @@ export default function LoginPage() {
     }
 
     if (data.session) {
-      router.push("/onboarding");
+      router.push(nextPath);
       router.refresh();
       return;
     }

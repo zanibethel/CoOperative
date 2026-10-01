@@ -30,6 +30,7 @@ export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const isPublic =
     path === "/" ||
+    path === "/unison" ||
     path.startsWith("/login") ||
     path.startsWith("/auth") ||
     path.startsWith("/api/");
