@@ -61,6 +61,35 @@ export async function GET(request: Request) {
     );
   }
 
+  let contributorNames = new Map<string, string>();
+  if (scope === "owner") {
+    const contributorIds = Array.from(
+      new Set(
+        (nodes || [])
+          .map((node) => node.contributor_user_id)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    );
+
+    if (contributorIds.length > 0) {
+      const { data: contributors, error: contributorError } = await admin
+        .from("unison_contributors")
+        .select("user_id,display_name")
+        .in("user_id", contributorIds);
+
+      if (contributorError) {
+        return NextResponse.json(
+          { error: "Could not load contributor names." },
+          { status: 502 },
+        );
+      }
+
+      contributorNames = new Map(
+        (contributors || []).map((item) => [item.user_id, item.display_name]),
+      );
+    }
+  }
+
   const now = Date.now();
   const rows = (nodes || []).map((node) => {
     const lastSeenMs = Date.parse(node.last_seen_at);
@@ -70,6 +99,9 @@ export async function GET(request: Request) {
       id: node.id,
       displayName: node.display_name,
       contributorUserId: node.contributor_user_id,
+      contributorName: node.contributor_user_id
+        ? contributorNames.get(node.contributor_user_id) ?? null
+        : null,
       nodeClass: node.node_class,
       status,
       reportedState: node.state,
