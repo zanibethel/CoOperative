@@ -497,3 +497,9 @@ b { color: var(--text); }
   color: var(--muted);
   font-size: .82rem;
 }
+
+.unison-live-node-error {
+  max-width: 420px;
+  color: var(--danger, #d66) !important;
+  overflow-wrap: anywhere;
+}
