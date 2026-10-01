@@ -364,10 +364,28 @@ internal sealed class InstallerForm : Form
                 "UNISON_NODE_ID",
                 EnvironmentVariableTarget.Machine
             );
-            var machineNodeToken = Environment.GetEnvironmentVariable(
-                "UNISON_NODE_TOKEN",
-                EnvironmentVariableTarget.Machine
-            );
+            var existingMachineWide = !string.IsNullOrWhiteSpace(machineNodeId);
+
+            if (existingMachineWide)
+            {
+                SetStatus(
+                    "Existing machine-wide Unison node found",
+                    "Refreshing the shared worker while preserving this PC's node identity."
+                );
+
+                await RunExistingRepairAsync(machineNodeId!, true);
+
+                var machineShellNote = await InstallShellIntegrationAsync();
+                SetStatus(
+                    "Repaired and connected",
+                    "This machine-wide Unison node kept its identity and runs independently of Windows profiles. " +
+                    "Desktop, Start Menu, and tray integration are ready." +
+                    machineShellNote
+                );
+                CompleteUi();
+                return;
+            }
+
             var userNodeId = Environment.GetEnvironmentVariable(
                 "UNISON_NODE_ID",
                 EnvironmentVariableTarget.User
@@ -376,51 +394,33 @@ internal sealed class InstallerForm : Form
                 "UNISON_NODE_TOKEN",
                 EnvironmentVariableTarget.User
             );
+            var hasLegacyNode =
+                !string.IsNullOrWhiteSpace(userNodeId) &&
+                !string.IsNullOrWhiteSpace(userNodeToken);
 
-            var existingMachineWide =
-                !string.IsNullOrWhiteSpace(machineNodeId) &&
-                !string.IsNullOrWhiteSpace(machineNodeToken);
-            var existingNodeId = existingMachineWide ? machineNodeId : userNodeId;
-            var existingNodeToken = existingMachineWide ? machineNodeToken : userNodeToken;
-            var hasExistingNode =
-                !string.IsNullOrWhiteSpace(existingNodeId) &&
-                !string.IsNullOrWhiteSpace(existingNodeToken);
-
-            if (hasExistingNode)
+            if (hasLegacyNode)
             {
                 SetStatus(
-                    "Existing Unison node found",
-                    "Checking the current node before changing anything. A healthy current worker will not be restarted."
+                    "Existing legacy Unison node found",
+                    "Checking this profile's current preview node before changing anything."
                 );
 
-                var healthy = await HasFreshRealHeartbeatAsync(
-                    existingNodeId!,
-                    existingNodeToken!
-                );
-
+                var healthy = await HasFreshRealHeartbeatAsync(userNodeId!, userNodeToken!);
                 if (!healthy)
                 {
                     SetStatus(
                         "Repairing existing Unison node…",
                         "The saved node identity will be preserved while the worker files and startup path are refreshed."
                     );
-                    await RunExistingRepairAsync(existingNodeId!, existingMachineWide);
-
-                    SetStatus(
-                        "Starting local AI runtime…",
-                        "Waiting for CoOperative to verify a fresh heartbeat from the repaired node."
-                    );
-                    await WaitForRealHeartbeatAsync(existingMachineWide);
+                    await RunExistingRepairAsync(userNodeId!, false);
+                    await WaitForRealHeartbeatAsync(false);
                 }
 
-                var upgradeShellNote = await InstallShellIntegrationAsync();
+                var legacyShellNote = await InstallShellIntegrationAsync();
                 SetStatus(
                     healthy ? "Updated" : "Repaired and connected",
-                    (existingMachineWide
-                        ? "This machine-wide Unison node kept its identity and runs independently of Windows profiles. "
-                        : "This legacy per-profile Unison node kept its identity. ") +
-                    "Desktop, Start Menu, and tray integration are ready." +
-                    upgradeShellNote
+                    "This legacy per-profile Unison node kept its identity. Desktop, Start Menu, and tray integration are ready." +
+                    legacyShellNote
                 );
                 CompleteUi();
                 return;
@@ -436,11 +436,9 @@ internal sealed class InstallerForm : Form
             await RunBootstrapAsync(pairingCode);
 
             SetStatus(
-                "Starting machine-wide local AI…",
-                "The SYSTEM worker is installed. Waiting for CoOperative to verify a fresh heartbeat from this PC."
+                "Machine-wide local AI verified",
+                "The elevated installer confirmed a fresh whole-PC-idle-capable heartbeat from this PC."
             );
-
-            await WaitForRealHeartbeatAsync(true);
 
             var shellNote = await InstallShellIntegrationAsync();
 
