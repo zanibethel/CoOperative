@@ -43,3 +43,12 @@ The current intended first real cost-migration pilot is the owner's father's rad
 
 ## Canonical roadmap
 The current execution sequence and end-state definition live in `docs/END-STATE-ROADMAP.md`. New platform work should be compared against that roadmap and explicit newer owner decisions.
+
+## Canonical business economic model
+The governing commercial model is defined in `docs/BUSINESS-ECONOMIC-MODEL.md`. A business's current outside spend and explicit approved budget establish the economic envelope CoOperative must work inside. CoOperative should find equal-or-better lower-total-cost alternatives, including self-installed systems, business-owned compute, Unison nodes, connected AI, native capability, and qualified external providers.
+
+Customer savings and CoOperative profitability are simultaneous constraints. Do not create customer savings by operating structurally losing routes. Track customer charges separately from AI/API cost, infrastructure, Unison/node payouts, human payouts, and other variable cost. Enforce applicable margin floors.
+
+Savings must remain separated into projected, verified, and realized. Do not recommend cancellation of a working legacy service until the replacement has been proven through appropriate side-by-side/shadow testing, reconciliation, and approval.
+
+The intended business experience is conversation-first: Chat is the main control surface, with Projects/Businesses, Connected Services, Tools/Capabilities, Budget & Savings, Approvals, and Activity/Evidence surrounding it.
