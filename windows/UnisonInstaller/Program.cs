@@ -57,8 +57,10 @@ internal static class Program
 
     internal static string? ReadNodeEnvironment(string name)
     {
-        var machine = Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
-        if (!string.IsNullOrWhiteSpace(machine)) return machine;
+        if (MachineWideConfigured)
+        {
+            return Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.Machine);
+        }
         return Environment.GetEnvironmentVariable(name, EnvironmentVariableTarget.User);
     }
 
@@ -124,6 +126,11 @@ internal sealed class UnisonTrayContext : ApplicationContext
         {
             var nodeId = Program.ReadNodeEnvironment("UNISON_NODE_ID");
             var nodeToken = Program.ReadNodeEnvironment("UNISON_NODE_TOKEN");
+            if (Program.MachineWideConfigured && string.IsNullOrWhiteSpace(nodeToken))
+            {
+                SetStatus("Machine-wide");
+                return;
+            }
             if (string.IsNullOrWhiteSpace(nodeId) || string.IsNullOrWhiteSpace(nodeToken))
             {
                 SetStatus("Not linked");
