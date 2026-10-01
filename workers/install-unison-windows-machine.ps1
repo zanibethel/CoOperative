@@ -232,7 +232,8 @@ while ((Get-Date) -lt $deadline) {
       [string]$status.workerVersion -like "windows-unison-1.*" -and
       $caps -contains "text_generation" -and
       $caps -contains "machine_wide" -and
-      $caps -contains "whole_pc_idle"
+      $caps -contains "whole_pc_idle" -and
+      $caps -contains "local_personal_chat"
     ) {
       $verified = $true
       break
@@ -244,7 +245,7 @@ while ((Get-Date) -lt $deadline) {
 }
 
 if (-not $verified) {
-  throw "Machine-wide Unison started, but a verified whole-PC-idle heartbeat was not received in time."
+  throw "Machine-wide Unison started, but the whole-PC-idle worker and Personal Local AI were not both verified in time."
 }
 
 Write-Host ""
