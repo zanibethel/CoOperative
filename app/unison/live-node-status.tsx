@@ -33,6 +33,7 @@ type StatusPayload = {
     idle: number;
     busy: number;
     paused: number;
+    starting: number;
     offline: number;
   };
   nodes?: LiveNode[];
@@ -54,6 +55,7 @@ function stateLabel(status: string) {
   if (status === "idle") return "Idle";
   if (status === "busy") return "Busy";
   if (status === "paused") return "Paused";
+  if (status === "starting") return "Starting";
   return "Offline";
 }
 
@@ -164,6 +166,7 @@ export default function LiveNodeStatus({
           <span><small>Online</small><strong>{counts.online}</strong></span>
           <span><small>Idle</small><strong>{counts.idle}</strong></span>
           <span><small>Busy</small><strong>{counts.busy}</strong></span>
+          <span><small>Starting</small><strong>{counts.starting}</strong></span>
           <span><small>Offline</small><strong>{counts.offline}</strong></span>
         </div>
       ) : null}
