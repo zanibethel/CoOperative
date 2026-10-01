@@ -11,7 +11,7 @@ export type TextTaskClass =
   | "reasoning"
   | "long-context";
 
-export const TEXT_MODEL_REGISTRY_REVISION = "2026-09-30.2";
+export const TEXT_MODEL_REGISTRY_REVISION = "2026-10-01.1";
 
 export const TEXT_MODEL_REGISTRY = {
   fast: {
@@ -113,8 +113,9 @@ export function publicTextModelRegistry() {
       localFirst: true,
       manualLocalFallback: "never-paid",
       automaticPaidFallback: false,
+      escalationEvaluator: "deterministic-v1",
       note:
-        "allowPaidFallback records permission for future escalation logic; this router does not execute a hosted fallback.",
+        "CoOperative can now evaluate whether stronger paid or business-owned AI is justified. External execution remains disabled until a qualified executor connector is configured and policy authorizes the spend.",
     },
   };
 }
