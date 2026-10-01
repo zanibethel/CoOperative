@@ -91,7 +91,8 @@ b { color: var(--text); }
 .local-ai-context-metrics strong { display: block; font-size: .84rem; margin: 0; overflow-wrap: anywhere; }
 .local-ai-context-empty { margin: 0; align-self: center; }
 .local-ai-context-empty a { color: var(--accent); }
-.local-ai-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 320px) auto; gap: 18px; align-items: end; }
+.local-ai-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; }
+.local-ai-toolbar > .local-ai-execution-details { grid-column: 1 / -1; }
 .local-ai-toolbar p { margin: 6px 0 0; font-size: .9rem; }
 .local-ai-status { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); white-space: nowrap; padding-bottom: 13px; }
 .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-2) 14%, transparent); }
@@ -108,7 +109,17 @@ b { color: var(--text); }
 .local-ai-composer { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 16px; }
 .local-ai-composer textarea { min-height: 96px; }
 .local-ai-actions { display: flex; align-items: center; gap: 14px; }
-.local-ai-meta { margin: -4px 0 0; font-size: .78rem; }
+.local-ai-meta { margin: 6px 0 0; font-size: .78rem; }
+.local-ai-execution-details,
+.local-ai-response-details { color: var(--muted); }
+.local-ai-execution-details summary,
+.local-ai-response-details summary { cursor: pointer; font-size: .78rem; color: var(--muted); }
+.local-ai-execution-panel { margin-top: 10px; display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.local-ai-execution-panel .field { max-width: 320px; }
+.execution-trace { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: .82rem; margin-bottom: 8px; }
+.execution-trace-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent); }
+.cooperative-chat-shell { padding-top: 28px; }
+.cooperative-chat-nav { margin-bottom: 24px; }
 .brand { text-decoration: none; }
 
 @media (max-width: 760px) {
