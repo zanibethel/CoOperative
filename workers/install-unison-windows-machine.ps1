@@ -170,6 +170,7 @@ $values = @{
   "WINDOWS_TEXT_FAST_MODEL_ID" = $adaptiveFastModel
   "WINDOWS_TEXT_QUALITY_MODEL_ID" = $adaptiveQualityModel
   "WINDOWS_TEXT_HEAVY_MODEL_ID" = $adaptiveHeavyModel
+  "UNISON_LOCAL_CHAT_PORT" = "11436"
   "UNISON_SHARED_UV_EXE" = $uvExe
   "UV_CACHE_DIR" = $env:UV_CACHE_DIR
   "UV_PYTHON_INSTALL_DIR" = $env:UV_PYTHON_INSTALL_DIR
