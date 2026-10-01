@@ -94,7 +94,8 @@ export async function POST(request: Request) {
       service_name: input.serviceName,
       external_account_label: input.externalAccountLabel || null,
       connection_method: input.connectionMethod,
-      connection_status: "manual",
+      connection_status:
+        input.connectionMethod === "manual" ? "manual" : "not-connected",
       monthly_cost_cents: Math.round(input.monthlyCost * 100),
       billing_frequency: input.billingFrequency,
       features_used: input.featuresUsed,
