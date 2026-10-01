@@ -106,6 +106,21 @@ export default async function UnisonContributorDashboard() {
                 cpuLogical?: number;
                 memoryTotalMb?: number;
                 gpus?: Array<{ name?: string; memoryTotalMb?: number | null }>;
+                textModelPlan?: {
+                  revision?: string;
+                  backend?: string;
+                  models?: { fast?: string; quality?: string; heavy?: string };
+                  selectionReason?: string;
+                };
+                textBenchmark?: {
+                  profile?: string;
+                  model?: string;
+                  provider?: string;
+                  outputTokens?: number;
+                  latencyMs?: number;
+                  tokensPerSecond?: number | null;
+                  recordedAt?: string;
+                };
               };
               const status = nodeStatus(node);
               return (
@@ -124,6 +139,33 @@ export default async function UnisonContributorDashboard() {
                     <span>{resources.memoryTotalMb ? `${Math.round(resources.memoryTotalMb / 1024)} GB RAM` : "RAM pending"}</span>
                     <span>Last seen {new Date(node.last_seen_at).toLocaleString()}</span>
                   </div>
+                  {resources.textModelPlan?.models ? (
+                    <div className="unison-stack">
+                      <p>
+                        <strong>Adaptive text:</strong>{" "}
+                        {resources.textModelPlan.backend || "local"} · Fast{" "}
+                        <code>{resources.textModelPlan.models.fast || "pending"}</code> · Quality{" "}
+                        <code>{resources.textModelPlan.models.quality || "pending"}</code>
+                        {resources.textModelPlan.models.heavy
+                          ? <> · Heavy candidate <code>{resources.textModelPlan.models.heavy}</code></>
+                          : null}
+                      </p>
+                      {resources.textBenchmark?.model ? (
+                        <p>
+                          <strong>Latest benchmark:</strong>{" "}
+                          {resources.textBenchmark.model}
+                          {typeof resources.textBenchmark.tokensPerSecond === "number"
+                            ? ` · ${resources.textBenchmark.tokensPerSecond.toFixed(1)} tok/s`
+                            : ""}
+                          {typeof resources.textBenchmark.latencyMs === "number"
+                            ? ` · ${(resources.textBenchmark.latencyMs / 1000).toFixed(1)}s`
+                            : ""}
+                        </p>
+                      ) : (
+                        <p>Real throughput benchmark will appear after this node completes text work.</p>
+                      )}
+                    </div>
+                  ) : null}
                   <UnisonNodeActions nodeId={node.id} status={status} />
                 </article>
               );
