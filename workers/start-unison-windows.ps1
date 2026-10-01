@@ -6,6 +6,26 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Scheduled tasks can start with a stale process environment immediately after setup.
+# Refresh the values we persist for the current Windows user before validating them.
+foreach ($name in @(
+  "UNISON_NODE_TOKEN",
+  "UNISON_NODE_ID",
+  "UNISON_NODE_NAME",
+  "UNISON_NODE_OWNER_REF",
+  "UNISON_NODE_CLASS",
+  "COOPERATIVE_QUEUE_URL",
+  "UNISON_IDLE_ONLY",
+  "UNISON_IDLE_THRESHOLD_SECONDS"
+)) {
+  if (-not (Get-Item -Path "Env:$name" -ErrorAction SilentlyContinue)) {
+    $value = [Environment]::GetEnvironmentVariable($name, "User")
+    if ($value) {
+      Set-Item -Path "Env:$name" -Value $value
+    }
+  }
+}
+
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   Write-Host "uv is required. Install it first with: winget install -e --id astral-sh.uv"
   exit 1
