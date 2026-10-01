@@ -74,60 +74,6 @@ export default function JoinClient({
     }
   }
 
-  function downloadPersonalInstaller(nextPairing: Pairing) {
-    const bootstrapUrl = `${window.location.origin}/api/unison/download/windows`;
-    const installer = [
-      "@echo off",
-      "setlocal",
-      "title CoOperative Unison Setup",
-      "echo.",
-      "echo Setting up CoOperative Unison...",
-      `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $b=Join-Path $env:TEMP 'cooperative-unison-bootstrap.ps1'; Invoke-WebRequest -UseBasicParsing -Uri '${bootstrapUrl}' -OutFile $b; & $b -PairCode '${nextPairing.pairingCode}' -NodeName $env:COMPUTERNAME -IdleMinutes 5"`,
-      "if errorlevel 1 (",
-      "  echo.",
-      "  echo Setup did not finish. Leave this window open so the error can be reviewed.",
-      "  pause",
-      "  exit /b 1",
-      ")",
-      "echo.",
-      "echo CoOperative Unison is installed and running.",
-      "echo You can close this window and return to the browser.",
-      "timeout /t 3 /nobreak >nul",
-      "exit /b 0",
-      "",
-    ].join("\r\n");
-
-    const blob = new Blob([installer], {
-      type: "application/x-msdos-program",
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "Install-CoOperative-Unison.cmd";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
-
-  async function installThisPc() {
-    setWorking(true);
-    setMessage("");
-
-    try {
-      const payload = await requestPairing();
-      setPairing(payload);
-      downloadPersonalInstaller(payload);
-      setMessage(
-        "Installer downloaded. Open Install-CoOperative-Unison.cmd to finish setup. It will pair this PC automatically.",
-      );
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not prepare installer.");
-    } finally {
-      setWorking(false);
-    }
-  }
-
   async function copyCommand() {
     if (!pairing) return;
     await navigator.clipboard.writeText(pairing.command);
@@ -207,24 +153,17 @@ export default function JoinClient({
             >
               Download latest Setup.exe
             </a>
-            <button className="secondary-button" type="button" onClick={installThisPc} disabled={working}>
-              {working ? "Preparing fallback…" : "Legacy per-profile fallback"}
-            </button>
           </div>
           <p>
             After setup, the dashboard should show <strong>Whole-PC idle</strong>. Unison then runs
             independently of the signed-in Windows profile and only accepts new work after the
             entire computer has been idle for the configured period.
           </p>
-          <p>
-            <strong>Use the legacy per-profile fallback only if the normal Setup.exe cannot run.</strong>
-          </p>
-
           <details>
             <summary>Advanced / manual setup</summary>
             <div className="unison-stack">
               <p>
-                Use this only if the one-click installer cannot run on this computer.
+                Manual machine-wide setup for troubleshooting or environments where Setup.exe cannot run.
               </p>
               <div className="cta-row">
                 <button className="secondary-button" type="button" onClick={createPairingCode} disabled={working}>
@@ -249,7 +188,7 @@ export default function JoinClient({
                 </button>
               </div>
               <p>
-                Manual fallback: open PowerShell, paste the full command below, and press Enter.
+                Manual machine-wide setup: open PowerShell, paste the full command below, and press Enter. Windows will request administrator approval.
               </p>
               <pre className="agent-output">{pairing.command}</pre>
             </div>
