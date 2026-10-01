@@ -32,6 +32,8 @@ from transformers import CLIPVisionModelWithProjection
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from unison_runtime import node_available, start_heartbeat_thread
+
 FAST_MODEL_ID = os.getenv(
     "FAST_MODEL_ID",
     "stable-diffusion-v1-5/stable-diffusion-v1-5",
@@ -64,14 +66,19 @@ DTYPE = torch.float16 if DEVICE in {"cuda", "mps"} else torch.float32
 WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN")
 QUEUE_URL = os.getenv("COOPERATIVE_QUEUE_URL", "https://co-operative-mu.vercel.app").rstrip("/")
 QUEUE_POLL_SECONDS = max(2, int(os.getenv("COOPERATIVE_QUEUE_POLL_SECONDS", "3")))
-WORKER_ID = os.getenv("COOPERATIVE_WORKER_ID", socket.gethostname())[:160]
+WORKER_ID = (
+    os.getenv("UNISON_NODE_ID")
+    or os.getenv("COOPERATIVE_WORKER_ID")
+    or socket.gethostname()
+)[:160]
 PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.7.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.8.0")
 
 MODEL_LOCK = threading.Lock()
+UNISON_BUSY = threading.Event()
 loaded_profile: str | None = None
 text_pipe = None
 image_pipe = None
@@ -420,6 +427,14 @@ def queue_loop():
     while True:
         job_id = None
         try:
+            if not node_available():
+                if loaded_profile is not None:
+                    with MODEL_LOCK:
+                        clear_model()
+                    print("Unison node is in active use; released model memory.", flush=True)
+                time.sleep(QUEUE_POLL_SECONDS)
+                continue
+
             response = httpx.post(
                 f"{QUEUE_URL}/api/inference/jobs/claim",
                 headers=queue_headers(),
@@ -457,7 +472,12 @@ def queue_loop():
                 seed=job.get("seed"),
             )
 
-            result = run_generation(request)
+            UNISON_BUSY.set()
+            try:
+                result = run_generation(request)
+            finally:
+                UNISON_BUSY.clear()
+
             result["dataUrl"] = compact_jpeg_data_url(result["dataUrl"])
             complete_job(job_id, result)
             print(f"Completed async image job {job_id}.")
@@ -547,6 +567,22 @@ def generate(request: ImageRequest, authorization: str | None = Header(default=N
 
 
 if __name__ == "__main__":
+    start_heartbeat_thread(
+        [
+            "image_generation",
+            "image_to_image",
+            "fast_profile",
+            "quality_profile",
+            "async_queue",
+            "seeded_variation",
+            "variation_modes",
+            "ip_adapter_identity",
+            "multi_reference_identity",
+        ],
+        "image-worker-0.8.0",
+        busy_provider=UNISON_BUSY.is_set,
+    )
+
     if PRELOAD_PROFILE in {"fast", "quality"}:
         try:
             ensure_profile(PRELOAD_PROFILE)
@@ -558,4 +594,8 @@ if __name__ == "__main__":
     elif QUEUE_URL:
         print("COOPERATIVE_QUEUE_URL is set, but INFERENCE_WORKER_TOKEN is missing; queue polling disabled.")
 
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    uvicorn.run(
+        app,
+        host=os.getenv("WORKER_BIND_HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8000")),
+    )

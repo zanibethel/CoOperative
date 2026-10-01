@@ -55,6 +55,23 @@ Business intake → validated analysis → connected-service/cost mapping → pr
 
 The first analyzer is intentionally deterministic. AI is added behind stable contracts so providers can be replaced without rewriting the application.
 
+## Unison compute layer
+
+CoOperative is being designed to prefer compute that customers and members already own before renting external infrastructure. **Unison** is the distributed node layer for that execution model.
+
+Routing direction:
+
+```text
+customer/business-owned node
+  -> platform/private node
+  -> Unison community node
+  -> commercial cloud / paid provider fallback
+```
+
+Logical AI workers keep their identity, skills, memory, policies, and history in CoOperative. Unison nodes are replaceable execution hosts and receive only the task-specific context required for an eligible workload.
+
+The first alpha reuses the working asynchronous image queue and adds node heartbeat, capability/hardware reporting, Windows idle-aware claiming, and a private-node registry. See `docs/UNISON.md`.
+
 ## Stack
 
 - Next.js 16 App Router
