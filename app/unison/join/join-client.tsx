@@ -76,7 +76,6 @@ export default function JoinClient({
 
   function downloadPersonalInstaller(nextPairing: Pairing) {
     const bootstrapUrl = `${window.location.origin}/api/unison/download/windows`;
-    const dashboardUrl = `${window.location.origin}/unison/dashboard`;
     const installer = [
       "@echo off",
       "setlocal",
@@ -92,8 +91,8 @@ export default function JoinClient({
       ")",
       "echo.",
       "echo CoOperative Unison is installed and running.",
+      "echo You can close this window and return to the browser.",
       "timeout /t 3 /nobreak >nul",
-      `start "" "${dashboardUrl}"`,
       "exit /b 0",
       "",
     ].join("\r\n");
