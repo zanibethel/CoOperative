@@ -47,6 +47,9 @@ type ReportJob = {
   outputTokens?: number | null;
   firstTokenMs?: number | null;
   latencyMs?: number | null;
+  workerId?: string | null;
+  routingPreference?: string | null;
+  preferredNodeId?: string | null;
   error?: string | null;
   createdAt?: string | null;
   completedAt?: string | null;
@@ -74,6 +77,9 @@ type ImprovementPayload = {
     route: string;
     paidFallback: boolean;
     modelRegistryRevision: string;
+    ownedNodePreferred?: boolean;
+    preferredNodeId?: string | null;
+    preferredNodeName?: string | null;
   };
   partialText?: string | null;
   text?: string | null;
@@ -83,6 +89,9 @@ type ImprovementPayload = {
   outputTokens?: number | null;
   firstTokenMs?: number | null;
   latencyMs?: number | null;
+  workerId?: string | null;
+  routingPreference?: string | null;
+  preferredNodeId?: string | null;
   error?: string | null;
   detail?: string | null;
 };
@@ -136,6 +145,9 @@ export default function ImprovementLab() {
           outputTokens: payload.outputTokens,
           firstTokenMs: payload.firstTokenMs,
           latencyMs: payload.latencyMs,
+          workerId: payload.workerId,
+          routingPreference: payload.routingPreference,
+          preferredNodeId: payload.preferredNodeId,
           error: payload.error,
         };
         setReport(next);
@@ -311,6 +323,9 @@ export default function ImprovementLab() {
             outputTokens: next.outputTokens,
             firstTokenMs: next.firstTokenMs,
             latencyMs: next.latencyMs,
+            workerId: next.workerId,
+            routingPreference: next.routingPreference,
+            preferredNodeId: next.preferredNodeId,
             error: next.error,
           };
           setDetailReport(detail);
@@ -480,6 +495,10 @@ export default function ImprovementLab() {
                   <p>
                     {report.provider || "owned/local provider"}
                     {report.model ? ` · ${report.model}` : ""}
+                    {report.workerId ? ` · worker ${report.workerId}` : ""}
+                    {report.routingPreference === "prefer-owned"
+                      ? " · owned-node preferred"
+                      : ""}
                     {typeof report.promptTokens === "number" &&
                     typeof report.outputTokens === "number"
                       ? ` · ${integer(report.promptTokens)} in / ${integer(
