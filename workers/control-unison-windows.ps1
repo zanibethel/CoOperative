@@ -17,9 +17,24 @@ if ($Uri -match "^cooperative-unison://([^/?#]+)") {
 
 switch ($action) {
   "restart" {
-    schtasks.exe /End /TN $taskName 2>$null | Out-Null
-    Start-Sleep -Seconds 2
-    schtasks.exe /Run /TN $taskName | Out-Null
+    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.CommandLine -and
+        $_.CommandLine -like "*CoOperative*Unison*" -and
+        $_.CommandLine -like "*hf-image-worker.py*"
+      } |
+      ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+      }
+
+    Start-Sleep -Seconds 1
+    $launcher = Join-Path $installDir "start-unison-hidden.vbs"
+    if (-not (Test-Path $launcher)) {
+      throw "The Unison launcher is missing. Run Repair connection first."
+    }
+
+    $wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
+    & $wscript //B //Nologo $launcher
   }
   "repair" {
     $repair = Join-Path $installDir "repair-unison-windows.ps1"
