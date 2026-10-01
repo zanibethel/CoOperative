@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { getUnisonViewer } from "@/lib/unison/access";
 import LiveNodeStatus from "../live-node-status";
+import ImprovementLab from "./ImprovementLab";
 
 function hours(seconds: number) {
   if (!seconds) return "0h";
@@ -100,6 +101,8 @@ export default async function UnisonOwnerDashboard() {
           into RaiseHub.
         </p>
       </section>
+
+      <ImprovementLab />
 
       <LiveNodeStatus
         scope="owner"
