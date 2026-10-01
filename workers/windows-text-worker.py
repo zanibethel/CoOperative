@@ -226,7 +226,7 @@ def run_generation(job_id: str, job: dict):
 
     output_tokens = int(generated.shape[-1])
     latency_ms = int((time.time() - started) * 1000)
-    post_progress(job_id, text, output_tokens, latency_ms)
+    post_progress(job_id, text, output_tokens, None)
 
     return {
         "text": text,
