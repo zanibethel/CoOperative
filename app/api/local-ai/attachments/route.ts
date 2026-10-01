@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { createClient } from "@/lib/supabase/server";
+import { authenticatedUserId } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -9,13 +9,8 @@ const BUCKET = "local-ai-attachments";
 const MAX_BYTES = 3 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-async function currentUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user;
+async function currentUserId() {
+  return authenticatedUserId();
 }
 
 function extensionFor(mimeType: string) {
@@ -25,8 +20,8 @@ function extensionFor(mimeType: string) {
 }
 
 export async function POST(request: Request) {
-  const user = await currentUser();
-  if (!user) {
+  const userId = await currentUserId();
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -50,10 +45,10 @@ export async function POST(request: Request) {
       );
     }
 
-    const ownerRef = `coop-user:${user.id}`;
+    const ownerRef = `coop-user:${userId}`;
     const attachmentId = crypto.randomUUID();
     const extension = extensionFor(file.type);
-    const storagePath = `${user.id}/${attachmentId}.${extension}`;
+    const storagePath = `${userId}/${attachmentId}.${extension}`;
     const bytes = new Uint8Array(await file.arrayBuffer());
     const admin = createAdminSupabaseClient();
 
@@ -104,8 +99,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const user = await currentUser();
-  if (!user) {
+  const userId = await currentUserId();
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -116,7 +111,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Attachment id is required." }, { status: 400 });
     }
 
-    const ownerRef = `coop-user:${user.id}`;
+    const ownerRef = `coop-user:${userId}`;
     const admin = createAdminSupabaseClient();
     const { data: attachment, error } = await admin
       .from("local_ai_attachments")
@@ -154,8 +149,8 @@ export async function GET(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const user = await currentUser();
-  if (!user) {
+  const userId = await currentUserId();
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -166,7 +161,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Attachment id is required." }, { status: 400 });
     }
 
-    const ownerRef = `coop-user:${user.id}`;
+    const ownerRef = `coop-user:${userId}`;
     const admin = createAdminSupabaseClient();
     const { data: attachment, error } = await admin
       .from("local_ai_attachments")
