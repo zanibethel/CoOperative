@@ -328,6 +328,13 @@ if __name__ == "__main__":
 
     try:
         queue_loop()
+    except BaseException as exc:
+        print(
+            f"UNISON_TEXT_FATAL:{type(exc).__name__}:{str(exc)[:700]}",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise
     finally:
         set_busy(False)
         try:
