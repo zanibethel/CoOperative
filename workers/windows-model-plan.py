@@ -80,23 +80,23 @@ def nvidia_gpus() -> list[dict]:
 def choose_models(ram_mb: int, gpu_mb: int) -> dict:
     fast = "qwen2.5:1.5b"
     quality = "qwen2.5:3b"
-    heavy = "qwen3:4b"
+    heavy = "qwen3:4b-instruct"
 
     effective_mb = max(ram_mb, gpu_mb * 2 if gpu_mb else 0)
 
     if effective_mb >= 10_000:
-        quality = "qwen3:4b"
+        quality = "qwen3:4b-instruct"
         heavy = "qwen3:8b"
     if effective_mb >= 20_000 or gpu_mb >= 10_000:
-        fast = "qwen3:4b"
+        fast = "qwen3:4b-instruct"
         quality = "qwen3:8b"
         heavy = "qwen3:14b"
     if effective_mb >= 32_000 or gpu_mb >= 16_000:
         quality = "qwen3:14b"
-        heavy = "qwen3:30b"
+        heavy = "qwen3:30b-instruct"
     if effective_mb >= 56_000 or gpu_mb >= 24_000:
         fast = "qwen3:8b"
-        quality = "qwen3:30b"
+        quality = "qwen3:30b-instruct"
         heavy = "qwen3:32b"
 
     return {"fast": fast, "quality": quality, "heavy": heavy}
