@@ -11,7 +11,11 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   exit 1
 }
 
-if (-not $env:INFERENCE_WORKER_TOKEN -and -not $env:UNISON_NODE_SHARED_SECRET) {
+if (
+  -not $env:UNISON_NODE_TOKEN -and
+  -not $env:INFERENCE_WORKER_TOKEN -and
+  -not $env:UNISON_NODE_SHARED_SECRET
+) {
   throw "No Unison node token is configured. Run install-unison-windows.ps1 first."
 }
 
