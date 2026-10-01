@@ -95,6 +95,36 @@ Hermes should focus its budget on high-leverage platform work:
 
 Hermes should improve CoOperative's institutional knowledge rather than repeatedly solving the same customer problem from scratch.
 
+## Owner-facing improvement review loop
+
+CoOperative should eventually use its own qualified/local models as the first-choice analyzers for accumulated execution evidence.
+
+The intended loop is:
+
+```text
+usage + outcomes + failures + costs + verification evidence
+  -> owned/local model compiles an improvement report
+  -> deterministic checks and evals validate the claims
+  -> CoOperative prepares bounded proposals
+       - code changes
+       - playbook/routing changes
+       - eval additions
+       - prompt/context changes
+       - connector/provider changes
+       - curated owned-model training candidates
+  -> owner dashboard chat presents the report
+  -> owner can ask questions / request more evidence
+  -> Approve / Deny / Defer
+  -> approved change goes through isolated branch/test/verification gates
+  -> production/model promotion only after the applicable approval boundary
+```
+
+Owned/local models should be preferred for compiling these reports when benchmark-qualified. Paid external models may be proposed only when the owned stack is insufficient and the existing spend/approval policy permits it.
+
+The owner dashboard chat should be the primary review surface. Reports should be evidence-linked and concise enough to act on, while allowing drill-down into raw metrics/events where authorized.
+
+Model improvement must remain curated. Do not automatically train on raw conversations or private tenant data. Convert suitable, rights-cleared, de-identified/generalized cases into evals or training candidates; benchmark any changed owned model against the current production model before promotion.
+
 ## Improvement proposal lifecycle
 
 ```text
