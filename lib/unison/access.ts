@@ -1,27 +1,28 @@
 import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { createClient } from "@/lib/supabase/server";
+import { authenticatedIdentity } from "@/lib/supabase/auth";
 
 export async function getUnisonViewer() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const identity = await authenticatedIdentity();
+  if (!identity) return null;
 
-  if (!user) return null;
+  const user = {
+    id: identity.userId,
+    email: identity.email,
+  };
 
   const admin = createAdminSupabaseClient();
   const [{ data: owner }, { data: contributor }] = await Promise.all([
     admin
       .from("unison_platform_owners")
       .select("user_id")
-      .eq("user_id", user.id)
+      .eq("user_id", identity.userId)
       .maybeSingle(),
     admin
       .from("unison_contributors")
       .select("user_id,display_name,contact_email,status,payout_status,joined_at")
-      .eq("user_id", user.id)
+      .eq("user_id", identity.userId)
       .maybeSingle(),
   ]);
 
