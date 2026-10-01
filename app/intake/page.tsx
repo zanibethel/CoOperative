@@ -25,6 +25,10 @@ const initial = {
   businessComputeDetails: "",
   localAiPreference: "open-to-owned" as const,
   allowExcessComputeContribution: false,
+  monthlyTechnologySpend: 0,
+  monthlyTechnologyBudget: 0,
+  maxCooperativeManagedSpend: 0,
+  targetSavingsPercent: 20,
   costPriority: "balanced" as const,
 };
 
@@ -168,6 +172,68 @@ export default function IntakePage() {
               <option value="no">No / decide later</option>
               <option value="yes">Yes, show us that option</option>
             </select>
+          </div>
+        </section>
+
+        <section className="card intake-section">
+          <div className="eyebrow">Budget + savings</div>
+          <h2>Give CoOperative the economic guardrails.</h2>
+          <p>
+            These numbers become constraints for recommendations. Zero means the amount is
+            not known yet, not that CoOperative has permission to spend without a limit.
+          </p>
+
+          <div className="row">
+            <div className="field">
+              <label>Approximate current monthly technology/service spend</label>
+              <input
+                type="number"
+                min={0}
+                step="1"
+                value={form.monthlyTechnologySpend}
+                onChange={(e) => update("monthlyTechnologySpend", Number(e.target.value))}
+              />
+              <small>Software, AI, hosting, automation, and other technology services.</small>
+            </div>
+
+            <div className="field">
+              <label>Maximum total monthly technology budget</label>
+              <input
+                type="number"
+                min={0}
+                step="1"
+                value={form.monthlyTechnologyBudget}
+                onChange={(e) => update("monthlyTechnologyBudget", Number(e.target.value))}
+              />
+              <small>CoOperative should treat a known value here as a hard total ceiling.</small>
+            </div>
+          </div>
+
+          <div className="row">
+            <div className="field">
+              <label>Maximum monthly CoOperative-managed spend</label>
+              <input
+                type="number"
+                min={0}
+                step="1"
+                value={form.maxCooperativeManagedSpend}
+                onChange={(e) => update("maxCooperativeManagedSpend", Number(e.target.value))}
+              />
+              <small>Separate from external subscriptions that remain active during migration.</small>
+            </div>
+
+            <div className="field">
+              <label>Target savings</label>
+              <input
+                type="number"
+                min={0}
+                max={95}
+                step="1"
+                value={form.targetSavingsPercent}
+                onChange={(e) => update("targetSavingsPercent", Number(e.target.value))}
+              />
+              <small>Percent reduction CoOperative should try to reach without reducing required quality.</small>
+            </div>
           </div>
         </section>
 
