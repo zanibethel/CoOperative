@@ -50,20 +50,80 @@ export default function JoinClient({
     }
   }
 
+  async function requestPairing() {
+    const response = await fetch("/api/unison/contributor/pairing-code", {
+      method: "POST",
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not create pairing code.");
+    return payload as Pairing;
+  }
+
   async function createPairingCode() {
     setWorking(true);
     setMessage("");
 
     try {
-      const response = await fetch("/api/unison/contributor/pairing-code", {
-        method: "POST",
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Could not create pairing code.");
+      const payload = await requestPairing();
       setPairing(payload);
       setMessage("Pairing code created. It expires in one hour and can only be used once.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not create pairing code.");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  function downloadPersonalInstaller(nextPairing: Pairing) {
+    const bootstrapUrl = `${window.location.origin}/api/unison/download/windows`;
+    const dashboardUrl = `${window.location.origin}/unison/dashboard`;
+    const installer = [
+      "@echo off",
+      "setlocal",
+      "title CoOperative Unison Setup",
+      "echo.",
+      "echo Setting up CoOperative Unison...",
+      `powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $b=Join-Path $env:TEMP 'cooperative-unison-bootstrap.ps1'; Invoke-WebRequest -UseBasicParsing -Uri '${bootstrapUrl}' -OutFile $b; & $b -PairCode '${nextPairing.pairingCode}' -NodeName $env:COMPUTERNAME -IdleMinutes 5"`,
+      "if errorlevel 1 (",
+      "  echo.",
+      "  echo Setup did not finish. Leave this window open so the error can be reviewed.",
+      "  pause",
+      "  exit /b 1",
+      ")",
+      "echo.",
+      "echo CoOperative Unison is installed and running.",
+      "timeout /t 3 /nobreak >nul",
+      `start "" "${dashboardUrl}"`,
+      "exit /b 0",
+      "",
+    ].join("\r\n");
+
+    const blob = new Blob([installer], {
+      type: "application/x-msdos-program",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "Install-CoOperative-Unison.cmd";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function installThisPc() {
+    setWorking(true);
+    setMessage("");
+
+    try {
+      const payload = await requestPairing();
+      setPairing(payload);
+      downloadPersonalInstaller(payload);
+      setMessage(
+        "Installer downloaded. Open Install-CoOperative-Unison.cmd to finish setup. It will pair this PC automatically.",
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not prepare installer.");
     } finally {
       setWorking(false);
     }
@@ -99,23 +159,36 @@ export default function JoinClient({
       {joined ? (
         <section className="card unison-stack">
           <div>
-            <div className="eyebrow">Add a Windows PC</div>
-            <h2>Create a one-time pairing code.</h2>
+            <div className="eyebrow">Add this Windows PC</div>
+            <h2>Install Unison on this computer.</h2>
             <p>
-              The code enrolls one computer and is exchanged for a unique device credential.
-              It does not expose CoOperative’s platform-wide secrets. The recommended setup is:
-              create the code, copy the install command, then paste that command into PowerShell on this PC.
+              CoOperative will create a one-time device credential and prepare a personalized installer.
+              No pairing code or PowerShell command needs to be copied manually.
             </p>
           </div>
 
           <div className="cta-row">
-            <button className="primary" type="button" onClick={createPairingCode} disabled={working}>
-              {working ? "Working…" : "Create pairing code"}
+            <button className="primary" type="button" onClick={installThisPc} disabled={working}>
+              {working ? "Preparing installer…" : "Install on this PC"}
             </button>
-            <a className="secondary-cta" href="/api/unison/download/windows">
-              Download installer script
-            </a>
           </div>
+
+          <details>
+            <summary>Advanced / manual setup</summary>
+            <div className="unison-stack">
+              <p>
+                Use this only if the one-click installer cannot run on this computer.
+              </p>
+              <div className="cta-row">
+                <button className="secondary-button" type="button" onClick={createPairingCode} disabled={working}>
+                  Create pairing code
+                </button>
+                <a className="secondary-cta" href="/api/unison/download/windows">
+                  Download raw PowerShell script
+                </a>
+              </div>
+            </div>
+          </details>
 
           {pairing ? (
             <div className="unison-command">
@@ -129,8 +202,7 @@ export default function JoinClient({
                 </button>
               </div>
               <p>
-                Recommended: open PowerShell on this Windows PC, paste the full command below,
-                and press Enter. It downloads the installer and automatically uses this one-time pairing code.
+                Manual fallback: open PowerShell, paste the full command below, and press Enter.
               </p>
               <pre className="agent-output">{pairing.command}</pre>
             </div>
