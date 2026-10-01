@@ -34,7 +34,7 @@ export default async function UnisonContributorDashboard() {
   const [{ data: nodes }, { data: usage }] = await Promise.all([
     admin
       .from("unison_nodes")
-      .select("id,display_name,node_class,state,platform,resources,policy,worker_version,first_seen_at,last_seen_at")
+      .select("id,display_name,node_class,state,platform,capabilities,resources,policy,worker_version,first_seen_at,last_seen_at")
       .eq("contributor_user_id", viewer.user.id)
       .order("first_seen_at", { ascending: false }),
     admin
@@ -122,6 +122,7 @@ export default async function UnisonContributorDashboard() {
                   recordedAt?: string;
                 };
               };
+              const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
               const policy = (node.policy || {}) as {
                 idleScope?: "session" | "machine";
                 idleThresholdSeconds?: number;
@@ -142,6 +143,7 @@ export default async function UnisonContributorDashboard() {
                     <span>{resources.cpuLogical || "?"} logical CPUs</span>
                     <span>{resources.memoryTotalMb ? `${Math.round(resources.memoryTotalMb / 1024)} GB RAM` : "RAM pending"}</span>
                     <span>{policy.idleScope === "machine" ? "Whole-PC idle" : "Profile idle"}</span>
+                    {capabilities.includes("local_personal_chat") ? <span>Personal Local AI ready</span> : null}
                     <span>{node.worker_version || "Worker version pending"}</span>
                     <span>Last seen {new Date(node.last_seen_at).toLocaleString()}</span>
                   </div>
