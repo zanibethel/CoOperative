@@ -22,6 +22,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build:
@@ -56,15 +57,75 @@ jobs:
           }
           Copy-Item $source "artifacts/CoOperative-Unison-Setup.exe" -Force
 
-      - name: Sign installer when certificate is configured
+      - name: Detect Azure Artifact Signing configuration
+        id: artifact-signing-config
         if: ${{ github.event_name != 'pull_request' }}
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_PROFILE: ${{ secrets.AZURE_ARTIFACT_SIGNING_PROFILE }}
+        run: |
+          $required = @(
+            $env:AZURE_CLIENT_ID,
+            $env:AZURE_TENANT_ID,
+            $env:AZURE_SUBSCRIPTION_ID,
+            $env:AZURE_ARTIFACT_SIGNING_ENDPOINT,
+            $env:AZURE_ARTIFACT_SIGNING_ACCOUNT,
+            $env:AZURE_ARTIFACT_SIGNING_PROFILE
+          )
+          $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace($_) })
+          if ($missing.Count -gt 0) {
+            "configured=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Azure Artifact Signing is not fully configured."
+          } else {
+            "configured=true" >> $env:GITHUB_OUTPUT
+            Write-Host "Azure Artifact Signing configuration found."
+          }
+
+      - name: Azure login for Artifact Signing
+        if: ${{ steps.artifact-signing-config.outputs.configured == 'true' }}
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign installer with Azure Artifact Signing
+        if: ${{ steps.artifact-signing-config.outputs.configured == 'true' }}
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\artifacts
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+
+      - name: Sign installer with legacy PFX when configured
+        if: ${{ github.event_name != 'pull_request' && steps.artifact-signing-config.outputs.configured != 'true' }}
         shell: pwsh
         env:
           WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_BASE64)) {
-            Write-Host "No Windows signing certificate is configured; publishing unsigned preview."
+            Write-Host "No public-trust signing configuration is available; publishing unsigned preview."
             exit 0
           }
           $certPath = Join-Path $env:RUNNER_TEMP "unison-signing.pfx"
