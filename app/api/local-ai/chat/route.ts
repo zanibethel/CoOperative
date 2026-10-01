@@ -3,6 +3,10 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase/server";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
+import {
+  COOPERATIVE_BUSINESS_CHAT_POLICY,
+  COOPERATIVE_BUSINESS_POLICY_REVISION,
+} from "@/lib/ai/business-chat-policy";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -146,8 +150,16 @@ export async function POST(request: Request) {
       (currentAttachmentIds.length > 0
         ? "Describe and analyze the attached image."
         : "");
+    const systemMessage = {
+      role: "system" as const,
+      content: COOPERATIVE_BUSINESS_CHAT_POLICY,
+    };
     const userMessage = { role: "user" as const, content: modelUserText };
-    const jobMessages = [...history, userMessage].slice(-40);
+    const jobMessages = [
+      systemMessage,
+      ...history.slice(-38),
+      userMessage,
+    ];
     const jobId = crypto.randomUUID();
 
     const { error: jobError } = await admin.from("text_inference_jobs").insert({
@@ -165,8 +177,8 @@ export async function POST(request: Request) {
       task_class: "general",
       route_reason:
         input.profile === "quality"
-          ? "Manual Local Quality selection."
-          : "Manual Local Fast selection.",
+          ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.`
+          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.`,
       allow_paid_fallback: false,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
