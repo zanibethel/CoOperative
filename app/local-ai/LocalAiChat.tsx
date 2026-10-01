@@ -4,6 +4,19 @@ import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
 
 type Profile = "fast" | "quality";
 
+type BusinessSummary = {
+  id: string;
+  name: string;
+  industry?: string | null;
+  monthlyConnectedServiceCostCents: number;
+  reportedMonthlyTechnologySpendCents?: number | null;
+  monthlyTechnologyBudgetCents?: number | null;
+  maxCooperativeManagedSpendCents?: number | null;
+  targetSavingsPercent?: number | null;
+  connectedServicesCount: number;
+  connectedAiCount: number;
+};
+
 type ImageAttachment = {
   id: string;
   fileName: string;
@@ -37,6 +50,12 @@ type ConversationResult = {
   detail?: string;
 };
 
+type BusinessResult = {
+  businesses?: BusinessSummary[];
+  error?: string;
+  detail?: string;
+};
+
 type AttachmentResult = {
   attachment?: ImageAttachment;
   error?: string;
@@ -63,6 +82,7 @@ type JobResult = {
 };
 
 const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
+const ACTIVE_BUSINESS_KEY = "cooperative.local-ai.active-business";
 const MAX_ATTACHMENTS = 4;
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
 const MAX_IMAGE_EDGE = 1800;
@@ -171,6 +191,8 @@ async function prepareImage(file: File) {
 export default function LocalAiChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
+  const [selectedBusinessId, setSelectedBusinessId] = useState<string>("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversationTitle, setConversationTitle] = useState("New chat");
   const [input, setInput] = useState("");
@@ -185,6 +207,30 @@ export default function LocalAiChat() {
   const [uploadingImages, setUploadingImages] = useState(false);
   const activePollRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const refreshBusinesses = useCallback(async () => {
+    const response = await fetch("/api/local-ai/businesses", { cache: "no-store" });
+    const result = (await response.json()) as BusinessResult;
+    if (!response.ok) {
+      throw new Error(result.detail || result.error || "Could not load businesses.");
+    }
+
+    const items = result.businesses || [];
+    setBusinesses(items);
+
+    const saved = window.localStorage.getItem(ACTIVE_BUSINESS_KEY) || "";
+    const selected =
+      items.find((item) => item.id === saved)?.id || items[0]?.id || "";
+    setSelectedBusinessId(selected);
+
+    if (selected) {
+      window.localStorage.setItem(ACTIVE_BUSINESS_KEY, selected);
+    } else {
+      window.localStorage.removeItem(ACTIVE_BUSINESS_KEY);
+    }
+
+    return selected;
+  }, []);
 
   const refreshConversations = useCallback(async () => {
     const response = await fetch("/api/local-ai/conversations", { cache: "no-store" });
@@ -329,6 +375,7 @@ export default function LocalAiChat() {
 
     async function initialize() {
       try {
+        await refreshBusinesses();
         const threads = await refreshConversations();
         const savedJobId = window.localStorage.getItem(ACTIVE_JOB_KEY);
 
@@ -386,7 +433,7 @@ export default function LocalAiChat() {
       cancelled = true;
       activePollRef.current = null;
     };
-  }, [loadConversation, pollJob, refreshConversations]);
+  }, [loadConversation, pollJob, refreshBusinesses, refreshConversations]);
 
   async function removeAttachment(attachment: ImageAttachment) {
     setAttachments((current) => current.filter((item) => item.id !== attachment.id));
@@ -561,6 +608,7 @@ export default function LocalAiChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversationId: conversationId || undefined,
+          businessId: selectedBusinessId || undefined,
           message: text,
           attachmentIds: currentAttachments.map((attachment) => attachment.id),
           profile,
@@ -593,8 +641,76 @@ export default function LocalAiChat() {
     }
   }
 
+  const activeBusiness =
+    businesses.find((item) => item.id === selectedBusinessId) || null;
+
+  const formatMoney = (cents?: number | null) =>
+    typeof cents === "number"
+      ? `${(cents / 100).toFixed(0)}/mo`
+      : "Unknown";
+
   return (
     <section className="local-ai-layout">
+      <div className="local-ai-contextbar card">
+        <div className="field">
+          <label>Active business / project context</label>
+          <select
+            value={selectedBusinessId}
+            onChange={(event) => {
+              const id = event.target.value;
+              setSelectedBusinessId(id);
+              if (id) window.localStorage.setItem(ACTIVE_BUSINESS_KEY, id);
+            }}
+            disabled={busy || businesses.length === 0}
+          >
+            {businesses.length === 0 ? (
+              <option value="">No business profile yet</option>
+            ) : null}
+            {businesses.map((business) => (
+              <option value={business.id} key={business.id}>
+                {business.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {activeBusiness ? (
+          <div className="local-ai-context-metrics">
+            <span>
+              <small>Known services</small>
+              <strong>{formatMoney(activeBusiness.monthlyConnectedServiceCostCents)}</strong>
+            </span>
+            <span>
+              <small>Hard budget</small>
+              <strong>{formatMoney(activeBusiness.monthlyTechnologyBudgetCents)}</strong>
+            </span>
+            <span>
+              <small>CoOperative ceiling</small>
+              <strong>{formatMoney(activeBusiness.maxCooperativeManagedSpendCents)}</strong>
+            </span>
+            <span>
+              <small>Target savings</small>
+              <strong>
+                {typeof activeBusiness.targetSavingsPercent === "number"
+                  ? `${activeBusiness.targetSavingsPercent}%`
+                  : "Unknown"}
+              </strong>
+            </span>
+            <span>
+              <small>Connections</small>
+              <strong>
+                {activeBusiness.connectedServicesCount} services · {activeBusiness.connectedAiCount} AI
+              </strong>
+            </span>
+          </div>
+        ) : (
+          <p className="local-ai-context-empty">
+            Run a <a href="/intake">Mission Briefing</a> to create a business profile,
+            budget guardrails, and economic context for chat.
+          </p>
+        )}
+      </div>
+
       <div className="local-ai-threadbar card">
         <label className="field local-ai-thread-select">
           <span>Conversation</span>
