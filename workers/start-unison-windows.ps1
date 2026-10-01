@@ -275,7 +275,12 @@ $textCapabilities = @(
 if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
   $textCapabilities += @("machine_wide", "whole_pc_idle")
 }
-Send-StartupHeartbeat -WorkerVersion "starting-windows-text-ready-0.5" -Capabilities $textCapabilities
+$textReadyVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
+  "windows-unison-1.0.0-machine-text-only"
+} else {
+  "starting-windows-text-ready-0.5"
+}
+Send-StartupHeartbeat -WorkerVersion $textReadyVersion -Capabilities $textCapabilities
 Write-Host "Windows text runtime started."
 
 $imageWorkerPath = Join-Path $PSScriptRoot "hf-image-worker.py"
@@ -310,15 +315,26 @@ while (-not $imageProcess.HasExited -and -not $textProcess.HasExited) {
   }
 
   if (-not $runtimeStarted -and ((Get-Date) - $lastStartingHeartbeat).TotalSeconds -ge 20) {
+    $imageStartingCapabilities = @(
+      "text_generation",
+      "text_fast_profile",
+      "text_quality_profile",
+      "async_queue",
+      "startup_phase:image-runtime"
+    )
+    if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
+      $imageStartingCapabilities += @("machine_wide", "whole_pc_idle")
+    }
+
+    $imageStartingVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
+      "windows-unison-1.0.0-machine-text-only"
+    } else {
+      "starting-windows-0.4"
+    }
+
     Send-StartupHeartbeat `
-      -WorkerVersion "starting-windows-0.4" `
-      -Capabilities @(
-        "text_generation",
-        "text_fast_profile",
-        "text_quality_profile",
-        "async_queue",
-        "startup_phase:image-runtime"
-      )
+      -WorkerVersion $imageStartingVersion `
+      -Capabilities $imageStartingCapabilities
     $lastStartingHeartbeat = Get-Date
   }
 }
