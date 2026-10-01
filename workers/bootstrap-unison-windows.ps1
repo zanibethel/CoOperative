@@ -42,6 +42,7 @@ $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/w
 $workerFiles = @(
   "hf-image-worker.py",
   "windows-text-worker.py",
+  "windows-model-plan.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
   "install-unison-windows.ps1",

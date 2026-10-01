@@ -10,6 +10,25 @@ function Get-UserEnv([string]$Name) {
   return [Environment]::GetEnvironmentVariable($Name, "User")
 }
 
+function Set-UserEnv([string]$Name, [string]$Value) {
+  [Environment]::SetEnvironmentVariable($Name, $Value, "User")
+  Set-Item -Path "Env:$Name" -Value $Value
+}
+
+function Find-Ollama {
+  $command = Get-Command ollama -ErrorAction SilentlyContinue
+  if ($command) { return $command.Source }
+
+  $candidates = @(
+    (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
+    (Join-Path $env:ProgramFiles "Ollama\ollama.exe")
+  )
+  foreach ($candidate in $candidates) {
+    if ($candidate -and (Test-Path $candidate)) { return $candidate }
+  }
+  return $null
+}
+
 $installDir = Join-Path $env:LOCALAPPDATA "CoOperative\Unison"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
@@ -56,6 +75,7 @@ $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/w
 $workerFiles = @(
   "hf-image-worker.py",
   "windows-text-worker.py",
+  "windows-model-plan.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
   "control-unison-windows.ps1",
@@ -86,6 +106,40 @@ try {
 }
 finally {
   Remove-Item -Recurse -Force $stageDir -ErrorAction SilentlyContinue
+}
+
+$modelPlanner = Join-Path $installDir "windows-model-plan.py"
+$modelPlanPath = Join-Path $installDir "text-model-plan.json"
+if (Test-Path $modelPlanner) {
+  Write-Host "Refreshing adaptive local AI plan..."
+  & uv run $modelPlanner | Out-Null
+  if (Test-Path $modelPlanPath) {
+    try {
+      $plan = Get-Content $modelPlanPath -Raw | ConvertFrom-Json
+      $ollama = Find-Ollama
+
+      if (-not $ollama -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host "Installing quantized local AI runtime..."
+        winget install -e --id Ollama.Ollama --accept-package-agreements --accept-source-agreements --silent
+        $env:Path =
+          [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+          [Environment]::GetEnvironmentVariable("Path", "User")
+        $ollama = Find-Ollama
+      }
+
+      if ($ollama) {
+        Set-UserEnv "WINDOWS_TEXT_BACKEND" "ollama"
+        Set-UserEnv "WINDOWS_TEXT_FAST_MODEL_ID" ([string]$plan.models.fast)
+        Set-UserEnv "WINDOWS_TEXT_QUALITY_MODEL_ID" ([string]$plan.models.quality)
+        Set-UserEnv "WINDOWS_TEXT_HEAVY_MODEL_ID" ([string]$plan.models.heavy)
+        Write-Host "Adaptive text plan ready: Fast=$($plan.models.fast) Quality=$($plan.models.quality) Heavy=$($plan.models.heavy)"
+      } else {
+        Write-Host "Ollama is unavailable; preserving the current safe text backend."
+      }
+    } catch {
+      Write-Host "Adaptive text planning warning: $($_.Exception.Message)"
+    }
+  }
 }
 
 $nodeName = Get-UserEnv "UNISON_NODE_NAME"

@@ -8,12 +8,14 @@ CoOperative control plane remains responsible for routing and accounting.
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import platform
 import socket
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 import httpx
@@ -180,6 +182,51 @@ _HARDWARE = {
     "maxMemoryMb": MAX_MEMORY_MB,
 }
 
+_RUNTIME_DIR = Path(__file__).resolve().parent
+_MODEL_PLAN_PATH = _RUNTIME_DIR / "text-model-plan.json"
+_TEXT_BENCHMARK_PATH = _RUNTIME_DIR / "text-benchmark.json"
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else None
+    except Exception:
+        return None
+
+
+def _dynamic_resources() -> dict:
+    resources = dict(_HARDWARE)
+    plan = _read_json(_MODEL_PLAN_PATH)
+    if plan:
+        resources["textModelPlan"] = {
+            "revision": str(plan.get("revision") or "")[:80],
+            "backend": str(plan.get("backend") or "")[:80],
+            "models": {
+                "fast": str((plan.get("models") or {}).get("fast") or "")[:160],
+                "quality": str((plan.get("models") or {}).get("quality") or "")[:160],
+                "heavy": str((plan.get("models") or {}).get("heavy") or "")[:160],
+            },
+            "selectionReason": str(plan.get("selectionReason") or "")[:1000],
+        }
+
+    benchmark = _read_json(_TEXT_BENCHMARK_PATH)
+    if benchmark:
+        resources["textBenchmark"] = {
+            "profile": str(benchmark.get("profile") or "")[:32],
+            "model": str(benchmark.get("model") or "")[:160],
+            "provider": str(benchmark.get("provider") or "")[:120],
+            "outputTokens": max(0, int(benchmark.get("outputTokens") or 0)),
+            "latencyMs": max(0, int(benchmark.get("latencyMs") or 0)),
+            "tokensPerSecond": (
+                float(benchmark["tokensPerSecond"])
+                if isinstance(benchmark.get("tokensPerSecond"), (int, float))
+                else None
+            ),
+            "recordedAt": str(benchmark.get("recordedAt") or "")[:80],
+        }
+    return resources
+
 
 def heartbeat_payload(
     capabilities: list[str],
@@ -199,7 +246,7 @@ def heartbeat_payload(
             "machine": platform.machine() or "",
         },
         "capabilities": capabilities[:64],
-        "resources": _HARDWARE,
+        "resources": _dynamic_resources(),
         "policy": {
             "idleOnly": IDLE_ONLY,
             "idleThresholdSeconds": IDLE_THRESHOLD_SECONDS,

@@ -8,6 +8,27 @@ const gpuSchema = z.object({
   memoryTotalMb: z.number().int().nonnegative().nullable().optional(),
 });
 
+const textModelPlanSchema = z.object({
+  revision: z.string().max(80).default(""),
+  backend: z.string().max(80).default(""),
+  models: z.object({
+    fast: z.string().max(160).default(""),
+    quality: z.string().max(160).default(""),
+    heavy: z.string().max(160).default(""),
+  }),
+  selectionReason: z.string().max(1000).default(""),
+});
+
+const textBenchmarkSchema = z.object({
+  profile: z.string().max(32).default(""),
+  model: z.string().max(160).default(""),
+  provider: z.string().max(120).default(""),
+  outputTokens: z.number().int().nonnegative().default(0),
+  latencyMs: z.number().int().nonnegative().default(0),
+  tokensPerSecond: z.number().nonnegative().nullable().optional(),
+  recordedAt: z.string().max(80).default(""),
+});
+
 export const unisonNodeHeartbeatSchema = z.object({
   nodeId: z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/),
   displayName: z.string().min(1).max(160),
@@ -27,6 +48,8 @@ export const unisonNodeHeartbeatSchema = z.object({
     maxCpuPercent: z.number().min(1).max(100).default(50),
     maxGpuPercent: z.number().min(1).max(100).default(80),
     maxMemoryMb: z.number().int().positive().nullable().optional(),
+    textModelPlan: textModelPlanSchema.optional(),
+    textBenchmark: textBenchmarkSchema.optional(),
   }),
   policy: z.object({
     idleOnly: z.boolean().default(true),
