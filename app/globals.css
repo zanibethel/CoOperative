@@ -402,3 +402,79 @@ b { color: var(--text); }
   margin: 0;
   color: var(--danger, #d66);
 }
+
+
+.owner-improvement-lab {
+  display: grid;
+  gap: 16px;
+}
+.owner-improvement-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: .8rem;
+}
+.owner-improvement-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+.owner-improvement-metrics span {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+  padding: 11px 12px;
+}
+.owner-improvement-metrics small,
+.owner-improvement-metrics em {
+  display: block;
+  color: var(--muted);
+  font-style: normal;
+}
+.owner-improvement-metrics strong {
+  display: block;
+  margin: 4px 0 2px;
+  font-size: 1.15rem;
+}
+.owner-improvement-chat {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+  padding: 14px;
+  min-height: 130px;
+}
+.owner-improvement-message {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+}
+.owner-improvement-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-weight: 800;
+}
+.owner-improvement-message pre {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.55;
+}
+.owner-improvement-message details {
+  margin-top: 12px;
+  color: var(--muted);
+}
+.owner-improvement-empty p {
+  margin-bottom: 0;
+}
+.owner-improvement-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: .82rem;
+}
