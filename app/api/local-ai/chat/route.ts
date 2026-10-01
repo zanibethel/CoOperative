@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { createClient } from "@/lib/supabase/server";
+import { authenticatedUserId } from "@/lib/supabase/auth";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
 import {
   COOPERATIVE_BUSINESS_CHAT_POLICY,
@@ -28,13 +28,10 @@ const chatRequestSchema = z
   );
 
 async function currentOwner() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const userId = await authenticatedUserId();
 
-  return user
-    ? { userId: user.id, ownerRef: `coop-user:${user.id}` }
+  return userId
+    ? { userId, ownerRef: `coop-user:${userId}` }
     : null;
 }
 
