@@ -2,17 +2,14 @@ import { createHash, randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { createClient } from "@/lib/supabase/server";
+import { authenticatedUserId } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
 
 export async function POST() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const userId = await authenticatedUserId();
 
-  if (!user) {
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -20,7 +17,7 @@ export async function POST() {
   const { data: contributor, error: contributorError } = await admin
     .from("unison_contributors")
     .select("user_id,status")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (contributorError) {
@@ -40,9 +37,9 @@ export async function POST() {
 
   const { error } = await admin.from("unison_pairing_codes").insert({
     code_hash: codeHash,
-    owner_ref: `contributor:${user.id}`,
+    owner_ref: `contributor:${userId}`,
     node_class: "community",
-    contributor_user_id: user.id,
+    contributor_user_id: userId,
     expires_at: expiresAt,
   });
 
