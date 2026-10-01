@@ -1,0 +1,94 @@
+name: Unison Windows Installer
+
+on:
+  pull_request:
+    paths:
+      - "windows/UnisonInstaller/**"
+      - ".github/workflows/unison-windows-installer.yml"
+      - "app/unison/install/connect/**"
+      - "app/api/unison/nodes/self-status/**"
+      - "app/api/unison/download/installer/windows/**"
+  push:
+    branches: [main]
+    paths:
+      - "windows/UnisonInstaller/**"
+      - ".github/workflows/unison-windows-installer.yml"
+      - "app/unison/install/connect/**"
+      - "app/api/unison/nodes/self-status/**"
+      - "app/api/unison/download/installer/windows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish single-file installer
+        shell: pwsh
+        run: >
+          dotnet publish windows/UnisonInstaller/CoOperative.Unison.Installer.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:PublishTrimmed=false
+          -o artifacts/unison-windows
+
+      - name: Normalize installer filename
+        shell: pwsh
+        run: |
+          $source = "artifacts/unison-windows/CoOperative-Unison-Setup.exe"
+          if (-not (Test-Path $source)) {
+            throw "Published installer was not found at $source"
+          }
+          Copy-Item $source "artifacts/CoOperative-Unison-Setup.exe" -Force
+
+      - name: Sign installer when certificate is configured
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_BASE64)) {
+            Write-Host "No Windows signing certificate is configured; publishing unsigned preview."
+            exit 0
+          }
+          $certPath = Join-Path $env:RUNNER_TEMP "unison-signing.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName |
+            Select-Object -Last 1
+          if (-not $signtool) { throw "signtool.exe was not found." }
+          & $signtool.FullName sign /f $certPath /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 "artifacts/CoOperative-Unison-Setup.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CoOperative-Unison-Setup
+          path: artifacts/CoOperative-Unison-Setup.exe
+          if-no-files-found: error
+
+      - name: Publish preview release asset
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view unison-windows-preview *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create unison-windows-preview --title "CoOperative Unison Windows Preview" --notes "Automatically updated preview build of the CoOperative Unison Windows installer." --prerelease
+          }
+          gh release upload unison-windows-preview "artifacts/CoOperative-Unison-Setup.exe" --clobber

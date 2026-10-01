@@ -167,10 +167,21 @@ export default function JoinClient({
           </div>
 
           <div className="cta-row">
-            <button className="primary" type="button" onClick={installThisPc} disabled={working}>
-              {working ? "Preparing installer…" : "Install on this PC"}
+            <a
+              className="primary"
+              href="/api/unison/download/installer/windows"
+            >
+              Try polished Setup.exe preview
+            </a>
+            <button className="secondary-button" type="button" onClick={installThisPc} disabled={working}>
+              {working ? "Preparing fallback…" : "Use current installer fallback"}
             </button>
           </div>
+          <p>
+            The Setup.exe preview opens your browser for secure account approval, installs
+            the proven worker silently, and waits for a verified heartbeat before showing
+            Connected. The current CMD flow remains available while the preview is tested.
+          </p>
 
           <details>
             <summary>Advanced / manual setup</summary>
