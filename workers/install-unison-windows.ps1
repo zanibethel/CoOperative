@@ -1,11 +1,8 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$Token,
+  [string]$PairCode,
   [string]$QueueUrl = "https://co-operative-mu.vercel.app",
   [string]$NodeName = $env:COMPUTERNAME,
-  [string]$OwnerRef = "platform-private",
-  [ValidateSet("private", "business", "community")]
-  [string]$NodeClass = "private",
   [int]$IdleMinutes = 5,
   [int]$MaxCpuPercent = 50,
   [int]$MaxGpuPercent = 80,
@@ -24,12 +21,38 @@ if (-not $existingNodeId) {
   $existingNodeId = "$safeComputer-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
 }
 
+Write-Host "Pairing this PC with CoOperative Unison..."
+$pairBody = @{
+  pairingCode = $PairCode
+  nodeId = $existingNodeId
+  displayName = $NodeName
+} | ConvertTo-Json
+
+try {
+  $pairing = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$QueueUrl/api/unison/nodes/pair" `
+    -ContentType "application/json" `
+    -Body $pairBody
+} catch {
+  $detail = $_.ErrorDetails.Message
+  if ($detail) {
+    throw "Unison pairing failed: $detail"
+  }
+  throw
+}
+
+$nodeToken = [string]$pairing.nodeToken
+if (-not $nodeToken) {
+  throw "Pairing succeeded without a node credential. Installation stopped."
+}
+
 $values = @{
-  "INFERENCE_WORKER_TOKEN" = $Token
+  "UNISON_NODE_TOKEN" = $nodeToken
   "UNISON_NODE_ID" = $existingNodeId
   "UNISON_NODE_NAME" = $NodeName
-  "UNISON_NODE_OWNER_REF" = $OwnerRef
-  "UNISON_NODE_CLASS" = $NodeClass
+  "UNISON_NODE_OWNER_REF" = [string]$pairing.ownerRef
+  "UNISON_NODE_CLASS" = [string]$pairing.nodeClass
   "UNISON_IDLE_ONLY" = "true"
   "UNISON_IDLE_THRESHOLD_SECONDS" = [string]([Math]::Max(0, $IdleMinutes) * 60)
   "UNISON_MAX_CPU_PERCENT" = [string]([Math]::Min(100, [Math]::Max(1, $MaxCpuPercent)))
@@ -52,8 +75,10 @@ $taskCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$launc
 schtasks.exe /Create /F /SC ONLOGON /TN $taskName /TR $taskCommand | Out-Null
 
 Write-Host ""
-Write-Host "Unison node installed."
+Write-Host "Unison node paired and installed."
 Write-Host "Node ID: $existingNodeId"
+Write-Host "Owner: $($pairing.ownerRef)"
+Write-Host "Class: $($pairing.nodeClass)"
 Write-Host "Startup task: $taskName"
 Write-Host "The worker will only claim new jobs after $IdleMinutes minute(s) of Windows inactivity."
 Write-Host ""
