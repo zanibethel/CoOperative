@@ -63,15 +63,52 @@ export function deriveDemoAssessment(input: BusinessIntake): AssessmentResult {
     opportunities.push({ title: "Social content planning and publishing pipeline", currentProblem: "Content ideation, rewriting, approvals, scheduling, and cross-posting consume recurring time and are easy to do inconsistently.", proposedAutomation: "Generate an approved content queue from business goals and real activity, adapt posts per channel, require configured approvals, and publish through supported APIs or scheduling tools when cost-effective.", humanRole: "Set brand rules, approve sensitive campaigns, and review performance before the system expands autonomy.", estimatedHoursSavedPerMonth: hours, implementationEffort: "medium", riskLevel: "medium", confidence: 0.71, priorityScore: score(hours, "medium", "medium") });
   }
 
+  const ownsPotentialCompute = input.businessComputeAvailable === "yes";
+  const isOpenToOwnedCompute =
+    input.localAiPreference === "prefer-owned" ||
+    input.localAiPreference === "open-to-owned";
+  const usesPaidAi =
+    input.aiUsageToday === "paid-services" ||
+    input.aiUsageToday === "mixed" ||
+    input.monthlyAiSpend > 0;
+
+  if (ownsPotentialCompute || (usesPaidAi && isOpenToOwnedCompute)) {
+    const estimatedHours = Math.max(2, Math.round(input.teamSize * 0.6));
+    const spendLanguage =
+      input.monthlyAiSpend > 0
+        ? `The business reports about ${Math.round(input.monthlyAiSpend)} per month in AI spend and may already own compute that can handle part of that workload.`
+        : "The business may already own compute capable of handling some AI workloads that would otherwise be sent to paid external providers.";
+
+    opportunities.push({
+      title: "Business-owned AI compute assessment",
+      currentProblem: spendLanguage,
+      proposedAutomation:
+        "Benchmark enrolled business hardware, match it to approved CoOperative model tiers, estimate local power/runtime cost against equivalent external AI cost, and route eligible workloads to owned compute first when it is cheaper and meets privacy, quality, and turnaround requirements.",
+      humanRole:
+        "Approve hardware enrollment, resource limits, privacy rules, and whether unused capacity may be offered to Unison for compensated work.",
+      estimatedHoursSavedPerMonth: estimatedHours,
+      implementationEffort: "medium",
+      riskLevel: "low",
+      confidence: ownsPotentialCompute ? 0.84 : 0.68,
+      priorityScore: score(estimatedHours + Math.min(12, input.monthlyAiSpend / 25), "medium", "low"),
+    });
+  }
+
   const genericHours = Math.max(5, Math.round(input.teamSize * 1.8));
   opportunities.push({ title: "Recurring admin checklist automation", currentProblem: `The business reports repetitive work: ${input.repetitiveWork.slice(0, 180)}${input.repetitiveWork.length > 180 ? "…" : ""}`, proposedAutomation: "Convert the recurring sequence into an explicit workflow with event triggers, task ownership, deadlines, and exception handling.", humanRole: "Own exceptions and periodically review whether the workflow still matches reality.", estimatedHoursSavedPerMonth: genericHours, implementationEffort: "low", riskLevel: "low", confidence: 0.72, priorityScore: score(genericHours, "low", "low") });
 
   opportunities.sort((a, b) => b.priorityScore - a.priorityScore);
 
   const costLanguage = input.costPriority === "lowest-cost" ? "Recommendations should prefer owned or low-cost infrastructure before adding paid SaaS." : input.costPriority === "best-fit" ? "Recommendations may favor higher-cost tools when they clearly provide the best operational fit." : "Recommendations should balance ongoing cost, reliability, and implementation effort.";
+  const computeLanguage =
+    input.businessComputeAvailable === "yes"
+      ? "The business reports hardware that may be suitable for local AI, so CoOperative should benchmark owned compute before purchasing equivalent external capacity."
+      : input.localAiPreference === "prefer-owned"
+        ? "The business prefers owned compute where practical; hardware eligibility should be verified before routing workloads."
+        : "";
 
   return {
-    businessSummary: `${input.businessName} is a ${input.industry} business with approximately ${input.teamSize} team member${input.teamSize === 1 ? "" : "s"}. The first assessment focuses on repetitive coordination, communication, scheduling, customer acquisition, and follow-up work rather than automating judgment-heavy decisions. ${costLanguage}`,
+    businessSummary: `${input.businessName} is a ${input.industry} business with approximately ${input.teamSize} team member${input.teamSize === 1 ? "" : "s"}. The first assessment focuses on repetitive coordination, communication, scheduling, customer acquisition, and follow-up work rather than automating judgment-heavy decisions. ${costLanguage} ${computeLanguage}`.trim(),
     processes,
     opportunities,
   };

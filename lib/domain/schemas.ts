@@ -14,6 +14,13 @@ export const BusinessIntakeSchema = z.object({
   websiteAndInquiryFlow: z.string().trim().max(2000).default(""),
   marketingAndSocial: z.string().trim().max(2000).default(""),
   bookingAndScheduling: z.string().trim().max(2000).default(""),
+  aiUsageToday: z.enum(["none", "paid-services", "local", "mixed", "unsure"]).default("unsure"),
+  aiServicesAndSpend: z.string().trim().max(2000).default(""),
+  monthlyAiSpend: z.coerce.number().min(0).max(1000000).default(0),
+  businessComputeAvailable: z.enum(["yes", "no", "unsure"]).default("unsure"),
+  businessComputeDetails: z.string().trim().max(2500).default(""),
+  localAiPreference: z.enum(["prefer-owned", "open-to-owned", "cloud-first", "unsure"]).default("open-to-owned"),
+  allowExcessComputeContribution: z.boolean().default(false),
   costPriority: z.enum(["lowest-cost", "balanced", "best-fit"]).default("balanced"),
 });
 

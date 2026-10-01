@@ -18,6 +18,13 @@ const initial = {
   websiteAndInquiryFlow: "",
   marketingAndSocial: "",
   bookingAndScheduling: "",
+  aiUsageToday: "unsure" as const,
+  aiServicesAndSpend: "",
+  monthlyAiSpend: 0,
+  businessComputeAvailable: "unsure" as const,
+  businessComputeDetails: "",
+  localAiPreference: "open-to-owned" as const,
+  allowExcessComputeContribution: false,
   costPriority: "balanced" as const,
 };
 
@@ -82,6 +89,88 @@ export default function IntakePage() {
         <div className="field"><label>How do booking and scheduling work?</label><textarea placeholder="Phone calls, paid booking app, Google Calendar, walk-ins…" value={form.bookingAndScheduling} onChange={(e) => update("bookingAndScheduling", e.target.value)} /></div>
         <div className="field"><label>What regularly slows the business down?</label><textarea required value={form.bottlenecks} onChange={(e) => update("bottlenecks", e.target.value)} /></div>
         <div className="field"><label>What must a human always approve or decide?</label><textarea value={form.humanApprovalAreas} onChange={(e) => update("humanApprovalAreas", e.target.value)} /></div>
+
+        <section className="card intake-section">
+          <div className="eyebrow">AI + owned compute</div>
+          <h2>Could hardware you already own reduce your AI bill?</h2>
+          <p>
+            CoOperative can prefer business-owned compute when it is capable and cost-effective,
+            then fall back to Unison or paid AI only when needed.
+          </p>
+
+          <div className="field">
+            <label>How does the business use AI today?</label>
+            <select value={form.aiUsageToday} onChange={(e) => update("aiUsageToday", e.target.value as typeof form.aiUsageToday)}>
+              <option value="none">We do not currently use AI</option>
+              <option value="paid-services">Mostly paid AI services/subscriptions</option>
+              <option value="local">Mostly AI running on our own hardware</option>
+              <option value="mixed">A mix of paid and local AI</option>
+              <option value="unsure">Not sure</option>
+            </select>
+          </div>
+
+          <div className="field">
+            <label>Which AI tools do you use, and what are they used for?</label>
+            <textarea
+              placeholder="ChatGPT, Claude, image generation, customer support, coding, content creation…"
+              value={form.aiServicesAndSpend}
+              onChange={(e) => update("aiServicesAndSpend", e.target.value)}
+            />
+          </div>
+
+          <div className="field">
+            <label>Approximate monthly AI spend</label>
+            <input
+              type="number"
+              min={0}
+              step="1"
+              value={form.monthlyAiSpend}
+              onChange={(e) => update("monthlyAiSpend", Number(e.target.value))}
+            />
+            <small>Subscriptions plus typical usage/API charges. An estimate is fine.</small>
+          </div>
+
+          <div className="field">
+            <label>Does the business own a PC, workstation, server, or GPU that could run AI workloads?</label>
+            <select value={form.businessComputeAvailable} onChange={(e) => update("businessComputeAvailable", e.target.value as typeof form.businessComputeAvailable)}>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+              <option value="unsure">Not sure</option>
+            </select>
+          </div>
+
+          <div className="field">
+            <label>Describe available business hardware</label>
+            <textarea
+              placeholder="Gaming PC, NVIDIA GPU model, workstation, server, mini PC, number of machines… If you do not know the specs, say that."
+              value={form.businessComputeDetails}
+              onChange={(e) => update("businessComputeDetails", e.target.value)}
+            />
+            <small>Later, the Unison installer can detect the actual CPU, GPU, RAM, and supported workloads automatically.</small>
+          </div>
+
+          <div className="field">
+            <label>How should CoOperative treat business-owned compute?</label>
+            <select value={form.localAiPreference} onChange={(e) => update("localAiPreference", e.target.value as typeof form.localAiPreference)}>
+              <option value="prefer-owned">Prefer our hardware whenever it makes financial/operational sense</option>
+              <option value="open-to-owned">Use our hardware when it is a good fit</option>
+              <option value="cloud-first">Prefer external AI unless we explicitly choose local</option>
+              <option value="unsure">Not sure yet</option>
+            </select>
+          </div>
+
+          <div className="field">
+            <label>If capacity is idle, would you consider earning from excess compute through Unison?</label>
+            <select
+              value={form.allowExcessComputeContribution ? "yes" : "no"}
+              onChange={(e) => update("allowExcessComputeContribution", e.target.value === "yes")}
+            >
+              <option value="no">No / decide later</option>
+              <option value="yes">Yes, show us that option</option>
+            </select>
+          </div>
+        </section>
+
         <div className="field"><label>Cost priority</label><select value={form.costPriority} onChange={(e) => update("costPriority", e.target.value as typeof form.costPriority)}><option value="lowest-cost">Lowest ongoing cost</option><option value="balanced">Balance cost and convenience</option><option value="best-fit">Best fit even if it costs more</option></select></div>
         <button className="primary" disabled={loading}>{loading ? "Analyzing…" : "Generate intel report"}</button>
         {error ? <div className="error">{error}</div> : null}
