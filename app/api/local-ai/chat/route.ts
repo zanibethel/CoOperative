@@ -7,6 +7,7 @@ import {
   COOPERATIVE_BUSINESS_CHAT_POLICY,
   COOPERATIVE_BUSINESS_POLICY_REVISION,
 } from "@/lib/ai/business-chat-policy";
+import { buildBusinessChatContext } from "@/lib/ai/business-context";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -14,6 +15,7 @@ export const maxDuration = 30;
 const chatRequestSchema = z
   .object({
     conversationId: z.string().uuid().optional(),
+    businessId: z.string().uuid().optional(),
     message: z.string().max(16000).default(""),
     attachmentIds: z.array(z.string().uuid()).max(4).default([]),
     profile: z.enum(["fast", "quality"]).default("fast"),
@@ -25,13 +27,15 @@ const chatRequestSchema = z
     "Message or image attachment is required.",
   );
 
-async function currentOwnerRef() {
+async function currentOwner() {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  return user ? `coop-user:${user.id}` : null;
+  return user
+    ? { userId: user.id, ownerRef: `coop-user:${user.id}` }
+    : null;
 }
 
 function titleFromMessage(message: string, hasImages: boolean) {
@@ -41,14 +45,19 @@ function titleFromMessage(message: string, hasImages: boolean) {
 }
 
 export async function POST(request: Request) {
-  const ownerRef = await currentOwnerRef();
-  if (!ownerRef) {
+  const owner = await currentOwner();
+  if (!owner) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     const input = chatRequestSchema.parse(await request.json());
     const admin = createAdminSupabaseClient();
+    const ownerRef = owner.ownerRef;
+    const businessContext = await buildBusinessChatContext(
+      owner.userId,
+      input.businessId,
+    );
 
     let conversationId = input.conversationId;
     let conversationTitle = "";
@@ -150,14 +159,25 @@ export async function POST(request: Request) {
       (currentAttachmentIds.length > 0
         ? "Describe and analyze the attached image."
         : "");
-    const systemMessage = {
-      role: "system" as const,
-      content: COOPERATIVE_BUSINESS_CHAT_POLICY,
-    };
+    const systemMessages = [
+      {
+        role: "system" as const,
+        content: COOPERATIVE_BUSINESS_CHAT_POLICY,
+      },
+      ...(businessContext
+        ? [
+            {
+              role: "system" as const,
+              content: businessContext.systemContext,
+            },
+          ]
+        : []),
+    ];
     const userMessage = { role: "user" as const, content: modelUserText };
+    const historyLimit = 39 - systemMessages.length;
     const jobMessages = [
-      systemMessage,
-      ...history.slice(-38),
+      ...systemMessages,
+      ...history.slice(-historyLimit),
       userMessage,
     ];
     const jobId = crypto.randomUUID();
@@ -177,8 +197,8 @@ export async function POST(request: Request) {
       task_class: "general",
       route_reason:
         input.profile === "quality"
-          ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.`
-          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.`,
+          ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}`
+          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}`,
       allow_paid_fallback: false,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
@@ -219,6 +239,7 @@ export async function POST(request: Request) {
         profile: input.profile,
         conversationId,
         conversationTitle,
+        business: businessContext?.business ?? null,
       },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
@@ -233,11 +254,12 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const ownerRef = await currentOwnerRef();
-  if (!ownerRef) {
+  const owner = await currentOwner();
+  if (!owner) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const ownerRef = owner.ownerRef;
   const url = new URL(request.url);
   const jobId = url.searchParams.get("jobId") || "";
 

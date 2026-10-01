@@ -21,6 +21,10 @@ export const BusinessIntakeSchema = z.object({
   businessComputeDetails: z.string().trim().max(2500).default(""),
   localAiPreference: z.enum(["prefer-owned", "open-to-owned", "cloud-first", "unsure"]).default("open-to-owned"),
   allowExcessComputeContribution: z.boolean().default(false),
+  monthlyTechnologySpend: z.coerce.number().min(0).max(1000000).default(0),
+  monthlyTechnologyBudget: z.coerce.number().min(0).max(1000000).default(0),
+  maxCooperativeManagedSpend: z.coerce.number().min(0).max(1000000).default(0),
+  targetSavingsPercent: z.coerce.number().min(0).max(95).default(20),
   costPriority: z.enum(["lowest-cost", "balanced", "best-fit"]).default("balanced"),
 });
 
