@@ -142,7 +142,11 @@ internal sealed class UnisonTrayContext : ApplicationContext
             }
             else
             {
-                SetStatus(char.ToUpperInvariant(state[0]) + state[1..]);
+                SetStatus(
+                    string.IsNullOrWhiteSpace(state)
+                        ? "Unknown"
+                        : char.ToUpperInvariant(state[0]) + state[1..]
+                );
             }
         }
         catch
