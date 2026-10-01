@@ -18,6 +18,7 @@ import base64
 import gc
 import io
 import os
+import platform
 import socket
 from pathlib import Path
 import threading
