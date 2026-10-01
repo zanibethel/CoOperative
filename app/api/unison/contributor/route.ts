@@ -2,19 +2,16 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { createClient } from "@/lib/supabase/server";
+import { authenticatedIdentity } from "@/lib/supabase/auth";
 
 const contributorSchema = z.object({
   displayName: z.string().trim().min(1).max(160),
 });
 
 export async function GET() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const identity = await authenticatedIdentity();
 
-  if (!user) {
+  if (!identity) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -22,7 +19,7 @@ export async function GET() {
   const { data, error } = await admin
     .from("unison_contributors")
     .select("user_id,display_name,contact_email,status,payout_status,joined_at")
-    .eq("user_id", user.id)
+    .eq("user_id", identity.userId)
     .maybeSingle();
 
   if (error) {
@@ -33,12 +30,9 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const identity = await authenticatedIdentity();
 
-  if (!user?.email) {
+  if (!identity?.email) {
     return NextResponse.json({ error: "Sign in with an email account first." }, { status: 401 });
   }
 
@@ -53,9 +47,9 @@ export async function POST(request: Request) {
     .from("unison_contributors")
     .upsert(
       {
-        user_id: user.id,
+        user_id: identity.userId,
         display_name: parsed.data.displayName,
-        contact_email: user.email,
+        contact_email: identity.email,
         status: "active",
         updated_at: now,
       },
