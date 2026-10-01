@@ -63,11 +63,29 @@ $workerFiles = @(
 )
 
 Write-Host "Refreshing CoOperative Unison files..."
-foreach ($file in $workerFiles) {
-  $target = Join-Path $installDir $file
-  $temp = "$target.download"
-  Invoke-WebRequest -Uri "$baseUrl/$file" -OutFile $temp -UseBasicParsing
-  Move-Item -Force $temp $target
+$stageDir = Join-Path $installDir (".update-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+
+try {
+  # Download the complete bundle before replacing any live file. This prevents a
+  # failed network request from leaving an old/new mixed worker installation.
+  foreach ($file in $workerFiles) {
+    $staged = Join-Path $stageDir $file
+    Invoke-WebRequest -Uri "$baseUrl/$file" -OutFile $staged -UseBasicParsing
+
+    if (-not (Test-Path $staged) -or (Get-Item $staged).Length -le 0) {
+      throw "Downloaded Unison worker file '$file' was empty or missing."
+    }
+  }
+
+  foreach ($file in $workerFiles) {
+    $staged = Join-Path $stageDir $file
+    $target = Join-Path $installDir $file
+    Move-Item -Force $staged $target
+  }
+}
+finally {
+  Remove-Item -Recurse -Force $stageDir -ErrorAction SilentlyContinue
 }
 
 $nodeName = Get-UserEnv "UNISON_NODE_NAME"
