@@ -25,6 +25,11 @@ import {
   recommendedForRequest,
   type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
+import {
+  affordableVideoSuggestion,
+  chooseNousManagedImage,
+  chooseNousManagedVideo,
+} from "@/lib/inference/nous-managed-media";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
 import {
@@ -868,80 +873,121 @@ export async function POST(request: Request) {
         4,
         Math.max(0, input.modelMixer?.agents.media ?? 0),
       ) as 0 | 1 | 2 | 3 | 4;
-      let selectedMediaModel: MediaCatalogModel | null = null;
-      let pricingSource = "configured-fallback";
+      const requestCapUsd = input.modelMixer?.maxSpendUsd ?? null;
 
-      try {
-        const catalog = await openRouterMediaCatalog();
-        const pool = mediaPlan.kind === "video" ? catalog.video : catalog.image;
-        const requested = recommendedForRequest(pool, mediaLevel, {
-          durationSeconds: mediaPlan.durationSeconds,
-          aspectRatio: mediaPlan.aspectRatio,
-        });
-        const freeFallback = pool.find((model) => model.free) || null;
-        const paidMediaEnabled =
-          process.env.HERMES_MEDIA_PAID_ENABLED === "true" && profileBalance.funded;
+      const nousRuntimeAuth = await freshNousRuntimeAuthForOwner(ownerRef).catch(
+        () => null,
+      );
+      const nousChoice =
+        mediaPlan.kind === "image"
+          ? chooseNousManagedImage(mediaLevel, requestCapUsd)
+          : chooseNousManagedVideo(
+              mediaLevel,
+              requestCapUsd,
+              mediaPlan.durationSeconds,
+            );
 
-        selectedMediaModel =
-          requested && (!requested.free && !paidMediaEnabled)
-            ? freeFallback
-            : requested || freeFallback;
-        pricingSource = catalog.source;
-      } catch {
-        selectedMediaModel = null;
-      }
-
-      const fallbackConfig = hermesMediaConfiguration(mediaPlan.kind);
-      const selectedProvider = selectedMediaModel ? "openrouter" : fallbackConfig.provider;
-      const selectedModel = selectedMediaModel?.id || fallbackConfig.model;
-      const selectedFree = selectedMediaModel?.free ?? fallbackConfig.freeRoute;
-      const estimatedProviderCostUsd = selectedMediaModel
-        ? estimatedMediaProviderCostUsd(selectedMediaModel, mediaPlan.durationSeconds)
-        : selectedFree
-          ? 0
-          : null;
-
-      if (!selectedFree && process.env.HERMES_MEDIA_PAID_ENABLED !== "true") {
+      if (
+        nousRuntimeAuth &&
+        mediaPlan.kind === "video" &&
+        mediaLevel > 0 &&
+        !nousChoice
+      ) {
+        const suggestion = affordableVideoSuggestion(
+          mediaPlan.durationSeconds,
+          requestCapUsd,
+        );
+        const requestedSeconds = mediaPlan.durationSeconds || 0;
+        const suggestedSeconds = suggestion?.affordableSeconds || 0;
+        const minimumBudget = suggestion?.minimumRequestedBudget || 0;
         const message =
-          "I found a paid media route, but paid media is still disabled until CoOperative's markup/margin rule is configured. Move the Media slider to Free or use the free smoke-test route for now.";
-        const { error: paidGateError } = await admin
-          .from("local_ai_messages")
-          .insert([
-            {
-              conversation_id: conversationId,
-              owner_ref: ownerRef,
-              role: "user",
-              content: visibleUserText,
-              attachment_ids: [],
-              job_id: null,
-            },
-            {
-              conversation_id: conversationId,
-              owner_ref: ownerRef,
-              role: "assistant",
-              content: message,
-              attachment_ids: [],
-              job_id: null,
-            },
-          ]);
-        if (paidGateError) throw paidGateError;
+          suggestedSeconds >= 1
+            ? `Your current ${(requestCapUsd || 0).toFixed(2)} cap is below the estimated cost for a ${requestedSeconds}s video. To stay inside the cap, I can reduce the test to about ${suggestedSeconds}s at 360p with audio off. Or raise this request to about ${minimumBudget.toFixed(2)} for the full ${requestedSeconds}s low-cost test. Nous credits stay first; OpenRouter is only backup.`
+            : `Your current ${(requestCapUsd || 0).toFixed(2)} cap is below the cheapest managed video test I can price safely. Raise the request cap or reduce duration/quality before I spend anything. Nous credits stay first; OpenRouter is only backup.`;
+
+        await admin.from("local_ai_messages").insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: visibleUserText,
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: message,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
 
         return NextResponse.json(
           {
             status: "completed",
             execution: "code",
-            capability: mediaPlan.kind,
+            capability: "video",
             conversationId,
             conversationTitle,
             text: message,
             provider: "code",
-            model: "media-spend-gate",
+            model: "media-budget-options",
+            routeReason:
+              "CoOperative stopped before generation and suggested lower-cost controls or a higher request cap.",
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
       }
 
-      const requestCapUsd = input.modelMixer?.maxSpendUsd ?? null;
+      let selectedMediaModel: MediaCatalogModel | null = null;
+      let pricingSource = nousRuntimeAuth && nousChoice
+        ? "nous-managed"
+        : "configured-fallback";
+
+      if (!nousRuntimeAuth || !nousChoice) {
+        try {
+          const catalog = await openRouterMediaCatalog();
+          const pool =
+            mediaPlan.kind === "video" ? catalog.video : catalog.image;
+          selectedMediaModel = recommendedForRequest(pool, mediaLevel, {
+            durationSeconds: mediaPlan.durationSeconds,
+            aspectRatio: mediaPlan.aspectRatio,
+          });
+          pricingSource = catalog.source;
+        } catch {
+          selectedMediaModel = null;
+        }
+      }
+
+      const fallbackConfig = hermesMediaConfiguration(mediaPlan.kind);
+      const selectedProvider =
+        nousRuntimeAuth && nousChoice
+          ? "nous"
+          : selectedMediaModel
+            ? "openrouter"
+            : fallbackConfig.provider;
+      const selectedModel =
+        nousRuntimeAuth && nousChoice
+          ? nousChoice.model
+          : selectedMediaModel?.id || fallbackConfig.model;
+      const selectedFree =
+        selectedProvider === "nous"
+          ? false
+          : selectedMediaModel?.free ?? fallbackConfig.freeRoute;
+      const estimatedProviderCostUsd =
+        nousRuntimeAuth && nousChoice
+          ? nousChoice.estimatedCostUsd
+          : selectedMediaModel
+            ? estimatedMediaProviderCostUsd(
+                selectedMediaModel,
+                mediaPlan.durationSeconds,
+              )
+            : selectedFree
+              ? 0
+              : null;
+
       if (
         estimatedProviderCostUsd !== null &&
         requestCapUsd !== null &&
@@ -986,15 +1032,13 @@ export async function POST(request: Request) {
         );
       }
 
-      const [openRouterService, nousRuntimeAuth] = await Promise.all([
+      const openRouterService =
         selectedProvider === "openrouter"
-          ? businessOwnedServiceCredentialForOwner(
+          ? await businessOwnedServiceCredentialForOwner(
               ownerRef,
               "openrouter-api",
             )
-          : Promise.resolve(null),
-        freshNousRuntimeAuthForOwner(ownerRef).catch(() => null),
-      ]);
+          : null;
       const providerCredential =
         openRouterService?.credential ||
         process.env.OPENROUTER_API_KEY?.trim() ||
@@ -1124,7 +1168,7 @@ export async function POST(request: Request) {
             provider: started.provider,
             model: started.model,
             routeReason:
-              `CoOperative selected ${selectedModel} from the ${pricingSource} media catalog at Media level ${mediaLevel}, then used ${nousRuntimeAuth ? "Nous Portal/Hermes" : "the OpenRouter free fallback"} for low-cost orchestration before one media-generation call.`,
+              `CoOperative selected ${selectedModel} from ${pricingSource} at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal subscription credits are the first paid source." : "OpenRouter is being used as the connected backup provider."} The request remains bounded by the Model Mixer spend cap.`,
             estimatedProviderCostUsd,
             modelMixer: input.modelMixer || null,
             requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
