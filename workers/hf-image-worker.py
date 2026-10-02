@@ -83,6 +83,7 @@ MODEL_LOCK = threading.Lock()
 UNISON_BUSY = threading.Event()
 TEXT_READY_MARKER = Path(__file__).with_name("text-worker.ready")
 TEXT_BUSY_MARKER = Path(__file__).with_name("text-worker.busy")
+LOCAL_CHAT_READY_MARKER = Path(__file__).with_name("local-chat.ready")
 loaded_profile: str | None = None
 text_pipe = None
 image_pipe = None
