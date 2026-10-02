@@ -11,6 +11,7 @@ export type HermesMediaStartSpec = {
   provider?: string;
   model?: string;
   providerCredential?: string;
+  nousAuthJson?: string;
 };
 
 export type HermesMediaStartResult = {
@@ -70,15 +71,15 @@ export function hermesMediaConfiguration(
         : "bytedance/seedance-2.0-fast:free"),
     "Media model",
   );
-  const nousConfigured = Boolean(process.env.NOUS_API_KEY?.trim());
+  const legacyNousConfigured = Boolean(process.env.NOUS_API_KEY?.trim());
   const orchestratorProvider = safeIdentifier(
     process.env.HERMES_CLOUD_PROVIDER?.trim() ||
-      (nousConfigured ? "nous-api" : "openrouter"),
+      (legacyNousConfigured ? "nous" : "openrouter"),
     "Hermes orchestrator provider",
   );
   const orchestratorModel = safeIdentifier(
     process.env.HERMES_CLOUD_MODEL?.trim() ||
-      (orchestratorProvider === "nous-api"
+      (orchestratorProvider === "nous"
         ? "poolside/laguna-s-2.1:free"
         : "openrouter/free"),
     "Hermes orchestrator model",
@@ -185,12 +186,24 @@ export async function startHermesMediaTask(
 ): Promise<HermesMediaStartResult> {
   if (!spec.userRequest.trim()) throw new Error("A media request is required.");
 
-  const config = hermesMediaConfiguration(spec.kind, {
+  const baseConfig = hermesMediaConfiguration(spec.kind, {
     provider: spec.provider,
     model: spec.model,
   });
+  const orchestratorProvider = spec.nousAuthJson ? "nous" : baseConfig.orchestratorProvider;
+  const orchestratorModel =
+    spec.nousAuthJson && !process.env.HERMES_CLOUD_MODEL?.trim()
+      ? "poolside/laguna-s-2.1:free"
+      : baseConfig.orchestratorModel;
+  const config = {
+    ...baseConfig,
+    orchestratorProvider,
+    orchestratorModel,
+  };
 
-  const env: Record<string, string> = {};
+  const env: Record<string, string> = {
+    HERMES_HOME: "/tmp/cooperative-hermes",
+  };
   const nousApiKey = process.env.NOUS_API_KEY?.trim();
   if (nousApiKey) env.NOUS_API_KEY = nousApiKey;
 
@@ -205,15 +218,22 @@ export async function startHermesMediaTask(
     env.OPENROUTER_API_KEY = credential;
   }
 
-  if (config.provider !== "openrouter") {
+  if (
+    config.provider !== "openrouter" &&
+    !(spec.kind === "image" && config.provider === "nous")
+  ) {
     throw new Error(
-      `Media provider ${config.provider} is not enabled in the first CoOperative cloud-media slice.`,
+      `Media provider ${config.provider} is not enabled for this CoOperative media job.`,
     );
   }
 
-  if (config.orchestratorProvider === "nous-api" && !nousApiKey) {
+  if (
+    config.orchestratorProvider === "nous" &&
+    !spec.nousAuthJson &&
+    !nousApiKey
+  ) {
     throw new Error(
-      "Hermes is configured to use Nous for orchestration, but NOUS_API_KEY is not connected.",
+      "Nous Portal is selected for Hermes orchestration but is not connected to this CoOperative profile.",
     );
   }
 
@@ -241,6 +261,23 @@ export async function startHermesMediaTask(
     const stderr = await install.stderr();
     await sandbox.stop();
     throw new Error(`Hermes installation failed: ${stderr.slice(-800)}`);
+  }
+
+  if (spec.nousAuthJson) {
+    await sandbox.runCommand({
+      cmd: "bash",
+      args: ["-lc", "mkdir -p /tmp/cooperative-hermes && chmod 700 /tmp/cooperative-hermes"],
+    });
+    await sandbox.writeFiles([
+      {
+        path: "/tmp/cooperative-hermes/auth.json",
+        content: Buffer.from(spec.nousAuthJson, "utf8"),
+      },
+    ]);
+    await sandbox.runCommand({
+      cmd: "bash",
+      args: ["-lc", "chmod 600 /tmp/cooperative-hermes/auth.json"],
+    });
   }
 
   const category = spec.kind === "image" ? "image_gen" : "video_gen";

@@ -26,6 +26,7 @@ import {
   type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
+import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
 import {
   looksLikeApiCredential,
   planServiceConnectIntent,
@@ -465,13 +466,15 @@ export async function POST(request: Request) {
         );
       }
 
-      const openRouterService =
+      const [openRouterService, nousRuntimeAuth] = await Promise.all([
         selectedProvider === "openrouter"
-          ? await businessOwnedServiceCredentialForOwner(
+          ? businessOwnedServiceCredentialForOwner(
               ownerRef,
               "openrouter-api",
             )
-          : null;
+          : Promise.resolve(null),
+        freshNousRuntimeAuthForOwner(ownerRef).catch(() => null),
+      ]);
       const providerCredential =
         openRouterService?.credential ||
         process.env.OPENROUTER_API_KEY?.trim() ||
@@ -568,6 +571,7 @@ export async function POST(request: Request) {
           provider: selectedProvider,
           model: selectedModel,
           providerCredential,
+          nousAuthJson: nousRuntimeAuth?.sandboxAuthJson,
         });
 
         const { error: mediaStartError } = await admin
@@ -600,7 +604,7 @@ export async function POST(request: Request) {
             provider: started.provider,
             model: started.model,
             routeReason:
-              `CoOperative selected ${selectedModel} from the ${pricingSource} media catalog at Media level ${mediaLevel}, then used a cheap/free Hermes orchestrator for one media-generation call.`,
+              `CoOperative selected ${selectedModel} from the ${pricingSource} media catalog at Media level ${mediaLevel}, then used ${nousRuntimeAuth ? "Nous Portal/Hermes" : "the OpenRouter free fallback"} for low-cost orchestration before one media-generation call.`,
             estimatedProviderCostUsd,
             modelMixer: input.modelMixer || null,
             requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
