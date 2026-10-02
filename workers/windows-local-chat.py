@@ -93,6 +93,7 @@ button,input,textarea,select{font:inherit}.app{display:grid;grid-template-column
 .project-row{display:flex;gap:7px;align-items:center;margin:8px 0}.project-row input[type=text]{flex:1;background:#07131e;border:1px solid #31516a;color:#fff;border-radius:9px;padding:7px}
 .project-files,.tasks{display:grid;gap:7px;margin-top:8px}.file-row,.task-row{display:flex;gap:7px;align-items:flex-start;border:1px solid #244055;border-radius:9px;padding:7px;font-size:.8rem}.file-row span,.task-row span{flex:1;min-width:0;word-break:break-word}
 .error{color:#ffb6bc;font-size:.85rem;padding:0 12px}.web-warning{font-size:.74rem;color:#d7bd82}
+.recovery-card{display:grid;gap:8px;margin-top:10px;padding:10px 11px;border:1px solid #315b73;border-radius:12px;background:#0d1c29}.recovery-current{font-size:.8rem;color:#dff9ff}.recovery-card summary{cursor:pointer;color:#94adbf;font-size:.74rem}.recovery-events{display:grid;gap:6px;margin-top:7px}.recovery-events>small{color:#7894a8;font-size:.64rem}.recovery-event{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:6px 7px;border:1px solid #223d51;border-radius:8px;background:#091723}.recovery-event span{font-size:.68rem}.recovery-event time{color:#7894a8;font-size:.6rem}.recovery-resolution{font-size:.68rem;color:#bfeecf;padding:6px 7px;border:1px solid #315f4a;border-radius:8px}
 @media(max-width:900px){.app{grid-template-columns:1fr}.sidebar{display:none}.content{grid-template-columns:1fr}.project{position:absolute;right:0;top:58px;bottom:0;width:min(90vw,340px);z-index:5;box-shadow:-20px 0 50px #0008}.msg{max-width:94%}.composer{grid-template-columns:auto 1fr auto}.send{grid-column:3}.voice-reply{display:none}}
 </style>
 </head>
@@ -188,6 +189,7 @@ const uid=()=>crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(3
 let state={projects:[],conversations:[],activeProjectId:null,activeConversationId:null,modelMode:"auto",webMode:"off",voiceReply:false};
 let pending=[];
 let recording=false, recorder=null, recordedChunks=[];
+const recoveryPolls=new Map();
 
 function loadState(){
   try{const v=JSON.parse(localStorage.getItem(STATE_KEY)||"null");if(v&&typeof v==="object")state={...state,...v}}catch{}
@@ -240,6 +242,54 @@ async function hostedRequest(path="",options={}){
   if(!r.ok)throw new Error(j.error||"Hosted history sync failed.");
   return j;
 }
+async function recoveryRequest(path="",options={}){
+  const headers={...(options.headers||{})};
+  if(cooperativeProfileToken)headers["X-Cooperative-Profile-Token"]=cooperativeProfileToken;
+  const r=await fetch("/api/recovery"+path,{cache:"no-store",...options,headers});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j.error||"Recovery Agent request failed.");
+  return j;
+}
+function recoveryDirective(content){
+  const match=String(content||"").match(/RECOVERY_STATUS:([0-9a-f]{8}-[0-9a-f-]{27,})/i);
+  if(!match)return null;
+  return {incidentId:match[1],text:String(content||"").replace(match[0],"").trim()};
+}
+function renderRecoveryCard(parent,incidentId){
+  const wrap=document.createElement("div");wrap.className="recovery-card";
+  const current=document.createElement("div");current.className="recovery-current";current.textContent="Recovery Agent · checking status…";wrap.appendChild(current);
+  const details=document.createElement("details");const summary=document.createElement("summary");summary.textContent="Recovery details";details.appendChild(summary);
+  const events=document.createElement("div");events.className="recovery-events";details.appendChild(events);wrap.appendChild(details);parent.appendChild(wrap);
+
+  async function poll(){
+    try{
+      const j=await recoveryRequest("?incidentId="+encodeURIComponent(incidentId));
+      const incident=j.incident||{};
+      current.textContent="Recovery Agent · "+(incident.current_message||incident.status||"working");
+      events.innerHTML="";
+      const note=document.createElement("small");note.textContent="Activity summaries only — private model reasoning is not exposed.";events.appendChild(note);
+      for(const event of (j.events||[])){
+        const row=document.createElement("div");row.className="recovery-event";
+        const text=document.createElement("span");text.textContent=event.message||event.kind||"Recovery activity";row.appendChild(text);
+        if(event.created_at){const t=document.createElement("time");t.textContent=new Date(event.created_at).toLocaleTimeString();row.appendChild(t)}
+        events.appendChild(row);
+      }
+      if(incident.resolution_summary){
+        const row=document.createElement("div");row.className="recovery-resolution";row.textContent="Resolution: "+incident.resolution_summary;events.appendChild(row);
+      }
+      if(["diagnosing","repairing","retrying"].includes(incident.status)){
+        const timer=setTimeout(poll,2500);recoveryPolls.set(incidentId,timer);
+      }else{
+        recoveryPolls.delete(incidentId);
+        const c=currentConversation();
+        if(c?.hostedId)void selectConversation(c);
+      }
+    }catch{
+      const timer=setTimeout(poll,5000);recoveryPolls.set(incidentId,timer);
+    }
+  }
+  if(!recoveryPolls.has(incidentId)){recoveryPolls.set(incidentId,true);void poll()}
+}
 async function selectConversation(c){
   state.activeConversationId=c.id;state.activeProjectId=c.projectId||null;
   if(c.hostedId){
@@ -282,7 +332,9 @@ function renderMessages(){
   if(!c||!c.messages.length){const e=document.createElement("div");e.className="empty";e.innerHTML="<strong>Your AI runs here.</strong><br>Chat, attach images or documents, use voice, search the web when you choose, or work inside a local project.";box.appendChild(e);return}
   for(const m of c.messages){
     const d=document.createElement("div");d.className="msg "+(m.role==="user"?"user":"assistant");
-    const text=document.createElement("div");text.textContent=m.content;d.appendChild(text);
+    const recovery=m.role==="assistant"?recoveryDirective(m.content):null;
+    const text=document.createElement("div");text.textContent=recovery?recovery.text:m.content;d.appendChild(text);
+    if(recovery)renderRecoveryCard(d,recovery.incidentId);
     if(m.attachments?.length){const meta=document.createElement("div");meta.className="msg-meta";meta.textContent="Attachments: "+m.attachments.join(", ");d.appendChild(meta)}
     if(m.role==="assistant"){
       if(m.imageId){
@@ -385,7 +437,35 @@ async function send(){
     c.messages.push({role:"assistant",content:j.text,meta,sources:j.webResults||[],imageId,imageAlt:j.generatedImage?.prompt||"Locally generated image"});c.updatedAt=Date.now();pending=[];saveState();renderAll();
     try{await appendHostedMessage(c,"assistant",j.text,{model:j.model||null,profile:j.profile||null,webSearchUsed:!!j.webSearchUsed,imageGenerated:!!j.imageGenerated})}catch(e){console.warn("Hosted history sync unavailable",e)}
     if(state.voiceReply&&!j.imageGenerated)void speakText(j.text);
-  }catch(e){$("error").textContent=e.message||String(e)}
+  }catch(e){
+    const detail=e.message||String(e);
+    if(c.hostedId&&cooperativeProfileToken){
+      try{
+        $("status").textContent="Recovery Agent is taking over…";
+        const report=await recoveryRequest("",{
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            conversationId:c.hostedId,
+            error:String(detail).slice(0,4000),
+            context:String(userText).slice(0,4000)
+          })
+        });
+        const incident=report.incident||{};
+        const incidentId=incident.id||"";
+        const message=(incident.current_message||"Recovery Agent is diagnosing the local chat route in the background.")+
+          "\n\nYou can keep chatting instead of waiting. I’ll report back here when the local route is ready."+
+          (incidentId?"\n\nRECOVERY_STATUS:"+incidentId:"");
+        c.messages.push({role:"assistant",content:message,meta:"Recovery Agent · local-only"});
+        c.updatedAt=Date.now();saveState();renderAll();
+        $("error").textContent="";
+      }catch(recoveryError){
+        $("error").textContent=detail+" · Recovery Agent could not start: "+(recoveryError.message||String(recoveryError));
+      }
+    }else{
+      $("error").textContent=detail;
+    }
+  }
   finally{$("send").disabled=false;$("status").textContent="Ready";renderAttachments();input.focus()}
 }
 async function speakText(text){
