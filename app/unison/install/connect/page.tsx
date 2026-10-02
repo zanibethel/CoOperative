@@ -6,13 +6,27 @@ import InstallerConnectClient from "./installer-connect-client";
 export default async function UnisonInstallerConnectPage({
   searchParams,
 }: {
-  searchParams: Promise<{ port?: string; nonce?: string }>;
+  searchParams: Promise<{
+    port?: string;
+    nonce?: string;
+    mode?: string;
+    nodeId?: string;
+    proof?: string;
+  }>;
 }) {
   const params = await searchParams;
   const port = Number(params.port);
   const nonce = typeof params.nonce === "string" ? params.nonce : "";
+  const existingNode = params.mode === "existing";
+  const nodeId = typeof params.nodeId === "string" ? params.nodeId : "";
+  const proof = typeof params.proof === "string" ? params.proof : "";
 
-  if (!Number.isInteger(port) || port < 1024 || port > 65535 || nonce.length < 20) {
+  const invalidBase =
+    !Number.isInteger(port) || port < 1024 || port > 65535 || nonce.length < 20;
+  const invalidExisting =
+    existingNode && (nodeId.length < 1 || nodeId.length > 160 || proof.length < 32);
+
+  if (invalidBase || invalidExisting) {
     return (
       <main className="shell">
         <section className="card">
@@ -26,17 +40,25 @@ export default async function UnisonInstallerConnectPage({
 
   const viewer = await getUnisonViewer();
   if (!viewer) {
-    const next = `/unison/install/connect?port=${port}&nonce=${encodeURIComponent(nonce)}`;
-    redirect(`/login?next=${encodeURIComponent(next)}`);
+    const query = new URLSearchParams({
+      port: String(port),
+      nonce,
+      ...(existingNode ? { mode: "existing", nodeId, proof } : {}),
+    });
+    const next = "/unison/install/connect?" + query.toString();
+    redirect("/login?next=" + encodeURIComponent(next));
   }
 
-  if (!viewer.contributor || viewer.contributor.status !== "active") {
+  if (!existingNode && (!viewer.contributor || viewer.contributor.status !== "active")) {
     return (
       <main className="shell">
         <section className="card">
           <div className="eyebrow">Unison Setup</div>
           <h1>Join Unison first.</h1>
-          <p>This installer can only be linked to an active contributor account.</p>
+          <p>
+            Registering a new computer as a contributor node requires an active
+            Unison contributor account.
+          </p>
           <a className="primary" href="/unison/join">Join Unison</a>
         </section>
       </main>
@@ -47,9 +69,17 @@ export default async function UnisonInstallerConnectPage({
     <main className="shell">
       <nav className="nav">
         <a href="/unison" className="brand">UNISON</a>
-        <div className="badge">Windows setup</div>
+        <div className="badge">
+          {existingNode ? "Link Windows profile" : "Windows setup"}
+        </div>
       </nav>
-      <InstallerConnectClient port={port} nonce={nonce} />
+      <InstallerConnectClient
+        port={port}
+        nonce={nonce}
+        mode={existingNode ? "existing" : "new"}
+        nodeId={existingNode ? nodeId : undefined}
+        proof={existingNode ? proof : undefined}
+      />
     </main>
   );
 }
