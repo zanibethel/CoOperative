@@ -68,8 +68,16 @@ type ConversationResult = {
   detail?: string;
 };
 
+type AiBalanceSummary = {
+  availableMicrousd: number;
+  availableUsd: number;
+  funded: boolean;
+  paidAiEligible: boolean;
+};
+
 type BusinessResult = {
   businesses?: BusinessSummary[];
+  aiBalance?: AiBalanceSummary;
   error?: string;
   detail?: string;
 };
@@ -236,6 +244,7 @@ export default function LocalAiChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
+  const [aiBalance, setAiBalance] = useState<AiBalanceSummary | null>(null);
   const [ownedNodes, setOwnedNodes] = useState<OwnedNode[]>([]);
   const [nodeRouting, setNodeRouting] = useState<NodeRouting>("prefer-owned");
   const [requiredNodeId, setRequiredNodeId] = useState("");
@@ -280,6 +289,7 @@ export default function LocalAiChat() {
 
     const items = result.businesses || [];
     setBusinesses(items);
+    setAiBalance(result.aiBalance || null);
 
     const saved = window.localStorage.getItem(ACTIVE_BUSINESS_KEY) || "";
     const selected =
@@ -781,6 +791,12 @@ export default function LocalAiChat() {
                 {activeBusiness.connectedServicesCount} services · {activeBusiness.connectedAiCount} AI
               </strong>
             </span>
+            <span>
+              <small>Funded AI balance</small>
+              <strong>
+                {aiBalance ? `${aiBalance.availableUsd.toFixed(4)}` : "$0.0000"}
+              </strong>
+            </span>
           </div>
         ) : (
           <p className="local-ai-context-empty">
@@ -894,8 +910,8 @@ export default function LocalAiChat() {
               Require this node prevents another worker from taking the job.
             </small>
             <small>
-              CoOperative keeps paid fallback disabled here. Owned/local execution stays inside the
-              existing approval and spending gates.
+              Owned/local execution stays first. Platform-paid high-quality AI is eligible only when
+              this profile has a funded AI balance and the estimated request cost fits inside it.
             </small>
             {meta ? <small>{meta}</small> : null}
           </div>
