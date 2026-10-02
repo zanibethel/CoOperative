@@ -127,7 +127,7 @@ export default function JoinClient({
             maxLength={160}
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
-            placeholder="Zach"
+            placeholder="Your display name"
           />
           <small>This is how your contribution appears in your own dashboard and the platform owner report.</small>
         </div>
