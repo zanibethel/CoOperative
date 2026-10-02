@@ -1105,7 +1105,6 @@ export async function POST(request: Request) {
           candidates.length ? Math.min(...candidates) : null,
         );
 
-        const requestedSeconds = mediaPlan.durationSeconds || 0;
         const affordableSeconds = nousSuggestion?.affordableSeconds || 0;
         const actions =
           mediaPlan.kind === "video"
@@ -1293,9 +1292,7 @@ export async function POST(request: Request) {
           generationPrompt += `\nBudget-approved generated audio: ${selectedAudio ? "on" : "off"}.`;
         }
       }
-      const requestMaxSpendMicrousd = input.modelMixer
-        ? Math.round(input.modelMixer.maxSpendUsd * 1_000_000)
-        : null;
+      const requestMaxSpendMicrousd = Math.round(requestCapUsd * 1_000_000);
 
       const { error: mediaJobError } = await admin
         .from("media_generation_jobs")
