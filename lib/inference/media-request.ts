@@ -16,7 +16,7 @@ const VIDEO_NOUNS = /\b(video|clip|reel|animation|movie|film)\b|\b(?:youtube|ins
 const AMBIGUOUS_MEDIA_NOUNS = /\b(ad|advertisement|commercial)\b/i;
 
 function durationFrom(message: string) {
-  const match = message.match(/\b(\d{1,2})\s*(?:seconds?|secs?|s)\b/i);
+  const match = message.match(/\b(\d{1,2})\s*(?:-\s*)?(?:seconds?|secs?|s)\b/i);
   if (!match) return null;
   const value = Number(match[1]);
   return value >= 1 && value <= 30 ? value : null;
