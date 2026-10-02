@@ -2025,6 +2025,41 @@ export default function LocalAiChat() {
                     );
                   }
 
+                  const mediaRecommendations =
+                    mediaRecommendationsDirective(message.content);
+                  if (mediaRecommendations) {
+                    return (
+                      <>
+                        {mediaRecommendations.text ? (
+                          <div>{mediaRecommendations.text}</div>
+                        ) : null}
+                        <MediaRecommendationChoices
+                          options={mediaRecommendations.options}
+                          onChoose={(option) => {
+                            const mediaLevel =
+                              option.tier === "high-end"
+                                ? 4
+                                : option.tier === "balanced"
+                                  ? 2
+                                  : 1;
+                            setModelMixer((current) => ({
+                              ...current,
+                              preset: "custom",
+                              maxSpendUsd: option.capUsd,
+                              agents: {
+                                ...current.agents,
+                                media: mediaLevel,
+                              },
+                            }));
+                            setInput(
+                              `Use the ${option.label} media recommendation exactly as quoted.`,
+                            );
+                          }}
+                        />
+                      </>
+                    );
+                  }
+
                   const budgetFollowup = budgetFollowupDirective(message.content);
                   if (budgetFollowup) {
                     return (
