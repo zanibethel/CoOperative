@@ -453,6 +453,19 @@ export default function ModelMixer({
                 aria-label="Maximum spend cap"
               />
             </span>
+            <button
+              className="model-mixer-test-cap"
+              type="button"
+              onClick={() =>
+                onChange({
+                  ...settings,
+                  preset: "custom",
+                  maxSpendUsd: 0.05,
+                })
+              }
+            >
+              Use $0.05 test cap
+            </button>
           </label>
         </div>
 
@@ -475,7 +488,8 @@ export default function ModelMixer({
           <p>
             CoOperative routes each subtask to the cheapest capable model within your selected cap.
             The slider is a quality/cost ceiling for that agent, not a requirement to spend at that
-            level. {mediaCatalog
+            level. For connected paid media, Nous subscription credits are preferred first and
+            OpenRouter is used only as a bounded backup when needed. {mediaCatalog
               ? `Media prices are live from OpenRouter as of ${new Date(mediaCatalog.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
               : mediaCatalogError
                 ? "Live media pricing is temporarily unavailable, so configured fallback routes will be used."
