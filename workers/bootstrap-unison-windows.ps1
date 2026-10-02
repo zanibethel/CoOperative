@@ -47,6 +47,7 @@ $workerFiles = @(
   "windows-local-voice.py",
   "windows-local-web-search.py",
   "windows-model-plan.py",
+  "windows-text-benchmark.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
   "install-unison-windows.ps1",

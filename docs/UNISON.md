@@ -46,6 +46,8 @@ For a machine that does not already have the repository, use `workers/bootstrap-
 
 `workers/install-unison-windows.ps1` performs the local pairing/configuration step and can still be used directly from a repository checkout.
 
+Windows text setup is hardware-adaptive. The installer now inventories Windows display adapters instead of relying only on `nvidia-smi`, so AMD and Intel GPUs are visible to the node planner. Older AMD cards such as the Radeon RX 590 are normalized around the Windows AdapterRAM reporting limitation and are marked for Ollama's Vulkan path. After Ollama is installed, the setup benchmarks the provisional Fast and Quality models on the actual PC, records tokens/second, total latency, Ollama-reported VRAM residency, and GPU-offload ratio, then rewrites the model plan if Quality is too slow or is not being offloaded as expected. The contributor dashboard surfaces the measured acceleration path and benchmark results.
+
 The image worker defaults to idle-only mode on Windows. It does not preload the image model, will not claim a new queue job until the configured Windows inactivity threshold is met, and releases loaded model/GPU memory when Windows becomes active again. A job already running is allowed to finish; preemption is a later phase. CPU/GPU percentage values are reported policy ceilings in this alpha; hard runtime enforcement is a later scheduler/runtime step.
 
 Example bootstrap on a Windows PC:

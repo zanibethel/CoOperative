@@ -55,6 +55,7 @@ $workerFiles = @(
   "windows-local-voice.py",
   "windows-local-web-search.py",
   "windows-model-plan.py",
+  "windows-text-benchmark.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
   "control-unison-windows.ps1",
@@ -97,6 +98,7 @@ finally {
 $env:UV_CACHE_DIR = Get-MachineEnv "UV_CACHE_DIR"
 $env:UV_PYTHON_INSTALL_DIR = Get-MachineEnv "UV_PYTHON_INSTALL_DIR"
 $modelPlanner = Join-Path $installDir "windows-model-plan.py"
+$modelBenchmark = Join-Path $installDir "windows-text-benchmark.py"
 $modelPlanPath = Join-Path $installDir "text-model-plan.json"
 if (Test-Path $modelPlanner) {
   Write-Host "Refreshing adaptive model plan..."
@@ -127,6 +129,28 @@ if (-not $ollamaExe -or -not (Test-Path $ollamaExe)) {
     Set-MachineEnv "WINDOWS_TEXT_BACKEND" "ollama"
   } catch {
     Write-Host "Shared Ollama repair warning: $($_.Exception.Message)"
+  }
+}
+
+if ($ollamaExe -and (Test-Path $ollamaExe) -and (Test-Path $modelBenchmark)) {
+  try {
+    $env:UNISON_OLLAMA_EXE = $ollamaExe
+    $env:UNISON_OLLAMA_URL = $(if (Get-MachineEnv "UNISON_OLLAMA_URL") { Get-MachineEnv "UNISON_OLLAMA_URL" } else { "http://127.0.0.1:11435" })
+    $env:OLLAMA_HOST = $env:UNISON_OLLAMA_URL.Replace("http://", "")
+    $storedModels = Get-MachineEnv "OLLAMA_MODELS"
+    if ($storedModels) { $env:OLLAMA_MODELS = $storedModels }
+    Write-Host "Re-benchmarking Fast and Quality models..."
+    & $uvExe run $modelBenchmark | Out-Null
+    if (Test-Path $modelPlanPath) {
+      $plan = Get-Content $modelPlanPath -Raw | ConvertFrom-Json
+      Set-MachineEnv "WINDOWS_TEXT_BACKEND" "ollama"
+      Set-MachineEnv "WINDOWS_TEXT_FAST_MODEL_ID" ([string]$plan.models.fast)
+      Set-MachineEnv "WINDOWS_TEXT_QUALITY_MODEL_ID" ([string]$plan.models.quality)
+      Set-MachineEnv "WINDOWS_TEXT_HEAVY_MODEL_ID" ([string]$plan.models.heavy)
+      if ($plan.models.vision) { Set-MachineEnv "WINDOWS_VISION_MODEL_ID" ([string]$plan.models.vision) }
+    }
+  } catch {
+    Write-Host "Adaptive benchmark warning: $($_.Exception.Message)"
   }
 }
 

@@ -53,6 +53,7 @@ $installDir = Join-Path $env:ProgramData "CoOperative\Unison"
 $runtimeDir = Join-Path $installDir "runtime"
 $uvExe = Join-Path $runtimeDir "uv\uv.exe"
 $modelPlanner = Join-Path $installDir "windows-model-plan.py"
+$modelBenchmark = Join-Path $installDir "windows-text-benchmark.py"
 $modelPlanPath = Join-Path $installDir "text-model-plan.json"
 $modelsDir = Join-Path $installDir "models"
 $ollamaDir = Join-Path $runtimeDir "ollama"
@@ -110,6 +111,12 @@ if (Test-Path $modelPlanner) {
     $adaptiveQualityModel = [string]$plan.models.quality
     $adaptiveHeavyModel = [string]$plan.models.heavy
     if ($plan.models.vision) { $adaptiveVisionModel = [string]$plan.models.vision }
+
+    if ($plan.hardware.gpus -and $plan.hardware.gpus.Count -gt 0) {
+      $gpu = $plan.hardware.gpus | Sort-Object { [int]$_.memoryTotalMb } -Descending | Select-Object -First 1
+      Write-Host "Detected GPU: $($gpu.name) ($($gpu.memoryTotalMb) MB reported/normalized VRAM)"
+      Write-Host "Preferred acceleration path: $($plan.acceleration.preferred)"
+    }
   }
 }
 
@@ -133,6 +140,31 @@ if (-not $ollamaExe) {
 
 if ($ollamaExe) {
   $adaptiveBackend = "ollama"
+
+  # Benchmark on the same private Ollama endpoint the machine worker will use.
+  $env:UNISON_OLLAMA_EXE = $ollamaExe
+  $env:UNISON_OLLAMA_URL = "http://127.0.0.1:11435"
+  $env:OLLAMA_HOST = "127.0.0.1:11435"
+  $env:OLLAMA_MODELS = $modelsDir
+
+  if (Test-Path $modelBenchmark) {
+    try {
+      Write-Host "Benchmarking Fast and Quality models on this PC. This can download several GB once..."
+      & $uvExe run $modelBenchmark | Out-Null
+      if (Test-Path $modelPlanPath) {
+        $plan = Get-Content $modelPlanPath -Raw | ConvertFrom-Json
+        $adaptiveFastModel = [string]$plan.models.fast
+        $adaptiveQualityModel = [string]$plan.models.quality
+        $adaptiveHeavyModel = [string]$plan.models.heavy
+        if ($plan.models.vision) { $adaptiveVisionModel = [string]$plan.models.vision }
+        Write-Host "Measured acceleration: $($plan.acceleration.observedBackend); GPU offload verified=$($plan.acceleration.gpuOffloadVerified)"
+      }
+    } catch {
+      Write-Host "Adaptive benchmark warning: $($_.Exception.Message)"
+      Write-Host "Keeping the conservative hardware-selected model plan."
+    }
+  }
+
   Write-Host "Adaptive text plan: Fast=$adaptiveFastModel Quality=$adaptiveQualityModel Heavy=$adaptiveHeavyModel"
 } else {
   Write-Host "Quantized runtime unavailable; using the proven 1.5B fallback until repair can add it."

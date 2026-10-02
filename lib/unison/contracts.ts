@@ -6,6 +6,8 @@ export const unisonNodeStateSchema = z.enum(["online", "idle", "busy", "paused"]
 const gpuSchema = z.object({
   name: z.string().min(1).max(240),
   memoryTotalMb: z.number().int().nonnegative().nullable().optional(),
+  vendor: z.string().max(40).optional(),
+  driverVersion: z.string().max(120).optional(),
 });
 
 const textModelPlanSchema = z.object({
@@ -30,6 +32,25 @@ const textBenchmarkSchema = z.object({
   recordedAt: z.string().max(80).default(""),
 });
 
+const textBenchmarkResultSchema = z.object({
+  model: z.string().max(160).default(""),
+  targetProfiles: z.array(z.string().max(32)).max(4).default([]),
+  success: z.boolean().default(false),
+  latencyMs: z.number().int().nonnegative().default(0),
+  tokensPerSecond: z.number().nonnegative().nullable().optional(),
+  vramBytes: z.number().int().nonnegative().default(0),
+  modelSizeBytes: z.number().int().nonnegative().default(0),
+  gpuOffloadRatio: z.number().min(0).max(1).default(0),
+  recordedAt: z.string().max(80).default(""),
+});
+
+const textAccelerationSchema = z.object({
+  preferred: z.string().max(80).default(""),
+  observedBackend: z.string().max(80).default(""),
+  gpuOffloadVerified: z.boolean().default(false),
+  maxObservedGpuOffloadRatio: z.number().min(0).max(1).default(0),
+});
+
 export const unisonNodeHeartbeatSchema = z.object({
   nodeId: z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/),
   displayName: z.string().min(1).max(160),
@@ -51,6 +72,8 @@ export const unisonNodeHeartbeatSchema = z.object({
     maxMemoryMb: z.number().int().positive().nullable().optional(),
     textModelPlan: textModelPlanSchema.optional(),
     textBenchmark: textBenchmarkSchema.optional(),
+    textBenchmarks: z.array(textBenchmarkResultSchema).max(8).optional(),
+    textAcceleration: textAccelerationSchema.optional(),
   }),
   policy: z.object({
     idleOnly: z.boolean().default(true),

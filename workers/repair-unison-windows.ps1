@@ -93,6 +93,7 @@ $workerFiles = @(
   "windows-local-voice.py",
   "windows-local-web-search.py",
   "windows-model-plan.py",
+  "windows-text-benchmark.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
   "control-unison-windows.ps1",
@@ -126,6 +127,7 @@ finally {
 }
 
 $modelPlanner = Join-Path $installDir "windows-model-plan.py"
+$modelBenchmark = Join-Path $installDir "windows-text-benchmark.py"
 $modelPlanPath = Join-Path $installDir "text-model-plan.json"
 if (Test-Path $modelPlanner) {
   Write-Host "Refreshing adaptive local AI plan..."
@@ -145,6 +147,17 @@ if (Test-Path $modelPlanner) {
       }
 
       if ($ollama) {
+        $env:UNISON_OLLAMA_EXE = $ollama
+        $env:UNISON_OLLAMA_URL = "http://127.0.0.1:11434"
+        if (Test-Path $modelBenchmark) {
+          try {
+            Write-Host "Re-benchmarking Fast and Quality models..."
+            & uv run $modelBenchmark | Out-Null
+            $plan = Get-Content $modelPlanPath -Raw | ConvertFrom-Json
+          } catch {
+            Write-Host "Adaptive benchmark warning: $($_.Exception.Message)"
+          }
+        }
         Set-UserEnv "WINDOWS_TEXT_BACKEND" "ollama"
         Set-UserEnv "WINDOWS_TEXT_FAST_MODEL_ID" ([string]$plan.models.fast)
         Set-UserEnv "WINDOWS_TEXT_QUALITY_MODEL_ID" ([string]$plan.models.quality)

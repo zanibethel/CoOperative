@@ -35,6 +35,7 @@ $adaptiveQualityModel = $adaptiveFastModel
 $adaptiveHeavyModel = $adaptiveFastModel
 $adaptiveVisionModel = "qwen2.5vl:3b"
 $modelPlanner = Join-Path $PSScriptRoot "windows-model-plan.py"
+$modelBenchmark = Join-Path $PSScriptRoot "windows-text-benchmark.py"
 $modelPlanPath = Join-Path $PSScriptRoot "text-model-plan.json"
 
 if (Test-Path $modelPlanner) {
@@ -60,9 +61,33 @@ if (Test-Path $modelPlanner) {
         $adaptiveFastModel = [string]$plan.models.fast
         $adaptiveQualityModel = [string]$plan.models.quality
         $adaptiveHeavyModel = [string]$plan.models.heavy
-    if ($plan.models.vision) { $adaptiveVisionModel = [string]$plan.models.vision }
+        if ($plan.models.vision) { $adaptiveVisionModel = [string]$plan.models.vision }
+
+        if ($plan.hardware.gpus -and $plan.hardware.gpus.Count -gt 0) {
+          $gpu = $plan.hardware.gpus | Sort-Object { [int]$_.memoryTotalMb } -Descending | Select-Object -First 1
+          Write-Host "Detected GPU: $($gpu.name) ($($gpu.memoryTotalMb) MB reported/normalized VRAM)"
+          Write-Host "Preferred acceleration path: $($plan.acceleration.preferred)"
+        }
+
+        $env:UNISON_OLLAMA_EXE = $ollama
+        $env:UNISON_OLLAMA_URL = "http://127.0.0.1:11434"
+        if (Test-Path $modelBenchmark) {
+          try {
+            Write-Host "Benchmarking Fast and Quality models on this PC. This can download several GB once..."
+            & uv run $modelBenchmark | Out-Null
+            $plan = Get-Content $modelPlanPath -Raw | ConvertFrom-Json
+            $adaptiveFastModel = [string]$plan.models.fast
+            $adaptiveQualityModel = [string]$plan.models.quality
+            $adaptiveHeavyModel = [string]$plan.models.heavy
+            if ($plan.models.vision) { $adaptiveVisionModel = [string]$plan.models.vision }
+            Write-Host "Measured acceleration: $($plan.acceleration.observedBackend); GPU offload verified=$($plan.acceleration.gpuOffloadVerified)"
+          } catch {
+            Write-Host "Adaptive benchmark warning: $($_.Exception.Message)"
+            Write-Host "Keeping the conservative hardware-selected model plan."
+          }
+        }
+
         Write-Host "Adaptive model plan: Fast=$adaptiveFastModel Quality=$adaptiveQualityModel Heavy=$adaptiveHeavyModel"
-        Write-Host "Fast will be fetched when first needed; larger models stay lazy until routed work requires them."
       } else {
         Write-Host "Ollama is unavailable; keeping the proven 1.5B Transformers fallback."
       }
