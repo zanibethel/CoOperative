@@ -112,6 +112,22 @@ function conciseFailureDetail(value: unknown) {
     .slice(0, 700);
 }
 
+function providerCreditBoundary(value: unknown) {
+  if (typeof value !== "string") return false;
+  const text = value.toLowerCase();
+  return (
+    text.includes("402") ||
+    text.includes("insufficient credits") ||
+    text.includes("purchase credits") ||
+    text.includes("billing issue")
+  );
+}
+
+function aspectRatioFromPrompt(value: string) {
+  const match = value.match(/\b(1:1|4:5|3:2|16:9|9:16)\b/);
+  return match?.[1] || "4:5";
+}
+
 function estimatedMediaProviderCostUsd(
   model: MediaCatalogModel,
   durationSeconds: number | null,
@@ -496,6 +512,64 @@ export async function POST(request: Request) {
                 "CoOperative prevented a duplicate retry because the previous media job already completed.",
             },
             { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        if (
+          recentMedia.kind === "image" &&
+          providerCreditBoundary(recentMedia.error)
+        ) {
+          const localJobId = crypto.randomUUID();
+          const { error: localJobError } = await admin
+            .from("inference_jobs")
+            .insert({
+              id: localJobId,
+              kind: "image",
+              status: "queued",
+              client_owner_ref: ownerRef,
+              prompt: recentMedia.prompt,
+              aspect_ratio: aspectRatioFromPrompt(recentMedia.prompt),
+              profile: "quality",
+              variation_mode: "balanced",
+              seed:
+                Number.parseInt(localJobId.replaceAll("-", "").slice(0, 8), 16) %
+                2147483648,
+            });
+          if (localJobError) throw localJobError;
+
+          const { error: localRetryMessageError } = await admin
+            .from("local_ai_messages")
+            .insert({
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: input.message.trim(),
+              attachment_ids: [],
+              job_id: localJobId,
+            });
+          if (localRetryMessageError) throw localRetryMessageError;
+
+          await admin
+            .from("local_ai_conversations")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", conversationId)
+            .eq("owner_ref", ownerRef);
+
+          return NextResponse.json(
+            {
+              jobId: localJobId,
+              status: "queued",
+              execution: "media",
+              capability: "image",
+              conversationId,
+              conversationTitle,
+              provider: "cooperative-local",
+              model: "local-image-quality",
+              routeReason:
+                "OpenRouter refused the cloud generation because the provider account has no credits. CoOperative preserved the spending boundary and rerouted the image to owned local quality generation at no provider charge.",
+              estimatedProviderCostUsd: 0,
+            },
+            { status: 202, headers: { "Cache-Control": "no-store" } },
           );
         }
 
@@ -1451,9 +1525,89 @@ export async function GET(request: Request) {
       if (mediaError) throw mediaError;
 
       if (!mediaJob) {
-        return jobId
-          ? NextResponse.json({ error: "Job not found." }, { status: 404 })
-          : new Response(null, { status: 204 });
+        let localImageQuery = admin
+          .from("inference_jobs")
+          .select(
+            "id,status,prompt,aspect_ratio,profile,result_path,result_model,result_provider,worker_id,error,created_at,completed_at",
+          )
+          .eq("client_owner_ref", ownerRef);
+
+        localImageQuery = jobId
+          ? localImageQuery.eq("id", jobId)
+          : localImageQuery
+              .in("status", ["queued", "running"])
+              .order("created_at", { ascending: false })
+              .limit(1);
+
+        const { data: localImageJob, error: localImageError } =
+          await localImageQuery.maybeSingle();
+        if (localImageError) throw localImageError;
+
+        if (!localImageJob) {
+          return jobId
+            ? NextResponse.json({ error: "Job not found." }, { status: 404 })
+            : new Response(null, { status: 204 });
+        }
+
+        let mediaUrl: string | null = null;
+        if (localImageJob.status === "completed" && localImageJob.result_path) {
+          const { data: signed, error: signError } = await admin.storage
+            .from("inference-job-assets")
+            .createSignedUrl(localImageJob.result_path, 15 * 60);
+          if (signError) throw signError;
+          mediaUrl = signed?.signedUrl || null;
+        }
+
+        if (localImageJob.status === "completed" && mediaUrl) {
+          const resultText =
+            `Generated image locally with ${localImageJob.result_model || "CoOperative local image model"}.\nMEDIA_IMAGE:${mediaUrl}`;
+
+          const { data: existingResultMessage } = await admin
+            .from("local_ai_messages")
+            .select("id")
+            .eq("conversation_id", conversationId)
+            .eq("owner_ref", ownerRef)
+            .eq("content", resultText)
+            .limit(1)
+            .maybeSingle();
+
+          if (!existingResultMessage) {
+            await admin.from("local_ai_messages").insert({
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: resultText,
+              attachment_ids: [],
+              job_id: null,
+            });
+          }
+        }
+
+        return NextResponse.json(
+          {
+            jobId: localImageJob.id,
+            execution: "media",
+            status: localImageJob.status,
+            conversationId,
+            capability: "image",
+            provider: localImageJob.result_provider || "cooperative-local",
+            model: localImageJob.result_model || "local-image-quality",
+            text:
+              localImageJob.status === "completed" && mediaUrl
+                ? `Generated image locally with ${localImageJob.result_model || "CoOperative local image model"}.\nMEDIA_IMAGE:${mediaUrl}`
+                : null,
+            mediaUrl,
+            workerId: localImageJob.worker_id,
+            error: localImageJob.error,
+            routeReason:
+              localImageJob.status === "completed"
+                ? "Owned local image generation completed after the cloud provider hit an account-credit boundary."
+                : "Owned local image generation is handling the request without increasing provider spend.",
+            createdAt: localImageJob.created_at,
+            completedAt: localImageJob.completed_at,
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
       }
 
       if (
