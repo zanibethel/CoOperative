@@ -418,7 +418,7 @@ export async function GET(request: Request) {
     let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,error,created_at,completed_at",
+        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,created_at,completed_at",
       )
       .eq("client_owner_ref", ownerRef);
 
@@ -460,6 +460,7 @@ export async function GET(request: Request) {
         preferredNodeId: job.preferred_node_id,
         targetNodeId: job.target_node_id,
         routeReason: job.route_reason,
+        paidFallbackAllowed: job.allow_paid_fallback === true,
         error: job.error,
         createdAt: job.created_at,
         completedAt: job.completed_at,
