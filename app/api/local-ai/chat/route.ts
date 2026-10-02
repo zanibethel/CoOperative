@@ -584,7 +584,7 @@ export async function POST(request: Request) {
         if (estimatedMicrousd > 0) {
           const estimatedUsd = estimatedMicrousd / 1_000_000;
           const assistantText =
-            `The last media attempt is no longer active, but retrying it could create another paid generation charge of about ${estimatedUsd.toFixed(2)}. I won’t duplicate that spend automatically. Approve another paid generation if you want me to retry it.`;
+            `The last media attempt is no longer active, but retrying it could create another paid generation charge of about ${estimatedUsd.toFixed(2)}. I won’t duplicate that spend automatically. Choose a lower-cost route, keep Nous first, or raise the cap explicitly before retrying.\n\nBUDGET_FOLLOWUPS`;
 
           await admin.from("local_ai_messages").insert([
             {
@@ -902,8 +902,8 @@ export async function POST(request: Request) {
         const minimumBudget = suggestion?.minimumRequestedBudget || 0;
         const message =
           suggestedSeconds >= 1
-            ? `Your current $${(requestCapUsd || 0).toFixed(2)} cap is below the estimated cost for a ${requestedSeconds}s video. To stay inside the cap, I can reduce the test to about ${suggestedSeconds}s at 360p with audio off. Or raise this request to about $${minimumBudget.toFixed(2)} for the full ${requestedSeconds}s low-cost test. Nous credits stay first; OpenRouter is only backup.`
-            : `Your current $${(requestCapUsd || 0).toFixed(2)} cap is below the cheapest managed video test I can price safely. Raise the request cap or reduce duration/quality before I spend anything. Nous credits stay first; OpenRouter is only backup.`;
+            ? `Your current ${(requestCapUsd || 0).toFixed(2)} cap is below the estimated cost for a ${requestedSeconds}s video. To stay inside the cap, I can reduce the test to about ${suggestedSeconds}s at 360p with audio off. Or raise this request to about ${minimumBudget.toFixed(2)} for the full ${requestedSeconds}s low-cost test. Nous credits stay first; OpenRouter is only backup.\n\nBUDGET_FOLLOWUPS`
+            : `Your current ${(requestCapUsd || 0).toFixed(2)} cap is below the cheapest managed video test I can price safely. Raise the request cap or reduce duration/quality before I spend anything. Nous credits stay first; OpenRouter is only backup.\n\nBUDGET_FOLLOWUPS`;
 
         await admin.from("local_ai_messages").insert([
           {
@@ -994,7 +994,7 @@ export async function POST(request: Request) {
         estimatedProviderCostUsd > requestCapUsd
       ) {
         const message =
-          `The live estimate for ${selectedModel} is about $${estimatedProviderCostUsd.toFixed(2)}, above this request's $${requestCapUsd.toFixed(2)} max-spend cap. Raise the cap or lower the Media slider.`;
+          `The live estimate for ${selectedModel} is about ${estimatedProviderCostUsd.toFixed(2)}, above this request's ${requestCapUsd.toFixed(2)} max-spend cap. Raise the cap or lower the Media slider. Nous remains the first managed paid source; OpenRouter stays backup.\n\nBUDGET_FOLLOWUPS`;
         const { error: capError } = await admin
           .from("local_ai_messages")
           .insert([
