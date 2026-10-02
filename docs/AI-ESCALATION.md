@@ -1,6 +1,6 @@
 # Governed AI Escalation
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 CoOperative should not force every task through the same model.
 
@@ -99,6 +99,12 @@ For high-risk or high-value work, the required success floor should be raised.
 
 No surprise paid fallback remains a hard rule.
 
+Platform-paid high-quality AI has an additional hard prerequisite: the authenticated CoOperative profile must have an available funded AI balance. A configured provider key, a configured model, or a positive monthly technology budget does not count as funded execution balance.
+
+Before a platform-paid request is sent, CoOperative atomically reserves enough profile balance for the estimated request cost plus a small estimate-drift buffer. After the provider returns metered usage, CoOperative settles the actual configured cost and releases the unused reserve. Concurrent requests cannot reserve the same funds twice.
+
+Business-owned AI is tracked separately because provider billing belongs to the connected business account rather than the CoOperative-funded balance.
+
 The evaluator distinguishes:
 
 - `stay-local` — insufficient evidence that escalation is warranted;
@@ -151,17 +157,21 @@ Implemented in the first escalation layer:
 - unknown-cost approval gate;
 - first paid execution adapter for OpenAI Responses API;
 - guarded execution endpoint at `/api/inference/text/escalation/execute`;
-- environment-controlled qualification, benchmark, model, pricing, context, and business-owned flags.
+- environment-controlled qualification, benchmark, model, pricing, context, and business-owned flags;
+- profile-level funded AI balances stored in micro-USD;
+- atomic reserve / settle / release operations;
+- an append-only credit/debit usage ledger;
+- server-authoritative balance checks before platform-paid execution;
+- CreatorHub stronger-model retries constrained by the user's funded profile balance.
 
-The OpenAI adapter is inert unless it is explicitly enabled, configured, benchmark-qualified, and the evaluator returns `escalate`. Merely having an API key does not authorize paid execution.
+The OpenAI adapter is inert unless it is explicitly enabled, configured, benchmark-qualified, the evaluator returns `escalate`, and the profile has enough available funded balance to cover the estimated request. Merely having an API key does not authorize paid execution.
 
 Not yet implemented:
 
-- automatic repo-agent/local-chat invocation after a local miss;
-- additional provider adapters such as Anthropic/AWS/business-hosted endpoints;
+- fully automatic local-chat escalation after a local capability miss;
+- additional platform-paid provider adapters such as Anthropic/AWS/Gemini;
 - persistent per-model benchmark registry;
-- per-tenant automatic spend budgets;
-- cost ledger for paid model calls;
+- customer-facing balance top-up/payment flow;
 - independent verification of paid-model output.
 
 The evaluator remains separate from provider execution so CoOperative can change GPT/Claude/Gemini/AWS/open-weight providers without changing policy logic.
