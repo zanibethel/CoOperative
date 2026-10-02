@@ -188,6 +188,85 @@ function videoControlsFromPrompt(prompt: string) {
   };
 }
 
+type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
+
+function attachmentExtension(mimeType: string) {
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  return "jpg";
+}
+
+async function stageLocalImageReferences(
+  admin: AdminClient,
+  ownerRef: string,
+  jobId: string,
+  attachmentIds: string[],
+) {
+  if (!attachmentIds.length) return [];
+
+  const { data: attachments, error: attachmentError } = await admin
+    .from("local_ai_attachments")
+    .select("id,storage_path,file_name,mime_type")
+    .eq("owner_ref", ownerRef)
+    .in("id", attachmentIds);
+
+  if (attachmentError) throw attachmentError;
+  if (!attachments || attachments.length !== attachmentIds.length) {
+    throw new Error("One or more reference images are no longer available.");
+  }
+
+  const byId = new Map(attachments.map((attachment) => [attachment.id, attachment]));
+  const referencePaths: Array<{
+    path: string;
+    title?: string;
+    contentType: string;
+  }> = [];
+
+  try {
+    for (let index = 0; index < attachmentIds.length; index += 1) {
+      const attachment = byId.get(attachmentIds[index]);
+      if (!attachment) throw new Error("Reference image metadata is missing.");
+
+      const { data: blob, error: downloadError } = await admin.storage
+        .from("local-ai-attachments")
+        .download(attachment.storage_path);
+      if (downloadError) throw downloadError;
+
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      if (!bytes.length || bytes.byteLength > 12 * 1024 * 1024) {
+        throw new Error("Reference image is empty or exceeds the local inference limit.");
+      }
+
+      const contentType = attachment.mime_type || "image/jpeg";
+      const path =
+        `jobs/${jobId}/references/${index}.${attachmentExtension(contentType)}`;
+      const { error: uploadError } = await admin.storage
+        .from("inference-job-assets")
+        .upload(path, bytes, {
+          contentType,
+          cacheControl: "3600",
+          upsert: false,
+        });
+      if (uploadError) throw uploadError;
+
+      referencePaths.push({
+        path,
+        title: attachment.file_name || undefined,
+        contentType,
+      });
+    }
+
+    return referencePaths;
+  } catch (error) {
+    if (referencePaths.length) {
+      await admin.storage
+        .from("inference-job-assets")
+        .remove(referencePaths.map((reference) => reference.path));
+    }
+    throw error;
+  }
+}
+
 export async function POST(request: Request) {
   const owner = await currentOwner();
   if (!owner) {
@@ -822,6 +901,7 @@ export async function POST(request: Request) {
     }
 
     let effectiveMediaRequestText = input.message.trim();
+    let effectiveMediaAttachmentIds = [...input.attachmentIds];
     let mediaPlan = planMediaRequest(effectiveMediaRequestText);
 
     if (
@@ -832,7 +912,7 @@ export async function POST(request: Request) {
       const { data: recentConversationRows, error: recentConversationError } =
         await admin
           .from("local_ai_messages")
-          .select("role,content")
+          .select("role,content,attachment_ids")
           .eq("conversation_id", conversationId)
           .eq("owner_ref", ownerRef)
           .order("created_at", { ascending: false })
@@ -848,6 +928,9 @@ export async function POST(request: Request) {
           row.content.trim() +
           "\nFollow-up preference: " +
           input.message.trim();
+        effectiveMediaAttachmentIds = Array.isArray(row.attachment_ids)
+          ? row.attachment_ids.slice(0, 4)
+          : [];
         mediaPlan = planMediaRequest(effectiveMediaRequestText);
         if (mediaPlan) break;
       }
@@ -902,9 +985,12 @@ export async function POST(request: Request) {
         );
       }
 
-      if (input.attachmentIds.length > 0) {
+      if (
+        mediaPlan.kind === "video" &&
+        effectiveMediaAttachmentIds.length > 0
+      ) {
         const message =
-          "Text-to-media generation is ready. Image-to-video/reference-image generation is the next media slice, so remove the attachment for this first smoke test or describe the desired scene in text.";
+          "I understand this as a new video request using a reference image. Reference-image video generation is not connected to a verified route yet, so I did not blend it with an earlier request or start a generation.";
         const { error: unsupportedError } = await admin
           .from("local_ai_messages")
           .insert([
@@ -913,7 +999,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: input.attachmentIds,
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -936,7 +1022,7 @@ export async function POST(request: Request) {
             conversationTitle,
             text: message,
             provider: "code",
-            model: "media-preflight",
+            model: "media-reference-video-preflight",
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
