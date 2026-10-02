@@ -63,7 +63,10 @@ jobs:
               } catch {}
             }
             if (-not $ready) { throw "Personal Local AI server did not become ready." }
+            if ($status.features.imageGeneration -ne $true) { throw "Personal Local AI did not advertise image generation." }
             Write-Host "Personal Local AI loopback server verified."
+
+            python -c "import runpy; m=runpy.run_path('workers/windows-local-chat.py'); assert m['wants_image_generation']('create an image of a blue robot'); assert not m['wants_image_generation']('analyze this image'); assert m['image_aspect_ratio']('make a 16:9 wallpaper') == '16:9'; print('Personal AI image intent verified.')"
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
