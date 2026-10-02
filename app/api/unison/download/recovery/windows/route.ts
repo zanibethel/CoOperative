@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { authenticatedUserId } from "@/lib/supabase/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { canManageNode } from "@/lib/unison/node-access";
 
 export const runtime = "nodejs";
 
@@ -32,11 +33,17 @@ export async function GET(request: Request) {
   }
 
   const admin = createAdminSupabaseClient();
+  if (!(await canManageNode(admin, userId, parsed.data.nodeId))) {
+    return NextResponse.json(
+      { error: "Only a device owner or admin can repair or restart this node." },
+      { status: 403 },
+    );
+  }
+
   const { data: node, error } = await admin
     .from("unison_nodes")
     .select("id,display_name")
     .eq("id", parsed.data.nodeId)
-    .eq("contributor_user_id", userId)
     .maybeSingle();
 
   if (error) {
