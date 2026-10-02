@@ -2258,3 +2258,48 @@ b { color: var(--text); }
     gap: 3px;
   }
 }
+
+
+.recovery-executor-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--muted);
+  font-size: .68rem;
+  line-height: 1.35;
+}
+
+.recovery-executor-strip span {
+  min-width: 0;
+}
+
+.recovery-executor-strip strong {
+  color: var(--text);
+  font-size: .65rem;
+  text-transform: uppercase;
+  letter-spacing: .045em;
+}
+
+
+.personal-recovery-executor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--muted);
+  font-size: .66rem;
+}
+
+.personal-recovery-executor strong {
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: .045em;
+  font-size: .63rem;
+}

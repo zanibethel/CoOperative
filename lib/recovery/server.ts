@@ -1077,12 +1077,25 @@ async function syncDebuggerStatus(
 
   const { data: task, error } = await admin
     .from("agent_tasks")
-    .select("id,status,result,error,branch_name,updated_at,completed_at")
+    .select("id,status,result,error,branch_name,worker_id,requested_profile,updated_at,completed_at")
     .eq("id", incident.agent_task_id)
     .eq("owner_ref", incident.owner_ref)
     .maybeSingle();
   if (error) throw error;
   if (!task) return incident;
+
+  if (task.status === "queued") {
+    const current =
+      "Recovery Agent is waiting for an available local debugger worker to claim this repair.";
+    if (current !== incident.current_message) {
+      await admin
+        .from("recovery_incidents")
+        .update({ current_message: current, updated_at: nowIso() })
+        .eq("id", incident.id)
+        .eq("owner_ref", incident.owner_ref);
+    }
+    return { ...incident, current_message: current };
+  }
 
   if (task.status === "running" || task.status === "waiting_llm") {
     const current =
@@ -1358,14 +1371,76 @@ export async function refreshRecoveryIncident(
           model: typeof rawMeta.model === "string" ? rawMeta.model : undefined,
           executor:
             typeof rawMeta.executor === "string" ? rawMeta.executor : undefined,
+          provider:
+            typeof rawMeta.provider === "string" ? rawMeta.provider : undefined,
           checks: Array.isArray(rawMeta.checks) ? rawMeta.checks : undefined,
         },
         created_at: event.created_at,
       };
     });
 
+    const { data: task } = await admin
+      .from("agent_tasks")
+      .select("id,status,worker_id,requested_profile,agent_key")
+      .eq("id", latest.agent_task_id)
+      .eq("owner_ref", ownerRef)
+      .maybeSingle();
+
+    const latestModelEvent = [...safeAgentEvents]
+      .reverse()
+      .find(
+        (event) =>
+          event.metadata &&
+          (typeof event.metadata.model === "string" ||
+            typeof event.metadata.executor === "string"),
+      );
+
+    const rawWorkerId =
+      task?.worker_id && typeof task.worker_id === "string"
+        ? task.worker_id
+        : null;
+    const likelyNodeId = rawWorkerId
+      ? rawWorkerId.replace(/-repo-agent$/i, "")
+      : null;
+
+    let nodeName: string | null = null;
+    if (likelyNodeId) {
+      const { data: exactNode } = await admin
+        .from("unison_nodes")
+        .select("id,display_name")
+        .eq("id", likelyNodeId)
+        .maybeSingle();
+
+      if (exactNode) {
+        nodeName = exactNode.display_name || exactNode.id;
+      }
+    }
+
     return {
       incident: latest,
+      executor: {
+        agent: task?.agent_key || "debugger",
+        taskStatus: task?.status || "unknown",
+        workerId: rawWorkerId,
+        deviceName: nodeName,
+        requestedProfile: task?.requested_profile || null,
+        executor:
+          latestModelEvent?.metadata &&
+          typeof latestModelEvent.metadata.executor === "string"
+            ? latestModelEvent.metadata.executor
+            : null,
+        provider:
+          latestModelEvent?.metadata &&
+          typeof latestModelEvent.metadata.provider === "string"
+            ? latestModelEvent.metadata.provider
+            : null,
+        model:
+          latestModelEvent?.metadata &&
+          typeof latestModelEvent.metadata.model === "string"
+            ? latestModelEvent.metadata.model
+            : null,
+        waitingForWorker: task?.status === "queued" && !rawWorkerId,
+      },
       events: [...(events || []), ...safeAgentEvents].sort((a, b) =>
         String(a.created_at).localeCompare(String(b.created_at)),
       ),

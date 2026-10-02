@@ -21,6 +21,7 @@ import os
 import platform
 import socket
 from pathlib import Path
+import runpy
 import threading
 import time
 from typing import Literal
@@ -77,7 +78,43 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.9.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.9.2")
+
+def start_repo_recovery_worker():
+    enabled = os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        print("Local repo Recovery Agent auto-start disabled.", flush=True)
+        return None
+
+    script = Path(__file__).with_name("repo-agent-worker.py")
+    if not script.exists():
+        print("Local repo Recovery Agent script not found; background code repair unavailable.", flush=True)
+        return None
+    if not WORKER_TOKEN:
+        print("Local repo Recovery Agent not started: worker token is unavailable.", flush=True)
+        return None
+
+    os.environ.setdefault("INFERENCE_WORKER_TOKEN", WORKER_TOKEN)
+    os.environ.setdefault("COOPERATIVE_QUEUE_URL", QUEUE_URL)
+
+    def runner():
+        try:
+            runpy.run_path(str(script), run_name="__main__")
+        except Exception as exc:
+            print(
+                "Local repo Recovery Agent stopped: " + str(exc)[:800],
+                flush=True,
+            )
+
+    thread = threading.Thread(
+        target=runner,
+        daemon=True,
+        name="cooperative-repo-recovery",
+    )
+    thread.start()
+    print("Local repo Recovery Agent polling started.", flush=True)
+    return thread
+
 
 MODEL_LOCK = threading.Lock()
 UNISON_BUSY = threading.Event()
@@ -650,11 +687,12 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.9.1"
+            else "image-worker-0.9.2"
         ),
         busy_provider=unison_busy,
     )
     print("UNISON_RUNTIME_STARTED", flush=True)
+    start_repo_recovery_worker()
 
     if PRELOAD_PROFILE in {"fast", "quality"}:
         try:
