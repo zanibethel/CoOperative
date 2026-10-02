@@ -205,13 +205,11 @@ async function buildCatalog(): Promise<MediaCatalog> {
     const architecture = row.architecture && typeof row.architecture === "object"
       ? (row.architecture as Record<string, unknown>)
       : {};
-    const supported = row.supported_parameters && typeof row.supported_parameters === "object"
-      ? (row.supported_parameters as Record<string, unknown>)
-      : {};
     const pricing = videoPricing(row.pricing_skus);
     const durations = Array.isArray(row.supported_durations)
       ? row.supported_durations.map(numberValue).filter((value): value is number => value !== null)
       : [];
+    if (!durations.length) return [];
     const free = id.endsWith(":free") || (pricing.min === 0 && pricing.max === 0);
     return [{
       id,
@@ -222,10 +220,10 @@ async function buildCatalog(): Promise<MediaCatalog> {
       minUnitCostUsd: pricing.min,
       maxUnitCostUsd: pricing.max,
       costLabel: costLabel(pricing.min, pricing.max, pricing.unit),
-      inputModalities: Array.isArray(architecture.input_modalities)
-        ? architecture.input_modalities.filter((item): item is string => typeof item === "string")
+      inputModalities: row.supported_frame_images ? ["text", "image"] : ["text"],
+      aspectRatios: Array.isArray(row.supported_aspect_ratios)
+        ? row.supported_aspect_ratios.filter((item): item is string => typeof item === "string")
         : [],
-      aspectRatios: enumValues(supported.aspect_ratio),
       durations,
     }];
   });
@@ -297,4 +295,25 @@ export function recommendedForLevel(models: MediaCatalogModel[], level: 0 | 1 | 
     return cost !== null && cost > floor && (ceiling === null || cost <= ceiling);
   });
   return candidates[0] || free[0] || models.find((model) => model.minUnitCostUsd !== null) || null;
+}
+
+
+export function recommendedForRequest(
+  models: MediaCatalogModel[],
+  level: 0 | 1 | 2 | 3 | 4,
+  request: { durationSeconds?: number | null; aspectRatio?: string | null } = {},
+) {
+  const capable = models.filter((model) => {
+    const durationOk =
+      !request.durationSeconds ||
+      model.durations.length === 0 ||
+      model.durations.includes(request.durationSeconds);
+    const aspectOk =
+      !request.aspectRatio ||
+      model.aspectRatios.length === 0 ||
+      model.aspectRatios.includes(request.aspectRatio);
+    return durationOk && aspectOk;
+  });
+
+  return recommendedForLevel(capable.length ? capable : models, level);
 }
