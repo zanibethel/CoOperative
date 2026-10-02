@@ -25,6 +25,7 @@ import {
   recommendedForRequest,
   type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
+import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -384,6 +385,58 @@ export async function POST(request: Request) {
         );
       }
 
+      const openRouterService =
+        selectedProvider === "openrouter"
+          ? await businessOwnedServiceCredentialForOwner(
+              ownerRef,
+              "openrouter-api",
+            )
+          : null;
+      const providerCredential =
+        openRouterService?.credential ||
+        process.env.OPENROUTER_API_KEY?.trim() ||
+        undefined;
+
+      if (selectedProvider === "openrouter" && !providerCredential) {
+        const message =
+          "OpenRouter is not connected yet. Go to Services, add OpenRouter API, and paste your OpenRouter API key once. CoOperative will keep it in the encrypted server-side vault and use it for image/video generation.";
+        const { error: connectError } = await admin
+          .from("local_ai_messages")
+          .insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: visibleUserText,
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: message,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+        if (connectError) throw connectError;
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-provider-setup",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
       const jobId = crypto.randomUUID();
       const generationPrompt = mediaPromptWithResolvedControls(
         visibleUserText,
@@ -434,6 +487,7 @@ export async function POST(request: Request) {
           userRequest: generationPrompt,
           provider: selectedProvider,
           model: selectedModel,
+          providerCredential,
         });
 
         const { error: mediaStartError } = await admin
