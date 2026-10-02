@@ -144,7 +144,8 @@ export default async function UnisonContributorDashboard() {
                     <span>{resources.memoryTotalMb ? `${Math.round(resources.memoryTotalMb / 1024)} GB RAM` : "RAM pending"}</span>
                     <span>{policy.idleScope === "machine" ? "Whole-PC idle" : "Profile idle"}</span>
                     {capabilities.includes("local_personal_chat") ? <span>Personal Local AI ready</span> : null}
-                    {capabilities.includes("local_ai_images") ? <span>Images</span> : null}
+                    {capabilities.includes("local_ai_images") ? <span>Image understanding</span> : null}
+                    {capabilities.includes("local_ai_image_generation") ? <span>Image creation</span> : null}
                     {capabilities.includes("local_ai_files") ? <span>Files</span> : null}
                     {capabilities.includes("local_ai_web_search") ? <span>Web search</span> : null}
                     {capabilities.includes("local_ai_voice") ? <span>Voice</span> : null}
