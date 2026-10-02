@@ -13,11 +13,11 @@ import {
   textTaskClassSchema,
 } from "@/lib/inference/contracts";
 import {
-  aiProfileBalanceForUser,
+  aiProfileBalanceForOwnerRef,
+  profileRefFromAiOwnerRef,
   releaseAiProfileFunds,
   reserveAiProfileFunds,
   settleAiProfileFunds,
-  userIdFromAiOwnerRef,
 } from "@/lib/billing/ai-profile-balance";
 
 export const runtime = "nodejs";
@@ -56,10 +56,8 @@ export async function POST(request: Request) {
 
   try {
     const input = requestSchema.parse(await request.json());
-    const profileUserId = userIdFromAiOwnerRef(input.ownerRef);
-    const profileBalance = profileUserId
-      ? await aiProfileBalanceForUser(profileUserId)
-      : null;
+    const profileRef = profileRefFromAiOwnerRef(input.ownerRef);
+    const profileBalance = await aiProfileBalanceForOwnerRef(input.ownerRef);
     const requestedEvidence = input.evidence as EscalationEvidence;
     const fundedBalanceUsd = profileBalance?.availableUsd ?? 0;
     const requestedBudget = requestedEvidence.automaticPaidBudgetUsd ?? 0;
@@ -101,7 +99,7 @@ export async function POST(request: Request) {
 
     const estimatedCostUsd = decision.candidate.estimatedMarginalCostUsd;
     if (
-      !profileUserId ||
+      !profileRef ||
       !profileBalance?.funded ||
       typeof estimatedCostUsd !== "number" ||
       !Number.isFinite(estimatedCostUsd) ||
@@ -119,7 +117,7 @@ export async function POST(request: Request) {
     }
 
     const reservation = await reserveAiProfileFunds({
-      userId: profileUserId,
+      profileRef,
       estimatedCostUsd,
       source: "text-escalation",
       referenceId: crypto.randomUUID(),
