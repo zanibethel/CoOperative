@@ -1907,7 +1907,7 @@ export async function GET(request: Request) {
 
         const failure = polled.error || "Hermes media generation failed.";
         const completedAt = new Date().toISOString();
-        await admin
+        const { data: claimedFailure, error: failureUpdateError } = await admin
           .from("media_generation_jobs")
           .update({
             status: "failed",
@@ -1918,7 +1918,199 @@ export async function GET(request: Request) {
           })
           .eq("id", mediaJob.id)
           .eq("owner_ref", ownerRef)
-          .eq("status", "running");
+          .eq("status", "running")
+          .select("id")
+          .maybeSingle();
+        if (failureUpdateError) throw failureUpdateError;
+
+        if (
+          claimedFailure &&
+          mediaJob.provider === "nous" &&
+          providerCreditBoundary(failure)
+        ) {
+          const openRouterService =
+            await businessOwnedServiceCredentialForOwner(
+              ownerRef,
+              "openrouter-api",
+            );
+          const openRouterCredential =
+            openRouterService?.credential ||
+            process.env.OPENROUTER_API_KEY?.trim() ||
+            undefined;
+          const requestCapUsd =
+            typeof mediaJob.request_max_spend_microusd === "number"
+              ? mediaJob.request_max_spend_microusd / 1_000_000
+              : DEFAULT_TEST_SPEND_USD;
+
+          if (openRouterCredential) {
+            try {
+              const catalog = await openRouterMediaCatalog(true);
+              const pool =
+                mediaJob.kind === "video" ? catalog.video : catalog.image;
+              const affordable = affordableOpenRouterModel(
+                pool,
+                Math.min(
+                  4,
+                  Math.max(0, Number(mediaJob.media_level ?? 0)),
+                ) as 0 | 1 | 2 | 3 | 4,
+                {
+                  durationSeconds:
+                    mediaJob.kind === "video"
+                      ? Number(
+                          mediaJob.prompt.match(/\b(\d{1,2})\s*(?:second|seconds|sec|secs|s)\b/i)?.[1] ||
+                            5,
+                        )
+                      : null,
+                  aspectRatio: aspectRatioFromPrompt(mediaJob.prompt),
+                },
+                requestCapUsd,
+              );
+
+              if (affordable) {
+                const fallbackJobId = crypto.randomUUID();
+                const { error: fallbackInsertError } = await admin
+                  .from("media_generation_jobs")
+                  .insert({
+                    id: fallbackJobId,
+                    status: "queued",
+                    owner_ref: ownerRef,
+                    conversation_id: mediaJob.conversation_id,
+                    kind: mediaJob.kind,
+                    prompt: mediaJob.prompt,
+                    provider: "openrouter",
+                    model: affordable.model.id,
+                    model_mixer: mediaJob.model_mixer || null,
+                    request_max_spend_microusd:
+                      mediaJob.request_max_spend_microusd,
+                    media_level: mediaJob.media_level,
+                    estimated_provider_cost_microusd: Math.round(
+                      affordable.estimatedCostUsd * 1_000_000,
+                    ),
+                    pricing_source: catalog.source,
+                    fallback_from_job_id: mediaJob.id,
+                  });
+                if (fallbackInsertError) throw fallbackInsertError;
+
+                try {
+                  const started = await startHermesMediaTask({
+                    jobId: fallbackJobId,
+                    kind: mediaJob.kind,
+                    userRequest: mediaJob.prompt,
+                    provider: "openrouter",
+                    model: affordable.model.id,
+                    providerCredential: openRouterCredential,
+                    orchestratorProvider: "openrouter",
+                    orchestratorModel: "openrouter/free",
+                  });
+
+                  const { error: fallbackStartUpdateError } = await admin
+                    .from("media_generation_jobs")
+                    .update({
+                      status: "running",
+                      sandbox_name: started.sandboxName,
+                      started_at: started.startedAt,
+                      deadline_at: started.deadlineAt,
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", fallbackJobId)
+                    .eq("owner_ref", ownerRef);
+                  if (fallbackStartUpdateError) {
+                    throw fallbackStartUpdateError;
+                  }
+
+                  return NextResponse.json(
+                    {
+                      jobId: fallbackJobId,
+                      execution: "media",
+                      status: "running",
+                      conversationId: mediaJob.conversation_id,
+                      capability: mediaJob.kind,
+                      provider: "openrouter",
+                      model: affordable.model.id,
+                      routeReason:
+                        `Nous reported a credit/billing boundary, so CoOperative automatically moved this request to the best OpenRouter backup that fits the ${requestCapUsd.toFixed(2)} cap.`,
+                      estimatedProviderCostUsd:
+                        affordable.estimatedCostUsd,
+                    },
+                    { headers: { "Cache-Control": "no-store" } },
+                  );
+                } catch (fallbackStartFailure) {
+                  const fallbackError =
+                    fallbackStartFailure instanceof Error
+                      ? fallbackStartFailure.message
+                      : "OpenRouter backup could not start.";
+                  await admin
+                    .from("media_generation_jobs")
+                    .update({
+                      status: "failed",
+                      error: fallbackError.slice(0, 1200),
+                      completed_at: new Date().toISOString(),
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", fallbackJobId)
+                    .eq("owner_ref", ownerRef);
+                }
+              }
+            } catch (fallbackPlanningError) {
+              console.error("Could not plan OpenRouter media fallback", {
+                jobId: mediaJob.id,
+                detail:
+                  fallbackPlanningError instanceof Error
+                    ? fallbackPlanningError.message.slice(0, 800)
+                    : "Unknown fallback planning error",
+              });
+            }
+          }
+        }
+
+        if (claimedFailure && providerCreditBoundary(failure)) {
+          const requestCapUsd =
+            typeof mediaJob.request_max_spend_microusd === "number"
+              ? mediaJob.request_max_spend_microusd / 1_000_000
+              : DEFAULT_TEST_SPEND_USD;
+          const providerName =
+            mediaJob.provider === "nous" ? "Nous" : "OpenRouter";
+          const suggestion =
+            mediaBudgetSuggestion(mediaJob.kind, requestCapUsd, null);
+          const resultText =
+            `${providerName} reached a provider-credit boundary before this generation could continue. ${suggestion}\n\nSuggested follow-ups: lower Media quality, use local/free only, or increase the request cap after funding the backup provider.`;
+
+          if (mediaJob.conversation_id) {
+            const { error: messageError } = await admin
+              .from("local_ai_messages")
+              .insert({
+                conversation_id: mediaJob.conversation_id,
+                owner_ref: ownerRef,
+                role: "assistant",
+                content: resultText,
+                attachment_ids: [],
+                job_id: null,
+              });
+            if (messageError) throw messageError;
+
+            await admin
+              .from("local_ai_conversations")
+              .update({ updated_at: new Date().toISOString() })
+              .eq("id", mediaJob.conversation_id)
+              .eq("owner_ref", ownerRef);
+          }
+
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "code",
+              status: "completed",
+              conversationId: mediaJob.conversation_id,
+              capability: mediaJob.kind,
+              provider: "code",
+              model: "media-spend-boundary",
+              text: resultText,
+              routeReason:
+                "A provider funding boundary is a spending decision, not a runtime defect, so CoOperative stopped without invoking Recovery Agent.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
 
         return NextResponse.json(
           {
