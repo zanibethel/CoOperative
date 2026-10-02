@@ -14,6 +14,9 @@ export type MediaCatalogModel = {
   inputModalities: string[];
   aspectRatios: string[];
   durations: number[];
+  resolutions: string[];
+  audioSupported: boolean;
+  pricingSkus: Record<string, number>;
 };
 
 export type MediaCatalog = {
@@ -85,28 +88,37 @@ async function fetchJson(url: string) {
   }
 }
 
-function videoPricing(pricing: unknown) {
-  if (!pricing || typeof pricing !== "object") {
-    return { min: null, max: null, unit: "unknown" as const };
-  }
-  const perSecond: number[] = [];
-  const perMegapixelSecond: number[] = [];
-  for (const [key, raw] of Object.entries(pricing as Record<string, unknown>)) {
+function normalizedVideoPricing(pricing: unknown) {
+  const skus: Record<string, number> = {};
+  if (!pricing || typeof pricing !== "object") return skus;
+
+  for (const [rawKey, raw] of Object.entries(pricing as Record<string, unknown>)) {
     const amount = numberValue(raw);
     if (amount === null) continue;
-    if (key.startsWith("duration_seconds_")) perSecond.push(amount);
-    else if (key.startsWith("cents_per_second_output") || key.startsWith("cents_per_video_output_second")) {
-      perSecond.push(amount / 100);
-    } else if (key.includes("megapixel") && key.includes("second")) {
-      perMegapixelSecond.push(key.includes("cents") ? amount / 100 : amount);
+    const key = rawKey.toLowerCase().replace(/-/g, "_");
+    if (
+      key.startsWith("duration_seconds") ||
+      key.startsWith("per_video_second") ||
+      key.startsWith("cents_per_second_output") ||
+      key.startsWith("cents_per_video_output_second")
+    ) {
+      skus[key] = key.startsWith("cents_") ? amount / 100 : amount;
     }
   }
-  const values = perSecond.length ? perSecond : perMegapixelSecond;
-  if (!values.length) return { min: null, max: null, unit: "unknown" as const };
+  return skus;
+}
+
+function videoPricing(pricing: unknown) {
+  const skus = normalizedVideoPricing(pricing);
+  const values = Object.values(skus);
+  if (!values.length) {
+    return { min: null, max: null, unit: "unknown" as const, skus };
+  }
   return {
     min: Math.min(...values),
     max: Math.max(...values),
-    unit: perSecond.length ? ("second" as const) : ("megapixel" as const),
+    unit: "second" as const,
+    skus,
   };
 }
 
@@ -197,6 +209,9 @@ async function buildCatalog(): Promise<MediaCatalog> {
           : [],
         aspectRatios: enumValues(supported.aspect_ratio),
         durations: [],
+        resolutions: enumValues(supported.resolution),
+        audioSupported: false,
+        pricingSkus: {},
       };
     }),
   );
@@ -226,6 +241,11 @@ async function buildCatalog(): Promise<MediaCatalog> {
         ? row.supported_aspect_ratios.filter((item): item is string => typeof item === "string")
         : [],
       durations,
+      resolutions: Array.isArray(row.supported_resolutions)
+        ? row.supported_resolutions.filter((item): item is string => typeof item === "string")
+        : [],
+      audioSupported: row.generate_audio === true,
+      pricingSkus: pricing.skus,
     }];
   });
 
@@ -302,7 +322,12 @@ export function recommendedForLevel(models: MediaCatalogModel[], level: 0 | 1 | 
 export function recommendedForRequest(
   models: MediaCatalogModel[],
   level: 0 | 1 | 2 | 3 | 4,
-  request: { durationSeconds?: number | null; aspectRatio?: string | null } = {},
+  request: {
+    durationSeconds?: number | null;
+    aspectRatio?: string | null;
+    resolution?: string | null;
+    audio?: boolean | null;
+  } = {},
 ) {
   const capable = models.filter((model) => {
     const durationOk =
@@ -313,8 +338,172 @@ export function recommendedForRequest(
       !request.aspectRatio ||
       model.aspectRatios.length === 0 ||
       model.aspectRatios.includes(request.aspectRatio);
-    return durationOk && aspectOk;
+    const resolutionOk =
+      !request.resolution ||
+      model.resolutions.length === 0 ||
+      model.resolutions.some((value) => value.toLowerCase() === request.resolution?.toLowerCase());
+    const audioOk = request.audio !== true || model.audioSupported;
+    return durationOk && aspectOk && resolutionOk && audioOk;
   });
 
   return recommendedForLevel(capable.length ? capable : models, level);
+}
+
+function skuResolution(key: string) {
+  const match = key.match(/(?:^|_)(360p|480p|540p|720p|768p|1080p|1440p|2160p|4k)(?:_|$)/i);
+  return match?.[1]?.toLowerCase() || null;
+}
+
+function skuAudio(key: string) {
+  if (key.includes("without_audio") || key.includes("no_audio")) return false;
+  if (key.includes("with_audio")) return true;
+  return null;
+}
+
+export function bestOpenRouterVideoPricing(
+  model: MediaCatalogModel,
+  request: { resolution?: string | null; audio?: boolean | null } = {},
+) {
+  const entries = Object.entries(model.pricingSkus);
+  if (!entries.length) {
+    return model.minUnitCostUsd === null
+      ? null
+      : { rateUsdPerSecond: model.minUnitCostUsd, resolution: request.resolution || null, audio: request.audio ?? null };
+  }
+
+  const candidates = entries.flatMap(([key, rate]) => {
+    const resolution = skuResolution(key);
+    const audio = skuAudio(key);
+    if (
+      request.resolution &&
+      resolution &&
+      resolution.toLowerCase() !== request.resolution.toLowerCase()
+    ) return [];
+    if (request.audio !== null && request.audio !== undefined && audio !== null && audio !== request.audio) return [];
+    let score = 0;
+    if (request.resolution && resolution?.toLowerCase() === request.resolution.toLowerCase()) score += 4;
+    if (request.audio !== null && request.audio !== undefined && audio === request.audio) score += 3;
+    if (resolution) score += 1;
+    if (audio !== null) score += 1;
+    return [{ key, rate, resolution, audio, score }];
+  });
+
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => b.score - a.score || a.rate - b.rate);
+  const bestScore = candidates[0].score;
+  const best = candidates.filter((candidate) => candidate.score === bestScore).sort((a, b) => a.rate - b.rate)[0];
+  return {
+    rateUsdPerSecond: best.rate,
+    resolution: request.resolution || best.resolution,
+    audio: request.audio ?? best.audio,
+  };
+}
+
+export function estimateOpenRouterMediaCostUsd(
+  model: MediaCatalogModel,
+  request: {
+    durationSeconds?: number | null;
+    resolution?: string | null;
+    audio?: boolean | null;
+    megapixels?: number | null;
+  } = {},
+) {
+  if (model.free) return 0;
+  if (model.kind === "video") {
+    if (!request.durationSeconds) return null;
+    const pricing = bestOpenRouterVideoPricing(model, request);
+    return pricing ? pricing.rateUsdPerSecond * request.durationSeconds : null;
+  }
+  if (model.minUnitCostUsd === null) return null;
+  if (model.unit === "image") return model.minUnitCostUsd;
+  if (model.unit === "megapixel") {
+    return model.minUnitCostUsd * Math.max(1, request.megapixels || 1);
+  }
+  return null;
+}
+
+
+export type OpenRouterKeySpendStatus = {
+  checkedAt: string;
+  paidEligible: boolean;
+  freeTier: boolean | null;
+  keyLimitRemainingUsd: number | null;
+  accountCreditsRemainingUsd: number | null;
+  source: "credits" | "key" | "unavailable";
+};
+
+export async function openRouterKeySpendStatus(
+  credential: string,
+): Promise<OpenRouterKeySpendStatus> {
+  const headers = {
+    Accept: "application/json",
+    Authorization: `Bearer ${credential}`,
+  };
+  const checkedAt = new Date().toISOString();
+
+  try {
+    const creditsResponse = await fetch(`${API}/credits`, {
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (creditsResponse.ok) {
+      const payload = (await creditsResponse.json()) as {
+        data?: { total_credits?: unknown; total_usage?: unknown };
+      };
+      const total = numberValue(payload.data?.total_credits);
+      const used = numberValue(payload.data?.total_usage);
+      const remaining =
+        total !== null && used !== null ? Math.max(0, total - used) : null;
+      return {
+        checkedAt,
+        paidEligible: remaining !== null && remaining > 0,
+        freeTier: null,
+        keyLimitRemainingUsd: null,
+        accountCreditsRemainingUsd: remaining,
+        source: "credits",
+      };
+    }
+  } catch {
+    // A normal inference key may not have the management-key permission needed
+    // for /credits. Fall through to the current-key endpoint.
+  }
+
+  try {
+    const keyResponse = await fetch(`${API}/key`, {
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!keyResponse.ok) {
+      throw new Error(`OpenRouter key status returned HTTP ${keyResponse.status}.`);
+    }
+    const payload = (await keyResponse.json()) as {
+      data?: { is_free_tier?: unknown; limit_remaining?: unknown };
+    };
+    const freeTier =
+      typeof payload.data?.is_free_tier === "boolean"
+        ? payload.data.is_free_tier
+        : null;
+    const keyLimitRemainingUsd = numberValue(payload.data?.limit_remaining);
+    return {
+      checkedAt,
+      paidEligible:
+        freeTier === false &&
+        (keyLimitRemainingUsd === null || keyLimitRemainingUsd > 0),
+      freeTier,
+      keyLimitRemainingUsd,
+      accountCreditsRemainingUsd: null,
+      source: "key",
+    };
+  } catch {
+    return {
+      checkedAt,
+      paidEligible: false,
+      freeTier: null,
+      keyLimitRemainingUsd: null,
+      accountCreditsRemainingUsd: null,
+      source: "unavailable",
+    };
+  }
 }
