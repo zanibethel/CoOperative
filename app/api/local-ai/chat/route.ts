@@ -441,6 +441,8 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         jobId: job.id,
+        execution:
+          job.worker_id === "cooperative-paid-router" ? "paid-ai" : undefined,
         status: job.status,
         profile: job.profile,
         conversationId: job.conversation_id,
