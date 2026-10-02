@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { authenticatedIdentity } from "@/lib/supabase/auth";
@@ -15,10 +16,10 @@ export default async function AiBalancePage() {
   return (
     <main className="shell">
       <nav className="nav">
-        <a className="brand" href="/">CoOperative</a>
+        <Link className="brand" href="/">CoOperative</Link>
         <div className="nav-links">
-          <a href="/local-ai">AI</a>
-          <a href="/personal-ai">Personal AI</a>
+          <Link href="/local-ai">AI</Link>
+          <Link href="/personal-ai">Personal AI</Link>
           <div className="badge">Balance</div>
         </div>
       </nav>
