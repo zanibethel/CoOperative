@@ -10,6 +10,7 @@ import {
 import { buildBusinessChatContext } from "@/lib/ai/business-context";
 import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
+import { activeNodeIds } from "@/lib/unison/node-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -225,11 +226,15 @@ export async function POST(request: Request) {
           );
         }
       } else {
-        const { data: ownedNodes, error: nodesError } = await admin
-          .from("unison_nodes")
-          .select("id,display_name,state,capabilities,policy,last_seen_at")
-          .eq("contributor_user_id", owner.userId)
-          .order("last_seen_at", { ascending: false });
+        const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
+        const { data: ownedNodes, error: nodesError } =
+          authorizedNodeIds.length > 0
+            ? await admin
+                .from("unison_nodes")
+                .select("id,display_name,state,capabilities,policy,last_seen_at")
+                .in("id", authorizedNodeIds)
+                .order("last_seen_at", { ascending: false })
+            : { data: [], error: null };
 
         if (nodesError) throw nodesError;
 
@@ -253,7 +258,7 @@ export async function POST(request: Request) {
         if (input.nodeRouting === "require-node") {
           if (!input.requiredNodeId) {
             return NextResponse.json(
-              { error: "Choose an owned Unison node to require." },
+              { error: "Choose an authorized Unison node to require." },
               { status: 400 },
             );
           }
@@ -261,13 +266,13 @@ export async function POST(request: Request) {
           const selected = textNodes.find((node) => node.id === input.requiredNodeId);
           if (!selected) {
             return NextResponse.json(
-              { error: "That owned Unison node is not currently available for text generation." },
+              { error: "That authorized Unison node is not currently available for text generation." },
               { status: 409 },
             );
           }
 
           targetNodeId = selected.id;
-          nodeRouteNote = ` Required owned node ${selected.display_name || selected.id}.`;
+          nodeRouteNote = ` Required authorized node ${selected.display_name || selected.id}.`;
         } else {
           const statePriority: Record<string, number> = { idle: 0, online: 1, busy: 2 };
           const selected = [...textNodes].sort(
@@ -276,7 +281,7 @@ export async function POST(request: Request) {
           if (selected) {
             preferredNodeId = selected.id;
             nodeRouteNote =
-              ` Preferred owned node ${selected.display_name || selected.id} for the first 15 seconds.`;
+              ` Preferred authorized node ${selected.display_name || selected.id} for the first 15 seconds.`;
           } else {
             nodeRouteNote = " No fresh owned text node was available, so normal local routing remains eligible.";
           }

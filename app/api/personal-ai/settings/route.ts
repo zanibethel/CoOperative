@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { authenticatedUserId } from "@/lib/supabase/auth";
+import { nodeMembership } from "@/lib/unison/node-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -76,16 +77,10 @@ export async function PATCH(request: Request) {
     const admin = createAdminSupabaseClient();
 
     if (input.preferredNodeId) {
-      const { data: node, error: nodeError } = await admin
-        .from("unison_nodes")
-        .select("id")
-        .eq("id", input.preferredNodeId)
-        .eq("contributor_user_id", userId)
-        .maybeSingle();
-      if (nodeError) throw nodeError;
-      if (!node) {
+      const membership = await nodeMembership(admin, userId, input.preferredNodeId);
+      if (!membership) {
         return NextResponse.json(
-          { error: "That node does not belong to this account." },
+          { error: "This account is not authorized to use that node." },
           { status: 403 },
         );
       }

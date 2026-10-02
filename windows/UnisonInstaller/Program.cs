@@ -13,6 +13,32 @@ internal static class Program
     internal const string BaseUrl = "https://co-operative-mu.vercel.app";
     internal const string LocalChatUrl = "http://127.0.0.1:11436/";
 
+    internal static string LocalChatUrlForProfile()
+    {
+        try
+        {
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CoOperative",
+                "Unison",
+                "profile-link.json"
+            );
+            if (!File.Exists(path)) return LocalChatUrl;
+
+            using var json = JsonDocument.Parse(File.ReadAllText(path));
+            var token = json.RootElement.TryGetProperty("profileToken", out var tokenElement)
+                ? tokenElement.GetString()
+                : null;
+            return string.IsNullOrWhiteSpace(token)
+                ? LocalChatUrl
+                : LocalChatUrl + "#profileToken=" + Uri.EscapeDataString(token);
+        }
+        catch
+        {
+            return LocalChatUrl;
+        }
+    }
+
     [STAThread]
     private static void Main(string[] args)
     {
@@ -26,7 +52,7 @@ internal static class Program
 
         if (args.Any(arg => arg.Equals("--local-chat", StringComparison.OrdinalIgnoreCase)))
         {
-            OpenUrl(LocalChatUrl);
+            OpenUrl(LocalChatUrlForProfile());
             return;
         }
 
@@ -101,7 +127,7 @@ internal sealed class UnisonTrayContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Open CoOperativeLocalAI", null, (_, _) => Program.OpenUrl(Program.LocalChatUrl));
+        menu.Items.Add("Open CoOperativeLocalAI", null, (_, _) => Program.OpenUrl(Program.LocalChatUrlForProfile()));
         menu.Items.Add("Open dashboard", null, (_, _) => Program.OpenUrl($"{Program.BaseUrl}/unison/dashboard"));
         menu.Items.Add("Restart node", null, (_, _) => RunControl("restart"));
         menu.Items.Add("Repair connection", null, (_, _) => RunControl("repair"));
@@ -377,17 +403,31 @@ internal sealed class InstallerForm : Form
             if (existingMachineWide)
             {
                 SetStatus(
-                    "Existing machine-wide Unison node found",
-                    "Refreshing the shared worker while preserving this PC's node identity."
+                    "Shared Unison PC found",
+                    "Linking this Windows profile to the existing machine-wide node. The AI runtime and model cache will stay shared."
                 );
 
-                await RunExistingRepairAsync(machineNodeId!, true);
+                (string Token, string Role) profileLink;
+                try
+                {
+                    profileLink = await LinkCurrentWindowsProfileAsync(machineNodeId!);
+                }
+                catch
+                {
+                    SetStatus(
+                        "Refreshing the shared worker…",
+                        "The existing node is not ready for profile linking yet. Repairing it once without changing its identity."
+                    );
+                    await RunExistingRepairAsync(machineNodeId!, true);
+                    profileLink = await LinkCurrentWindowsProfileAsync(machineNodeId!);
+                }
 
+                SaveProfileLink(machineNodeId!, profileLink.Token, profileLink.Role);
                 var machineShellNote = await InstallShellIntegrationAsync();
                 SetStatus(
-                    "Repaired and connected",
-                    "This machine-wide Unison node kept its identity and runs independently of Windows profiles. " +
-                    "CoOperativeLocalAI, desktop, Start Menu, and tray integration are ready." +
+                    "Profile connected",
+                    "This Windows profile now has its own private CoOperative identity on the shared PC. " +
+                    "The physical node, Ollama runtime, model cache, and hardware benchmark remain shared; your chats and hosted history do not." +
                     machineShellNote
                 );
                 CompleteUi();
@@ -424,10 +464,13 @@ internal sealed class InstallerForm : Form
                     await WaitForRealHeartbeatAsync(false);
                 }
 
+                var legacyLink = await LinkCurrentWindowsProfileAsync(userNodeId!);
+                SaveProfileLink(userNodeId!, legacyLink.Token, legacyLink.Role);
+
                 var legacyShellNote = await InstallShellIntegrationAsync();
                 SetStatus(
-                    healthy ? "Updated" : "Repaired and connected",
-                    "This legacy per-profile Unison node kept its identity. Desktop, Start Menu, and tray integration are ready." +
+                    healthy ? "Updated and linked" : "Repaired and linked",
+                    "This Windows profile is securely linked to the existing node and keeps its own private hosted history." +
                     legacyShellNote
                 );
                 CompleteUi();
@@ -438,21 +481,36 @@ internal sealed class InstallerForm : Form
 
             SetStatus(
                 "Installing machine-wide Unison…",
-                "Windows will request administrator approval. The compute worker will run for the whole PC, not just this Windows profile."
+                "Windows will request administrator approval. The compute worker will run once for the whole PC, not once per Windows profile."
             );
 
             await RunBootstrapAsync(pairingCode);
 
+            machineNodeId = Environment.GetEnvironmentVariable(
+                "UNISON_NODE_ID",
+                EnvironmentVariableTarget.Machine
+            );
+            if (string.IsNullOrWhiteSpace(machineNodeId))
+            {
+                throw new InvalidOperationException(
+                    "Machine-wide setup completed without a readable node identity."
+                );
+            }
+
             SetStatus(
                 "Machine-wide local AI verified",
-                "The elevated installer confirmed a fresh whole-PC-idle-capable heartbeat from this PC."
+                "The shared worker is online. Now linking your Windows profile so hosted history stays private to your account."
             );
+
+            var firstProfileLink = await LinkCurrentWindowsProfileAsync(machineNodeId);
+            SaveProfileLink(machineNodeId, firstProfileLink.Token, firstProfileLink.Role);
 
             var shellNote = await InstallShellIntegrationAsync();
 
             SetStatus(
                 "Connected",
-                "This PC is online as a machine-wide Unison node. CoOperativeLocalAI is available while the PC is in use; contributed work only starts after every signed-in Windows session has been idle for the configured period." +
+                "This PC now has one machine-wide Unison node and this Windows profile has its own private CoOperative identity. " +
+                "Additional Windows users can run this installer to add their own accounts without installing another AI runtime." +
                 shellNote
             );
             CompleteUi();
@@ -470,6 +528,166 @@ internal sealed class InstallerForm : Form
             );
             CompleteUi();
         }
+    }
+
+    private async Task<(string Token, string Role)> LinkCurrentWindowsProfileAsync(
+        string nodeId
+    )
+    {
+        SetStatus(
+            "Linking this Windows profile…",
+            "Your browser will confirm which CoOperative account should be allowed to use this shared PC."
+        );
+
+        string proof = "";
+        using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) })
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            Exception? lastError = null;
+
+            while (!deadline.IsCancellationRequested)
+            {
+                try
+                {
+                    using var response = await http.PostAsync(
+                        Program.LocalChatUrl + "api/device-link-proof",
+                        new StringContent("{}", Encoding.UTF8, "application/json"),
+                        deadline.Token
+                    );
+                    var body = await response.Content.ReadAsStringAsync(deadline.Token);
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        throw new InvalidOperationException(
+                            "Local node rejected profile linking: " + body
+                        );
+                    }
+
+                    using var json = JsonDocument.Parse(body);
+                    proof = json.RootElement.GetProperty("proof").GetString() ?? "";
+                    var returnedNodeId =
+                        json.RootElement.GetProperty("nodeId").GetString() ?? "";
+                    if (proof.Length < 32 || returnedNodeId != nodeId)
+                    {
+                        throw new InvalidOperationException(
+                            "Local node returned an invalid profile-link proof."
+                        );
+                    }
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    await Task.Delay(1500, deadline.Token);
+                }
+            }
+
+            if (proof.Length < 32)
+            {
+                throw new InvalidOperationException(
+                    "CoOperativeLocalAI was not ready to link this Windows profile.",
+                    lastError
+                );
+            }
+        }
+
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+        var link =
+            BaseUrl +
+            "/unison/install/connect?mode=existing" +
+            "&port=" + port +
+            "&nonce=" + Uri.EscapeDataString(nonce) +
+            "&nodeId=" + Uri.EscapeDataString(nodeId) +
+            "&proof=" + Uri.EscapeDataString(proof);
+
+        Program.OpenUrl(link);
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        while (!timeout.IsCancellationRequested)
+        {
+            using var client = await listener.AcceptTcpClientAsync(timeout.Token);
+            using var stream = client.GetStream();
+            var request = await ReadHttpRequestAsync(stream, timeout.Token);
+
+            if (request.Method == "OPTIONS")
+            {
+                await WriteHttpResponseAsync(stream, 204, "{}", timeout.Token);
+                continue;
+            }
+
+            if (request.Method != "POST")
+            {
+                await WriteHttpResponseAsync(
+                    stream,
+                    405,
+                    "{\"error\":\"Method not allowed\"}",
+                    timeout.Token
+                );
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(request.Body);
+                var root = document.RootElement;
+                var receivedNonce = root.GetProperty("nonce").GetString() ?? "";
+                var receivedNodeId = root.GetProperty("nodeId").GetString() ?? "";
+                var profileToken = root.GetProperty("profileToken").GetString() ?? "";
+                var role = root.TryGetProperty("role", out var roleElement)
+                    ? roleElement.GetString() ?? "member"
+                    : "member";
+
+                if (
+                    !string.Equals(receivedNonce, nonce, StringComparison.Ordinal) ||
+                    !string.Equals(receivedNodeId, nodeId, StringComparison.Ordinal) ||
+                    profileToken.Length < 32
+                )
+                {
+                    await WriteHttpResponseAsync(
+                        stream,
+                        403,
+                        "{\"error\":\"Invalid authorization\"}",
+                        timeout.Token
+                    );
+                    continue;
+                }
+
+                await WriteHttpResponseAsync(stream, 200, "{\"ok\":true}", timeout.Token);
+                listener.Stop();
+                return (profileToken, role);
+            }
+            catch
+            {
+                await WriteHttpResponseAsync(
+                    stream,
+                    400,
+                    "{\"error\":\"Invalid request\"}",
+                    timeout.Token
+                );
+            }
+        }
+
+        throw new TimeoutException(
+            "Windows-profile authorization timed out. Reopen setup and try again."
+        );
+    }
+
+    private void SaveProfileLink(string nodeId, string profileToken, string role)
+    {
+        Directory.CreateDirectory(_installDir);
+        var path = Path.Combine(_installDir, "profile-link.json");
+        var json = JsonSerializer.Serialize(
+            new
+            {
+                nodeId,
+                profileToken,
+                role,
+                linkedAt = DateTimeOffset.UtcNow,
+            }
+        );
+        File.WriteAllText(path, json, Encoding.UTF8);
     }
 
     private async Task<string> ReceiveBrowserPairingAsync()

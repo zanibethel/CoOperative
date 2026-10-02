@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { getUnisonViewer } from "@/lib/unison/access";
+import { activeNodeMemberships } from "@/lib/unison/node-access";
 import UnisonNodeActions from "./node-actions";
 import LiveNodeStatus from "../live-node-status";
 
@@ -28,24 +29,43 @@ function nodeStatus(node: { state: string; last_seen_at: string }) {
 export default async function UnisonContributorDashboard() {
   const viewer = await getUnisonViewer();
   if (!viewer) redirect("/login?next=/unison/dashboard");
-  if (!viewer.contributor) redirect("/unison/join");
 
   const admin = createAdminSupabaseClient();
+  const memberships = await activeNodeMemberships(admin, viewer.user.id);
+  if (!viewer.contributor && memberships.length === 0) redirect("/unison/join");
+
+  const nodeIds = memberships.map((membership) => membership.nodeId);
+  const roleByNode = new Map(
+    memberships.map((membership) => [membership.nodeId, membership.role]),
+  );
+
+  const nodeQuery =
+    nodeIds.length > 0
+      ? admin
+          .from("unison_nodes")
+          .select("id,display_name,node_class,state,platform,capabilities,resources,policy,worker_version,first_seen_at,last_seen_at")
+          .in("id", nodeIds)
+          .order("first_seen_at", { ascending: false })
+      : Promise.resolve({ data: [], error: null });
+
+  const usageQuery = viewer.contributor
+    ? admin
+        .from("unison_usage_ledger")
+        .select("id,node_id,source_job_type,status,compute_seconds,gpu_seconds,earned_cents,estimated_external_cost_cents,completed_at,created_at")
+        .eq("contributor_user_id", viewer.user.id)
+        .order("created_at", { ascending: false })
+        .limit(100)
+    : Promise.resolve({ data: [], error: null });
+
   const [{ data: nodes }, { data: usage }] = await Promise.all([
-    admin
-      .from("unison_nodes")
-      .select("id,display_name,node_class,state,platform,capabilities,resources,policy,worker_version,first_seen_at,last_seen_at")
-      .eq("contributor_user_id", viewer.user.id)
-      .order("first_seen_at", { ascending: false }),
-    admin
-      .from("unison_usage_ledger")
-      .select("id,node_id,source_job_type,status,compute_seconds,gpu_seconds,earned_cents,estimated_external_cost_cents,completed_at,created_at")
-      .eq("contributor_user_id", viewer.user.id)
-      .order("created_at", { ascending: false })
-      .limit(100),
+    nodeQuery,
+    usageQuery,
   ]);
 
-  const nodeRows = nodes ?? [];
+  const nodeRows = (nodes ?? []).map((node) => ({
+    ...node,
+    accessRole: roleByNode.get(node.id) ?? "member",
+  }));
   const usageRows = usage ?? [];
   const completed = usageRows.filter((entry) => entry.status === "completed");
   const computeSeconds = completed.reduce((sum, entry) => sum + Number(entry.compute_seconds || 0), 0);
@@ -64,17 +84,21 @@ export default async function UnisonContributorDashboard() {
           <Link href="/personal-ai">CoOperativeLocalAI</Link>
           <Link href="/unison/join">Add a PC</Link>
           {viewer.isOwner ? <Link href="/unison/owner">Owner dashboard</Link> : null}
-          <div className="badge">{viewer.contributor.display_name}</div>
+          <div className="badge">{viewer.contributor?.display_name || "Shared user"}</div>
         </div>
       </nav>
 
       <section className="hero compact-hero">
-        <div className="eyebrow">Contributor dashboard</div>
-        <h1>Your compute. Your contribution.</h1>
+        <div className="eyebrow">
+          {viewer.contributor ? "Contributor dashboard" : "Shared device access"}
+        </div>
+        <h1>
+          {viewer.contributor ? "Your compute. Your contribution." : "Your authorized AI devices."}
+        </h1>
         <p>
-          See what your devices have contributed to CoOperative and the earnings attached
-          to verified usage. Compensation rates are not enabled yet, so tracked earnings
-          remain at zero until a rate is deliberately published.
+          {viewer.contributor
+            ? "See what your devices have contributed to CoOperative and the verified usage attached to them. Compensation rates are not enabled yet, so tracked earnings remain at zero until a rate is deliberately published."
+            : "Use this PC for your own private CoOperativeLocalAI and mobile Personal AI. The machine is shared, but your conversations and hosted history remain tied to your account."}
         </p>
       </section>
 
@@ -178,6 +202,13 @@ export default async function UnisonContributorDashboard() {
                     <span>{resources.cpuLogical || "?"} logical CPUs</span>
                     <span>{resources.memoryTotalMb ? `${Math.round(resources.memoryTotalMb / 1024)} GB RAM` : "RAM pending"}</span>
                     <span>{policy.idleScope === "machine" ? "Whole-PC idle" : "Profile idle"}</span>
+                    <span>
+                      {node.accessRole === "owner"
+                        ? "Device owner"
+                        : node.accessRole === "admin"
+                          ? "Device admin"
+                          : "Shared access"}
+                    </span>
                     {capabilities.includes("local_personal_chat") ? <span>CoOperativeLocalAI ready</span> : null}
                     {capabilities.includes("local_ai_images") ? <span>Image understanding</span> : null}
                     {capabilities.includes("local_ai_image_generation") ? <span>Image creation</span> : null}
@@ -249,7 +280,14 @@ export default async function UnisonContributorDashboard() {
                       )}
                     </div>
                   ) : null}
-                  <UnisonNodeActions nodeId={node.id} status={status} />
+                  {node.accessRole === "owner" || node.accessRole === "admin" ? (
+                    <UnisonNodeActions nodeId={node.id} status={status} />
+                  ) : (
+                    <p>
+                      You can use this PC for your private Personal AI. Device repair and
+                      restart controls stay with the owner/admin.
+                    </p>
+                  )}
                 </article>
               );
             })}

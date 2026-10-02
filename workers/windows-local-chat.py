@@ -220,8 +220,22 @@ function renderHistory(){
   for(const c of rows){const b=document.createElement("button");b.textContent=c.title||"Chat";if(c.id===state.activeConversationId)b.className="active";b.onclick=()=>void selectConversation(c);box.appendChild(b)}
 }
 
+const PROFILE_TOKEN_KEY="cooperative-local-profile-token";
+function loadProfileToken(){
+  const hash=new URLSearchParams(location.hash.startsWith("#")?location.hash.slice(1):location.hash);
+  const supplied=hash.get("profileToken");
+  if(supplied){
+    localStorage.setItem(PROFILE_TOKEN_KEY,supplied);
+    history.replaceState(null,"",location.pathname+location.search);
+    return supplied;
+  }
+  return localStorage.getItem(PROFILE_TOKEN_KEY)||"";
+}
+let cooperativeProfileToken=loadProfileToken();
 async function hostedRequest(path="",options={}){
-  const r=await fetch("/api/hosted-history"+path,{cache:"no-store",...options});
+  const headers={...(options.headers||{})};
+  if(cooperativeProfileToken)headers["X-Cooperative-Profile-Token"]=cooperativeProfileToken;
+  const r=await fetch("/api/hosted-history"+path,{cache:"no-store",...options,headers});
   const j=await r.json();
   if(!r.ok)throw new Error(j.error||"Hosted history sync failed.");
   return j;
@@ -468,9 +482,15 @@ def hosted_history_request(
     method: str = "GET",
     conversation_id: str | None = None,
     payload: dict | None = None,
+    profile_token: str | None = None,
 ) -> dict:
     if not NODE_ID or not NODE_TOKEN:
-        raise RuntimeError("This CoOperativeLocalAI is not linked to a Unison contributor node.")
+        raise RuntimeError("This CoOperativeLocalAI is not linked to a Unison node.")
+    if not profile_token:
+        raise RuntimeError(
+            "This Windows profile is not linked to a CoOperative user yet. "
+            "Run the Unison installer once from this Windows profile."
+        )
 
     url = f"{COOPERATIVE_URL}/api/personal-ai/node/history"
     params = {"nodeId": NODE_ID}
@@ -483,6 +503,7 @@ def hosted_history_request(
         params=params if method == "GET" else None,
         headers={
             "Authorization": f"Bearer {NODE_TOKEN}",
+            "X-Cooperative-Profile-Token": profile_token,
             "Content-Type": "application/json",
         },
         json=payload if method != "GET" else None,
@@ -495,6 +516,31 @@ def hosted_history_request(
         except Exception:
             detail = response.text
         raise RuntimeError(str(detail or "Hosted history sync failed.")[:700])
+    value = response.json()
+    return value if isinstance(value, dict) else {}
+
+
+def device_link_proof() -> dict:
+    if not NODE_ID or not NODE_TOKEN:
+        raise RuntimeError("This PC is not linked to a Unison node.")
+
+    response = httpx.post(
+        f"{COOPERATIVE_URL}/api/unison/nodes/link-proof",
+        headers={
+            "Authorization": f"Bearer {NODE_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json={"nodeId": NODE_ID},
+        timeout=30.0,
+        follow_redirects=True,
+    )
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail") or response.json().get("error")
+        except Exception:
+            detail = response.text
+        raise RuntimeError(str(detail or "Could not authorize this local PC.")[:700])
+
     value = response.json()
     return value if isinstance(value, dict) else {}
 
@@ -947,8 +993,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path == "/api/hosted-history":
             conversation_id = (parse_qs(parsed.query).get("conversationId") or [None])[0]
+            profile_token = self.headers.get("X-Cooperative-Profile-Token")
             try:
-                self._json(200, hosted_history_request("GET", conversation_id=conversation_id))
+                self._json(
+                    200,
+                    hosted_history_request(
+                        "GET",
+                        conversation_id=conversation_id,
+                        profile_token=profile_token,
+                    ),
+                )
             except Exception as exc:
                 self._json(502, {"error": str(exc)[:800]})
             return
@@ -985,8 +1039,13 @@ class Handler(BaseHTTPRequestHandler):
 
         parsed = urlparse(self.path)
         try:
+            if parsed.path == "/api/device-link-proof":
+                self._json(201, device_link_proof())
+                return
+
             if parsed.path == "/api/hosted-history":
                 body = json.loads(self._read_body(512_000) or b"{}")
+                profile_token = self.headers.get("X-Cooperative-Profile-Token")
                 action = str(body.get("action") or "")
                 if action == "create":
                     result = hosted_history_request(
@@ -996,6 +1055,7 @@ class Handler(BaseHTTPRequestHandler):
                             "nodeId": NODE_ID,
                             "title": str(body.get("title") or "New chat")[:160],
                         },
+                        profile_token=profile_token,
                     )
                 elif action == "append":
                     conversation_id = str(body.get("conversationId") or "")
@@ -1015,6 +1075,7 @@ class Handler(BaseHTTPRequestHandler):
                             if isinstance(body.get("metadata"), dict)
                             else {},
                         },
+                        profile_token=profile_token,
                     )
                 else:
                     raise RuntimeError("Unknown hosted history action.")

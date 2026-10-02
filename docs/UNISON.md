@@ -74,3 +74,35 @@ The pairing code is single-use. The installer exchanges it for a unique node cre
 4. **Isolation** — container/VM/WASM execution profiles and workload-specific sandboxes.
 5. **Accounting** — measured compute units, electricity-aware estimates, owner cost avoided, community earnings, platform margin.
 6. **Community beta** — opt-in providers, reputation, minimum pricing, payouts, abuse controls, dispute handling.
+
+
+## One PC, multiple private users
+
+A machine-wide Windows install represents one physical Unison node. Additional
+Windows users do not install a second worker, Ollama runtime, model cache, or
+hardware benchmark. Running the installer from another Windows profile creates a
+separate authorized-user link to the existing node.
+
+The first contributor who pairs a physical node is its device owner and remains
+the contributor/earnings owner. Additional authenticated CoOperative users are
+linked as members and can later be promoted to device admin by the owner.
+
+Each linked Windows profile receives its own opaque profile token stored under
+that Windows user's local AppData. CoOperativeLocalAI opens with that token in a
+URL fragment, stores it only in that browser profile, and removes the fragment
+from the visible URL. Hosted Personal AI history requires both the machine node
+credential and the current Windows profile token. A machine credential by itself
+is intentionally insufficient to read any user's hosted history.
+
+Remote/mobile Personal AI uses the signed-in CoOperative user's node membership
+rather than the node's contributor owner. Conversations remain keyed to that
+user, so two people may use the same physical PC without sharing conversation
+history.
+
+Personal requests from any authorized user use the node's priority personal
+queue before community work. Community work remains tied to the physical node
+and its contributor owner.
+
+Device owners/admins may revoke member access; revocation also invalidates that
+user's Windows-profile tokens and clears the node as their preferred Personal AI
+device. Owner access cannot be removed through the member-management endpoint.

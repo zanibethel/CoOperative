@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { authenticatedUserId } from "@/lib/supabase/auth";
+import { activeNodeIds } from "@/lib/unison/node-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -109,10 +110,13 @@ async function settingsFor(userId: string) {
 
 async function ownedNodes(userId: string) {
   const admin = createAdminSupabaseClient();
+  const nodeIds = await activeNodeIds(admin, userId);
+  if (nodeIds.length === 0) return [];
+
   const { data, error } = await admin
     .from("unison_nodes")
     .select("id,display_name,state,capabilities,last_seen_at")
-    .eq("contributor_user_id", userId)
+    .in("id", nodeIds)
     .order("last_seen_at", { ascending: false });
   if (error) throw error;
   return (data || []) as NodeRow[];
@@ -261,7 +265,7 @@ export async function POST(request: Request) {
       temperature: 0.3,
       routing_mode: modelChoice.profile === "heavy" ? "local-heavy" : modelChoice.profile === "quality" ? "local-quality" : "local-fast",
       task_class: modelChoice.profile === "heavy" ? "reasoning" : "general",
-      route_reason: `Personal AI priority request. ${modelChoice.reason} Required owned node ${targetNode.display_name || targetNode.id}.`,
+      route_reason: `Personal AI priority request. ${modelChoice.reason} Required authorized node ${targetNode.display_name || targetNode.id}.`,
       allow_paid_fallback: false,
       human_approval_required: false,
       verification_status: "not_run",
