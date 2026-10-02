@@ -1397,54 +1397,117 @@ class Handler(BaseHTTPRequestHandler):
 
                 BUSY_MARKER.write_text(str(os.getpid()), encoding="utf-8")
                 try:
-                    ensure_model(model)
-                    started = time.time()
-                    response = httpx.post(
-                        f"{OLLAMA_URL}/api/chat",
-                        json={
-                            "model": model,
-                            "messages": ollama_messages,
-                            "stream": False,
-                            "options": {
-                                "temperature": 0.3,
-                                "num_predict": 1800 if profile == "heavy" else 1200,
-                                "top_p": 0.9,
-                            },
-                        },
-                        timeout=None,
-                    )
-                    response.raise_for_status()
-                    result = response.json()
-                    text = str((result.get("message") or {}).get("content") or "").strip()
-                    if not text:
-                        raise RuntimeError("The local model returned an empty response.")
-                    output_tokens = int(result.get("eval_count") or 0)
-                    eval_ns = int(result.get("eval_duration") or 0)
-                    tokens_per_second = (
-                        output_tokens / (eval_ns / 1_000_000_000)
-                        if output_tokens > 0 and eval_ns > 0
-                        else None
-                    )
-                    self._json(
-                        200,
-                        {
-                            "text": text,
-                            "model": model,
-                            "profile": profile,
-                            "modelReason": model_reason,
-                            "latencyMs": int((time.time() - started) * 1000),
-                            "tokensPerSecond": tokens_per_second,
-                            "localInference": True,
-                            "webSearchUsed": bool(web_results),
-                            "webResults": [
-                                {"title": row["title"], "url": row["url"]}
-                                for row in web_results
-                            ],
-                        },
+                    recovery_events = []
+                    candidates = [(model, profile, model_reason)]
+                    if not images:
+                        fallback_order = (
+                            [("quality", QUALITY_MODEL), ("fast", FAST_MODEL)]
+                            if profile == "heavy"
+                            else [("fast", FAST_MODEL), ("quality", QUALITY_MODEL)]
+                            if profile == "quality"
+                            else [("quality", QUALITY_MODEL), ("heavy", HEAVY_MODEL)]
+                        )
+                        for fallback_profile, fallback_model in fallback_order:
+                            if fallback_model and all(
+                                fallback_model != existing[0] for existing in candidates
+                            ):
+                                candidates.append(
+                                    (
+                                        fallback_model,
+                                        fallback_profile,
+                                        "Recovery Agent selected a different local model after the first route failed.",
+                                    )
+                                )
+                            if len(candidates) >= 2:
+                                break
+
+                    last_error = None
+                    for attempt, (candidate_model, candidate_profile, candidate_reason) in enumerate(candidates, start=1):
+                        try:
+                            ensure_model(candidate_model)
+                            started = time.time()
+                            response = httpx.post(
+                                f"{OLLAMA_URL}/api/chat",
+                                json={
+                                    "model": candidate_model,
+                                    "messages": ollama_messages,
+                                    "stream": False,
+                                    "options": {
+                                        "temperature": 0.3,
+                                        "num_predict": 1800 if candidate_profile == "heavy" else 1200,
+                                        "top_p": 0.9,
+                                    },
+                                },
+                                timeout=None,
+                            )
+                            response.raise_for_status()
+                            result = response.json()
+                            text = str((result.get("message") or {}).get("content") or "").strip()
+                            if not text:
+                                raise RuntimeError("The local model returned an empty response.")
+
+                            output_tokens = int(result.get("eval_count") or 0)
+                            eval_ns = int(result.get("eval_duration") or 0)
+                            tokens_per_second = (
+                                output_tokens / (eval_ns / 1_000_000_000)
+                                if output_tokens > 0 and eval_ns > 0
+                                else None
+                            )
+                            recovered = attempt > 1
+                            if recovered:
+                                recovery_events.append(
+                                    {
+                                        "kind": "rerouted",
+                                        "message": (
+                                            "Recovery Agent rerouted the request to "
+                                            + candidate_model
+                                            + " on this PC."
+                                        ),
+                                    }
+                                )
+                            self._json(
+                                200,
+                                {
+                                    "text": text,
+                                    "model": candidate_model,
+                                    "profile": candidate_profile,
+                                    "modelReason": candidate_reason,
+                                    "latencyMs": int((time.time() - started) * 1000),
+                                    "tokensPerSecond": tokens_per_second,
+                                    "localInference": True,
+                                    "webSearchUsed": bool(web_results),
+                                    "webResults": [
+                                        {"title": row["title"], "url": row["url"]}
+                                        for row in web_results
+                                    ],
+                                    "recovery": {
+                                        "recovered": recovered,
+                                        "attempts": attempt,
+                                        "events": recovery_events,
+                                    },
+                                },
+                            )
+                            return
+                        except Exception as exc:
+                            last_error = exc
+                            recovery_events.append(
+                                {
+                                    "kind": "attempt_failed",
+                                    "message": (
+                                        "Local route "
+                                        + str(candidate_model)
+                                        + " failed: "
+                                        + str(exc)[:320]
+                                    ),
+                                }
+                            )
+
+                    raise RuntimeError(
+                        "Local Recovery Agent exhausted the bounded local model routes. "
+                        + str(last_error or "The local model failed.")
                     )
                 finally:
                     BUSY_MARKER.unlink(missing_ok=True)
-                return
 
             self._json(404, {"error": "Not found."})
         except Exception as exc:
