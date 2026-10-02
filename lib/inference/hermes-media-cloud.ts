@@ -105,10 +105,7 @@ export function hermesMediaConfiguration(
     model,
     orchestratorProvider,
     orchestratorModel,
-    freeRoute:
-      model.endsWith(":free") ||
-      model === "inclusionai/ming-image-0.1-design" ||
-      model === "inclusionai/ming-image-0.1-design-layer",
+    freeRoute: model.endsWith(":free"),
   };
 }
 
@@ -234,7 +231,7 @@ export async function startHermesMediaTask(
 
   if (
     config.provider !== "openrouter" &&
-    !(spec.kind === "image" && config.provider === "nous")
+    config.provider !== "nous"
   ) {
     throw new Error(
       `Media provider ${config.provider} is not enabled for this CoOperative media job.`,
@@ -242,7 +239,7 @@ export async function startHermesMediaTask(
   }
 
   if (
-    config.orchestratorProvider === "nous" &&
+    (config.orchestratorProvider === "nous" || config.provider === "nous") &&
     !spec.nousAuthJson &&
     !nousApiKey
   ) {
