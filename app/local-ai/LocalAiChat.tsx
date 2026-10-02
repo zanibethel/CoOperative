@@ -125,6 +125,40 @@ type JobResult = {
   detail?: string | null;
 };
 
+type RecoveryEvent = {
+  id: string | number;
+  kind: string;
+  message: string;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string;
+};
+
+type RecoveryIncident = {
+  id: string;
+  status:
+    | "diagnosing"
+    | "repairing"
+    | "waiting_user"
+    | "retrying"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  error_class: string;
+  current_message: string;
+  continuation_prompt?: string | null;
+  requires_user_action: boolean;
+  automatic_retry: boolean;
+  resolution_summary?: string | null;
+  updated_at?: string;
+};
+
+type RecoveryResult = {
+  incident?: RecoveryIncident;
+  events?: RecoveryEvent[];
+  error?: string;
+  detail?: string;
+};
+
 const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
 const ACTIVE_BUSINESS_KEY = "cooperative.local-ai.active-business";
 const MAX_ATTACHMENTS = 4;
