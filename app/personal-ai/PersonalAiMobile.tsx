@@ -522,9 +522,14 @@ export default function PersonalAiMobile() {
             </span>
           </label>
 
+          <a className="secondary-button personal-chat-balance-link" href="/balance">
+            AI balance & paid usage
+          </a>
+
           <p className="personal-chat-privacy-note">
-            No paid or cloud AI fallback. If this PC is offline, the request
-            stays unavailable rather than being sent elsewhere.
+            Personal AI still stays on your selected PC. Your funded balance is
+            available to other CoOperative workflows only when a paid route is
+            explicitly eligible; it is never used to silently replace an offline PC.
           </p>
         </div>
       ) : null}

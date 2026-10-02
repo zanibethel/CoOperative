@@ -867,8 +867,9 @@ export default function LocalAiChat() {
             <span>
               <small>Funded AI balance</small>
               <strong>
-                {aiBalance ? `${aiBalance.availableUsd.toFixed(4)}` : "$0.0000"}
+                {aiBalance ? "$" + aiBalance.availableUsd.toFixed(4) : "$0.0000"}
               </strong>
+              <a className="local-ai-balance-link" href="/balance">Add / review</a>
             </span>
           </div>
         ) : (
