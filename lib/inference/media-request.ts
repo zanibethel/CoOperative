@@ -11,6 +11,7 @@ export type MediaRequestPlan = {
 };
 
 const CREATE_VERBS = /\b(create|generate|make|render|produce|design|animate|provide)\b/i;
+const DIRECT_MEDIA_REQUEST = /\b(i(?:'d| would) like|i want|give me)\b/i;
 const IMAGE_NOUNS = /\b(image|picture|photo|portrait|illustration|graphic|poster|thumbnail)\b/i;
 const VIDEO_NOUNS = /\b(video|clip|reel|animation|movie|film)\b|\b(?:youtube|instagram|tiktok)\s+short\b/i;
 const AMBIGUOUS_MEDIA_NOUNS = /\b(ad|advertisement|commercial)\b/i;
@@ -58,7 +59,9 @@ function mediaKindFrom(message: string): MediaRequestKind | null {
 
 export function planMediaRequest(message: string): MediaRequestPlan | null {
   const text = message.trim();
-  if (!text || !CREATE_VERBS.test(text)) return null;
+  if (!text || (!CREATE_VERBS.test(text) && !DIRECT_MEDIA_REQUEST.test(text))) {
+    return null;
+  }
 
   const kind = mediaKindFrom(text);
   if (!kind) return null;
