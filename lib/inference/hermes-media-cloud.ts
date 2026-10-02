@@ -33,11 +33,24 @@ export type HermesMediaPollResult = {
   error: string | null;
 };
 
-const HERMES_RELEASE = "v2026.9.14";
-const HERMES_INSTALL_URLS = [
-  "https://hermes-agent.nousresearch.com/install.sh",
-  `https://raw.githubusercontent.com/NousResearch/hermes-agent/${HERMES_RELEASE}/scripts/install.sh`,
-];
+const HERMES_RELEASE = "v2026.9.24";
+const HERMES_INSTALLERS = [
+  {
+    label: "pinned-jsdelivr",
+    url: `https://cdn.jsdelivr.net/gh/NousResearch/hermes-agent@${HERMES_RELEASE}/scripts/install.sh`,
+    branch: HERMES_RELEASE,
+  },
+  {
+    label: "pinned-github",
+    url: `https://raw.githubusercontent.com/NousResearch/hermes-agent/${HERMES_RELEASE}/scripts/install.sh`,
+    branch: HERMES_RELEASE,
+  },
+  {
+    label: "latest-official",
+    url: "https://hermes-agent.nousresearch.com/install.sh",
+    branch: "main",
+  },
+] as const;
 const STATUS_DIR = "/tmp/cooperative-media";
 const IMAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const VIDEO_TIMEOUT_MS = 15 * 60 * 1000;
@@ -255,15 +268,15 @@ export async function startHermesMediaTask(
   let installSucceeded = false;
   const installErrors: string[] = [];
 
-  for (const installUrl of HERMES_INSTALL_URLS) {
+  for (const installer of HERMES_INSTALLERS) {
     const install = await sandbox.runCommand({
       cmd: "bash",
       args: [
         "-lc",
         [
           "rm -f /tmp/hermes-install.sh",
-          `curl --retry 2 --retry-delay 2 --retry-all-errors -fsSL "${installUrl}" -o /tmp/hermes-install.sh`,
-          `bash /tmp/hermes-install.sh --skip-setup --skip-browser --skip-computer-use --non-interactive --branch ${HERMES_RELEASE}`,
+          `curl --retry 3 --retry-delay 2 --retry-all-errors -fsSL "${installer.url}" -o /tmp/hermes-install.sh`,
+          `bash /tmp/hermes-install.sh --skip-setup --skip-browser --skip-computer-use --non-interactive --branch ${installer.branch}`,
         ].join(" && "),
       ],
     });
@@ -276,14 +289,14 @@ export async function startHermesMediaTask(
     const stderr = await install.stderr();
     const stdout = await install.stdout();
     installErrors.push(
-      `${installUrl}: ${(stderr || stdout || "install failed").slice(-500)}`,
+      `${installer.label}: ${(stderr || stdout || "install failed").slice(-700)}`,
     );
   }
 
   if (!installSucceeded) {
     await sandbox.stop();
     throw new Error(
-      `Hermes installation failed after official + GitHub fallback: ${installErrors.join(" | ").slice(-1200)}`,
+      `Hermes installation failed after pinned stable + official fallback: ${installErrors.join(" | ").slice(-1600)}`,
     );
   }
 
