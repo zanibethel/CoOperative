@@ -115,7 +115,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("text_inference_jobs")
-      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at")
+      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -133,26 +133,37 @@ export async function POST(request: Request) {
 
     if (typeof body.error === "string" && body.error.trim()) {
       const completedAt = new Date().toISOString();
+      const failureUpdate: Record<string, unknown> = {
+        status: "failed",
+        error: body.error.slice(0, 1200),
+        completed_at: completedAt,
+        updated_at: completedAt,
+      };
+      if (job.personal_use) {
+        failureUpdate.messages = [
+          { role: "system", content: "Personal AI payload removed after local execution." },
+        ];
+        failureUpdate.partial_text = null;
+        failureUpdate.result_text = null;
+      }
+
       const { error: updateError } = await supabase
         .from("text_inference_jobs")
-        .update({
-          status: "failed",
-          error: body.error.slice(0, 1200),
-          completed_at: completedAt,
-          updated_at: completedAt,
-        })
+        .update(failureUpdate)
         .eq("id", jobId);
 
       if (updateError) throw updateError;
 
-      await recordUnisonTextUsage(supabase, {
-        jobId,
-        workerId,
-        claimedAt: job.claimed_at,
-        status: "failed",
-        completedAt,
-        latencyMs: null,
-      });
+      if (!job.personal_use) {
+        await recordUnisonTextUsage(supabase, {
+          jobId,
+          workerId,
+          claimedAt: job.claimed_at,
+          status: "failed",
+          completedAt,
+          latencyMs: null,
+        });
+      }
 
       return NextResponse.json({ ok: true, status: "failed" });
     }
@@ -163,36 +174,73 @@ export async function POST(request: Request) {
 
     const latencyMs = asCount(body.latencyMs);
     const completedAt = new Date().toISOString();
+    const provider =
+      typeof body.provider === "string"
+        ? body.provider.slice(0, 160)
+        : "cooperative-local-text-worker";
+    const resultModel = body.model.slice(0, 300);
+
+    const jobUpdate: Record<string, unknown> = {
+      status: "completed",
+      partial_text: job.personal_use ? null : body.text,
+      result_text: job.personal_use ? null : body.text,
+      result_model: resultModel,
+      result_provider: provider,
+      prompt_tokens: asCount(body.promptTokens),
+      output_tokens: asCount(body.outputTokens),
+      latency_ms: latencyMs,
+      error: null,
+      completed_at: completedAt,
+      updated_at: completedAt,
+    };
+    if (job.personal_use) {
+      jobUpdate.messages = [
+        { role: "system", content: "Personal AI payload removed after local execution." },
+      ];
+    }
+
     const { error: updateError } = await supabase
       .from("text_inference_jobs")
-      .update({
-        status: "completed",
-        partial_text: body.text,
-        result_text: body.text,
-        result_model: body.model.slice(0, 300),
-        result_provider:
-          typeof body.provider === "string"
-            ? body.provider.slice(0, 160)
-            : "cooperative-local-text-worker",
-        prompt_tokens: asCount(body.promptTokens),
-        output_tokens: asCount(body.outputTokens),
-        latency_ms: latencyMs,
-        error: null,
-        completed_at: completedAt,
-        updated_at: completedAt,
-      })
+      .update(jobUpdate)
       .eq("id", jobId);
 
     if (updateError) throw updateError;
 
-    await recordUnisonTextUsage(supabase, {
-      jobId,
-      workerId,
-      claimedAt: job.claimed_at,
-      status: "completed",
-      completedAt,
-      latencyMs,
-    });
+    if (job.personal_use) {
+      if (!job.personal_user_id || !job.personal_conversation_id) {
+        throw new Error("Personal AI completion is missing its user or conversation.");
+      }
+
+      const { error: personalMessageError } = await supabase.rpc(
+        "personal_ai_append_message",
+        {
+          p_user_id: job.personal_user_id,
+          p_conversation_id: job.personal_conversation_id,
+          p_role: "assistant",
+          p_content: body.text.trim(),
+          p_source: "node",
+          p_source_job_id: jobId,
+          p_metadata: {
+            model: resultModel,
+            provider,
+            promptTokens: asCount(body.promptTokens),
+            outputTokens: asCount(body.outputTokens),
+            latencyMs,
+            workerId,
+          },
+        },
+      );
+      if (personalMessageError) throw personalMessageError;
+    } else {
+      await recordUnisonTextUsage(supabase, {
+        jobId,
+        workerId,
+        claimedAt: job.claimed_at,
+        status: "completed",
+        completedAt,
+        latencyMs,
+      });
+    }
 
     if (job.conversation_id) {
       const { error: messageError } = await supabase.from("local_ai_messages").upsert(

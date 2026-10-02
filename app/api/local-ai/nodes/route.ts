@@ -32,6 +32,8 @@ export async function GET() {
       const fresh = Number.isFinite(seenAt) && seenAt >= freshAfter;
       const textCapable =
         capabilities.includes("text_generation") && policy.allowText !== false;
+      const personalAiCapable =
+        textCapable && capabilities.includes("local_personal_chat");
 
       return {
         id: node.id,
@@ -42,7 +44,10 @@ export async function GET() {
         lastSeenAt: node.last_seen_at,
         fresh,
         textCapable,
+        personalAiCapable,
         availableForText: fresh && textCapable && node.state !== "paused",
+        availableForPersonalAi:
+          fresh && personalAiCapable && node.state !== "paused",
       };
     });
 

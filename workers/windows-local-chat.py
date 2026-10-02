@@ -7,11 +7,12 @@
 
 """Private, loopback-only Personal Local AI for Windows Unison nodes.
 
-The chat UI, chat history, projects, and project file cache live on the local
-Windows/browser profile. Inference is sent only to the node's loopback Ollama
-runtime. Optional web search sends the search query to a search provider only
-when the user enables Web mode. Personal prompts never enter the CoOperative
-community job queue.
+The chat UI runs on the local Windows node and inference is sent only to the
+node's loopback Ollama runtime. Conversation history can synchronize to the
+authenticated CoOperative account using encrypted hosted history so desktop and
+mobile can continue the same chats. Optional web search sends the search query
+to a search provider only when the user enables Web mode. Personal inference
+never enters the contributed-compute queue.
 """
 
 from __future__ import annotations
@@ -37,6 +38,12 @@ IMAGE_PORT_MARKER = HERE / "image-worker.port"
 
 HOST = "127.0.0.1"
 PORT = int(os.getenv("UNISON_LOCAL_CHAT_PORT", "11436"))
+COOPERATIVE_URL = os.getenv(
+    "COOPERATIVE_QUEUE_URL",
+    "https://co-operative-mu.vercel.app",
+).rstrip("/")
+NODE_ID = (os.getenv("UNISON_NODE_ID") or "").strip()[:160]
+NODE_TOKEN = os.getenv("UNISON_NODE_TOKEN") or os.getenv("INFERENCE_WORKER_TOKEN")
 OLLAMA_URL = os.getenv("UNISON_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
 FAST_MODEL = os.getenv("WINDOWS_TEXT_FAST_MODEL_ID", "qwen2.5:1.5b")
 QUALITY_MODEL = os.getenv("WINDOWS_TEXT_QUALITY_MODEL_ID", FAST_MODEL)
@@ -94,7 +101,7 @@ button,input,textarea,select{font:inherit}.app{display:grid;grid-template-column
   <aside class="sidebar">
     <div>
       <div class="brand">CoOperative Local AI</div>
-      <div class="privacy">Private assistant running on this PC. Personal prompts are not sent to the CoOperative job queue.</div>
+      <div class="privacy">Inference runs on this PC. Chat history syncs encrypted to your authenticated CoOperative account so you can continue on mobile.</div>
       <span class="badge">LOCAL INFERENCE</span>
     </div>
     <div class="side-actions">
@@ -194,7 +201,7 @@ function saveState(){localStorage.setItem(STATE_KEY,JSON.stringify(state))}
 function currentProject(){return state.projects.find(p=>p.id===state.activeProjectId)||null}
 function currentConversation(){return state.conversations.find(c=>c.id===state.activeConversationId)||null}
 function newConversation(){
-  const c={id:uid(),title:"New chat",projectId:state.activeProjectId||null,messages:[],createdAt:Date.now(),updatedAt:Date.now()};
+  const c={id:uid(),hostedId:null,title:"New chat",projectId:state.activeProjectId||null,messages:[],createdAt:Date.now(),updatedAt:Date.now()};
   state.conversations.unshift(c);state.activeConversationId=c.id;saveState();renderAll();$("input").focus();return c;
 }
 function ensureConversation(){return currentConversation()||newConversation()}
@@ -210,7 +217,51 @@ function renderProjects(){
 function renderHistory(){
   const box=$("history");box.innerHTML="";
   const rows=state.conversations.filter(c=>state.activeProjectId?c.projectId===state.activeProjectId:true).slice(0,40);
-  for(const c of rows){const b=document.createElement("button");b.textContent=c.title||"Chat";if(c.id===state.activeConversationId)b.className="active";b.onclick=()=>{state.activeConversationId=c.id;state.activeProjectId=c.projectId||null;saveState();renderAll()};box.appendChild(b)}
+  for(const c of rows){const b=document.createElement("button");b.textContent=c.title||"Chat";if(c.id===state.activeConversationId)b.className="active";b.onclick=()=>void selectConversation(c);box.appendChild(b)}
+}
+
+async function hostedRequest(path="",options={}){
+  const r=await fetch("/api/hosted-history"+path,{cache:"no-store",...options});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j.error||"Hosted history sync failed.");
+  return j;
+}
+async function selectConversation(c){
+  state.activeConversationId=c.id;state.activeProjectId=c.projectId||null;
+  if(c.hostedId){
+    try{
+      const j=await hostedRequest("?conversationId="+encodeURIComponent(c.hostedId));
+      c.title=j.conversation?.title||c.title;
+      c.hostedUpdatedAt=j.conversation?.updatedAt||c.hostedUpdatedAt;
+      c.messages=(j.messages||[]).map(m=>({role:m.role,content:m.content,hostedMessageId:m.id,createdAt:m.createdAt}));
+    }catch(e){$("error").textContent=e.message||String(e)}
+  }
+  saveState();renderAll();
+}
+async function syncHostedHistory(){
+  try{
+    const j=await hostedRequest();
+    for(const remote of (j.conversations||[])){
+      let c=state.conversations.find(x=>x.hostedId===remote.id||x.id===remote.id);
+      if(!c){
+        c={id:remote.id,hostedId:remote.id,title:remote.title||"Personal AI",projectId:null,messages:[],createdAt:Date.parse(remote.createdAt||"")||Date.now(),updatedAt:Date.parse(remote.updatedAt||"")||Date.now(),hostedUpdatedAt:remote.updatedAt};
+        state.conversations.unshift(c);
+      }else{
+        c.hostedId=remote.id;c.title=remote.title||c.title;c.hostedUpdatedAt=remote.updatedAt||c.hostedUpdatedAt;
+      }
+    }
+    saveState();renderHistory();
+  }catch{}
+}
+async function ensureHostedConversation(c,title){
+  if(c.hostedId)return c.hostedId;
+  const j=await hostedRequest("",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"create",title:String(title||c.title||"New chat").slice(0,160)})});
+  c.hostedId=j.conversationId;c.hostedUpdatedAt=new Date().toISOString();saveState();return c.hostedId;
+}
+async function appendHostedMessage(c,role,content,metadata={}){
+  if(!c.hostedId)return;
+  await hostedRequest("",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"append",conversationId:c.hostedId,role,content,metadata})});
+  c.hostedUpdatedAt=new Date().toISOString();saveState();
 }
 function renderMessages(){
   const box=$("messages");box.innerHTML="";const c=currentConversation();
@@ -297,7 +348,9 @@ async function send(){
   const input=$("input"),text=input.value.trim();if(!text&&!pending.length)return;
   $("error").textContent="";const c=ensureConversation();const names=pending.map(x=>x.name);
   const userText=text||"Please analyze the attached item(s).";
-  c.messages.push({role:"user",content:userText,attachments:names});if(c.title==="New chat")c.title=userText.slice(0,46);c.updatedAt=Date.now();input.value="";saveState();renderAll();
+  if(c.title==="New chat")c.title=userText.slice(0,46);
+  try{await ensureHostedConversation(c,userText);await appendHostedMessage(c,"user",userText,{attachments:names})}catch(e){console.warn("Hosted history sync unavailable",e)}
+  c.messages.push({role:"user",content:userText,attachments:names});c.updatedAt=Date.now();input.value="";saveState();renderAll();
   $("send").disabled=true;$("status").textContent="Choosing the best local model…";
   try{
     const project=await projectContext();
@@ -316,6 +369,7 @@ async function send(){
       await dbPut({id:imageId,kind:"generated-image",name:"cooperative-local-image-"+Date.now()+".png",data:j.generatedImage.dataUrl,createdAt:Date.now(),model:j.generatedImage.model||j.model});
     }
     c.messages.push({role:"assistant",content:j.text,meta,sources:j.webResults||[],imageId,imageAlt:j.generatedImage?.prompt||"Locally generated image"});c.updatedAt=Date.now();pending=[];saveState();renderAll();
+    try{await appendHostedMessage(c,"assistant",j.text,{model:j.model||null,profile:j.profile||null,webSearchUsed:!!j.webSearchUsed,imageGenerated:!!j.imageGenerated})}catch(e){console.warn("Hosted history sync unavailable",e)}
     if(state.voiceReply&&!j.imageGenerated)void speakText(j.text);
   }catch(e){$("error").textContent=e.message||String(e)}
   finally{$("send").disabled=false;$("status").textContent="Ready";renderAttachments();input.focus()}
@@ -351,7 +405,7 @@ $("mic").onclick=toggleMic;$("projectToggle").onclick=()=>$("projectPanel").clas
 $("modelMode").onchange=()=>{state.modelMode=$("modelMode").value;saveState()};
 $("webMode").onchange=()=>{state.webMode=$("webMode").value;saveState();updateWebWarning()};
 $("voiceReply").onclick=()=>{state.voiceReply=!state.voiceReply;saveState();updateVoiceButton()};
-loadState();if(!state.activeConversationId&&state.conversations.length)state.activeConversationId=state.conversations[0].id;renderAll();$("input").focus();
+loadState();if(!state.activeConversationId&&state.conversations.length)state.activeConversationId=state.conversations[0].id;renderAll();void syncHostedHistory();setInterval(()=>void syncHostedHistory(),15000);$("input").focus();
 </script>
 </body>
 </html>
@@ -408,6 +462,41 @@ def run_helper(name: str, args: list[str], timeout: float | None = None) -> dict
             detail = detail[0]
         raise RuntimeError(str(detail)[:700])
     return payload if isinstance(payload, dict) else {}
+
+
+def hosted_history_request(
+    method: str = "GET",
+    conversation_id: str | None = None,
+    payload: dict | None = None,
+) -> dict:
+    if not NODE_ID or not NODE_TOKEN:
+        raise RuntimeError("This Personal AI is not linked to a Unison contributor node.")
+
+    url = f"{COOPERATIVE_URL}/api/personal-ai/node/history"
+    params = {"nodeId": NODE_ID}
+    if conversation_id:
+        params["conversationId"] = conversation_id
+
+    response = httpx.request(
+        method,
+        url,
+        params=params if method == "GET" else None,
+        headers={
+            "Authorization": f"Bearer {NODE_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json=payload if method != "GET" else None,
+        timeout=30.0,
+        follow_redirects=True,
+    )
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail") or response.json().get("error")
+        except Exception:
+            detail = response.text
+        raise RuntimeError(str(detail or "Hosted history sync failed.")[:700])
+    value = response.json()
+    return value if isinstance(value, dict) else {}
 
 
 def ollama_executable() -> str | None:
@@ -856,6 +945,14 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if parsed.path == "/api/hosted-history":
+            conversation_id = (parse_qs(parsed.query).get("conversationId") or [None])[0]
+            try:
+                self._json(200, hosted_history_request("GET", conversation_id=conversation_id))
+            except Exception as exc:
+                self._json(502, {"error": str(exc)[:800]})
+            return
+
         if parsed.path == "/api/status":
             self._json(
                 200,
@@ -888,6 +985,42 @@ class Handler(BaseHTTPRequestHandler):
 
         parsed = urlparse(self.path)
         try:
+            if parsed.path == "/api/hosted-history":
+                body = json.loads(self._read_body(512_000) or b"{}")
+                action = str(body.get("action") or "")
+                if action == "create":
+                    result = hosted_history_request(
+                        "POST",
+                        payload={
+                            "action": "create",
+                            "nodeId": NODE_ID,
+                            "title": str(body.get("title") or "New chat")[:160],
+                        },
+                    )
+                elif action == "append":
+                    conversation_id = str(body.get("conversationId") or "")
+                    role = str(body.get("role") or "")
+                    content = str(body.get("content") or "")
+                    if not conversation_id or role not in {"user", "assistant"}:
+                        raise RuntimeError("Invalid hosted history append request.")
+                    result = hosted_history_request(
+                        "POST",
+                        payload={
+                            "action": "append",
+                            "nodeId": NODE_ID,
+                            "conversationId": conversation_id,
+                            "role": role,
+                            "content": content[:200000],
+                            "metadata": body.get("metadata")
+                            if isinstance(body.get("metadata"), dict)
+                            else {},
+                        },
+                    )
+                else:
+                    raise RuntimeError("Unknown hosted history action.")
+                self._json(200, result)
+                return
+
             if parsed.path == "/api/extract":
                 raw = self._read_body(MAX_FILE_BODY)
                 name = (parse_qs(parsed.query).get("name") or ["upload.bin"])[0]

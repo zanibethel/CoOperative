@@ -7,7 +7,10 @@ export const maxDuration = 30;
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json().catch(() => ({}))) as { workerId?: unknown };
+    const body = (await request.json().catch(() => ({}))) as {
+      workerId?: unknown;
+      personalOnly?: unknown;
+    };
     const workerId =
       typeof body.workerId === "string" && body.workerId.trim()
         ? body.workerId.trim().slice(0, 160)
@@ -17,11 +20,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const personalOnly = body.personalOnly === true;
     const supabase = createAdminSupabaseClient();
-    const { data, error } = await supabase.rpc("claim_next_text_inference_job", {
-      p_worker_id: workerId,
-      p_node_id: workerId,
-    });
+    const { data, error } = personalOnly
+      ? await supabase.rpc("claim_next_personal_text_inference_job", {
+          p_worker_id: workerId,
+          p_node_id: workerId,
+        })
+      : await supabase.rpc("claim_next_text_inference_job", {
+          p_worker_id: workerId,
+          p_node_id: workerId,
+        });
     if (error) throw error;
 
     const job = Array.isArray(data) ? data[0] : null;
@@ -41,6 +50,8 @@ export async function POST(request: Request) {
         routingPreference: job.routing_preference || "default",
         preferredNodeId: job.preferred_node_id || null,
         targetNodeId: job.target_node_id || null,
+        personalUse: Boolean(job.personal_use),
+        personalConversationId: job.personal_conversation_id || null,
       },
       { headers: { "Cache-Control": "no-store" } },
     );
