@@ -84,6 +84,8 @@ UNISON_BUSY = threading.Event()
 TEXT_READY_MARKER = Path(__file__).with_name("text-worker.ready")
 TEXT_BUSY_MARKER = Path(__file__).with_name("text-worker.busy")
 LOCAL_CHAT_READY_MARKER = Path(__file__).with_name("local-chat.ready")
+LOCAL_CHAT_BUSY_MARKER = Path(__file__).with_name("local-chat.busy")
+IMAGE_PORT_MARKER = Path(__file__).with_name("image-worker.port")
 loaded_profile: str | None = None
 text_pipe = None
 image_pipe = None
@@ -574,7 +576,11 @@ def unison_capabilities():
 
 
 def unison_busy():
-    return UNISON_BUSY.is_set() or TEXT_BUSY_MARKER.exists()
+    return (
+        UNISON_BUSY.is_set()
+        or TEXT_BUSY_MARKER.exists()
+        or LOCAL_CHAT_BUSY_MARKER.exists()
+    )
 
 
 @app.get("/health")
@@ -625,10 +631,13 @@ def capabilities():
 @app.post("/v1/images/generate")
 def generate(request: ImageRequest, authorization: str | None = Header(default=None)):
     require_worker_token(authorization)
+    UNISON_BUSY.set()
     try:
         return run_generation(request)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)[:800]) from exc
+    finally:
+        UNISON_BUSY.clear()
 
 
 if __name__ == "__main__":
@@ -656,13 +665,26 @@ if __name__ == "__main__":
     elif QUEUE_URL:
         print("COOPERATIVE_QUEUE_URL is set, but no node/worker token is configured; queue polling disabled.")
 
-    # Windows Unison workers use the outbound async queue, so they do not need a
-    # fixed public listener. An ephemeral loopback port avoids collisions with a
-    # stale/older worker during in-place upgrades.
+    # Windows uses a discoverable ephemeral loopback port. Personal Local AI
+    # reads the marker and proxies image requests directly to this worker without
+    # exposing the node token or sending the prompt through the CoOperative queue.
     default_host = "127.0.0.1" if platform.system() == "Windows" else "0.0.0.0"
-    default_port = "0" if platform.system() == "Windows" else "8000"
-    uvicorn.run(
-        app,
-        host=os.getenv("WORKER_BIND_HOST", default_host),
-        port=int(os.getenv("PORT", default_port)),
-    )
+    requested_port = int(os.getenv("PORT", "0" if platform.system() == "Windows" else "8000"))
+    listener_port = requested_port
+    if platform.system() == "Windows" and listener_port == 0:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            listener_port = int(probe.getsockname()[1])
+
+    if platform.system() == "Windows":
+        IMAGE_PORT_MARKER.write_text(str(listener_port), encoding="utf-8")
+
+    try:
+        uvicorn.run(
+            app,
+            host=os.getenv("WORKER_BIND_HOST", default_host),
+            port=listener_port,
+        )
+    finally:
+        if platform.system() == "Windows":
+            IMAGE_PORT_MARKER.unlink(missing_ok=True)
