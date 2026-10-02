@@ -482,13 +482,11 @@ async function retryFreeMediaJob(
 async function appendRecoveryMessage(
   admin: AdminClient,
   ownerRef: string,
-  conversationId: string | null,
+  source: FailedSource,
   incidentId: string,
   currentMessage: string,
   continuationPrompt: string,
 ) {
-  if (!conversationId) return;
-
   const content = [
     currentMessage,
     "",
@@ -497,8 +495,32 @@ async function appendRecoveryMessage(
     "RECOVERY_STATUS:" + incidentId,
   ].join("\n");
 
+  if (
+    source.kind === "text" &&
+    source.job.personal_use &&
+    source.job.personal_user_id &&
+    source.job.personal_conversation_id
+  ) {
+    const { error } = await admin.rpc("personal_ai_append_message", {
+      p_user_id: source.job.personal_user_id,
+      p_conversation_id: source.job.personal_conversation_id,
+      p_role: "assistant",
+      p_content: content,
+      p_source: "web",
+      p_source_job_id: null,
+      p_metadata: {
+        recoveryIncidentId: incidentId,
+        recoveryStatus: true,
+      },
+    });
+    if (error) throw error;
+    return;
+  }
+
+  if (!source.conversationId) return;
+
   const { error } = await admin.from("local_ai_messages").insert({
-    conversation_id: conversationId,
+    conversation_id: source.conversationId,
     owner_ref: ownerRef,
     role: "assistant",
     content,
@@ -510,7 +532,7 @@ async function appendRecoveryMessage(
   await admin
     .from("local_ai_conversations")
     .update({ updated_at: nowIso() })
-    .eq("id", conversationId)
+    .eq("id", source.conversationId)
     .eq("owner_ref", ownerRef);
 }
 
@@ -545,7 +567,14 @@ export async function startRecoveryForJob(
     .insert({
       id: incidentId,
       owner_ref: ownerRef,
-      conversation_id: source.conversationId,
+      conversation_id:
+        source.kind === "text" && source.job.personal_use
+          ? null
+          : source.conversationId,
+      personal_conversation_id:
+        source.kind === "text" && source.job.personal_use
+          ? source.job.personal_conversation_id
+          : null,
       source_kind: source.kind,
       source_job_id: sourceJobId,
       status:
@@ -598,7 +627,7 @@ export async function startRecoveryForJob(
   await appendRecoveryMessage(
     admin,
     ownerRef,
-    source.conversationId,
+    source,
     incidentId,
     classification.currentMessage,
     classification.continuationPrompt,
@@ -1046,13 +1075,20 @@ export async function refreshRecoveryIncident(
 export async function listRecoveryIncidents(
   ownerRef: string,
   conversationId: string,
+  scope: "cooperative" | "personal" = "cooperative",
 ) {
   const admin = createAdminSupabaseClient();
-  const { data, error } = await admin
+  let query = admin
     .from("recovery_incidents")
     .select("*")
-    .eq("owner_ref", ownerRef)
-    .eq("conversation_id", conversationId)
+    .eq("owner_ref", ownerRef);
+
+  query =
+    scope === "personal"
+      ? query.eq("personal_conversation_id", conversationId)
+      : query.eq("conversation_id", conversationId);
+
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .limit(12);
   if (error) throw error;
