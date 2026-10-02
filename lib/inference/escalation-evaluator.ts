@@ -32,6 +32,7 @@ export type EscalationEvidence = {
   requestedOutputTokens: number;
   localAttempts: number;
   localFailures: number;
+  localExecutionUnavailable?: boolean;
   malformedStructuredOutputs?: number;
   scopeGuardRejections?: number;
   verificationStatus: EscalationVerificationStatus;
@@ -105,6 +106,11 @@ function escalationScore(evidence: EscalationEvidence) {
   if (evidence.localFailures > 0) {
     score += bounded(evidence.localFailures, 0, 3);
     reasonCodes.push("local-failure");
+  }
+
+  if (evidence.localExecutionUnavailable) {
+    score += 4;
+    reasonCodes.push("local-execution-unavailable");
   }
 
   if (evidence.localAttempts >= 2) {
