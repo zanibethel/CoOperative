@@ -25,6 +25,60 @@ function providerDisplayName(providerKey: string) {
   return providerKey;
 }
 
+export async function GET(request: Request) {
+  const userId = await authenticatedUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const providerKey = new URL(request.url).searchParams.get("providerKey") || "";
+  if (!isBusinessAiProviderKey(providerKey)) {
+    return NextResponse.json({ error: "Unknown provider." }, { status: 400 });
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data: organization, error: organizationError } = await admin
+    .from("organizations")
+    .select("id")
+    .eq("owner_user_id", userId)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (organizationError) {
+    return NextResponse.json({ error: "Could not read provider status." }, { status: 502 });
+  }
+  if (!organization) {
+    return NextResponse.json(
+      { connected: false, providerKey, providerName: providerDisplayName(providerKey) },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  const { data: service, error: serviceError } = await admin
+    .from("connected_services")
+    .select("id,connection_status,last_synced_at")
+    .eq("organization_id", organization.id)
+    .eq("provider_key", providerKey)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (serviceError) {
+    return NextResponse.json({ error: "Could not read provider status." }, { status: 502 });
+  }
+
+  return NextResponse.json(
+    {
+      connected: service?.connection_status === "connected",
+      providerKey,
+      providerName: providerDisplayName(providerKey),
+      lastVerifiedAt: service?.last_synced_at || null,
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}
+
 export async function POST(request: Request) {
   const userId = await authenticatedUserId();
   if (!userId) {
