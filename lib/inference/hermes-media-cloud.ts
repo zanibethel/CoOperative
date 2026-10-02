@@ -245,16 +245,11 @@ export async function startHermesMediaTask(
     },
   ]);
 
-  const launch = await sandbox.runCommand({
+  await sandbox.runCommand({
     cmd: "bash",
     args: ["/tmp/cooperative-media-run.sh"],
     detached: true,
   });
-  if (launch.exitCode !== 0) {
-    const stderr = await launch.stderr();
-    await sandbox.stop();
-    throw new Error(`Hermes media worker could not start: ${stderr.slice(-800)}`);
-  }
 
   return {
     sandboxName,
