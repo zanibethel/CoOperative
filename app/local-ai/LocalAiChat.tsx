@@ -649,11 +649,13 @@ function NousPortalConnectCard({
 type RecoveryStatusCardProps = {
   incidentId: string;
   onConversationChanged: () => Promise<void> | void;
+  onSuggestion?: (value: string) => void;
 };
 
 function RecoveryStatusCard({
   incidentId,
   onConversationChanged,
+  onSuggestion,
 }: RecoveryStatusCardProps) {
   const [result, setResult] = useState<RecoveryResult | null>(null);
   const [cardError, setCardError] = useState("");
@@ -784,6 +786,43 @@ function RecoveryStatusCard({
               <strong>Provider</strong> {result.executor.provider}
             </span>
           ) : null}
+        </div>
+      ) : null}
+
+      {incident?.status === "waiting_user" &&
+      (incident.error_class === "spend_boundary" ||
+        incident.error_class === "provider_credit_boundary") ? (
+        <div className="recovery-suggestions">
+          <button
+            type="button"
+            onClick={() =>
+              onSuggestion?.(
+                "Keep my current budget and reduce quality or duration enough to fit it.",
+              )
+            }
+          >
+            Reduce quality to fit budget
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onSuggestion?.(
+                "Use my Nous subscription credits first, then OpenRouter only as backup, and retry.",
+              )
+            }
+          >
+            Use Nous first
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onSuggestion?.(
+                "Increase this request's max spend to $0.10 and retry only if needed.",
+              )
+            }
+          >
+            Increase cap to $0.10
+          </button>
         </div>
       ) : null}
 
@@ -1835,6 +1874,7 @@ export default function LocalAiChat() {
                         {recovery.text ? <div>{recovery.text}</div> : null}
                         <RecoveryStatusCard
                           incidentId={recovery.incidentId}
+                          onSuggestion={(value) => setInput(value)}
                           onConversationChanged={async () => {
                             if (conversationId) {
                               await loadConversation(conversationId);
