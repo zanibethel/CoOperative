@@ -19,7 +19,9 @@ import gc
 import io
 import os
 import platform
+import shutil
 import socket
+import subprocess
 from pathlib import Path
 import runpy
 import threading
@@ -116,6 +118,43 @@ def start_repo_recovery_worker():
     return thread
 
 
+def start_local_text_worker():
+    enabled = os.getenv("COOPERATIVE_START_TEXT_WORKER", "1").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        print("Local MLX text worker auto-start disabled.", flush=True)
+        return None
+    if platform.system() != "Darwin" or platform.machine() not in {"arm64", "aarch64"}:
+        return None
+
+    script = Path(__file__).with_name("mlx-text-worker.py")
+    if not script.exists():
+        print("Local MLX text worker script not found; recovery reasoning will wait for another text node.", flush=True)
+        return None
+
+    uv = shutil.which("uv")
+    if not uv:
+        print("Local MLX text worker not started: uv is unavailable.", flush=True)
+        return None
+
+    env = os.environ.copy()
+    env.setdefault("COOPERATIVE_QUEUE_URL", QUEUE_URL)
+    if "UNISON_NODE_TOKEN" not in env and "INFERENCE_WORKER_TOKEN" not in env and WORKER_TOKEN:
+        env["INFERENCE_WORKER_TOKEN"] = WORKER_TOKEN
+
+    try:
+        process = subprocess.Popen(
+            [uv, "run", str(script)],
+            cwd=str(Path(__file__).resolve().parent.parent),
+            env=env,
+        )
+    except Exception as exc:
+        print("Local MLX text worker could not start: " + str(exc)[:800], flush=True)
+        return None
+
+    print(f"Local MLX text worker started (pid {process.pid}).", flush=True)
+    return process
+
+
 MODEL_LOCK = threading.Lock()
 UNISON_BUSY = threading.Event()
 TEXT_READY_MARKER = Path(__file__).with_name("text-worker.ready")
@@ -123,7 +162,9 @@ TEXT_BUSY_MARKER = Path(__file__).with_name("text-worker.busy")
 LOCAL_CHAT_READY_MARKER = Path(__file__).with_name("local-chat.ready")
 LOCAL_CHAT_BUSY_MARKER = Path(__file__).with_name("local-chat.busy")
 IMAGE_PORT_MARKER = Path(__file__).with_name("image-worker.port")
+IMAGE_BUSY_MARKER = Path(__file__).with_name("image-worker.busy")
 IMAGE_PORT_MARKER.unlink(missing_ok=True)
+IMAGE_BUSY_MARKER.unlink(missing_ok=True)
 loaded_profile: str | None = None
 text_pipe = None
 image_pipe = None
@@ -500,7 +541,7 @@ def queue_loop():
     while True:
         job_id = None
         try:
-            if not node_available():
+            if not node_available() or TEXT_BUSY_MARKER.exists():
                 if loaded_profile is not None:
                     with MODEL_LOCK:
                         clear_model()
@@ -546,9 +587,11 @@ def queue_loop():
             )
 
             UNISON_BUSY.set()
+            IMAGE_BUSY_MARKER.write_text(job_id, encoding="utf-8")
             try:
                 result = run_generation(request)
             finally:
+                IMAGE_BUSY_MARKER.unlink(missing_ok=True)
                 UNISON_BUSY.clear()
 
             result["dataUrl"] = compact_jpeg_data_url(result["dataUrl"])
@@ -708,6 +751,7 @@ if __name__ == "__main__":
     )
     print("UNISON_RUNTIME_STARTED", flush=True)
     start_repo_recovery_worker()
+    start_local_text_worker()
 
     if PRELOAD_PROFILE in {"fast", "quality"}:
         try:

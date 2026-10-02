@@ -169,3 +169,72 @@ export async function GET(request: Request) {
     );
   }
 }
+
+
+export async function DELETE(request: Request) {
+  const authorization = await authorizeAgentWorker(request);
+  if (!authorization.authorized) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const url = new URL(request.url);
+    const taskId = url.searchParams.get("taskId") || "";
+    const jobId = url.searchParams.get("jobId") || "";
+    if (!taskId || !jobId) {
+      return NextResponse.json(
+        { error: "taskId and jobId are required." },
+        { status: 400 },
+      );
+    }
+
+    const admin = createAdminSupabaseClient();
+    const { data: task, error: taskError } = await admin
+      .from("agent_tasks")
+      .select("id,owner_ref,status")
+      .eq("id", taskId)
+      .maybeSingle();
+    if (taskError) throw taskError;
+    if (!task) {
+      return NextResponse.json({ error: "Task not found." }, { status: 404 });
+    }
+    if (!agentWorkerCanAccessOwner(authorization, task.owner_ref)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const cancelledAt = new Date().toISOString();
+    const { error: cancelError } = await admin
+      .from("text_inference_jobs")
+      .update({
+        status: "cancelled",
+        error: "Local agent reasoning timed out before a text worker completed it.",
+        completed_at: cancelledAt,
+        updated_at: cancelledAt,
+      })
+      .eq("id", jobId)
+      .eq("agent_task_id", taskId)
+      .in("status", ["queued", "running"]);
+    if (cancelError) throw cancelError;
+
+    await admin
+      .from("agent_tasks")
+      .update({
+        status: "running",
+        updated_at: cancelledAt,
+      })
+      .eq("id", taskId)
+      .eq("status", "waiting_llm");
+
+    return NextResponse.json(
+      { ok: true, status: "cancelled" },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message : "Could not cancel agent LLM work.";
+    return NextResponse.json(
+      { error: "Could not cancel agent LLM work.", detail: detail.slice(0, 800) },
+      { status: 502, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+}

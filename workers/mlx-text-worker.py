@@ -21,6 +21,8 @@ from mlx_lm import load as text_load
 from mlx_lm import stream_generate as text_stream_generate
 from mlx_lm.sample_utils import make_sampler
 
+from unison_runtime import node_available
+
 FAST_MODEL_ID = os.getenv(
     "TEXT_FAST_MODEL_ID",
     "mlx-community/Qwen3-4B-Instruct-2507-4bit",
@@ -36,8 +38,16 @@ VISION_MODEL_ID = os.getenv(
 
 QUEUE_URL = os.getenv("COOPERATIVE_QUEUE_URL", "https://co-operative-mu.vercel.app").rstrip("/")
 QUEUE_POLL_SECONDS = max(2, int(os.getenv("COOPERATIVE_TEXT_QUEUE_POLL_SECONDS", "3")))
-WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN")
-WORKER_ID = os.getenv("COOPERATIVE_TEXT_WORKER_ID", f"{socket.gethostname()}-text")[:160]
+WORKER_TOKEN = os.getenv("UNISON_NODE_TOKEN") or os.getenv("INFERENCE_WORKER_TOKEN")
+WORKER_ID = (
+    os.getenv("UNISON_NODE_ID")
+    or os.getenv("COOPERATIVE_TEXT_WORKER_ID")
+    or f"{socket.gethostname()}-text"
+)[:160]
+WORKER_DIR = Path(__file__).resolve().parent
+TEXT_READY_MARKER = WORKER_DIR / "text-worker.ready"
+TEXT_BUSY_MARKER = WORKER_DIR / "text-worker.busy"
+IMAGE_BUSY_MARKER = WORKER_DIR / "image-worker.busy"
 
 PROFILE_MODELS = {
     "fast": FAST_MODEL_ID,
@@ -64,7 +74,7 @@ def require_supported_mac():
 
 def queue_headers():
     if not WORKER_TOKEN:
-        raise RuntimeError("INFERENCE_WORKER_TOKEN is required for text queue polling.")
+        raise RuntimeError("A Unison node or inference worker token is required for text queue polling.")
     return {
         "Authorization": f"Bearer {WORKER_TOKEN}",
         "Content-Type": "application/json",
@@ -422,53 +432,72 @@ def queue_loop():
     print(f"Vision: {VISION_MODEL_ID}")
     print("Live token progress enabled.")
 
-    while True:
-        job_id = None
-        try:
-            response = httpx.post(
-                f"{QUEUE_URL}/api/inference/text/jobs/claim",
-                headers=queue_headers(),
-                json={"workerId": WORKER_ID},
-                timeout=30.0,
-                follow_redirects=True,
-            )
+    TEXT_READY_MARKER.write_text(str(os.getpid()), encoding="utf-8")
+    try:
+        while True:
+            job_id = None
+            try:
+                if not node_available() or IMAGE_BUSY_MARKER.exists():
+                    if loaded_key is not None:
+                        clear_model()
+                    time.sleep(QUEUE_POLL_SECONDS)
+                    continue
 
-            if response.status_code == 204:
-                time.sleep(QUEUE_POLL_SECONDS)
-                continue
+                response = httpx.post(
+                    f"{QUEUE_URL}/api/inference/text/jobs/claim",
+                    headers=queue_headers(),
+                    json={"workerId": WORKER_ID},
+                    timeout=30.0,
+                    follow_redirects=True,
+                )
 
-            response.raise_for_status()
-            job = response.json()
-            job_id = str(job["jobId"])
-            profile = job.get("profile", "fast")
-            capability = job.get("capability", "text")
-            print(f"Claimed async text job {job_id} ({profile}, {capability}).")
+                if response.status_code == 204:
+                    time.sleep(QUEUE_POLL_SECONDS)
+                    continue
 
-            result = run_generation(job_id, job)
-            completion = complete_job(job_id, result)
-            if completion.get("status") == "cancelled":
-                print(f"Async text job {job_id} was cancelled.")
-                continue
+                response.raise_for_status()
+                job = response.json()
+                job_id = str(job["jobId"])
+                profile = job.get("profile", "fast")
+                capability = job.get("capability", "text")
+                print(f"Claimed async text job {job_id} ({profile}, {capability}).")
 
-            print(
-                f"Completed async text job {job_id} "
-                f"in {result['latencyMs']} ms using {result['model']}."
-            )
-        except JobCancelled:
-            print(f"Async text job {job_id} cancelled by user.")
-            continue
-        except KeyboardInterrupt:
-            print("Text worker stopped.")
-            return
-        except Exception as exc:
-            message = str(exc)[:1000]
-            print(f"Async text queue error: {message}")
-            if job_id:
+                TEXT_BUSY_MARKER.write_text(job_id, encoding="utf-8")
                 try:
-                    complete_job(job_id, {"error": message})
-                except Exception as completion_exc:
-                    print(f"Could not report failure for {job_id}: {completion_exc}")
-            time.sleep(QUEUE_POLL_SECONDS)
+                    result = run_generation(job_id, job)
+                finally:
+                    TEXT_BUSY_MARKER.unlink(missing_ok=True)
+
+                completion = complete_job(job_id, result)
+                if completion.get("status") == "cancelled":
+                    print(f"Async text job {job_id} was cancelled.")
+                    continue
+
+                print(
+                    f"Completed async text job {job_id} "
+                    f"in {result['latencyMs']} ms using {result['model']}."
+                )
+            except JobCancelled:
+                TEXT_BUSY_MARKER.unlink(missing_ok=True)
+                print(f"Async text job {job_id} cancelled by user.")
+                continue
+            except KeyboardInterrupt:
+                print("Text worker stopped.")
+                return
+            except Exception as exc:
+                TEXT_BUSY_MARKER.unlink(missing_ok=True)
+                message = str(exc)[:1000]
+                print(f"Async text queue error: {message}")
+                if job_id:
+                    try:
+                        complete_job(job_id, {"error": message})
+                    except Exception as completion_exc:
+                        print(f"Could not report failure for {job_id}: {completion_exc}")
+                time.sleep(QUEUE_POLL_SECONDS)
+    finally:
+        TEXT_BUSY_MARKER.unlink(missing_ok=True)
+        TEXT_READY_MARKER.unlink(missing_ok=True)
+        clear_model()
 
 
 if __name__ == "__main__":
@@ -476,6 +505,6 @@ if __name__ == "__main__":
     if not QUEUE_URL:
         raise RuntimeError("COOPERATIVE_QUEUE_URL is required.")
     if not WORKER_TOKEN:
-        raise RuntimeError("INFERENCE_WORKER_TOKEN is required.")
+        raise RuntimeError("A Unison node or inference worker token is required.")
 
     queue_loop()
