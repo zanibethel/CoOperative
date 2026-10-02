@@ -7,10 +7,7 @@ export default async function UnisonJoinPage() {
   const viewer = await getUnisonViewer();
   if (!viewer) redirect("/login?next=/unison/join");
 
-  const initialName =
-    viewer.contributor?.display_name ||
-    viewer.user.email?.split("@")[0] ||
-    "Contributor";
+  const initialName = viewer.contributor?.display_name || "";
 
   return (
     <main className="shell">
