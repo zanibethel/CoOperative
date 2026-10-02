@@ -15,6 +15,7 @@ const textModelPlanSchema = z.object({
     fast: z.string().max(160).default(""),
     quality: z.string().max(160).default(""),
     heavy: z.string().max(160).default(""),
+    vision: z.string().max(160).default(""),
   }),
   selectionReason: z.string().max(1000).default(""),
 });
