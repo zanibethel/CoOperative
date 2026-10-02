@@ -497,7 +497,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: input.message.trim(),
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
             {
@@ -505,7 +505,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: assistantText,
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
           ]);
@@ -571,7 +571,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: input.message.trim(),
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
             {
@@ -579,7 +579,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: assistantText,
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
           ]);
@@ -611,7 +611,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: input.message.trim(),
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
             {
@@ -619,7 +619,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: assistantText,
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
           ]);
@@ -713,7 +713,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: input.message.trim(),
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
             {
@@ -721,7 +721,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: assistantText,
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
           ]);
@@ -1456,7 +1456,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
             {
@@ -1497,7 +1497,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             },
             {
@@ -2100,7 +2100,7 @@ export async function GET(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: resultText,
-              attachment_ids: effectiveMediaAttachmentIds,
+              attachment_ids: [],
               job_id: null,
             });
           }
