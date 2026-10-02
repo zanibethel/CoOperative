@@ -139,6 +139,15 @@ function asksToReduceMediaToFit(message: string) {
   );
 }
 
+function explicitlyReusesRecentImage(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\b(?:this|that|same|previous|last)\s+(?:image|photo|picture|reference)\b/.test(value) ||
+    /\b(?:use|edit|change|modify|analyze|describe|reference)\s+(?:it|this|that|the same one)\b/.test(value) ||
+    /\b(?:use|edit|change|modify|analyze|describe|reference)\s+(?:the )?(?:same|previous|last)\s+(?:image|photo|picture)\b/.test(value)
+  );
+}
+
 function conciseFailureDetail(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return null;
   return value
@@ -186,6 +195,85 @@ function videoControlsFromPrompt(prompt: string) {
     resolution,
     audio: audioMatch === "on" ? true : audioMatch === "off" ? false : null,
   };
+}
+
+type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
+
+function attachmentExtension(mimeType: string) {
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  return "jpg";
+}
+
+async function stageLocalImageReferences(
+  admin: AdminClient,
+  ownerRef: string,
+  jobId: string,
+  attachmentIds: string[],
+) {
+  if (!attachmentIds.length) return [];
+
+  const { data: attachments, error: attachmentError } = await admin
+    .from("local_ai_attachments")
+    .select("id,storage_path,file_name,mime_type")
+    .eq("owner_ref", ownerRef)
+    .in("id", attachmentIds);
+
+  if (attachmentError) throw attachmentError;
+  if (!attachments || attachments.length !== attachmentIds.length) {
+    throw new Error("One or more reference images are no longer available.");
+  }
+
+  const byId = new Map(attachments.map((attachment) => [attachment.id, attachment]));
+  const referencePaths: Array<{
+    path: string;
+    title?: string;
+    contentType: string;
+  }> = [];
+
+  try {
+    for (let index = 0; index < attachmentIds.length; index += 1) {
+      const attachment = byId.get(attachmentIds[index]);
+      if (!attachment) throw new Error("Reference image metadata is missing.");
+
+      const { data: blob, error: downloadError } = await admin.storage
+        .from("local-ai-attachments")
+        .download(attachment.storage_path);
+      if (downloadError) throw downloadError;
+
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      if (!bytes.length || bytes.byteLength > 12 * 1024 * 1024) {
+        throw new Error("Reference image is empty or exceeds the local inference limit.");
+      }
+
+      const contentType = attachment.mime_type || "image/jpeg";
+      const path =
+        `jobs/${jobId}/references/${index}.${attachmentExtension(contentType)}`;
+      const { error: uploadError } = await admin.storage
+        .from("inference-job-assets")
+        .upload(path, bytes, {
+          contentType,
+          cacheControl: "3600",
+          upsert: false,
+        });
+      if (uploadError) throw uploadError;
+
+      referencePaths.push({
+        path,
+        title: attachment.file_name || undefined,
+        contentType,
+      });
+    }
+
+    return referencePaths;
+  } catch (error) {
+    if (referencePaths.length) {
+      await admin.storage
+        .from("inference-job-assets")
+        .remove(referencePaths.map((reference) => reference.path));
+    }
+    throw error;
+  }
 }
 
 export async function POST(request: Request) {
@@ -822,6 +910,7 @@ export async function POST(request: Request) {
     }
 
     let effectiveMediaRequestText = input.message.trim();
+    let effectiveMediaAttachmentIds = [...input.attachmentIds];
     let mediaPlan = planMediaRequest(effectiveMediaRequestText);
 
     if (
@@ -832,7 +921,7 @@ export async function POST(request: Request) {
       const { data: recentConversationRows, error: recentConversationError } =
         await admin
           .from("local_ai_messages")
-          .select("role,content")
+          .select("role,content,attachment_ids")
           .eq("conversation_id", conversationId)
           .eq("owner_ref", ownerRef)
           .order("created_at", { ascending: false })
@@ -848,6 +937,9 @@ export async function POST(request: Request) {
           row.content.trim() +
           "\nFollow-up preference: " +
           input.message.trim();
+        effectiveMediaAttachmentIds = Array.isArray(row.attachment_ids)
+          ? row.attachment_ids.slice(0, 4)
+          : [];
         mediaPlan = planMediaRequest(effectiveMediaRequestText);
         if (mediaPlan) break;
       }
@@ -902,9 +994,12 @@ export async function POST(request: Request) {
         );
       }
 
-      if (input.attachmentIds.length > 0) {
+      if (
+        mediaPlan.kind === "video" &&
+        effectiveMediaAttachmentIds.length > 0
+      ) {
         const message =
-          "Text-to-media generation is ready. Image-to-video/reference-image generation is the next media slice, so remove the attachment for this first smoke test or describe the desired scene in text.";
+          "I understand this as a new video request using a reference image. Reference-image video generation is not connected to a verified route yet, so I did not blend it with an earlier request or start a generation.";
         const { error: unsupportedError } = await admin
           .from("local_ai_messages")
           .insert([
@@ -913,7 +1008,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: input.attachmentIds,
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -936,7 +1031,7 @@ export async function POST(request: Request) {
             conversationTitle,
             text: message,
             provider: "code",
-            model: "media-preflight",
+            model: "media-reference-video-preflight",
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
@@ -993,6 +1088,8 @@ export async function POST(request: Request) {
         liveCatalog = null;
       }
 
+      const requiresReferenceImage =
+        mediaPlan.kind === "image" && effectiveMediaAttachmentIds.length > 0;
       let localImageAvailable = false;
       if (mediaPlan.kind === "image") {
         const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
@@ -1013,8 +1110,12 @@ export async function POST(request: Request) {
                 ? (node.policy as { allowImage?: unknown })
                 : {};
             const seenAt = Date.parse(node.last_seen_at || "");
+            const supportsRequestedImageMode = requiresReferenceImage
+              ? capabilities.includes("image_to_image") ||
+                capabilities.includes("single_reference_identity")
+              : capabilities.includes("image_generation");
             return (
-              capabilities.includes("image_generation") &&
+              supportsRequestedImageMode &&
               policy.allowImage !== false &&
               Number.isFinite(seenAt) &&
               seenAt >= freshAfter &&
@@ -1029,6 +1130,7 @@ export async function POST(request: Request) {
         openRouterCatalog: liveCatalog,
         currentCapUsd: requestCapUsd,
         localImageAvailable,
+        requiresReferenceImage,
       });
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const selectedRecommendation = recommendationTier
@@ -1070,7 +1172,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -1139,7 +1241,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -1183,6 +1285,19 @@ export async function POST(request: Request) {
           effectiveMediaRequestText,
           mediaPlan,
         );
+        const referencePaths = await stageLocalImageReferences(
+          admin,
+          ownerRef,
+          localJobId,
+          effectiveMediaAttachmentIds,
+        );
+        const localProfile =
+          selectedRecommendation.model.includes("fast") ? "fast" : "quality";
+        const variationMode =
+          selectedRecommendation.model.includes("quality-reference")
+            ? "preserve"
+            : "balanced";
+
         const { error: localJobError } = await admin.from("inference_jobs").insert({
           id: localJobId,
           kind: "image",
@@ -1190,13 +1305,21 @@ export async function POST(request: Request) {
           client_owner_ref: ownerRef,
           prompt: generationPrompt,
           aspect_ratio: mediaPlan.aspectRatio || "4:5",
-          profile: mediaLevel >= 2 ? "quality" : "fast",
-          variation_mode: "balanced",
+          profile: localProfile,
+          variation_mode: variationMode,
+          reference_paths: referencePaths,
           seed:
             Number.parseInt(localJobId.replaceAll("-", "").slice(0, 8), 16) %
             2147483648,
         });
-        if (localJobError) throw localJobError;
+        if (localJobError) {
+          if (referencePaths.length) {
+            await admin.storage
+              .from("inference-job-assets")
+              .remove(referencePaths.map((reference) => reference.path));
+          }
+          throw localJobError;
+        }
 
         const { error: localMessageError } = await admin
           .from("local_ai_messages")
@@ -1205,7 +1328,7 @@ export async function POST(request: Request) {
             owner_ref: ownerRef,
             role: "user",
             content: visibleUserText,
-            attachment_ids: [],
+            attachment_ids: effectiveMediaAttachmentIds,
             job_id: localJobId,
           });
         if (localMessageError) throw localMessageError;
@@ -1221,7 +1344,9 @@ export async function POST(request: Request) {
             provider: "cooperative-local",
             model: selectedRecommendation.model,
             routeReason:
-              "The user selected the quoted lowest-cost owned/local recommendation.",
+              effectiveMediaAttachmentIds.length > 0
+                ? `The user selected the quoted ${selectedRecommendation.label.toLowerCase()} reference-image route. The current attachment is scoped to this new image task only.`
+                : `The user selected the quoted ${selectedRecommendation.label.toLowerCase()} owned/local image route.`,
             estimatedProviderCostUsd: 0,
             requestMaxSpendUsd: requestCapUsd,
           },
@@ -1655,7 +1780,10 @@ export async function POST(request: Request) {
 
     if (historyError) throw historyError;
 
-    if (currentAttachmentIds.length === 0) {
+    if (
+      currentAttachmentIds.length === 0 &&
+      explicitlyReusesRecentImage(input.message)
+    ) {
       const latestImageMessage = (previousMessages || []).find(
         (message) =>
           Array.isArray(message.attachment_ids) && message.attachment_ids.length > 0,

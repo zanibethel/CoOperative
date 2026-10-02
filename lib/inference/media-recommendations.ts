@@ -143,6 +143,7 @@ export async function buildMediaRecommendationOptions(input: {
   openRouterCatalog: MediaCatalog | null;
   currentCapUsd: number;
   localImageAvailable?: boolean;
+  requiresReferenceImage?: boolean;
 }) {
   const { plan, openRouterCatalog, currentCapUsd } = input;
   const candidates: Candidate[] = [];
@@ -156,7 +157,9 @@ export async function buildMediaRecommendationOptions(input: {
   const openRouterPool =
     plan.kind === "video"
       ? openRouterCatalog?.video || []
-      : openRouterCatalog?.image || [];
+      : input.requiresReferenceImage
+        ? []
+        : openRouterCatalog?.image || [];
   const exactOpenRouter = openRouterPool.filter((model) =>
     supportsExactRequest(model, plan),
   );
@@ -214,32 +217,72 @@ export async function buildMediaRecommendationOptions(input: {
   }
 
   if (plan.kind === "image") {
-    for (const model of nousCatalog.image) {
-      candidates.push({
-        provider: "nous",
-        model: model.model,
-        modelName: model.model.replace(/^fal-ai\//, ""),
-        estimatedCostUsd: model.estimatedCostUsd,
-        capUsd: nextCent(model.estimatedCostUsd),
-        pricingSource: model.pricingSource,
-        resolution: null,
-        audio: null,
-        qualityLevel: model.minLevel,
-      });
+    if (!input.requiresReferenceImage) {
+      for (const model of nousCatalog.image) {
+        candidates.push({
+          provider: "nous",
+          model: model.model,
+          modelName: model.model.replace(/^fal-ai\//, ""),
+          estimatedCostUsd: model.estimatedCostUsd,
+          capUsd: nextCent(model.estimatedCostUsd),
+          pricingSource: model.pricingSource,
+          resolution: null,
+          audio: null,
+          qualityLevel: model.minLevel,
+        });
+      }
     }
 
     if (input.localImageAvailable) {
-      candidates.push({
-        provider: "cooperative-local",
-        model: "local-image-quality",
-        modelName: "Owned local image generator",
-        estimatedCostUsd: 0,
-        capUsd: 0,
-        pricingSource: "owned-local",
-        resolution: null,
-        audio: null,
-        qualityLevel: 1,
-      });
+      if (input.requiresReferenceImage) {
+        candidates.push(
+          {
+            provider: "cooperative-local",
+            model: "local-image-quality-identity",
+            modelName: "Owned Local Quality · Identity",
+            estimatedCostUsd: 0,
+            capUsd: 0,
+            pricingSource: "owned-local",
+            resolution: null,
+            audio: null,
+            qualityLevel: 4,
+          },
+          {
+            provider: "cooperative-local",
+            model: "local-image-quality-reference",
+            modelName: "Owned Local Quality · Reference",
+            estimatedCostUsd: 0,
+            capUsd: 0,
+            pricingSource: "owned-local",
+            resolution: null,
+            audio: null,
+            qualityLevel: 2,
+          },
+          {
+            provider: "cooperative-local",
+            model: "local-image-fast-reference",
+            modelName: "Owned Local Fast · Reference",
+            estimatedCostUsd: 0,
+            capUsd: 0,
+            pricingSource: "owned-local",
+            resolution: null,
+            audio: null,
+            qualityLevel: 1,
+          },
+        );
+      } else {
+        candidates.push({
+          provider: "cooperative-local",
+          model: "local-image-quality",
+          modelName: "Owned local image generator",
+          estimatedCostUsd: 0,
+          capUsd: 0,
+          pricingSource: "owned-local",
+          resolution: null,
+          audio: null,
+          qualityLevel: 1,
+        });
+      }
     }
   }
 
