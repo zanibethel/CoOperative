@@ -1,3 +1,5 @@
+import "server-only";
+
 export type NousManagedMediaKind = "image" | "video";
 
 export type NousManagedMediaChoice = {
@@ -7,112 +9,262 @@ export type NousManagedMediaChoice = {
   qualityLabel: string;
   degradedFromRequestedLevel: boolean;
   executionNote: string;
+  pricingSource: string;
+  resolution?: string | null;
+  audio?: boolean | null;
 };
 
-type ImageCandidate = {
+type LiveImageCandidate = {
   minLevel: 1 | 2 | 3 | 4;
   model: string;
-  conservativeCostUsd: number;
+  url: string;
   qualityLabel: string;
+  parseCostUsd: (html: string) => number | null;
 };
 
-const IMAGE_CANDIDATES: ImageCandidate[] = [
+type PixversePricing = {
+  fetchedAt: string;
+  source: string;
+  rates: Record<string, { withoutAudio: number; withAudio: number }>;
+};
+
+const CACHE_MS = 15 * 60 * 1000;
+const textCache = new Map<string, { at: number; text: string }>();
+
+async function liveText(url: string) {
+  const cached = textCache.get(url);
+  if (cached && Date.now() - cached.at < CACHE_MS) return cached.text;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(url, {
+      headers: { Accept: "text/html, text/plain;q=0.9" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Live media pricing returned HTTP ${response.status} for ${url}.`);
+    }
+    const text = await response.text();
+    textCache.set(url, { at: Date.now(), text });
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function firstNumber(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match) continue;
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value >= 0) return value;
+  }
+  return null;
+}
+
+const IMAGE_CANDIDATES: LiveImageCandidate[] = [
   {
     minLevel: 1,
     model: "fal-ai/z-image/turbo",
-    conservativeCostUsd: 0.01,
+    url: "https://fal.ai/models/fal-ai/z-image/turbo",
     qualityLabel: "economy",
+    parseCostUsd: (html) =>
+      firstNumber(html, [
+        /cost\s+\$([0-9.]+)\s+per\s+megapixel/i,
+        /\$([0-9.]+)\s*\/\s*MP/i,
+      ]),
   },
   {
     minLevel: 2,
     model: "fal-ai/qwen-image",
-    conservativeCostUsd: 0.03,
+    url: "https://fal.ai/models/fal-ai/qwen-image",
     qualityLabel: "balanced",
+    parseCostUsd: (html) =>
+      firstNumber(html, [
+        /cost\s+\$([0-9.]+)\s+per\s+megapixel/i,
+        /\$([0-9.]+)\s*\/\s*MP/i,
+      ]),
   },
   {
     minLevel: 3,
     model: "fal-ai/gpt-image-1.5",
-    conservativeCostUsd: 0.034,
+    url: "https://fal.ai/models/fal-ai/gpt-image-1.5",
     qualityLabel: "high",
+    parseCostUsd: (html) => {
+      const mediumSquare = firstNumber(html, [
+        /medium quality[^$]*\$([0-9.]+)\s+for\s+1024x1024/i,
+      ]);
+      if (mediumSquare === null) return null;
+      // Reserve a small amount for this model's separately metered prompt/reasoning
+      // tokens so the request ceiling remains conservative.
+      return mediumSquare + 0.01;
+    },
   },
   {
     minLevel: 4,
     model: "fal-ai/nano-banana-pro",
-    conservativeCostUsd: 0.15,
+    url: "https://fal.ai/models/fal-ai/nano-banana-pro",
     qualityLabel: "premium",
+    parseCostUsd: (html) =>
+      firstNumber(html, [
+        /cost\s+\$([0-9.]+)\s+per\s+image/i,
+        /\$([0-9.]+)\s*\/\s*image/i,
+      ]),
   },
 ];
 
-const PIXVERSE_360P_NO_AUDIO_USD_PER_SECOND = 0.025;
-
-export function chooseNousManagedImage(
+export async function chooseNousManagedImage(
   requestedLevel: 0 | 1 | 2 | 3 | 4,
   maxSpendUsd: number | null,
-): NousManagedMediaChoice | null {
+): Promise<NousManagedMediaChoice | null> {
   if (requestedLevel === 0) return null;
 
   const cap =
     maxSpendUsd === null ? Number.POSITIVE_INFINITY : Math.max(0, maxSpendUsd);
-  const requestedCandidates = IMAGE_CANDIDATES.filter(
-    (candidate) => candidate.minLevel <= requestedLevel,
-  );
-  const affordable = requestedCandidates.filter(
-    (candidate) => candidate.conservativeCostUsd <= cap,
-  );
-  const selected = affordable.at(-1);
-  if (!selected) return null;
+  const requestedCandidates = IMAGE_CANDIDATES
+    .filter((candidate) => candidate.minLevel <= requestedLevel)
+    .sort((a, b) => b.minLevel - a.minLevel);
 
-  return {
-    provider: "nous",
-    model: selected.model,
-    estimatedCostUsd: selected.conservativeCostUsd,
-    qualityLabel: selected.qualityLabel,
-    degradedFromRequestedLevel: selected.minLevel < requestedLevel,
-    executionNote:
-      "Nous Portal managed image generation is preferred because it uses the connected subscription credit balance before BYOK fallback.",
-  };
+  for (const candidate of requestedCandidates) {
+    try {
+      const html = await liveText(candidate.url);
+      const liveCost = candidate.parseCostUsd(html);
+      if (liveCost === null || liveCost > cap) continue;
+
+      return {
+        provider: "nous",
+        model: candidate.model,
+        estimatedCostUsd: liveCost,
+        qualityLabel: candidate.qualityLabel,
+        degradedFromRequestedLevel: candidate.minLevel < requestedLevel,
+        pricingSource: candidate.url,
+        executionNote:
+          "Nous Portal managed image generation is preferred. CoOperative verified current upstream pricing before approving the paid tool call.",
+      };
+    } catch {
+      // Never spend from a stale hard-coded estimate. If the live source is
+      // unavailable, let routing continue to local/free or another live catalog.
+    }
+  }
+  return null;
 }
 
-export function chooseNousManagedVideo(
+const PIXVERSE_URL = "https://fal.ai/models/fal-ai/pixverse/v6/text-to-video";
+const LEVEL_RESOLUTION: Record<1 | 2 | 3 | 4, string[]> = {
+  1: ["360p"],
+  2: ["540p", "360p"],
+  3: ["720p", "540p", "360p"],
+  4: ["1080p", "720p", "540p", "360p"],
+};
+
+async function livePixversePricing(): Promise<PixversePricing | null> {
+  try {
+    const html = await liveText(PIXVERSE_URL);
+    const rates: PixversePricing["rates"] = {};
+    for (const resolution of ["360p", "540p", "720p", "1080p"]) {
+      const escaped = resolution.replace("p", "p");
+      const row = html.match(
+        new RegExp(
+          `For\\s+${escaped}[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+without\\s+audio[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+with\\s+audio`,
+          "i",
+        ),
+      );
+      if (!row) continue;
+      const withoutAudio = Number(row[1]);
+      const withAudio = Number(row[2]);
+      if (Number.isFinite(withoutAudio) && Number.isFinite(withAudio)) {
+        rates[resolution] = { withoutAudio, withAudio };
+      }
+    }
+    if (!Object.keys(rates).length) return null;
+    return {
+      fetchedAt: new Date().toISOString(),
+      source: PIXVERSE_URL,
+      rates,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function chooseNousManagedVideo(
   requestedLevel: 0 | 1 | 2 | 3 | 4,
   maxSpendUsd: number | null,
   durationSeconds: number | null,
-): NousManagedMediaChoice | null {
+  requestedResolution: string | null = null,
+  requestedAudio: boolean | null = null,
+): Promise<NousManagedMediaChoice | null> {
   if (requestedLevel === 0 || !durationSeconds) return null;
 
-  const estimatedCostUsd =
-    durationSeconds * PIXVERSE_360P_NO_AUDIO_USD_PER_SECOND;
+  const pricing = await livePixversePricing();
+  if (!pricing) return null;
+
   const cap =
     maxSpendUsd === null ? Number.POSITIVE_INFINITY : Math.max(0, maxSpendUsd);
-  if (estimatedCostUsd > cap) return null;
+  const resolutionOrder = requestedResolution
+    ? [requestedResolution.toLowerCase()]
+    : LEVEL_RESOLUTION[requestedLevel];
+  const audio = requestedAudio ?? false;
 
-  return {
-    provider: "nous",
-    model: "pixverse-v6",
-    estimatedCostUsd,
-    qualityLabel: "test / economy video",
-    degradedFromRequestedLevel: requestedLevel > 1,
-    executionNote:
-      "Nous Portal managed PixVerse is configured for the low-cost test path; the prompt should request 360p with audio disabled.",
-  };
+  for (const resolution of resolutionOrder) {
+    const rate = pricing.rates[resolution];
+    if (!rate) continue;
+    const estimatedCostUsd =
+      durationSeconds * (audio ? rate.withAudio : rate.withoutAudio);
+    if (estimatedCostUsd > cap) continue;
+
+    const levelMax = LEVEL_RESOLUTION[requestedLevel][0];
+    return {
+      provider: "nous",
+      model: "pixverse-v6",
+      estimatedCostUsd,
+      qualityLabel: `${resolution} ${audio ? "with audio" : "no audio"}`,
+      degradedFromRequestedLevel:
+        Boolean(requestedResolution && requestedResolution.toLowerCase() !== resolution) ||
+        resolution !== levelMax,
+      pricingSource: pricing.source,
+      resolution,
+      audio,
+      executionNote:
+        "Nous Portal managed PixVerse is preferred. Duration, resolution, and generated-audio pricing were checked live before the generation call.",
+    };
+  }
+
+  return null;
 }
 
-export function affordableVideoSuggestion(
+export async function affordableVideoSuggestion(
   durationSeconds: number | null,
   maxSpendUsd: number | null,
+  requestedResolution: string | null = null,
+  requestedAudio: boolean | null = null,
 ) {
   if (!durationSeconds || maxSpendUsd === null) return null;
-  const requestedCost = durationSeconds * PIXVERSE_360P_NO_AUDIO_USD_PER_SECOND;
-  if (requestedCost <= maxSpendUsd) return null;
+  const pricing = await livePixversePricing();
+  if (!pricing) return null;
 
-  const affordableSeconds = Math.floor(
-    maxSpendUsd / PIXVERSE_360P_NO_AUDIO_USD_PER_SECOND,
-  );
-  const minimumRequestedBudget = requestedCost;
+  const audio = requestedAudio ?? false;
+  const requestedRate =
+    (requestedResolution && pricing.rates[requestedResolution.toLowerCase()]) ||
+    pricing.rates["360p"];
+  if (!requestedRate) return null;
+
+  const requestedCost =
+    durationSeconds * (audio ? requestedRate.withAudio : requestedRate.withoutAudio);
+  const cheapest = pricing.rates["360p"];
+  if (!cheapest) return null;
+  const cheapestRate = audio ? cheapest.withAudio : cheapest.withoutAudio;
+  const affordableSeconds = Math.floor(maxSpendUsd / cheapestRate);
 
   return {
     affordableSeconds: Math.max(0, affordableSeconds),
-    minimumRequestedBudget,
-    rateUsdPerSecond: PIXVERSE_360P_NO_AUDIO_USD_PER_SECOND,
+    minimumRequestedBudget: requestedCost,
+    rateUsdPerSecond: cheapestRate,
+    requestedResolution: requestedResolution || "360p",
+    suggestedResolution: "360p",
+    audio,
+    pricingSource: pricing.source,
   };
 }
