@@ -4,6 +4,7 @@ export const BUSINESS_AI_PROVIDER_KEYS = [
   "openai-api",
   "anthropic-claude",
   "google-gemini",
+  "openrouter-api",
 ] as const;
 
 export type BusinessAiProviderKey =
@@ -86,6 +87,29 @@ export async function validateBusinessAiCredential(
         },
       },
       "Claude",
+    );
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: unknown }>;
+    };
+    const models = (payload.data || [])
+      .map((item) => (typeof item.id === "string" ? item.id : ""))
+      .filter(Boolean)
+      .slice(0, 30);
+
+    return { providerKey, models };
+  }
+
+  if (providerKey === "openrouter-api") {
+    await checkedFetch(
+      "https://openrouter.ai/api/v1/key",
+      { headers: { Authorization: `Bearer ${secret}` } },
+      "OpenRouter",
+    );
+
+    const response = await checkedFetch(
+      "https://openrouter.ai/api/v1/models",
+      { headers: { Authorization: `Bearer ${secret}` } },
+      "OpenRouter",
     );
     const payload = (await response.json()) as {
       data?: Array<{ id?: unknown }>;
