@@ -902,8 +902,8 @@ export async function POST(request: Request) {
         const minimumBudget = suggestion?.minimumRequestedBudget || 0;
         const message =
           suggestedSeconds >= 1
-            ? `Your current ${(requestCapUsd || 0).toFixed(2)} cap is below the estimated cost for a ${requestedSeconds}s video. To stay inside the cap, I can reduce the test to about ${suggestedSeconds}s at 360p with audio off. Or raise this request to about ${minimumBudget.toFixed(2)} for the full ${requestedSeconds}s low-cost test. Nous credits stay first; OpenRouter is only backup.`
-            : `Your current ${(requestCapUsd || 0).toFixed(2)} cap is below the cheapest managed video test I can price safely. Raise the request cap or reduce duration/quality before I spend anything. Nous credits stay first; OpenRouter is only backup.`;
+            ? `Your current $${(requestCapUsd || 0).toFixed(2)} cap is below the estimated cost for a ${requestedSeconds}s video. To stay inside the cap, I can reduce the test to about ${suggestedSeconds}s at 360p with audio off. Or raise this request to about $${minimumBudget.toFixed(2)} for the full ${requestedSeconds}s low-cost test. Nous credits stay first; OpenRouter is only backup.`
+            : `Your current $${(requestCapUsd || 0).toFixed(2)} cap is below the cheapest managed video test I can price safely. Raise the request cap or reduce duration/quality before I spend anything. Nous credits stay first; OpenRouter is only backup.`;
 
         await admin.from("local_ai_messages").insert([
           {
@@ -994,7 +994,7 @@ export async function POST(request: Request) {
         estimatedProviderCostUsd > requestCapUsd
       ) {
         const message =
-          `The live estimate for ${selectedModel} is about ${estimatedProviderCostUsd.toFixed(2)}, above this request's ${requestCapUsd.toFixed(2)} max-spend cap. Raise the cap or lower the Media slider.`;
+          `The live estimate for ${selectedModel} is about $${estimatedProviderCostUsd.toFixed(2)}, above this request's $${requestCapUsd.toFixed(2)} max-spend cap. Raise the cap or lower the Media slider.`;
         const { error: capError } = await admin
           .from("local_ai_messages")
           .insert([
