@@ -86,6 +86,7 @@ TEXT_BUSY_MARKER = Path(__file__).with_name("text-worker.busy")
 LOCAL_CHAT_READY_MARKER = Path(__file__).with_name("local-chat.ready")
 LOCAL_CHAT_BUSY_MARKER = Path(__file__).with_name("local-chat.busy")
 IMAGE_PORT_MARKER = Path(__file__).with_name("image-worker.port")
+IMAGE_PORT_MARKER.unlink(missing_ok=True)
 loaded_profile: str | None = None
 text_pipe = None
 image_pipe = None
@@ -565,6 +566,7 @@ def unison_capabilities():
                 "local_personal_chat",
                 "local_ai_auto_model",
                 "local_ai_images",
+                "local_ai_image_generation",
                 "local_ai_files",
                 "local_ai_web_search",
                 "local_ai_voice",
