@@ -1958,3 +1958,29 @@ b { color: var(--text); }
     height: 64px;
   }
 }
+
+
+.secure-service-oauth-code {
+  display: grid;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.secure-service-oauth-code small {
+  color: var(--muted);
+  font-size: .7rem;
+}
+
+.secure-service-oauth-code strong {
+  font-size: 1.05rem;
+  letter-spacing: .08em;
+  overflow-wrap: anywhere;
+}
+
+.secure-service-oauth-link {
+  width: fit-content;
+  text-decoration: none;
+}
