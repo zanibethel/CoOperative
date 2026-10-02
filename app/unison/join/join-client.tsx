@@ -82,6 +82,41 @@ export default function JoinClient({
 
   return (
     <div className="unison-stack">
+      <section className="card unison-stack">
+        <div>
+          <div className="eyebrow">Unison + Personal AI</div>
+          <h2>Install Unison and your own Local AI on this computer.</h2>
+          <p>
+            One setup gives this PC a private <strong>CoOperative Personal Local AI</strong> for
+            everyday use and turns the machine into a Unison contributor node when the whole PC is
+            idle. Your PC works for you first.
+          </p>
+        </div>
+
+        <div>
+          <div className="eyebrow">Included with setup</div>
+          <div className="service-tags">
+            <span>Private Personal Local AI</span>
+            <span>Automatic model choice</span>
+            <span>Image understanding + local image creation</span>
+            <span>PDF / Office / code files</span>
+            <span>Local voice input + spoken replies</span>
+            <span>Optional web search</span>
+            <span>Local chat history</span>
+            <span>Project workspaces + tasks</span>
+            <span>Machine-wide Unison node</span>
+            <span>Whole-PC idle protection</span>
+          </div>
+        </div>
+
+        <p>
+          <strong>Personal AI stays local by default.</strong> Personal prompts, responses,
+          project data, attached-file context, and local history do not enter the CoOperative
+          community job queue. Web search is optional; when enabled, the search request can leave
+          the PC while model inference still runs locally.
+        </p>
+      </section>
+
       <form className="card form" onSubmit={join}>
         <div className="eyebrow">Contributor profile</div>
         <h2>{joined ? "You’re part of Unison." : "Join the compute network."}</h2>
@@ -104,42 +139,11 @@ export default function JoinClient({
       {joined ? (
         <section className="card unison-stack">
           <div>
-            <div className="eyebrow">Unison + Personal AI</div>
-            <h2>Install Unison and your own Local AI on this computer.</h2>
+            <div className="eyebrow">Ready to install</div>
+            <h2>Install Unison + Personal AI on this PC.</h2>
             <p>
-              One setup turns this PC into a machine-wide Unison contributor node and installs
-              <strong> CoOperative Local AI</strong> for private personal chat while the computer is
-              in use. Community compute only starts after the whole PC is idle. Windows will request
-              one administrator approval.
-            </p>
-          </div>
-
-          <div className="card unison-stack">
-            <div>
-              <div className="eyebrow">Included with setup</div>
-              <h3>Your PC works for you first.</h3>
-            </div>
-            <div className="service-tags">
-              <span>Private Personal Local AI</span>
-              <span>Automatic model choice</span>
-              <span>Image understanding + local image creation</span>
-              <span>PDF / Office / code files</span>
-              <span>Local voice input + spoken replies</span>
-              <span>Optional web search</span>
-              <span>Local chat history</span>
-              <span>Project workspaces + tasks</span>
-              <span>Machine-wide Unison node</span>
-              <span>Whole-PC idle protection</span>
-              <span>Desktop + Start Menu shortcuts</span>
-              <span>Tray access</span>
-            </div>
-            <p>
-              <strong>Personal Local AI stays local by default.</strong> Your personal prompts,
-              responses, project data, attached-file context, and browser-stored conversation
-              history do not enter the CoOperative community job queue. Web search is optional;
-              when enabled, only the search request is sent to an external search service while
-              model inference still runs on this PC. When you are actively using the PC, your
-              local AI remains available and contributed work stays blocked by the idle policy.
+              Your contributor profile is ready. Follow the steps below to install the machine-wide
+              node and Personal Local AI. Windows will request one administrator approval.
             </p>
           </div>
 
