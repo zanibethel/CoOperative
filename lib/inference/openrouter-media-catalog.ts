@@ -131,6 +131,7 @@ async function imageEndpointPricing(path: string | null) {
       const billable = String((row as { billable?: unknown }).billable || "");
       const cost = numberValue((row as { cost_usd?: unknown }).cost_usd);
       if (cost === null) continue;
+      if (cost <= 0) continue;
       if (unit === "image" || billable === "output_image") imageCosts.push(cost);
       else if (unit.includes("megapixel")) megapixelCosts.push(cost);
     }
