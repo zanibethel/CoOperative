@@ -1030,10 +1030,8 @@ export async function POST(request: Request) {
 
       let selectedProvider = "";
       let selectedModel = "";
-      let selectedFree = false;
       let estimatedProviderCostUsd: number | null = null;
       let pricingSource = "configured-fallback";
-      let openRouterCandidate: MediaCatalogModel | null = null;
 
       if (nousRuntimeAuth) {
         const nousChoice = nousManagedMediaChoice(
@@ -1045,7 +1043,6 @@ export async function POST(request: Request) {
         if (nousChoice) {
           selectedProvider = "nous";
           selectedModel = nousChoice.model;
-          selectedFree = false;
           estimatedProviderCostUsd = nousChoice.estimatedCostUsd;
           pricingSource = nousChoice.pricingSource;
         }
@@ -1067,15 +1064,13 @@ export async function POST(request: Request) {
           );
 
           if (affordable) {
-            openRouterCandidate = affordable.model;
             selectedProvider = "openrouter";
             selectedModel = affordable.model.id;
-            selectedFree = affordable.model.free;
             estimatedProviderCostUsd = affordable.estimatedCostUsd;
             pricingSource = catalog.source;
           }
         } catch {
-          openRouterCandidate = null;
+          // Live OpenRouter catalog can be temporarily unavailable; configured free fallback remains eligible.
         }
       }
 
@@ -1084,7 +1079,6 @@ export async function POST(request: Request) {
         if (fallbackConfig.freeRoute && openRouterCredential) {
           selectedProvider = fallbackConfig.provider;
           selectedModel = fallbackConfig.model;
-          selectedFree = true;
           estimatedProviderCostUsd = 0;
           pricingSource = "configured-free-fallback";
         }
