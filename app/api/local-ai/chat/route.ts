@@ -8,7 +8,12 @@ import {
   COOPERATIVE_BUSINESS_POLICY_REVISION,
 } from "@/lib/ai/business-chat-policy";
 import { buildBusinessChatContext } from "@/lib/ai/business-context";
-import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
+import {
+  aiProfileBalanceForUser,
+  releaseAiProfileFunds,
+  reserveAiProfileFunds,
+  settleAiProfileFunds,
+} from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import { activeNodeIds } from "@/lib/unison/node-access";
 import {
