@@ -101,7 +101,7 @@ internal sealed class UnisonTrayContext : ApplicationContext
         var menu = new ContextMenuStrip();
         menu.Items.Add(_statusItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Open Local AI chat", null, (_, _) => Program.OpenUrl(Program.LocalChatUrl));
+        menu.Items.Add("Open CoOperativeLocalAI", null, (_, _) => Program.OpenUrl(Program.LocalChatUrl));
         menu.Items.Add("Open dashboard", null, (_, _) => Program.OpenUrl($"{Program.BaseUrl}/unison/dashboard"));
         menu.Items.Add("Restart node", null, (_, _) => RunControl("restart"));
         menu.Items.Add("Repair connection", null, (_, _) => RunControl("repair"));
@@ -387,7 +387,7 @@ internal sealed class InstallerForm : Form
                 SetStatus(
                     "Repaired and connected",
                     "This machine-wide Unison node kept its identity and runs independently of Windows profiles. " +
-                    "Personal Local AI, desktop, Start Menu, and tray integration are ready." +
+                    "CoOperativeLocalAI, desktop, Start Menu, and tray integration are ready." +
                     machineShellNote
                 );
                 CompleteUi();
@@ -452,7 +452,7 @@ internal sealed class InstallerForm : Form
 
             SetStatus(
                 "Connected",
-                "This PC is online as a machine-wide Unison node. Personal Local AI is available while the PC is in use; contributed work only starts after every signed-in Windows session has been idle for the configured period." +
+                "This PC is online as a machine-wide Unison node. CoOperativeLocalAI is available while the PC is in use; contributed work only starts after every signed-in Windows session has been idle for the configured period." +
                 shellNote
             );
             CompleteUi();
@@ -858,10 +858,10 @@ internal sealed class InstallerForm : Form
                 iconPath
             );
             CreateShortcut(
-                Path.Combine(desktop, "CoOperative Local AI.lnk"),
+                Path.Combine(desktop, "CoOperativeLocalAI.lnk"),
                 installedExe,
                 "--local-chat",
-                "Open private Local AI chat on this PC",
+                "Open CoOperativeLocalAI on this PC",
                 iconPath
             );
 
@@ -876,10 +876,10 @@ internal sealed class InstallerForm : Form
                 iconPath
             );
             CreateShortcut(
-                Path.Combine(startMenuDir, "CoOperative Local AI.lnk"),
+                Path.Combine(startMenuDir, "CoOperativeLocalAI.lnk"),
                 installedExe,
                 "--local-chat",
-                "Open private Local AI chat on this PC",
+                "Open CoOperativeLocalAI on this PC",
                 iconPath
             );
 
@@ -902,10 +902,10 @@ internal sealed class InstallerForm : Form
 
             await File.AppendAllTextAsync(
                 _logPath,
-                $"[{DateTimeOffset.Now:u}] Local AI + dashboard desktop/start-menu shortcuts and tray controller installed.\r\n"
+                $"[{DateTimeOffset.Now:u}] CoOperativeLocalAI + dashboard desktop/start-menu shortcuts and tray controller installed.\r\n"
             );
 
-            return " Desktop shortcuts for Unison and Personal Local AI plus the tray controller are installed.";
+            return " Desktop shortcuts for Unison and CoOperativeLocalAI plus the tray controller are installed.";
         }
         catch (Exception ex)
         {

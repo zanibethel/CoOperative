@@ -95,7 +95,7 @@ export default function PersonalAiMobile() {
     const result = await response.json();
     if (!response.ok) {
       throw new Error(
-        result.detail || result.error || "Could not load Personal AI settings.",
+        result.detail || result.error || "Could not load CoOperativeLocalAI settings.",
       );
     }
     const next = result.settings as Settings;
@@ -110,7 +110,7 @@ export default function PersonalAiMobile() {
     const result = await response.json();
     if (!response.ok) {
       throw new Error(
-        result.detail || result.error || "Could not load Personal AI history.",
+        result.detail || result.error || "Could not load CoOperativeLocalAI history.",
       );
     }
     const next = (result.conversations || []) as Conversation[];
@@ -165,7 +165,7 @@ export default function PersonalAiMobile() {
       } catch (err) {
         if (!cancelled) {
           setError(
-            err instanceof Error ? err.message : "Could not load Personal AI.",
+            err instanceof Error ? err.message : "Could not load CoOperativeLocalAI.",
           );
           setStatus("Unavailable");
         }
@@ -234,7 +234,7 @@ export default function PersonalAiMobile() {
 
       if (!response.ok) {
         throw new Error(
-          result.detail || result.error || "Could not read Personal AI response.",
+          result.detail || result.error || "Could not read CoOperativeLocalAI response.",
         );
       }
 
@@ -266,7 +266,7 @@ export default function PersonalAiMobile() {
 
       throw new Error(
         result.error ||
-          `Personal AI ended with status ${result.status || "unknown"}.`,
+          `CoOperativeLocalAI ended with status ${result.status || "unknown"}.`,
       );
     }
   }
@@ -306,7 +306,7 @@ export default function PersonalAiMobile() {
         throw new Error(
           result.detail ||
             result.error ||
-            "Could not send to your Personal AI PC.",
+            "Could not send to your CoOperativeLocalAI PC.",
         );
       }
 
@@ -315,7 +315,7 @@ export default function PersonalAiMobile() {
       await pollJob(result.jobId, result.conversationId);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Personal AI request failed.",
+        err instanceof Error ? err.message : "CoOperativeLocalAI request failed.",
       );
       setStatus(
         selectedNode?.availableForPersonalAi ? "Connected" : "PC offline",
@@ -370,7 +370,7 @@ export default function PersonalAiMobile() {
           onClick={() => setShowHistory((current) => !current)}
           aria-expanded={showHistory}
         >
-          <strong>{activeConversation?.title || "Personal AI"}</strong>
+          <strong>{activeConversation?.title || "CoOperativeLocalAI"}</strong>
           <span>
             <i className={online ? "personal-chat-online-dot online" : "personal-chat-online-dot"} />
             {selectedNode?.displayName || "No PC"} · {status}
@@ -381,7 +381,7 @@ export default function PersonalAiMobile() {
           type="button"
           className="personal-chat-icon-button"
           onClick={() => setShowControls((current) => !current)}
-          aria-label="Personal AI settings"
+          aria-label="CoOperativeLocalAI settings"
           aria-expanded={showControls}
         >
           ⚙
@@ -434,7 +434,7 @@ export default function PersonalAiMobile() {
         <div className="personal-chat-popover personal-chat-controls">
           <div className="personal-chat-popover-head">
             <div>
-              <strong>Personal AI</strong>
+              <strong>CoOperativeLocalAI</strong>
               <small>Inference stays on your selected PC.</small>
             </div>
             <button
@@ -466,7 +466,7 @@ export default function PersonalAiMobile() {
               disabled={busy || conversationId !== ""}
             >
               {personalNodes.length === 0 ? (
-                <option value="">No Personal AI PC online</option>
+                <option value="">No CoOperativeLocalAI PC online</option>
               ) : null}
               {personalNodes.map((node) => (
                 <option value={node.id} key={node.id}>
@@ -517,7 +517,7 @@ export default function PersonalAiMobile() {
               <strong>Help improve CoOperative</strong>
               <small>
                 Allow authorized improvement systems to learn from this
-                encrypted Personal AI history.
+                encrypted CoOperativeLocalAI history.
               </small>
             </span>
           </label>
@@ -535,12 +535,12 @@ export default function PersonalAiMobile() {
             <div className="personal-chat-mark">C</div>
             <h1>What can I help with?</h1>
             <p>
-              Your Personal AI runs on{" "}
+              Your CoOperativeLocalAI runs on{" "}
               {selectedNode?.displayName || "your linked PC"}.
             </p>
             {!online ? (
               <div className="personal-chat-offline">
-                <strong>No Personal AI PC online</strong>
+                <strong>No CoOperativeLocalAI PC online</strong>
                 <span>
                   Once the current machine-wide Unison build is installed on
                   the PC, it will appear here automatically.
@@ -609,8 +609,8 @@ export default function PersonalAiMobile() {
             onChange={(event) => setInput(event.target.value)}
             placeholder={
               online
-                ? "Message Personal AI"
-                : "Your Personal AI PC is offline"
+                ? "Message CoOperativeLocalAI"
+                : "Your CoOperativeLocalAI PC is offline"
             }
             disabled={busy || !online}
             maxLength={16000}

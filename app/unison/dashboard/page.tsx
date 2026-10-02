@@ -61,7 +61,7 @@ export default async function UnisonContributorDashboard() {
       <nav className="nav">
         <Link href="/unison" className="brand">UNISON</Link>
         <div className="nav-links">
-          <Link href="/personal-ai">Personal AI</Link>
+          <Link href="/personal-ai">CoOperativeLocalAI</Link>
           <Link href="/unison/join">Add a PC</Link>
           {viewer.isOwner ? <Link href="/unison/owner">Owner dashboard</Link> : null}
           <div className="badge">{viewer.contributor.display_name}</div>
@@ -80,14 +80,14 @@ export default async function UnisonContributorDashboard() {
 
       <section className="card unison-info-card">
         <div>
-          <div className="eyebrow">Personal AI anywhere</div>
+          <div className="eyebrow">CoOperativeLocalAI anywhere</div>
           <strong>Use your own PC&apos;s AI from your phone.</strong>
           <p>
             Your linked PC performs the inference while encrypted hosted history keeps desktop and
-            mobile conversations in sync. Personal requests take priority over contributed work.
+            mobile conversations in sync. CoOperativeLocalAI requests take priority over contributed work.
           </p>
         </div>
-        <Link className="secondary-cta" href="/personal-ai">Open Personal AI</Link>
+        <Link className="secondary-cta" href="/personal-ai">Open CoOperativeLocalAI</Link>
       </section>
 
       <LiveNodeStatus
@@ -156,7 +156,7 @@ export default async function UnisonContributorDashboard() {
                     <span>{resources.cpuLogical || "?"} logical CPUs</span>
                     <span>{resources.memoryTotalMb ? `${Math.round(resources.memoryTotalMb / 1024)} GB RAM` : "RAM pending"}</span>
                     <span>{policy.idleScope === "machine" ? "Whole-PC idle" : "Profile idle"}</span>
-                    {capabilities.includes("local_personal_chat") ? <span>Personal Local AI ready</span> : null}
+                    {capabilities.includes("local_personal_chat") ? <span>CoOperativeLocalAI ready</span> : null}
                     {capabilities.includes("local_ai_images") ? <span>Image understanding</span> : null}
                     {capabilities.includes("local_ai_image_generation") ? <span>Image creation</span> : null}
                     {capabilities.includes("local_ai_files") ? <span>Files</span> : null}

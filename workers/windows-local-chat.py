@@ -5,7 +5,7 @@
 # ]
 # ///
 
-"""Private, loopback-only Personal Local AI for Windows Unison nodes.
+"""Private, loopback-only CoOperativeLocalAI for Windows Unison nodes.
 
 The chat UI runs on the local Windows node and inference is sent only to the
 node's loopback Ollama runtime. Conversation history can synchronize to the
@@ -69,7 +69,7 @@ HTML = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CoOperative Personal Local AI</title>
+<title>CoOperativeLocalAI</title>
 <style>
 :root{color-scheme:dark;font-family:Inter,Segoe UI,Arial,sans-serif;background:#07111b;color:#eef7ff;--panel:#0d1c29;--line:#223d51;--soft:#94adbf;--cyan:#9cecff}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#10334a 0,#07111b 38%);min-height:100vh}
@@ -100,7 +100,7 @@ button,input,textarea,select{font:inherit}.app{display:grid;grid-template-column
 <div class="app">
   <aside class="sidebar">
     <div>
-      <div class="brand">CoOperative Local AI</div>
+      <div class="brand">CoOperativeLocalAI</div>
       <div class="privacy">Inference runs on this PC. Chat history syncs encrypted to your authenticated CoOperative account so you can continue on mobile.</div>
       <span class="badge">LOCAL INFERENCE</span>
     </div>
@@ -148,7 +148,7 @@ button,input,textarea,select{font:inherit}.app{display:grid;grid-template-column
           <div class="attachments" id="attachments"></div>
           <div class="composer">
             <button class="icon-btn" id="attach" title="Attach images or files">＋</button>
-            <textarea id="input" placeholder="Ask your Personal Local AI…"></textarea>
+            <textarea id="input" placeholder="Ask your CoOperativeLocalAI…"></textarea>
             <button class="icon-btn" id="mic" title="Speak">🎤</button>
             <button class="send" id="send">Send</button>
           </div>
@@ -244,7 +244,7 @@ async function syncHostedHistory(){
     for(const remote of (j.conversations||[])){
       let c=state.conversations.find(x=>x.hostedId===remote.id||x.id===remote.id);
       if(!c){
-        c={id:remote.id,hostedId:remote.id,title:remote.title||"Personal AI",projectId:null,messages:[],createdAt:Date.parse(remote.createdAt||"")||Date.now(),updatedAt:Date.parse(remote.updatedAt||"")||Date.now(),hostedUpdatedAt:remote.updatedAt};
+        c={id:remote.id,hostedId:remote.id,title:remote.title||"CoOperativeLocalAI",projectId:null,messages:[],createdAt:Date.parse(remote.createdAt||"")||Date.now(),updatedAt:Date.parse(remote.updatedAt||"")||Date.now(),hostedUpdatedAt:remote.updatedAt};
         state.conversations.unshift(c);
       }else{
         c.hostedId=remote.id;c.title=remote.title||c.title;c.hostedUpdatedAt=remote.updatedAt||c.hostedUpdatedAt;
@@ -438,7 +438,7 @@ def uv_executable() -> str:
 def run_helper(name: str, args: list[str], timeout: float | None = None) -> dict:
     helper = HERE / name
     if not helper.is_file():
-        raise RuntimeError(f"Personal AI helper {name} is missing. Run Repair connection.")
+        raise RuntimeError(f"CoOperativeLocalAI helper {name} is missing. Run Repair connection.")
     process = subprocess.run(
         [uv_executable(), "run", str(helper), *args],
         capture_output=True,
@@ -470,7 +470,7 @@ def hosted_history_request(
     payload: dict | None = None,
 ) -> dict:
     if not NODE_ID or not NODE_TOKEN:
-        raise RuntimeError("This Personal AI is not linked to a Unison contributor node.")
+        raise RuntimeError("This CoOperativeLocalAI is not linked to a Unison contributor node.")
 
     url = f"{COOPERATIVE_URL}/api/personal-ai/node/history"
     params = {"nodeId": NODE_ID}
@@ -1148,7 +1148,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
 
                 system_parts = [
-                    "You are CoOperative Personal Local AI, a private general-purpose assistant "
+                    "You are CoOperativeLocalAI, a private general-purpose assistant "
                     "running on this Windows PC. Be useful, clear, practical, and honest. "
                     "Personal use has priority over contributed compute.",
                 ]
