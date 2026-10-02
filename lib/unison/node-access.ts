@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
@@ -65,4 +67,35 @@ export async function canManageNode(
 ) {
   const membership = await nodeMembership(admin, userId, nodeId);
   return membership?.role === "owner" || membership?.role === "admin";
+}
+
+
+export async function resolveNodeProfileToken(
+  admin: AdminClient,
+  nodeId: string,
+  rawToken: string | null | undefined,
+): Promise<UnisonNodeMembership | null> {
+  const token = (rawToken || "").trim();
+  if (!token) return null;
+
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const { data: profileToken, error: tokenError } = await admin
+    .from("unison_node_profile_tokens")
+    .select("id,user_id,node_id,revoked_at")
+    .eq("token_hash", tokenHash)
+    .eq("node_id", nodeId)
+    .maybeSingle();
+
+  if (tokenError) throw tokenError;
+  if (!profileToken || profileToken.revoked_at) return null;
+
+  const membership = await nodeMembership(admin, profileToken.user_id, nodeId);
+  if (!membership) return null;
+
+  await admin
+    .from("unison_node_profile_tokens")
+    .update({ last_used_at: new Date().toISOString() })
+    .eq("id", profileToken.id);
+
+  return membership;
 }
