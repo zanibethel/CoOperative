@@ -110,6 +110,11 @@ type JobResult = {
   preferredNodeId?: string | null;
   targetNodeId?: string | null;
   routeReason?: string | null;
+  paidFallbackAllowed?: boolean;
+  funding?: {
+    chargedUsd?: number;
+    availableMicrousd?: number;
+  } | null;
   error?: string | null;
   detail?: string | null;
 };
@@ -152,6 +157,9 @@ function resultMeta(result: JobResult) {
     typeof result.promptTokens === "number" && typeof result.outputTokens === "number"
       ? `${result.promptTokens} in / ${result.outputTokens} out`
       : null,
+    typeof result.funding?.chargedUsd === "number"
+      ? `${result.funding.chargedUsd.toFixed(6)} charged`
+      : null,
   ].filter(Boolean);
 
   return details.join(" · ");
@@ -168,6 +176,7 @@ function executionStep(
   if (status === "Waiting for local capacity…") return status;
   if (status === "Using local vision…") return status;
   if (status === "Using local AI…") return status;
+  if (status === "Using funded high-quality AI…") return status;
   if (status === "Stopping…") return status;
   if (status === "Copied") return status;
   if (status === "Ready") return "Ready";
@@ -420,6 +429,57 @@ export default function LocalAiChat() {
             break;
           }
 
+          if (
+            result.status === "failed" &&
+            result.capability === "text" &&
+            result.paidFallbackAllowed === true
+          ) {
+            setStreamingText("");
+            setStatus("Using funded high-quality AI…");
+
+            const paidResponse = await fetch("/api/local-ai/chat/paid-fallback", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ jobId }),
+            });
+            const paid = (await paidResponse.json()) as JobResult;
+
+            if (!paidResponse.ok) {
+              throw new Error(
+                paid.detail ||
+                  paid.error ||
+                  result.error ||
+                  "Local AI failed and funded paid fallback was unavailable.",
+              );
+            }
+
+            if (paid.status === "completed") {
+              if (paid.conversationId) {
+                await loadConversation(paid.conversationId);
+              }
+              await Promise.all([refreshConversations(), refreshBusinesses()]);
+              setMeta(resultMeta(paid));
+              setStatus("Ready");
+              window.localStorage.removeItem(ACTIVE_JOB_KEY);
+              break;
+            }
+
+            if (
+              paid.jobId &&
+              paid.jobId !== jobId &&
+              (paid.status === "running" || paid.status === "queued")
+            ) {
+              window.localStorage.setItem(ACTIVE_JOB_KEY, paid.jobId);
+              activePollRef.current = null;
+              await pollJob(paid.jobId, fallbackMessages);
+              return;
+            }
+
+            throw new Error(
+              paid.error || "Funded high-quality AI did not complete the request.",
+            );
+          }
+
           throw new Error(
             result.error ||
               `Local AI job ended with status ${result.status || "unknown"}.`,
@@ -436,7 +496,7 @@ export default function LocalAiChat() {
         }
       }
     },
-    [loadConversation, refreshConversations],
+    [loadConversation, refreshBusinesses, refreshConversations],
   );
 
   useEffect(() => {
