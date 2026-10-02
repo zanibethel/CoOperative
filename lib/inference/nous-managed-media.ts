@@ -152,6 +152,7 @@ export async function chooseNousManagedImage(
 }
 
 const PIXVERSE_URL = "https://fal.ai/models/fal-ai/pixverse/v6/text-to-video";
+const PIXVERSE_LLM_URL = `${PIXVERSE_URL}/llms.txt`;
 const LEVEL_RESOLUTION: Record<1 | 2 | 3 | 4, string[]> = {
   1: ["360p"],
   2: ["540p", "360p"],
@@ -160,33 +161,36 @@ const LEVEL_RESOLUTION: Record<1 | 2 | 3 | 4, string[]> = {
 };
 
 async function livePixversePricing(): Promise<PixversePricing | null> {
-  try {
-    const html = await liveText(PIXVERSE_URL);
-    const rates: PixversePricing["rates"] = {};
-    for (const resolution of ["360p", "540p", "720p", "1080p"]) {
-      const escaped = resolution.replace("p", "p");
-      const row = html.match(
-        new RegExp(
-          `For\\s+${escaped}[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+without\\s+audio[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+with\\s+audio`,
-          "i",
-        ),
-      );
-      if (!row) continue;
-      const withoutAudio = Number(row[1]);
-      const withAudio = Number(row[2]);
-      if (Number.isFinite(withoutAudio) && Number.isFinite(withAudio)) {
-        rates[resolution] = { withoutAudio, withAudio };
+  for (const source of [PIXVERSE_LLM_URL, PIXVERSE_URL]) {
+    try {
+      const html = await liveText(source);
+      const rates: PixversePricing["rates"] = {};
+      for (const resolution of ["360p", "540p", "720p", "1080p"]) {
+        const escaped = resolution.replace("p", "p");
+        const row = html.match(
+          new RegExp(
+            `For\\s+${escaped}[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+without\\s+audio[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+with\\s+audio`,
+            "i",
+          ),
+        );
+        if (!row) continue;
+        const withoutAudio = Number(row[1]);
+        const withAudio = Number(row[2]);
+        if (Number.isFinite(withoutAudio) && Number.isFinite(withAudio)) {
+          rates[resolution] = { withoutAudio, withAudio };
+        }
       }
+      if (!Object.keys(rates).length) continue;
+      return {
+        fetchedAt: new Date().toISOString(),
+        source,
+        rates,
+      };
+    } catch {
+      // Try the next live fal source. Never substitute a stale hard-coded price.
     }
-    if (!Object.keys(rates).length) return null;
-    return {
-      fetchedAt: new Date().toISOString(),
-      source: PIXVERSE_URL,
-      rates,
-    };
-  } catch {
-    return null;
   }
+  return null;
 }
 
 export async function chooseNousManagedVideo(
@@ -253,18 +257,65 @@ export async function affordableVideoSuggestion(
 
   const requestedCost =
     durationSeconds * (audio ? requestedRate.withAudio : requestedRate.withoutAudio);
-  const cheapest = pricing.rates["360p"];
-  if (!cheapest) return null;
-  const cheapestRate = audio ? cheapest.withAudio : cheapest.withoutAudio;
-  const affordableSeconds = Math.floor(maxSpendUsd / cheapestRate);
+
+  const resolutionOrder = ["1080p", "720p", "540p", "360p"];
+  const bestVariant = (withAudio: boolean) => {
+    let best:
+      | {
+          durationSeconds: number;
+          resolution: string;
+          audio: boolean;
+          estimatedCostUsd: number;
+          rateUsdPerSecond: number;
+        }
+      | null = null;
+
+    for (const resolution of resolutionOrder) {
+      const rates = pricing.rates[resolution];
+      if (!rates) continue;
+      const rate = withAudio ? rates.withAudio : rates.withoutAudio;
+      if (!Number.isFinite(rate) || rate <= 0) continue;
+
+      const affordableSeconds = Math.min(
+        durationSeconds,
+        Math.floor((maxSpendUsd + 1e-9) / rate),
+      );
+      if (affordableSeconds < 1) continue;
+
+      const candidate = {
+        durationSeconds: affordableSeconds,
+        resolution,
+        audio: withAudio,
+        estimatedCostUsd: affordableSeconds * rate,
+        rateUsdPerSecond: rate,
+      };
+
+      if (
+        !best ||
+        candidate.durationSeconds > best.durationSeconds ||
+        (candidate.durationSeconds === best.durationSeconds &&
+          resolutionOrder.indexOf(candidate.resolution) <
+            resolutionOrder.indexOf(best.resolution))
+      ) {
+        best = candidate;
+      }
+    }
+
+    return best;
+  };
+
+  const bestWithinBudget = bestVariant(audio);
+  const bestWithoutAudio = audio ? bestVariant(false) : null;
 
   return {
-    affordableSeconds: Math.max(0, affordableSeconds),
+    affordableSeconds: bestWithinBudget?.durationSeconds || 0,
     minimumRequestedBudget: requestedCost,
-    rateUsdPerSecond: cheapestRate,
+    rateUsdPerSecond: bestWithinBudget?.rateUsdPerSecond || null,
     requestedResolution: requestedResolution || "360p",
-    suggestedResolution: "360p",
+    suggestedResolution: bestWithinBudget?.resolution || null,
     audio,
+    bestWithinBudget,
+    bestWithoutAudio,
     pricingSource: pricing.source,
   };
 }
