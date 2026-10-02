@@ -85,27 +85,25 @@ export default function JoinClient({
       <section className="card unison-stack">
         <div>
           <div className="eyebrow">Unison + Personal AI</div>
-          <h2>Install Unison and your own Local AI on this computer.</h2>
+          <h2>Install Unison + Personal AI</h2>
           <p>
-            One setup gives this PC a private <strong>CoOperative Personal Local AI</strong> for
-            everyday use — including chat, <strong>image understanding and local image creation</strong>,
-            documents, voice, optional web search, local history, and project workspaces — and turns
-            the machine into a Unison contributor node when the whole PC is idle. Your PC works for
-            you first.
+            Get a private local AI for chat, image creation, image understanding, documents, voice,
+            web search, local history, and projects. When the whole PC is idle, it can also contribute
+            compute to Unison. <strong>Your PC works for you first.</strong>
           </p>
         </div>
 
         <div>
           <div className="eyebrow">Included with setup</div>
           <div className="service-tags">
-            <span>Private Personal Local AI</span>
+            <span>Private Personal AI</span>
             <span>Automatic model choice</span>
-            <span>Image understanding + local image creation</span>
+            <span>Image creation + understanding</span>
             <span>PDF / Office / code files</span>
-            <span>Local voice input + spoken replies</span>
+            <span>Voice input + spoken replies</span>
             <span>Optional web search</span>
             <span>Local chat history</span>
-            <span>Project workspaces + tasks</span>
+            <span>Projects + tasks</span>
             <span>Machine-wide Unison node</span>
             <span>Whole-PC idle protection</span>
           </div>
@@ -142,10 +140,10 @@ export default function JoinClient({
         <section className="card unison-stack">
           <div>
             <div className="eyebrow">Ready to install</div>
-            <h2>Install Unison + Personal AI on this PC.</h2>
+            <h2>Ready to install.</h2>
             <p>
-              Your contributor profile is ready. Follow the steps below to install the machine-wide
-              node and Personal Local AI. Windows will request one administrator approval.
+              Install the machine-wide Unison node and Personal AI with one setup. Windows will
+              request one administrator approval.
             </p>
           </div>
 
