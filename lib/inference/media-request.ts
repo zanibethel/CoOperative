@@ -64,35 +64,22 @@ export function planMediaRequest(message: string): MediaRequestPlan | null {
   if (!kind) return null;
 
   const durationSeconds = kind === "video" ? durationFrom(text) : null;
-  const aspectRatio = aspectFrom(text);
+  const explicitAspectRatio = aspectFrom(text);
+  const aspectRatio =
+    kind === "video" ? explicitAspectRatio ?? "16:9" : explicitAspectRatio;
   const resolution = kind === "video" ? resolutionFrom(text) : null;
   const audio = kind === "video" ? audioFrom(text) : null;
 
-  if (kind === "video") {
-    const missing: string[] = [];
-    if (!durationSeconds) missing.push("duration");
-    if (!aspectRatio) missing.push("format");
-
-    if (missing.length > 0) {
-      const details: string[] = [];
-      if (missing.includes("duration")) {
-        details.push("how long it should be (for example 5 or 8 seconds)");
-      }
-      if (missing.includes("format")) {
-        details.push("vertical 9:16, landscape 16:9, or square 1:1");
-      }
-      return {
-        kind,
-        durationSeconds,
-        aspectRatio,
-        resolution,
-        audio,
-        clarification:
-          "Before I spend any video-generation credits, tell me " +
-          details.join(" and ") +
-          ". I’ll use the cheaper planning step first, then make one generation call.",
-      };
-    }
+  if (kind === "video" && !durationSeconds) {
+    return {
+      kind,
+      durationSeconds,
+      aspectRatio,
+      resolution,
+      audio,
+      clarification:
+        "Before I spend any video-generation credits, tell me how long it should be (for example 5 or 8 seconds). I’ll use the cheaper planning step first, then make one generation call. If you do not specify a format, I’ll use landscape 16:9.",
+    };
   }
 
   return {
