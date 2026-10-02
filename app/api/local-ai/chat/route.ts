@@ -33,9 +33,11 @@ import {
 } from "@/lib/inference/openrouter-media-catalog";
 import {
   affordableVideoSuggestion,
-  chooseNousManagedImage,
-  chooseNousManagedVideo,
 } from "@/lib/inference/nous-managed-media";
+import {
+  buildMediaRecommendationOptions,
+  requestedMediaRecommendationTier,
+} from "@/lib/inference/media-recommendations";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
 import {
