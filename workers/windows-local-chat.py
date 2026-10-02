@@ -428,7 +428,7 @@ async function send(){
       project:{name:project.name||"",instructions:project.instructions,tasks:project.tasks,files:[...project.files,...oneOffFiles]}
     })});
     const j=await r.json();if(!r.ok)throw new Error(j.error||"Local AI request failed.");
-    const meta=[j.modelReason,j.model,j.tokensPerSecond?j.tokensPerSecond.toFixed(1)+" tok/s":null,j.webSearchUsed?"web search used":null,j.imageGenerated?"image generated locally":null].filter(Boolean).join(" · ");
+    const meta=[j.recovery?.recovered?"Recovery Agent rerouted locally":null,j.modelReason,j.model,j.tokensPerSecond?j.tokensPerSecond.toFixed(1)+" tok/s":null,j.webSearchUsed?"web search used":null,j.imageGenerated?"image generated locally":null].filter(Boolean).join(" · ");
     let imageId=null;
     if(j.generatedImage?.dataUrl){
       imageId=uid();
