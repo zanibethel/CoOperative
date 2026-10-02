@@ -33,6 +33,7 @@ import httpx
 HERE = Path(__file__).resolve().parent
 READY_MARKER = HERE / "local-chat.ready"
 BUSY_MARKER = HERE / "local-chat.busy"
+IMAGE_PORT_MARKER = HERE / "image-worker.port"
 
 HOST = "127.0.0.1"
 PORT = int(os.getenv("UNISON_LOCAL_CHAT_PORT", "11436"))
@@ -77,6 +78,7 @@ button,input,textarea,select{font:inherit}.app{display:grid;grid-template-column
 .chat{display:flex;flex-direction:column;min-height:0}.messages{flex:1;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:13px}
 .msg{max-width:min(82%,780px);padding:12px 14px;border-radius:16px;white-space:pre-wrap;line-height:1.48;word-break:break-word}.msg.user{align-self:flex-end;background:#164963}.msg.assistant{align-self:flex-start;background:#152735}.msg-meta{font-size:.72rem;color:#8fa8ba;margin-top:7px}.bubble-actions{display:flex;gap:6px;margin-top:8px}.bubble-actions button{border:0;background:transparent;color:#9ecfe9;cursor:pointer;padding:0;font-size:.78rem}
 .sources{margin-top:9px;display:grid;gap:4px}.sources a{color:#9cecff;font-size:.78rem;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.generated-image{display:block;max-width:min(100%,720px);max-height:720px;border-radius:13px;margin-top:10px;border:1px solid #294a60;object-fit:contain;background:#07131e}
 .empty{margin:auto;color:#8da6b8;text-align:center;max-width:520px;line-height:1.5}.composer-wrap{border-top:1px solid var(--line);padding:12px;background:#091723}.attachments{display:flex;gap:8px;overflow:auto;margin-bottom:8px}.chip{display:flex;align-items:center;gap:6px;border:1px solid #31516a;background:#102536;padding:6px 8px;border-radius:999px;font-size:.78rem;white-space:nowrap}.chip button{border:0;background:transparent;color:#fff;cursor:pointer}
 .composer{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:end}.composer textarea{resize:vertical;min-height:64px;max-height:180px;border:1px solid #31516a;background:#07131e;color:#fff;border-radius:12px;padding:11px}
 .icon-btn{height:44px;min-width:44px;border:1px solid #31516a;background:#102536;color:#fff;border-radius:11px;cursor:pointer}.send{height:44px;border:0;background:#dff9ff;color:#07111b;font-weight:800;border-radius:11px;padding:0 18px;cursor:pointer}
@@ -218,9 +220,18 @@ function renderMessages(){
     const text=document.createElement("div");text.textContent=m.content;d.appendChild(text);
     if(m.attachments?.length){const meta=document.createElement("div");meta.className="msg-meta";meta.textContent="Attachments: "+m.attachments.join(", ");d.appendChild(meta)}
     if(m.role==="assistant"){
+      if(m.imageId){
+        const img=document.createElement("img");img.className="generated-image";img.alt=m.imageAlt||"Locally generated image";d.appendChild(img);
+        dbGet(m.imageId).then(item=>{if(item?.data)img.src=item.data}).catch(()=>{});
+      }
       const actions=document.createElement("div");actions.className="bubble-actions";
       const speak=document.createElement("button");speak.textContent="Speak";speak.onclick=()=>speakText(m.content);actions.appendChild(speak);
-      const copy=document.createElement("button");copy.textContent="Copy";copy.onclick=()=>navigator.clipboard.writeText(m.content);actions.appendChild(copy);d.appendChild(actions);
+      const copy=document.createElement("button");copy.textContent="Copy";copy.onclick=()=>navigator.clipboard.writeText(m.content);actions.appendChild(copy);
+      if(m.imageId){
+        const save=document.createElement("button");save.textContent="Save image";save.onclick=async()=>{const item=await dbGet(m.imageId);if(!item?.data)return;const a=document.createElement("a");a.href=item.data;a.download=item.name||"cooperative-local-image.png";a.click()};actions.appendChild(save);
+        const reuse=document.createElement("button");reuse.textContent="Use as reference";reuse.onclick=async()=>{const item=await dbGet(m.imageId);if(!item?.data)return;pending.push({id:uid(),name:item.name||"generated-image.png",kind:"image",data:item.data.split(",",2).pop(),size:0,createdAt:Date.now()});renderAttachments()};actions.appendChild(reuse);
+      }
+      d.appendChild(actions);
       if(m.sources?.length){const src=document.createElement("div");src.className="sources";for(const s of m.sources){const a=document.createElement("a");a.href=s.url;a.target="_blank";a.rel="noopener noreferrer";a.textContent=s.title||s.url;src.appendChild(a)}d.appendChild(src)}
     }
     if(m.meta){const meta=document.createElement("div");meta.className="msg-meta";meta.textContent=m.meta;d.appendChild(meta)}
@@ -298,9 +309,14 @@ async function send(){
       project:{name:project.name||"",instructions:project.instructions,tasks:project.tasks,files:[...project.files,...oneOffFiles]}
     })});
     const j=await r.json();if(!r.ok)throw new Error(j.error||"Local AI request failed.");
-    const meta=[j.modelReason,j.model,j.tokensPerSecond?j.tokensPerSecond.toFixed(1)+" tok/s":null,j.webSearchUsed?"web search used":null].filter(Boolean).join(" · ");
-    c.messages.push({role:"assistant",content:j.text,meta,sources:j.webResults||[]});c.updatedAt=Date.now();pending=[];saveState();renderAll();
-    if(state.voiceReply)void speakText(j.text);
+    const meta=[j.modelReason,j.model,j.tokensPerSecond?j.tokensPerSecond.toFixed(1)+" tok/s":null,j.webSearchUsed?"web search used":null,j.imageGenerated?"image generated locally":null].filter(Boolean).join(" · ");
+    let imageId=null;
+    if(j.generatedImage?.dataUrl){
+      imageId=uid();
+      await dbPut({id:imageId,kind:"generated-image",name:"cooperative-local-image-"+Date.now()+".png",data:j.generatedImage.dataUrl,createdAt:Date.now(),model:j.generatedImage.model||j.model});
+    }
+    c.messages.push({role:"assistant",content:j.text,meta,sources:j.webResults||[],imageId,imageAlt:j.generatedImage?.prompt||"Locally generated image"});c.updatedAt=Date.now();pending=[];saveState();renderAll();
+    if(state.voiceReply&&!j.imageGenerated)void speakText(j.text);
   }catch(e){$("error").textContent=e.message||String(e)}
   finally{$("send").disabled=false;$("status").textContent="Ready";renderAttachments();input.focus()}
 }
@@ -548,6 +564,120 @@ def needs_web(query: str) -> bool:
     return any(trigger in lower for trigger in triggers)
 
 
+def wants_image_generation(query: str) -> bool:
+    lower = " ".join(query.lower().split())
+    exclusions = (
+        "analyze this image", "analyze the image", "describe this image",
+        "describe the image", "what is in this image", "what's in this image",
+        "read this image", "look at this image",
+    )
+    if any(phrase in lower for phrase in exclusions):
+        return False
+    triggers = (
+        "generate an image", "generate a picture", "create an image",
+        "create a picture", "make an image", "make a picture",
+        "make me an image", "make me a picture", "draw me ",
+        "draw a picture", "draw an image", "render an image",
+        "render a picture", "illustrate ", "create artwork",
+        "generate artwork",
+    )
+    return any(phrase in lower for phrase in triggers)
+
+
+def image_aspect_ratio(query: str) -> str:
+    lower = query.lower()
+    for ratio in ("1:1", "4:5", "3:2", "16:9", "9:16"):
+        if ratio in lower:
+            return ratio
+    if any(term in lower for term in ("phone wallpaper", "story format", "tiktok", "reel")):
+        return "9:16"
+    if any(term in lower for term in ("widescreen", "landscape", "desktop wallpaper")):
+        return "16:9"
+    if any(term in lower for term in ("portrait", "vertical")):
+        return "4:5"
+    if "square" in lower:
+        return "1:1"
+    return "1:1"
+
+
+def image_profile(query: str, has_reference: bool) -> str:
+    lower = query.lower()
+    if has_reference:
+        return "quality"
+    quality_terms = (
+        "high quality", "photorealistic", "photo realistic", "realistic",
+        "detailed", "cinematic", "professional", "premium",
+    )
+    return "quality" if any(term in lower for term in quality_terms) else "fast"
+
+
+def image_variation_mode(query: str, has_reference: bool) -> str:
+    if not has_reference:
+        return "balanced"
+    lower = query.lower()
+    if any(term in lower for term in ("keep the same", "preserve", "minor change", "small change")):
+        return "preserve"
+    if any(term in lower for term in ("new scene", "different scene", "new setting", "different setting")):
+        return "new-scene"
+    return "balanced"
+
+
+def image_worker_url() -> str:
+    override = os.getenv("UNISON_IMAGE_WORKER_URL", "").strip().rstrip("/")
+    if override:
+        parsed = urlparse(override)
+        if parsed.hostname not in {"127.0.0.1", "localhost"}:
+            raise RuntimeError("Personal image generation must use a loopback image worker.")
+        return override
+
+    if not IMAGE_PORT_MARKER.is_file():
+        raise RuntimeError(
+            "The local image generator is still starting or unavailable. "
+            "Wait for the Unison image runtime to finish and try again."
+        )
+    try:
+        port = int(IMAGE_PORT_MARKER.read_text(encoding="utf-8").strip())
+    except Exception as exc:
+        raise RuntimeError("The local image generator port marker is invalid.") from exc
+    if port < 1024 or port > 65535:
+        raise RuntimeError("The local image generator port is invalid.")
+    return f"http://127.0.0.1:{port}"
+
+
+def generate_local_image(query: str, images: list[str]) -> dict:
+    token = os.getenv("UNISON_NODE_TOKEN") or os.getenv("INFERENCE_WORKER_TOKEN")
+    if not token:
+        raise RuntimeError("The protected local image-worker credential is unavailable.")
+
+    references = [
+        {"dataUrl": f"data:image/jpeg;base64,{image}", "title": f"reference-{index + 1}"}
+        for index, image in enumerate(images[:1])
+    ]
+    profile = image_profile(query, bool(references))
+    response = httpx.post(
+        f"{image_worker_url()}/v1/images/generate",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "prompt": query[:6000],
+            "aspectRatio": image_aspect_ratio(query),
+            "profile": profile,
+            "references": references,
+            "variationMode": image_variation_mode(query, bool(references)),
+        },
+        timeout=None,
+    )
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail")
+        except Exception:
+            detail = response.text
+        raise RuntimeError(str(detail or "Local image generation failed.")[:800])
+    result = response.json()
+    if not isinstance(result, dict) or not str(result.get("dataUrl") or "").startswith("data:image/"):
+        raise RuntimeError("The local image generator returned an invalid image.")
+    return result
+
+
 def select_model(
     mode: str,
     messages: list[dict],
@@ -727,6 +857,7 @@ class Handler(BaseHTTPRequestHandler):
                     "features": {
                         "autoModel": True,
                         "images": True,
+                        "imageGeneration": True,
                         "files": True,
                         "webSearch": True,
                         "voiceInput": True,
@@ -825,6 +956,39 @@ class Handler(BaseHTTPRequestHandler):
                 images = clean_images(body.get("images"))
                 project, project_chars = project_context(body.get("project"))
                 query = latest_user_text(messages)
+
+                if wants_image_generation(query):
+                    BUSY_MARKER.write_text(str(os.getpid()), encoding="utf-8")
+                    try:
+                        generated = generate_local_image(query, images)
+                    finally:
+                        BUSY_MARKER.unlink(missing_ok=True)
+                    self._json(
+                        200,
+                        {
+                            "text": (
+                                "Generated locally on this PC. "
+                                f"Model: {generated.get('model') or 'local image model'}."
+                            ),
+                            "model": generated.get("model"),
+                            "profile": generated.get("profile"),
+                            "modelReason": "Local image-generation worker selected from the request.",
+                            "localInference": True,
+                            "imageGenerated": True,
+                            "generatedImage": {
+                                "dataUrl": generated.get("dataUrl"),
+                                "model": generated.get("model"),
+                                "profile": generated.get("profile"),
+                                "seed": generated.get("seed"),
+                                "latencyMs": generated.get("latencyMs"),
+                                "prompt": query[:6000],
+                            },
+                            "webSearchUsed": False,
+                            "webResults": [],
+                        },
+                    )
+                    return
+
                 web_mode = str(body.get("webMode") or "off").lower()
                 should_search = web_mode == "always" or (
                     web_mode == "auto" and needs_web(query)
