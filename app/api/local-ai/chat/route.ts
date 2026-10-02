@@ -1763,6 +1763,148 @@ export async function GET(request: Request) {
 
         const failure = polled.error || "Hermes media generation failed.";
         const completedAt = new Date().toISOString();
+
+        if (mediaJob.provider === "nous") {
+          const openRouterService =
+            await businessOwnedServiceCredentialForOwner(
+              ownerRef,
+              "openrouter-api",
+            );
+          const openRouterCredential =
+            openRouterService?.credential ||
+            process.env.OPENROUTER_API_KEY?.trim() ||
+            undefined;
+          const requestCapUsd =
+            typeof mediaJob.request_max_spend_microusd === "number"
+              ? mediaJob.request_max_spend_microusd / 1_000_000
+              : null;
+          const mediaLevel = Math.min(
+            4,
+            Math.max(0, Number(mediaJob.media_level || 0)),
+          ) as 0 | 1 | 2 | 3 | 4;
+          const durationSeconds =
+            mediaJob.kind === "video"
+              ? Number(
+                  String(mediaJob.prompt || "").match(
+                    /Duration:\s*(\d+)\s*seconds?/i,
+                  )?.[1] || 0,
+                ) || null
+              : null;
+          const aspectRatio =
+            String(mediaJob.prompt || "").match(
+              /(?:Aspect ratio|Preferred aspect ratio):\s*(16:9|9:16|1:1)/i,
+            )?.[1] || null;
+
+          if (openRouterCredential && requestCapUsd !== 0) {
+            try {
+              const catalog = await openRouterMediaCatalog(true);
+              const pool =
+                mediaJob.kind === "video" ? catalog.video : catalog.image;
+              const backupModel = recommendedForRequest(pool, mediaLevel, {
+                durationSeconds,
+                aspectRatio,
+              });
+              const backupEstimate = backupModel
+                ? estimatedMediaProviderCostUsd(
+                    backupModel,
+                    durationSeconds,
+                  )
+                : null;
+              const affordable =
+                backupModel &&
+                backupEstimate !== null &&
+                (requestCapUsd === null || backupEstimate <= requestCapUsd);
+
+              if (affordable && backupModel) {
+                await admin
+                  .from("media_generation_jobs")
+                  .update({
+                    status: "failed",
+                    usage: polled.usage,
+                    error: failure.slice(0, 1200),
+                    completed_at: completedAt,
+                    updated_at: completedAt,
+                  })
+                  .eq("id", mediaJob.id)
+                  .eq("owner_ref", ownerRef)
+                  .eq("status", "running");
+
+                const backupJobId = crypto.randomUUID();
+                const { error: backupInsertError } = await admin
+                  .from("media_generation_jobs")
+                  .insert({
+                    id: backupJobId,
+                    status: "queued",
+                    owner_ref: ownerRef,
+                    conversation_id: mediaJob.conversation_id,
+                    kind: mediaJob.kind,
+                    prompt: mediaJob.prompt,
+                    provider: "openrouter",
+                    model: backupModel.id,
+                    model_mixer: mediaJob.model_mixer || null,
+                    request_max_spend_microusd:
+                      mediaJob.request_max_spend_microusd ?? null,
+                    media_level: mediaLevel,
+                    estimated_provider_cost_microusd: Math.round(
+                      backupEstimate * 1_000_000,
+                    ),
+                    pricing_source: "openrouter-backup",
+                  });
+                if (backupInsertError) throw backupInsertError;
+
+                const nousRuntimeAuth =
+                  await freshNousRuntimeAuthForOwner(ownerRef).catch(() => null);
+                const started = await startHermesMediaTask({
+                  jobId: backupJobId,
+                  kind: mediaJob.kind,
+                  userRequest: mediaJob.prompt,
+                  provider: "openrouter",
+                  model: backupModel.id,
+                  providerCredential: openRouterCredential,
+                  nousAuthJson: nousRuntimeAuth?.sandboxAuthJson,
+                });
+
+                const { error: backupStartError } = await admin
+                  .from("media_generation_jobs")
+                  .update({
+                    status: "running",
+                    sandbox_name: started.sandboxName,
+                    started_at: started.startedAt,
+                    deadline_at: started.deadlineAt,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", backupJobId)
+                  .eq("owner_ref", ownerRef);
+                if (backupStartError) throw backupStartError;
+
+                return NextResponse.json(
+                  {
+                    jobId: backupJobId,
+                    execution: "media",
+                    status: "running",
+                    conversationId: mediaJob.conversation_id,
+                    capability: mediaJob.kind,
+                    provider: "openrouter",
+                    model: backupModel.id,
+                    routeReason:
+                      "Nous was tried first. Its managed media route failed, so CoOperative moved once to the connected OpenRouter backup without exceeding the same request spend cap.",
+                    estimatedProviderCostUsd: backupEstimate,
+                  },
+                  { headers: { "Cache-Control": "no-store" } },
+                );
+              }
+            } catch (backupError) {
+              console.error("Nous-to-OpenRouter media backup could not start", {
+                sourceJobId: mediaJob.id,
+                detail:
+                  backupError instanceof Error
+                    ? backupError.message.slice(0, 800)
+                    : "Unknown backup error",
+              });
+            }
+          }
+        }
+
         await admin
           .from("media_generation_jobs")
           .update({
