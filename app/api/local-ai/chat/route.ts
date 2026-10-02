@@ -880,8 +880,19 @@ export async function POST(request: Request) {
       ) as 0 | 1 | 2 | 3 | 4;
       const requestCapUsd = input.modelMixer?.maxSpendUsd ?? null;
 
+      let nousAuthFailure: string | null = null;
       const nousRuntimeAuth = await freshNousRuntimeAuthForOwner(ownerRef).catch(
-        () => null,
+        (error) => {
+          nousAuthFailure =
+            error instanceof Error
+              ? error.message.slice(0, 500)
+              : "Nous Portal authorization is temporarily unavailable.";
+          console.warn("Nous-first media authorization unavailable; backup routing may be used", {
+            ownerRef,
+            detail: nousAuthFailure,
+          });
+          return null;
+        },
       );
       const nousChoice =
         mediaPlan.kind === "image"
@@ -949,7 +960,9 @@ export async function POST(request: Request) {
       let selectedMediaModel: MediaCatalogModel | null = null;
       let pricingSource = nousRuntimeAuth && nousChoice
         ? "nous-managed"
-        : "configured-fallback";
+        : nousAuthFailure
+          ? "openrouter-backup-nous-auth-unavailable"
+          : "configured-fallback";
 
       if (!nousRuntimeAuth || !nousChoice) {
         try {
