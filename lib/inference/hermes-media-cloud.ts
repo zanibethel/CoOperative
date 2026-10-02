@@ -12,6 +12,8 @@ export type HermesMediaStartSpec = {
   model?: string;
   providerCredential?: string;
   nousAuthJson?: string;
+  orchestratorProvider?: string;
+  orchestratorModel?: string;
 };
 
 export type HermesMediaStartResult = {
@@ -204,11 +206,18 @@ export async function startHermesMediaTask(
     provider: spec.provider,
     model: spec.model,
   });
-  const orchestratorProvider = spec.nousAuthJson ? "nous" : baseConfig.orchestratorProvider;
-  const orchestratorModel =
-    spec.nousAuthJson && !process.env.HERMES_CLOUD_MODEL?.trim()
-      ? "poolside/laguna-s-2.1:free"
-      : baseConfig.orchestratorModel;
+  const orchestratorProvider = safeIdentifier(
+    spec.orchestratorProvider?.trim() ||
+      (spec.nousAuthJson ? "nous" : baseConfig.orchestratorProvider),
+    "Hermes orchestrator provider",
+  );
+  const orchestratorModel = safeIdentifier(
+    spec.orchestratorModel?.trim() ||
+      (spec.nousAuthJson && !process.env.HERMES_CLOUD_MODEL?.trim()
+        ? "poolside/laguna-s-2.1:free"
+        : baseConfig.orchestratorModel),
+    "Hermes orchestrator model",
+  );
   const config = {
     ...baseConfig,
     orchestratorProvider,
