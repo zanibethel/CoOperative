@@ -2143,3 +2143,118 @@ b { color: var(--text); }
     gap: 3px;
   }
 }
+
+
+/* Personal AI Recovery Agent */
+.personal-recovery-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel-2) 95%, var(--accent));
+  white-space: normal;
+}
+
+.personal-recovery-current {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+}
+
+.personal-recovery-current > div {
+  display: grid;
+  gap: 3px;
+}
+
+.personal-recovery-current strong {
+  font-size: .72rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.personal-recovery-current span:not(.personal-recovery-dot) {
+  font-size: .8rem;
+  line-height: 1.45;
+}
+
+.personal-recovery-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.personal-recovery-dot.active {
+  background: var(--accent);
+  animation: personal-chat-pulse 1.15s ease-in-out infinite;
+}
+
+.personal-recovery-dot.complete {
+  background: #62d78f;
+}
+
+.personal-recovery-card > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .74rem;
+  line-height: 1.45;
+}
+
+.personal-recovery-card details {
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.personal-recovery-card summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: .72rem;
+  font-weight: 800;
+}
+
+.personal-recovery-events {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.personal-recovery-events > small {
+  color: var(--muted);
+  font-size: .64rem;
+}
+
+.personal-recovery-events > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+}
+
+.personal-recovery-events span {
+  font-size: .68rem;
+  line-height: 1.42;
+}
+
+.personal-recovery-events time {
+  color: var(--muted);
+  font-size: .6rem;
+  white-space: nowrap;
+}
+
+.personal-recovery-resolution {
+  border-color: color-mix(in srgb, #62d78f 22%, var(--line)) !important;
+}
+
+@media (max-width: 760px) {
+  .personal-recovery-events > div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+}

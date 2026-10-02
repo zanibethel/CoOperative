@@ -31,6 +31,10 @@ type TextRecoveryJob = {
   routing_preference: string | null;
   model_mixer: unknown;
   request_max_spend_microusd: number | null;
+  personal_use: boolean;
+  personal_user_id: string | null;
+  personal_conversation_id: string | null;
+  target_node_id: string | null;
 };
 
 type MediaRecoveryJob = {
@@ -54,6 +58,7 @@ type RecoveryIncidentRow = {
   id: string;
   owner_ref: string;
   conversation_id: string | null;
+  personal_conversation_id: string | null;
   source_kind: "text" | "media" | "connector" | "runtime";
   source_job_id: string | null;
   status: string;
@@ -123,7 +128,7 @@ async function readFailedSource(
   const { data: textJob, error: textError } = await admin
     .from("text_inference_jobs")
     .select(
-      "id,status,client_owner_ref,conversation_id,error,messages,profile,max_tokens,temperature,routing_mode,task_class,allow_paid_fallback,human_approval_required,model_registry_revision,verification_status,attachment_ids,capability,routing_preference,model_mixer,request_max_spend_microusd",
+      "id,status,client_owner_ref,conversation_id,error,messages,profile,max_tokens,temperature,routing_mode,task_class,allow_paid_fallback,human_approval_required,model_registry_revision,verification_status,attachment_ids,capability,routing_preference,model_mixer,request_max_spend_microusd,personal_use,personal_user_id,personal_conversation_id,target_node_id",
     )
     .eq("id", sourceJobId)
     .eq("client_owner_ref", ownerRef)
@@ -242,12 +247,58 @@ async function retryTextJob(
   if (job.status !== "failed") return null;
 
   const retryJobId = crypto.randomUUID();
+
+  let retryMessages = job.messages;
+  if (job.personal_use) {
+    if (
+      !job.personal_user_id ||
+      !job.personal_conversation_id ||
+      !job.target_node_id
+    ) {
+      throw new Error(
+        "Personal AI recovery is missing its user, conversation, or local node.",
+      );
+    }
+
+    const { data: history, error: historyError } = await admin.rpc(
+      "personal_ai_read_messages",
+      {
+        p_user_id: job.personal_user_id,
+        p_conversation_id: job.personal_conversation_id,
+      },
+    );
+    if (historyError) throw historyError;
+
+    const recent = (history || [])
+      .slice(-24)
+      .filter(
+        (message: Record<string, unknown>) =>
+          (message.role === "user" || message.role === "assistant") &&
+          typeof message.content === "string",
+      )
+      .map((message: Record<string, unknown>) => ({
+        role: message.role,
+        content: message.content,
+      }));
+
+    retryMessages = [
+      {
+        role: "system",
+        content:
+          "You are CoOperative Personal AI running on the user's own Windows PC. " +
+          "Be useful, clear, practical, and honest. This is personal use, not contributed compute. " +
+          "Do not claim to have used cloud inference or paid APIs.",
+      },
+      ...recent,
+    ];
+  }
+
   const { error } = await admin.from("text_inference_jobs").insert({
     id: retryJobId,
     status: "queued",
     client_owner_ref: ownerRef,
-    conversation_id: job.conversation_id,
-    messages: job.messages,
+    conversation_id: job.personal_use ? null : job.conversation_id,
+    messages: retryMessages,
     attachment_ids: job.attachment_ids || [],
     capability: job.capability || "text",
     profile: job.profile || "fast",
@@ -255,20 +306,30 @@ async function retryTextJob(
     temperature: job.temperature ?? 0.2,
     routing_mode: job.routing_mode || "local-fast",
     task_class: job.task_class || "general",
-    route_reason:
-      "Recovery Agent retry for " +
-      job.id +
-      ". Previous route failed; node pinning cleared so the next eligible free/local route can claim it.",
-    allow_paid_fallback: job.allow_paid_fallback === true,
+    route_reason: job.personal_use
+      ? "Recovery Agent retry for " +
+        job.id +
+        ". Personal AI remains pinned to the same authorized local PC; no cloud or paid inference is allowed."
+      : "Recovery Agent retry for " +
+        job.id +
+        ". Previous route failed; node pinning cleared so the next eligible free/local route can claim it.",
+    allow_paid_fallback: job.personal_use ? false : job.allow_paid_fallback === true,
     human_approval_required: false,
     model_registry_revision:
       job.model_registry_revision || TEXT_MODEL_REGISTRY_REVISION,
     verification_status: "not_run",
-    routing_preference: "default",
+    routing_preference: job.personal_use ? "require-node" : "default",
     preferred_node_id: null,
-    target_node_id: null,
-    model_mixer: job.model_mixer || null,
-    request_max_spend_microusd: job.request_max_spend_microusd ?? null,
+    target_node_id: job.personal_use ? job.target_node_id : null,
+    personal_use: job.personal_use,
+    personal_user_id: job.personal_use ? job.personal_user_id : null,
+    personal_conversation_id: job.personal_use
+      ? job.personal_conversation_id
+      : null,
+    model_mixer: job.personal_use ? null : job.model_mixer || null,
+    request_max_spend_microusd: job.personal_use
+      ? null
+      : job.request_max_spend_microusd ?? null,
   });
   if (error) throw error;
 
@@ -292,8 +353,15 @@ async function retryTextJob(
     incidentId,
     ownerRef,
     "retry_started",
-    "Original text request was requeued with node pinning cleared.",
-    { retryJobId, spendChanged: false },
+    job.personal_use
+      ? "Original Personal AI request was requeued on the same authorized local PC."
+      : "Original text request was requeued with node pinning cleared.",
+    {
+      retryJobId,
+      spendChanged: false,
+      personalLocalOnly: job.personal_use,
+      targetNodeId: job.personal_use ? job.target_node_id : null,
+    },
   );
 
   return retryJobId;
@@ -414,13 +482,11 @@ async function retryFreeMediaJob(
 async function appendRecoveryMessage(
   admin: AdminClient,
   ownerRef: string,
-  conversationId: string | null,
+  source: FailedSource,
   incidentId: string,
   currentMessage: string,
   continuationPrompt: string,
 ) {
-  if (!conversationId) return;
-
   const content = [
     currentMessage,
     "",
@@ -429,8 +495,32 @@ async function appendRecoveryMessage(
     "RECOVERY_STATUS:" + incidentId,
   ].join("\n");
 
+  if (
+    source.kind === "text" &&
+    source.job.personal_use &&
+    source.job.personal_user_id &&
+    source.job.personal_conversation_id
+  ) {
+    const { error } = await admin.rpc("personal_ai_append_message", {
+      p_user_id: source.job.personal_user_id,
+      p_conversation_id: source.job.personal_conversation_id,
+      p_role: "assistant",
+      p_content: content,
+      p_source: "web",
+      p_source_job_id: null,
+      p_metadata: {
+        recoveryIncidentId: incidentId,
+        recoveryStatus: true,
+      },
+    });
+    if (error) throw error;
+    return;
+  }
+
+  if (!source.conversationId) return;
+
   const { error } = await admin.from("local_ai_messages").insert({
-    conversation_id: conversationId,
+    conversation_id: source.conversationId,
     owner_ref: ownerRef,
     role: "assistant",
     content,
@@ -442,8 +532,175 @@ async function appendRecoveryMessage(
   await admin
     .from("local_ai_conversations")
     .update({ updated_at: nowIso() })
-    .eq("id", conversationId)
+    .eq("id", source.conversationId)
     .eq("owner_ref", ownerRef);
+}
+
+async function queueRuntimeDebuggerTask(
+  admin: AdminClient,
+  ownerRef: string,
+  incidentId: string,
+  error: string,
+  context: string,
+) {
+  const taskId = crypto.randomUUID();
+  const objective = [
+    "BACKGROUND PERSONAL LOCAL-AI RECOVERY INCIDENT",
+    "Incident: " + incidentId,
+    "Failure evidence: " + error,
+    "User-safe context: " + context.slice(0, 1800),
+    "",
+    "Diagnose a failure in CoOperativeLocalAI / Windows local chat from repository evidence.",
+    "Prepare the smallest bounded repair only if code/configuration is responsible.",
+    "Do not read or modify secrets. Do not broaden permissions, spending, or auth scopes.",
+    "Keep Personal AI local-only: never replace local inference with cloud or paid inference.",
+    "Relevant areas commonly include workers/windows-local-chat.py, workers/windows-text-worker.py, Windows installer/repair scripts, Personal AI APIs, and local runtime setup.",
+    "If no repository change is justified, return a no-change diagnosis with the safest local recovery action.",
+  ].join("\n");
+
+  const { error: taskError } = await admin.from("agent_tasks").insert({
+    id: taskId,
+    owner_ref: ownerRef,
+    agent_key: "debugger",
+    repo_key: "cooperative",
+    mode: "prepare_change",
+    objective: objective.slice(0, 12000),
+    requested_profile: "quality",
+    status: "queued",
+  });
+  if (taskError) throw taskError;
+
+  await admin.from("agent_task_events").insert({
+    task_id: taskId,
+    owner_ref: ownerRef,
+    kind: "queued",
+    message: "Recovery debugger queued for CoOperativeLocalAI.",
+    metadata: {
+      incidentId,
+      sourceKind: "runtime",
+      executorPolicy: "local-first",
+      personalLocalOnly: true,
+    },
+  });
+
+  await admin
+    .from("recovery_incidents")
+    .update({
+      agent_task_id: taskId,
+      status: "repairing",
+      current_message:
+        "Recovery Agent is tracing the local chat failure with the local debugger in the background.",
+      updated_at: nowIso(),
+    })
+    .eq("id", incidentId)
+    .eq("owner_ref", ownerRef);
+
+  await addEvent(
+    admin,
+    incidentId,
+    ownerRef,
+    "debugger_queued",
+    "Local Debugger was queued to inspect the CoOperativeLocalAI route.",
+    { taskId, modelPolicy: "local-first", personalLocalOnly: true },
+  );
+
+  return taskId;
+}
+
+export async function startPersonalRuntimeRecovery(input: {
+  ownerRef: string;
+  userId: string;
+  conversationId: string;
+  error: string;
+  context?: string;
+}) {
+  const admin = createAdminSupabaseClient();
+  const cleanError = safeError(input.error);
+  const classification = classifyRecoveryFailure(cleanError, "runtime");
+  const incidentId = crypto.randomUUID();
+
+  const { data: incident, error: insertError } = await admin
+    .from("recovery_incidents")
+    .insert({
+      id: incidentId,
+      owner_ref: input.ownerRef,
+      conversation_id: null,
+      personal_conversation_id: input.conversationId,
+      source_kind: "runtime",
+      source_job_id: null,
+      status:
+        classification.strategy === "wait-user" ? "waiting_user" : "diagnosing",
+      error_class: classification.errorClass,
+      error_excerpt: cleanError,
+      current_message:
+        classification.strategy === "wait-user"
+          ? classification.currentMessage
+          : "Recovery Agent is diagnosing the local chat failure in the background.",
+      continuation_prompt:
+        "You can keep chatting instead of waiting. If there is another part of the task we can do locally, continue with it and I’ll report back when this route is ready.",
+      requires_user_action: classification.requiresUserAction,
+      automatic_retry: false,
+    })
+    .select("*")
+    .single();
+  if (insertError) throw insertError;
+
+  await addEvent(
+    admin,
+    incidentId,
+    input.ownerRef,
+    "detected",
+    "Recovery Agent captured a direct CoOperativeLocalAI runtime failure.",
+    {
+      errorClass: classification.errorClass,
+      sourceKind: "runtime",
+      personalLocalOnly: true,
+    },
+  );
+
+  if (classification.strategy !== "wait-user") {
+    await queueRuntimeDebuggerTask(
+      admin,
+      input.ownerRef,
+      incidentId,
+      cleanError,
+      input.context || "",
+    );
+  }
+
+  const content = [
+    classification.strategy === "wait-user"
+      ? classification.currentMessage
+      : "Recovery Agent is diagnosing the local chat route in the background.",
+    "",
+    "You can keep chatting instead of waiting. I’ll report back here when the local route is ready.",
+    "",
+    "RECOVERY_STATUS:" + incidentId,
+  ].join("\n");
+
+  const { error: messageError } = await admin.rpc("personal_ai_append_message", {
+    p_user_id: input.userId,
+    p_conversation_id: input.conversationId,
+    p_role: "assistant",
+    p_content: content,
+    p_source: "desktop",
+    p_source_job_id: null,
+    p_metadata: {
+      recoveryIncidentId: incidentId,
+      recoveryStatus: true,
+      personalLocalOnly: true,
+    },
+  });
+  if (messageError) throw messageError;
+
+  const { data: refreshed, error: refreshError } = await admin
+    .from("recovery_incidents")
+    .select("*")
+    .eq("id", incidentId)
+    .eq("owner_ref", input.ownerRef)
+    .single();
+  if (refreshError) throw refreshError;
+  return refreshed || incident;
 }
 
 export async function startRecoveryForJob(
@@ -477,7 +734,14 @@ export async function startRecoveryForJob(
     .insert({
       id: incidentId,
       owner_ref: ownerRef,
-      conversation_id: source.conversationId,
+      conversation_id:
+        source.kind === "text" && source.job.personal_use
+          ? null
+          : source.conversationId,
+      personal_conversation_id:
+        source.kind === "text" && source.job.personal_use
+          ? source.job.personal_conversation_id
+          : null,
       source_kind: source.kind,
       source_job_id: sourceJobId,
       status:
@@ -530,7 +794,7 @@ export async function startRecoveryForJob(
   await appendRecoveryMessage(
     admin,
     ownerRef,
-    source.conversationId,
+    source,
     incidentId,
     classification.currentMessage,
     classification.continuationPrompt,
@@ -978,13 +1242,20 @@ export async function refreshRecoveryIncident(
 export async function listRecoveryIncidents(
   ownerRef: string,
   conversationId: string,
+  scope: "cooperative" | "personal" = "cooperative",
 ) {
   const admin = createAdminSupabaseClient();
-  const { data, error } = await admin
+  let query = admin
     .from("recovery_incidents")
     .select("*")
-    .eq("owner_ref", ownerRef)
-    .eq("conversation_id", conversationId)
+    .eq("owner_ref", ownerRef);
+
+  query =
+    scope === "personal"
+      ? query.eq("personal_conversation_id", conversationId)
+      : query.eq("conversation_id", conversationId);
+
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .limit(12);
   if (error) throw error;

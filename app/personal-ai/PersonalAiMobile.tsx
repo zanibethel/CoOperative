@@ -44,8 +44,185 @@ type Settings = {
   preferredNodeId?: string | null;
 };
 
+type RecoveryEvent = {
+  id: string | number;
+  kind: string;
+  message: string;
+  created_at?: string;
+};
+
+type RecoveryIncident = {
+  id: string;
+  status:
+    | "diagnosing"
+    | "repairing"
+    | "waiting_user"
+    | "retrying"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  current_message: string;
+  continuation_prompt?: string | null;
+  resolution_summary?: string | null;
+};
+
+type RecoveryResult = {
+  incident?: RecoveryIncident;
+  events?: RecoveryEvent[];
+  error?: string;
+  detail?: string;
+};
+
+function recoveryDirective(content: string) {
+  const match = content.match(
+    /RECOVERY_STATUS:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
+  );
+  if (!match) return null;
+
+  return {
+    incidentId: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function PersonalRecoveryCard({
+  incidentId,
+  onChanged,
+}: {
+  incidentId: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [result, setResult] = useState<RecoveryResult | null>(null);
+  const [cardError, setCardError] = useState("");
+  const lastStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+
+    async function refresh() {
+      try {
+        const response = await fetch(
+          `/api/personal-ai/recovery?incidentId=${encodeURIComponent(incidentId)}`,
+          { cache: "no-store" },
+        );
+        const payload = (await response.json()) as RecoveryResult;
+        if (!response.ok || !payload.incident) {
+          throw new Error(
+            payload.detail || payload.error || "Could not read recovery status.",
+          );
+        }
+        if (cancelled) return;
+
+        const previous = lastStatusRef.current;
+        lastStatusRef.current = payload.incident.status;
+        setResult(payload);
+        setCardError("");
+
+        if (
+          previous &&
+          previous !== payload.incident.status &&
+          ["completed", "failed", "waiting_user"].includes(
+            payload.incident.status,
+          )
+        ) {
+          await onChanged();
+        }
+
+        if (
+          ["diagnosing", "repairing", "retrying"].includes(
+            payload.incident.status,
+          )
+        ) {
+          timer = window.setTimeout(refresh, 2400);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCardError(
+            err instanceof Error ? err.message : "Could not read recovery status.",
+          );
+          timer = window.setTimeout(refresh, 5000);
+        }
+      }
+    }
+
+    void refresh();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [incidentId, onChanged]);
+
+  const incident = result?.incident;
+  const active = Boolean(
+    incident &&
+      ["diagnosing", "repairing", "retrying"].includes(incident.status),
+  );
+
+  return (
+    <div className="personal-recovery-card">
+      <div className="personal-recovery-current">
+        <span
+          className={
+            active
+              ? "personal-recovery-dot active"
+              : incident?.status === "completed"
+                ? "personal-recovery-dot complete"
+                : "personal-recovery-dot"
+          }
+        />
+        <div>
+          <strong>Recovery Agent</strong>
+          <span>
+            {incident?.current_message ||
+              (cardError
+                ? "Recovery status is temporarily unavailable."
+                : "Checking recovery…")}
+          </span>
+        </div>
+      </div>
+
+      {incident?.continuation_prompt && active ? (
+        <p>{incident.continuation_prompt}</p>
+      ) : null}
+
+      <details>
+        <summary>Recovery details</summary>
+        <div className="personal-recovery-events">
+          <small>
+            Activity summaries only — private model reasoning is not exposed.
+          </small>
+          {(result?.events || []).map((event) => (
+            <div key={String(event.id)}>
+              <span>{event.message}</span>
+              {event.created_at ? (
+                <time>
+                  {new Date(event.created_at).toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })}
+                </time>
+              ) : null}
+            </div>
+          ))}
+          {incident?.resolution_summary ? (
+            <div className="personal-recovery-resolution">
+              <strong>Resolution</strong>
+              <span>{incident.resolution_summary}</span>
+            </div>
+          ) : null}
+        </div>
+      </details>
+
+      {cardError ? <div className="personal-chat-error">{cardError}</div> : null}
+    </div>
+  );
 }
 
 export default function PersonalAiMobile() {
@@ -261,6 +438,35 @@ export default function PersonalAiMobile() {
             .join(" · "),
         );
         setStatus("Connected");
+        return;
+      }
+
+      if (result.status === "failed") {
+        setStatus("Recovery running in background…");
+        const recoveryResponse = await fetch("/api/personal-ai/recovery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sourceJobId: jobId }),
+        });
+        const recovery = (await recoveryResponse.json()) as {
+          incident?: RecoveryIncident;
+          error?: string;
+          detail?: string;
+        };
+        if (!recoveryResponse.ok || !recovery.incident) {
+          throw new Error(
+            recovery.detail ||
+              recovery.error ||
+              result.error ||
+              "Local AI failed and Recovery Agent could not start.",
+          );
+        }
+
+        await loadConversation(id);
+        await refreshConversations();
+        setStatus(
+          selectedNode?.availableForPersonalAi ? "Connected" : "PC offline",
+        );
         return;
       }
 
@@ -569,7 +775,25 @@ export default function PersonalAiMobile() {
                 ) : null}
                 <div className="personal-chat-message-body">
                   <div className="personal-chat-message-text">
-                    {message.content}
+                    {(() => {
+                      const recovery = recoveryDirective(message.content);
+                      if (!recovery) return message.content;
+
+                      return (
+                        <>
+                          {recovery.text ? <div>{recovery.text}</div> : null}
+                          <PersonalRecoveryCard
+                            incidentId={recovery.incidentId}
+                            onChanged={async () => {
+                              if (conversationId) {
+                                await loadConversation(conversationId);
+                                await refreshConversations();
+                              }
+                            }}
+                          />
+                        </>
+                      );
+                    })()}
                   </div>
                   {message.role === "assistant" ? (
                     <div className="personal-chat-message-actions">
