@@ -350,8 +350,9 @@ export default function LocalAiChat() {
     async (jobId: string, fallbackMessages: ChatMessage[] = []) => {
       if (activePollRef.current === jobId) return;
 
-      activePollRef.current = jobId;
-      setActiveJobId(jobId);
+      let pollingJobId = jobId;
+      activePollRef.current = pollingJobId;
+      setActiveJobId(pollingJobId);
       setStreamingText("");
       setBusy(true);
       setError("");
@@ -359,15 +360,15 @@ export default function LocalAiChat() {
       try {
         for (;;) {
           const response = await fetch(
-            `/api/local-ai/chat?jobId=${encodeURIComponent(jobId)}`,
+            `/api/local-ai/chat?jobId=${encodeURIComponent(pollingJobId)}`,
             { cache: "no-store" },
           );
           const result = (await response.json()) as JobResult;
 
-          if (activePollRef.current !== jobId) return;
+          if (activePollRef.current !== pollingJobId) return;
 
           if (!response.ok) {
-            throw new Error(result.detail || result.error || "Could not read local AI job.");
+            throw new Error(result.detail || result.error || "Could not read CoOperative AI job.");
           }
 
           if (result.profile === "fast" || result.profile === "quality") {
@@ -382,10 +383,18 @@ export default function LocalAiChat() {
           }
 
           const runningLabel =
-            result.capability === "vision" ? "Using local vision…" : "Using local AI…";
+            result.execution === "paid-ai"
+              ? "Using funded high-quality AI…"
+              : result.capability === "vision"
+                ? "Using local vision…"
+                : "Using local AI…";
 
           if (result.status === "queued") {
-            setStatus("Waiting for local capacity…");
+            setStatus(
+              result.execution === "paid-ai"
+                ? "Using funded high-quality AI…"
+                : "Waiting for local capacity…",
+            );
             await wait(1000);
             continue;
           }
@@ -422,6 +431,9 @@ export default function LocalAiChat() {
               );
             }
 
+            if (result.execution === "paid-ai") {
+              await refreshBusinesses();
+            }
             setStreamingText("");
             setMeta(resultMeta(result));
             setStatus("Ready");
@@ -440,7 +452,7 @@ export default function LocalAiChat() {
             const paidResponse = await fetch("/api/local-ai/chat/paid-fallback", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ jobId }),
+              body: JSON.stringify({ jobId: pollingJobId }),
             });
             const paid = (await paidResponse.json()) as JobResult;
 
@@ -466,13 +478,14 @@ export default function LocalAiChat() {
 
             if (
               paid.jobId &&
-              paid.jobId !== jobId &&
+              paid.jobId !== pollingJobId &&
               (paid.status === "running" || paid.status === "queued")
             ) {
-              window.localStorage.setItem(ACTIVE_JOB_KEY, paid.jobId);
-              activePollRef.current = null;
-              await pollJob(paid.jobId, fallbackMessages);
-              return;
+              pollingJobId = paid.jobId;
+              activePollRef.current = pollingJobId;
+              setActiveJobId(pollingJobId);
+              window.localStorage.setItem(ACTIVE_JOB_KEY, pollingJobId);
+              continue;
             }
 
             throw new Error(
@@ -482,14 +495,14 @@ export default function LocalAiChat() {
 
           throw new Error(
             result.error ||
-              `Local AI job ended with status ${result.status || "unknown"}.`,
+              `CoOperative AI job ended with status ${result.status || "unknown"}.`,
           );
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Local AI request failed.");
+        setError(err instanceof Error ? err.message : "CoOperative AI request failed.");
         setStatus("Ready");
       } finally {
-        if (activePollRef.current === jobId) {
+        if (activePollRef.current === pollingJobId) {
           activePollRef.current = null;
           setActiveJobId(null);
           setBusy(false);
