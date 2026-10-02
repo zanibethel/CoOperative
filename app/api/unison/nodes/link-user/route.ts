@@ -44,28 +44,37 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: settings, error: settingsError } = await admin
-      .from("personal_ai_settings")
-      .select("user_id,preferred_node_id")
-      .eq("user_id", userId)
-      .maybeSingle();
-    if (settingsError) throw settingsError;
-
-    if (!settings) {
-      const { error: createError } = await admin.from("personal_ai_settings").insert({
-        user_id: userId,
-        preferred_node_id: input.nodeId,
-      });
-      if (createError) throw createError;
-    } else if (!settings.preferred_node_id) {
-      const { error: updateError } = await admin
+    try {
+      const { data: settings, error: settingsError } = await admin
         .from("personal_ai_settings")
-        .update({
+        .select("user_id,preferred_node_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (settingsError) throw settingsError;
+
+      if (!settings) {
+        const { error: createError } = await admin.from("personal_ai_settings").insert({
+          user_id: userId,
           preferred_node_id: input.nodeId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", userId);
-      if (updateError) throw updateError;
+        });
+        if (createError) throw createError;
+      } else if (!settings.preferred_node_id) {
+        const { error: updateError } = await admin
+          .from("personal_ai_settings")
+          .update({
+            preferred_node_id: input.nodeId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("user_id", userId);
+        if (updateError) throw updateError;
+      }
+    } catch (settingsError) {
+      console.warn("Shared node linked, but preferred-node setup was not updated", {
+        detail:
+          settingsError instanceof Error
+            ? settingsError.message.slice(0, 500)
+            : "Unknown settings error",
+      });
     }
 
     return NextResponse.json(
