@@ -45,6 +45,29 @@ jobs:
         run: |
           python -m py_compile workers/windows-text-worker.py workers/windows-local-chat.py workers/windows-local-file-extract.py workers/windows-local-voice.py workers/windows-local-web-search.py workers/windows-model-plan.py workers/unison_runtime.py workers/hf-image-worker.py
 
+      - name: Smoke test Personal Local AI server
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check httpx
+          $process = Start-Process python -ArgumentList "workers/windows-local-chat.py" -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $status = Invoke-RestMethod "http://127.0.0.1:11436/api/status"
+                if ($status.localInference -eq $true -and $status.features.projects -eq $true -and $status.features.voiceInput -eq $true) {
+                  $ready = $true
+                  break
+                }
+              } catch {}
+            }
+            if (-not $ready) { throw "Personal Local AI server did not become ready." }
+            Write-Host "Personal Local AI loopback server verified."
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
