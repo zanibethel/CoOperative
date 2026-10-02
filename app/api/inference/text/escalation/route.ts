@@ -39,6 +39,7 @@ const requestSchema = z.object({
     verificationStatus: z.enum(["not_run", "passed", "failed", "inconclusive"]),
     allowPaidFallback: z.boolean(),
     automaticPaidBudgetUsd: z.number().min(0).max(1000).optional(),
+    fundedPaidBalanceUsd: z.number().min(0).max(1000).optional(),
     requiredSuccessRate: z.number().min(0).max(1).optional(),
   }),
   candidates: z.array(candidateSchema).max(32),
@@ -69,6 +70,7 @@ export async function POST(request: Request) {
         decision,
         policy: {
           automaticPaidExecutionRequiresExplicitPermission: true,
+          platformPaidExecutionRequiresFundedProfileBalance: true,
           unknownCostRequiresApproval: true,
           benchmarkQualificationRequired: true,
           businessOwnedExecutorsMayBePreferredWhenQualified: true,
