@@ -8,6 +8,7 @@ import {
   COOPERATIVE_BUSINESS_POLICY_REVISION,
 } from "@/lib/ai/business-chat-policy";
 import { buildBusinessChatContext } from "@/lib/ai/business-context";
+import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -123,6 +124,68 @@ export async function POST(request: Request) {
         .eq("owner_ref", ownerRef);
 
       if (attachError) throw attachError;
+    }
+
+    const directResult = await handleBusinessIntake({
+      userId: owner.userId,
+      businessId: input.businessId,
+      conversationId,
+      message: input.message,
+      hasAttachments: input.attachmentIds.length > 0,
+    });
+
+    if (directResult.handled && directResult.text) {
+      const { error: directMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: input.attachmentIds,
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: directResult.text,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+
+      if (directMessageError) throw directMessageError;
+
+      const { error: directConversationError } = await admin
+        .from("local_ai_conversations")
+        .update({
+          profile: input.profile,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      if (directConversationError) throw directConversationError;
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "text",
+          profile: input.profile,
+          conversationId,
+          conversationTitle,
+          text: directResult.text,
+          provider: "code",
+          model: directResult.agent || "deterministic",
+          routeReason: directResult.routeReason,
+          savedFacts: directResult.savedFacts || [],
+          business: businessContext?.business ?? null,
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const { data: previousMessages, error: historyError } = await admin
