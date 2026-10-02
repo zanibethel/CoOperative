@@ -338,7 +338,10 @@ export async function POST(request: Request) {
         input.profile === "quality"
           ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}`
           : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}`,
-      allow_paid_fallback: false,
+      allow_paid_fallback:
+        requestedCapability === "text" &&
+        input.nodeRouting !== "require-node" &&
+        businessContext?.aiBalance.funded === true,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
@@ -382,6 +385,11 @@ export async function POST(request: Request) {
         routingPreference: input.nodeRouting,
         preferredNodeId,
         targetNodeId,
+        paidAiEligible:
+          requestedCapability === "text" &&
+          input.nodeRouting !== "require-node" &&
+          businessContext?.aiBalance.funded === true,
+        availableAiBalanceUsd: businessContext?.aiBalance.availableUsd ?? 0,
       },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
