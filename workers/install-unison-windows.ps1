@@ -33,6 +33,7 @@ $adaptiveBackend = "transformers"
 $adaptiveFastModel = "Qwen/Qwen2.5-1.5B-Instruct"
 $adaptiveQualityModel = $adaptiveFastModel
 $adaptiveHeavyModel = $adaptiveFastModel
+$adaptiveVisionModel = "qwen2.5vl:3b"
 $modelPlanner = Join-Path $PSScriptRoot "windows-model-plan.py"
 $modelPlanPath = Join-Path $PSScriptRoot "text-model-plan.json"
 
@@ -59,6 +60,7 @@ if (Test-Path $modelPlanner) {
         $adaptiveFastModel = [string]$plan.models.fast
         $adaptiveQualityModel = [string]$plan.models.quality
         $adaptiveHeavyModel = [string]$plan.models.heavy
+    if ($plan.models.vision) { $adaptiveVisionModel = [string]$plan.models.vision }
         Write-Host "Adaptive model plan: Fast=$adaptiveFastModel Quality=$adaptiveQualityModel Heavy=$adaptiveHeavyModel"
         Write-Host "Fast will be fetched when first needed; larger models stay lazy until routed work requires them."
       } else {
@@ -121,6 +123,7 @@ $values = @{
   "WINDOWS_TEXT_FAST_MODEL_ID" = $adaptiveFastModel
   "WINDOWS_TEXT_QUALITY_MODEL_ID" = $adaptiveQualityModel
   "WINDOWS_TEXT_HEAVY_MODEL_ID" = $adaptiveHeavyModel
+  "WINDOWS_VISION_MODEL_ID" = $adaptiveVisionModel
   "UNISON_LOCAL_CHAT_PORT" = "11436"
 }
 
