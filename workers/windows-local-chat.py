@@ -569,7 +569,8 @@ def wants_image_generation(query: str) -> bool:
     exclusions = (
         "analyze this image", "analyze the image", "describe this image",
         "describe the image", "what is in this image", "what's in this image",
-        "read this image", "look at this image",
+        "read this image", "look at this image", "draw a conclusion",
+        "draw a comparison",
     )
     if any(phrase in lower for phrase in exclusions):
         return False
@@ -641,7 +642,15 @@ def image_worker_url() -> str:
         raise RuntimeError("The local image generator port marker is invalid.") from exc
     if port < 1024 or port > 65535:
         raise RuntimeError("The local image generator port is invalid.")
-    return f"http://127.0.0.1:{port}"
+    url = f"http://127.0.0.1:{port}"
+    try:
+        health = httpx.get(f"{url}/health", timeout=2.5)
+        health.raise_for_status()
+    except Exception as exc:
+        raise RuntimeError(
+            "The local image generator is still starting or unavailable. Try again shortly."
+        ) from exc
+    return url
 
 
 def generate_local_image(query: str, images: list[str]) -> dict:
