@@ -400,6 +400,18 @@ $textCapabilities = @(
   "text_quality_profile",
   "async_queue"
 )
+if (Test-Path $textBenchmarkSuitePath) {
+  $textCapabilities += "adaptive_text_benchmarked"
+  try {
+    $startupSuite = Get-Content $textBenchmarkSuitePath -Raw | ConvertFrom-Json
+    if ([string]$startupSuite.acceleration.observedBackend -eq "vulkan") {
+      $textCapabilities += "vulkan_gpu"
+    }
+    if ([bool]$startupSuite.acceleration.gpuOffloadVerified) {
+      $textCapabilities += "gpu_offload_verified"
+    }
+  } catch {}
+}
 if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
   $textCapabilities += @("machine_wide", "whole_pc_idle")
 }
