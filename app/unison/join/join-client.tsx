@@ -88,8 +88,10 @@ export default function JoinClient({
           <h2>Install Unison and your own Local AI on this computer.</h2>
           <p>
             One setup gives this PC a private <strong>CoOperative Personal Local AI</strong> for
-            everyday use and turns the machine into a Unison contributor node when the whole PC is
-            idle. Your PC works for you first.
+            everyday use — including chat, <strong>image understanding and local image creation</strong>,
+            documents, voice, optional web search, local history, and project workspaces — and turns
+            the machine into a Unison contributor node when the whole PC is idle. Your PC works for
+            you first.
           </p>
         </div>
 
