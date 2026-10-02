@@ -46,9 +46,28 @@ if (-not $uvExe -or -not (Test-Path $uvExe)) {
   throw "The shared Unison runtime is missing. Reinstall the machine-wide setup."
 }
 
+Write-Host "Ensuring Git is available for Recovery Agent..."
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if ($winget) {
+    try {
+      winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements --silent | Out-Null
+      $env:Path =
+        [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+        [Environment]::GetEnvironmentVariable("Path", "User")
+    } catch {
+      Write-Host "Git install warning: $($_.Exception.Message)"
+    }
+  }
+}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  Write-Host "Recovery Agent warning: Git is unavailable, so repository repair will stay disabled until Git is installed."
+}
+
 $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/workers"
 $workerFiles = @(
   "hf-image-worker.py",
+  "repo-agent-worker.py",
   "windows-text-worker.py",
   "windows-local-chat.py",
   "windows-local-file-extract.py",
@@ -80,6 +99,7 @@ try {
     Where-Object {
       $_.CommandLine -and (
         $_.CommandLine -like "*hf-image-worker.py*" -or
+      $_.CommandLine -like "*repo-agent-worker.py*" -or
         $_.CommandLine -like "*windows-text-worker.py*" -or
         $_.CommandLine -like "*windows-local-chat.py*" -or
         $_.CommandLine -like "*start-unison-windows.ps1*"
@@ -196,7 +216,8 @@ while ((Get-Date) -lt $deadline) {
       $caps -contains "text_generation" -and
       $caps -contains "machine_wide" -and
       $caps -contains "whole_pc_idle" -and
-      $caps -contains "local_personal_chat"
+      $caps -contains "local_personal_chat" -and
+      $caps -contains "recovery_agent"
     ) {
       $verified = $true
       break
@@ -208,7 +229,7 @@ while ((Get-Date) -lt $deadline) {
 }
 
 if (-not $verified) {
-  throw "Machine-wide repair restarted Unison, but the whole-PC-idle worker and Personal Local AI were not both verified in time."
+  throw "Machine-wide repair restarted Unison, but whole-PC idle compute, Personal Local AI, and Recovery Agent were not all verified in time."
 }
 
 Write-Host ""

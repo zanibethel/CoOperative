@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { textInferenceMessageSchema } from "@/lib/inference/contracts";
-import { localWorkerAuthorized } from "@/lib/agents/server";
+import { agentWorkerCanAccessOwner, authorizeAgentWorker } from "@/lib/agents/server";
 import {
   preferredOwnedTextNode,
   userIdFromOwnerRef,
@@ -20,7 +20,8 @@ const createSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  if (!localWorkerAuthorized(request)) {
+  const authorization = await authorizeAgentWorker(request);
+  if (!authorization.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -35,6 +36,9 @@ export async function POST(request: Request) {
 
     if (taskError) throw taskError;
     if (!task) return NextResponse.json({ error: "Task not found." }, { status: 404 });
+    if (!agentWorkerCanAccessOwner(authorization, task.owner_ref)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     if (!["running","waiting_llm"].includes(task.status)) {
       return NextResponse.json(
         { error: `Task is not active: ${task.status}` },
@@ -95,7 +99,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  if (!localWorkerAuthorized(request)) {
+  const authorization = await authorizeAgentWorker(request);
+  if (!authorization.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -108,6 +113,22 @@ export async function GET(request: Request) {
     }
 
     const admin = createAdminSupabaseClient();
+
+    if (authorization.mode === "node") {
+      const { data: task, error: taskError } = await admin
+        .from("agent_tasks")
+        .select("id,owner_ref")
+        .eq("id", taskId)
+        .maybeSingle();
+      if (taskError) throw taskError;
+      if (!task) {
+        return NextResponse.json({ error: "Task not found." }, { status: 404 });
+      }
+      if (!agentWorkerCanAccessOwner(authorization, task.owner_ref)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+
     const { data: job, error } = await admin
       .from("text_inference_jobs")
       .select("id,status,profile,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,latency_ms,worker_id,routing_preference,preferred_node_id,error")

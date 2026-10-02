@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { localWorkerAuthorized } from "@/lib/agents/server";
+import { agentWorkerCanAccessOwner, authorizeAgentWorker } from "@/lib/agents/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -16,7 +16,8 @@ type Body = {
 const terminalStatuses = new Set(["completed","needs_approval","failed"]);
 
 export async function POST(request: Request) {
-  if (!localWorkerAuthorized(request)) {
+  const authorization = await authorizeAgentWorker(request);
+  if (!authorization.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -36,6 +37,9 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (taskError) throw taskError;
     if (!task) return NextResponse.json({ error: "Task not found." }, { status: 404 });
+    if (!agentWorkerCanAccessOwner(authorization, task.owner_ref)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     if (task.status === "cancelled") {
       return NextResponse.json({ ok: true, status: "cancelled" });
     }

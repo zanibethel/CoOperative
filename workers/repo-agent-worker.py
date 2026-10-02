@@ -4,14 +4,18 @@
 # ///
 
 from __future__ import annotations
-import ast, difflib, json, os, re, shlex, socket, subprocess, time
+import ast, difflib, json, os, re, shlex, shutil, socket, subprocess, time
 from pathlib import Path
 from typing import Any
 import httpx
 
 QUEUE_URL = os.getenv("COOPERATIVE_QUEUE_URL", "https://co-operative-mu.vercel.app").rstrip("/")
-WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN")
-WORKER_ID = os.getenv("COOPERATIVE_AGENT_WORKER_ID", f"{socket.gethostname()}-repo-agent")[:160]
+WORKER_TOKEN = os.getenv("INFERENCE_WORKER_TOKEN") or os.getenv("UNISON_NODE_TOKEN")
+NODE_ID = (os.getenv("UNISON_NODE_ID") or "").strip()
+WORKER_ID = os.getenv(
+    "COOPERATIVE_AGENT_WORKER_ID",
+    f"{NODE_ID or socket.gethostname()}-repo-agent",
+)[:160]
 POLL_SECONDS = max(2, int(os.getenv("COOPERATIVE_AGENT_QUEUE_POLL_SECONDS", "4")))
 WORKSPACE_ROOT = Path(os.getenv("COOPERATIVE_AGENT_WORKSPACE_ROOT", str(Path.cwd().parent))).expanduser().resolve()
 WORKTREE_ROOT = Path(os.getenv("COOPERATIVE_AGENT_WORKTREE_ROOT", str(WORKSPACE_ROOT / ".cooperative-agent-worktrees"))).expanduser().resolve()
@@ -28,8 +32,14 @@ class AgentError(RuntimeError):
 
 def headers():
     if not WORKER_TOKEN:
-        raise AgentError("INFERENCE_WORKER_TOKEN is required.")
-    return {"Authorization": f"Bearer {WORKER_TOKEN}", "Content-Type": "application/json"}
+        raise AgentError("A local worker or Unison node token is required.")
+    value = {
+        "Authorization": f"Bearer {WORKER_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    if NODE_ID:
+        value["X-Cooperative-Node-Id"] = NODE_ID
+    return value
 
 def run(args, cwd, timeout=90, check=True):
     result = subprocess.run(args, cwd=str(cwd), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
@@ -815,13 +825,29 @@ def handle_task(task):
         "executorApproval": executor_approval if use_paid_executor else None,
     })
 
+def local_node_available():
+    if not NODE_ID:
+        return True
+    try:
+        from unison_runtime import node_available
+        return bool(node_available())
+    except Exception:
+        # Fail closed for installed Unison nodes if idle state cannot be verified.
+        return False
+
 def queue_loop():
     print(f"CoOperative repo agent polling enabled for {QUEUE_URL} as {WORKER_ID}.")
     print(f"Approved workspace root: {WORKSPACE_ROOT}")
+    if NODE_ID:
+        print(f"Owner-scoped Unison Recovery Agent enabled for node {NODE_ID}.")
+        print("Recovery work claims only while the node is eligible under its local idle policy.")
     print("Agent writes use isolated local worktrees; push/deploy remain human-gated.")
     while True:
         task_id = None
         try:
+            if NODE_ID and not local_node_available():
+                time.sleep(POLL_SECONDS)
+                continue
             response = post("/api/agents/tasks/claim", {"workerId":WORKER_ID}, timeout=30.0)
             if response.status_code == 204:
                 time.sleep(POLL_SECONDS)
@@ -854,5 +880,7 @@ def queue_loop():
 
 if __name__ == "__main__":
     if not WORKER_TOKEN:
-        raise AgentError("INFERENCE_WORKER_TOKEN is required.")
+        raise AgentError("A local worker or Unison node token is required.")
+    if shutil.which("git") is None:
+        raise AgentError("Git is required for Recovery Agent repository repair.")
     queue_loop()

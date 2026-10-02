@@ -611,6 +611,21 @@ def unison_capabilities():
                 "local_ai_projects",
             ]
         )
+    recovery_active = os.getenv("COOPERATIVE_RECOVERY_AGENT_ACTIVE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    embedded_recovery = (
+        os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
+        in {"1", "true", "yes", "on"}
+        and Path(__file__).with_name("repo-agent-worker.py").exists()
+        and bool(WORKER_TOKEN)
+    )
+    if recovery_active or embedded_recovery:
+        capabilities.append("recovery_agent")
+
     return capabilities
 
 

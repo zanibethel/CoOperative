@@ -116,6 +116,8 @@ $localChatLogPath = Join-Path $PSScriptRoot "local-chat.log"
 $localChatErrorLogPath = Join-Path $PSScriptRoot "local-chat-error.log"
 $localChatReadyPath = Join-Path $PSScriptRoot "local-chat.ready"
 $localChatBusyPath = Join-Path $PSScriptRoot "local-chat.busy"
+$recoveryLogPath = Join-Path $PSScriptRoot "recovery-agent.log"
+$recoveryErrorLogPath = Join-Path $PSScriptRoot "recovery-agent-error.log"
 $imagePortPath = Join-Path $PSScriptRoot "image-worker.port"
 $modelPlanPath = Join-Path $PSScriptRoot "text-model-plan.json"
 $textBenchmarkPath = Join-Path $PSScriptRoot "text-benchmark.json"
@@ -298,6 +300,33 @@ function Start-LocalChatRuntime() {
   return $null
 }
 
+function Start-RecoveryRuntime() {
+  $recoveryWorkerPath = Join-Path $PSScriptRoot "repo-agent-worker.py"
+  if (-not (Test-Path $recoveryWorkerPath)) {
+    Add-Content -Path $recoveryErrorLogPath -Value "Recovery Agent worker file is missing."
+    return $null
+  }
+
+  $process = Start-Process `
+    -FilePath $uvExe `
+    -ArgumentList @("run", "`"$recoveryWorkerPath`"") `
+    -WorkingDirectory $PSScriptRoot `
+    -RedirectStandardOutput $recoveryLogPath `
+    -RedirectStandardError $recoveryErrorLogPath `
+    -PassThru `
+    -WindowStyle Hidden
+
+  Start-Sleep -Seconds 2
+  $process.Refresh()
+  if ($process.HasExited) {
+    $diagnostic = Last-Diagnostic $recoveryErrorLogPath $recoveryLogPath $process.ExitCode
+    Add-Content -Path $recoveryErrorLogPath -Value "Recovery Agent did not stay running: $diagnostic"
+    return $null
+  }
+
+  return $process
+}
+
 function Start-TextRuntime([int]$MaxAttempts = 3) {
   $textWorkerPath = Join-Path $PSScriptRoot "windows-text-worker.py"
 
@@ -435,8 +464,22 @@ $textReadyVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
 } else {
   "starting-windows-text-ready-0.5"
 }
+$recoveryProcess = Start-RecoveryRuntime
+if ($recoveryProcess) {
+  $env:COOPERATIVE_RECOVERY_AGENT_ACTIVE = "1"
+  $textCapabilities += "recovery_agent"
+  Write-Host "Local Recovery Agent started."
+} else {
+  $env:COOPERATIVE_RECOVERY_AGENT_ACTIVE = "0"
+  Write-Host "Local Recovery Agent did not start; core node compute remains available."
+}
 Send-StartupHeartbeat -WorkerVersion $textReadyVersion -Capabilities $textCapabilities
+
 Write-Host "Windows text runtime started."
+
+# Windows launches Recovery Agent as its own process. Disable the image worker's
+# embedded auto-start to avoid duplicate debugger pollers on installed nodes.
+$env:COOPERATIVE_START_REPO_AGENT = "0"
 
 $imageWorkerPath = Join-Path $PSScriptRoot "hf-image-worker.py"
 $imageProcess = Start-Process `
@@ -479,6 +522,9 @@ while (-not $imageProcess.HasExited -and -not $textProcess.HasExited) {
     )
     if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
       $imageStartingCapabilities += @("machine_wide", "whole_pc_idle")
+    }
+    if ($recoveryProcess -and -not $recoveryProcess.HasExited) {
+      $imageStartingCapabilities += "recovery_agent"
     }
     if (Test-Path $localChatReadyPath) {
       $imageStartingCapabilities += @(
@@ -526,6 +572,9 @@ if ($textExitedFirst) {
   if ($localChatProcess -and -not $localChatProcess.HasExited) {
     Stop-Process -Id $localChatProcess.Id -Force -ErrorAction SilentlyContinue
   }
+  if ($recoveryProcess -and -not $recoveryProcess.HasExited) {
+    Stop-Process -Id $recoveryProcess.Id -Force -ErrorAction SilentlyContinue
+  }
 
   Send-StartupHeartbeat `
     -WorkerVersion "startup-failed-windows-0.5" `
@@ -552,6 +601,9 @@ if ($imageExitedFirst) {
   )
   if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
     $degradedCapabilities += @("machine_wide", "whole_pc_idle")
+  }
+  if ($recoveryProcess -and -not $recoveryProcess.HasExited) {
+    $degradedCapabilities += "recovery_agent"
   }
   if (Test-Path $localChatReadyPath) {
     $degradedCapabilities += @(

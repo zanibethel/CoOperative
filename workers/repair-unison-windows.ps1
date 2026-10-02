@@ -84,9 +84,28 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
   throw "uv could not be made available. Restart Windows and run Repair connection again."
 }
 
+Write-Host "Ensuring Git is available for Recovery Agent..."
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if ($winget) {
+    try {
+      winget install -e --id Git.Git --accept-package-agreements --accept-source-agreements --silent | Out-Null
+      $env:Path =
+        [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+        [Environment]::GetEnvironmentVariable("Path", "User")
+    } catch {
+      Write-Host "Git install warning: $($_.Exception.Message)"
+    }
+  }
+}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+  Write-Host "Recovery Agent warning: Git is unavailable, so repository repair will stay disabled until Git is installed."
+}
+
 $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/workers"
 $workerFiles = @(
   "hf-image-worker.py",
+  "repo-agent-worker.py",
   "windows-text-worker.py",
   "windows-local-chat.py",
   "windows-local-file-extract.py",
@@ -230,6 +249,7 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     $_.CommandLine -like "*CoOperative*Unison*" -and
     (
       $_.CommandLine -like "*hf-image-worker.py*" -or
+      $_.CommandLine -like "*repo-agent-worker.py*" -or
       $_.CommandLine -like "*windows-text-worker.py*" -or
       $_.CommandLine -like "*windows-local-chat.py*" -or
       $_.CommandLine -like "*start-unison-windows.ps1*"
