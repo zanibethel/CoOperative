@@ -48,6 +48,7 @@ type ModelMixerProps = {
   open: boolean;
   settings: ModelMixerSettings;
   paidAiEligible: boolean;
+  refreshKey?: number;
   onChange: (settings: ModelMixerSettings) => void;
   onClose: () => void;
 };
@@ -252,11 +253,17 @@ export default function ModelMixer({
   open,
   settings,
   paidAiEligible,
+  refreshKey = 0,
   onChange,
   onClose,
 }: ModelMixerProps) {
   const [mediaCatalog, setMediaCatalog] = useState<LiveMediaCatalog | null>(null);
   const [mediaCatalogError, setMediaCatalogError] = useState(false);
+
+  useEffect(() => {
+    setMediaCatalog(null);
+    setMediaCatalogError(false);
+  }, [refreshKey]);
 
   useEffect(() => {
     if (!open || mediaCatalog) return;
