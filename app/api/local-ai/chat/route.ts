@@ -497,7 +497,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: input.message.trim(),
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -505,7 +505,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: assistantText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
           ]);
@@ -571,7 +571,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: input.message.trim(),
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -579,7 +579,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: assistantText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
           ]);
@@ -611,7 +611,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: input.message.trim(),
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -619,7 +619,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: assistantText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
           ]);
@@ -713,7 +713,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: input.message.trim(),
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -721,7 +721,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: assistantText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
           ]);
@@ -1079,6 +1079,8 @@ export async function POST(request: Request) {
         liveCatalog = null;
       }
 
+      const requiresReferenceImage =
+        mediaPlan.kind === "image" && effectiveMediaAttachmentIds.length > 0;
       let localImageAvailable = false;
       if (mediaPlan.kind === "image") {
         const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
@@ -1099,8 +1101,12 @@ export async function POST(request: Request) {
                 ? (node.policy as { allowImage?: unknown })
                 : {};
             const seenAt = Date.parse(node.last_seen_at || "");
+            const supportsRequestedImageMode = requiresReferenceImage
+              ? capabilities.includes("image_to_image") ||
+                capabilities.includes("single_reference_identity")
+              : capabilities.includes("image_generation");
             return (
-              capabilities.includes("image_generation") &&
+              supportsRequestedImageMode &&
               policy.allowImage !== false &&
               Number.isFinite(seenAt) &&
               seenAt >= freshAfter &&
@@ -1115,6 +1121,7 @@ export async function POST(request: Request) {
         openRouterCatalog: liveCatalog,
         currentCapUsd: requestCapUsd,
         localImageAvailable,
+        requiresReferenceImage,
       });
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const selectedRecommendation = recommendationTier
@@ -1156,7 +1163,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -1225,7 +1232,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -1269,6 +1276,19 @@ export async function POST(request: Request) {
           effectiveMediaRequestText,
           mediaPlan,
         );
+        const referencePaths = await stageLocalImageReferences(
+          admin,
+          ownerRef,
+          localJobId,
+          effectiveMediaAttachmentIds,
+        );
+        const localProfile =
+          selectedRecommendation.model.includes("fast") ? "fast" : "quality";
+        const variationMode =
+          selectedRecommendation.model.includes("quality-reference")
+            ? "preserve"
+            : "balanced";
+
         const { error: localJobError } = await admin.from("inference_jobs").insert({
           id: localJobId,
           kind: "image",
@@ -1276,13 +1296,21 @@ export async function POST(request: Request) {
           client_owner_ref: ownerRef,
           prompt: generationPrompt,
           aspect_ratio: mediaPlan.aspectRatio || "4:5",
-          profile: mediaLevel >= 2 ? "quality" : "fast",
-          variation_mode: "balanced",
+          profile: localProfile,
+          variation_mode: variationMode,
+          reference_paths: referencePaths,
           seed:
             Number.parseInt(localJobId.replaceAll("-", "").slice(0, 8), 16) %
             2147483648,
         });
-        if (localJobError) throw localJobError;
+        if (localJobError) {
+          if (referencePaths.length) {
+            await admin.storage
+              .from("inference-job-assets")
+              .remove(referencePaths.map((reference) => reference.path));
+          }
+          throw localJobError;
+        }
 
         const { error: localMessageError } = await admin
           .from("local_ai_messages")
@@ -1291,7 +1319,7 @@ export async function POST(request: Request) {
             owner_ref: ownerRef,
             role: "user",
             content: visibleUserText,
-            attachment_ids: [],
+            attachment_ids: effectiveMediaAttachmentIds,
             job_id: localJobId,
           });
         if (localMessageError) throw localMessageError;
@@ -1307,7 +1335,9 @@ export async function POST(request: Request) {
             provider: "cooperative-local",
             model: selectedRecommendation.model,
             routeReason:
-              "The user selected the quoted lowest-cost owned/local recommendation.",
+              effectiveMediaAttachmentIds.length > 0
+                ? `The user selected the quoted ${selectedRecommendation.label.toLowerCase()} reference-image route. The current attachment is scoped to this new image task only.`
+                : `The user selected the quoted ${selectedRecommendation.label.toLowerCase()} owned/local image route.`,
             estimatedProviderCostUsd: 0,
             requestMaxSpendUsd: requestCapUsd,
           },
@@ -1426,7 +1456,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -1467,7 +1497,7 @@ export async function POST(request: Request) {
               owner_ref: ownerRef,
               role: "user",
               content: visibleUserText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             },
             {
@@ -2070,7 +2100,7 @@ export async function GET(request: Request) {
               owner_ref: ownerRef,
               role: "assistant",
               content: resultText,
-              attachment_ids: [],
+              attachment_ids: effectiveMediaAttachmentIds,
               job_id: null,
             });
           }
