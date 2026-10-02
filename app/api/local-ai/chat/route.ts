@@ -93,6 +93,16 @@ function asksAboutRecentFailure(message: string) {
   );
 }
 
+function asksToRetryRecentMedia(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\bretry (that|the|this|my|last)?\s*(image|video|media|generation)?\b/.test(value) ||
+    /\btry (that|the|this|my|last)?\s*(image|video|media)?\s*again\b/.test(value) ||
+    /\brun (that|the|this|my|last)?\s*(image|video|media)?\s*again\b/.test(value) ||
+    /\bretry it\b/.test(value)
+  );
+}
+
 function conciseFailureDetail(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return null;
   return value
@@ -380,6 +390,313 @@ export async function POST(request: Request) {
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
+      }
+    }
+
+    if (
+      input.attachmentIds.length === 0 &&
+      asksToRetryRecentMedia(input.message)
+    ) {
+      const { data: recentMedia, error: recentMediaError } = await admin
+        .from("media_generation_jobs")
+        .select(
+          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_source,result_url,error,started_at,deadline_at,completed_at,created_at",
+        )
+        .eq("owner_ref", ownerRef)
+        .eq("conversation_id", conversationId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (recentMediaError) throw recentMediaError;
+
+      if (recentMedia) {
+        const now = Date.now();
+        const deadline = recentMedia.deadline_at
+          ? Date.parse(recentMedia.deadline_at)
+          : Number.NaN;
+        const stillActive =
+          recentMedia.status === "running" &&
+          Number.isFinite(deadline) &&
+          now <= deadline;
+
+        if (stillActive) {
+          const assistantText =
+            "That media job is still within its execution window, so I’m not starting a duplicate. I’ll keep reconnecting to the existing job instead.";
+
+          await admin.from("local_ai_messages").insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: input.message.trim(),
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: assistantText,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+
+          return NextResponse.json(
+            {
+              jobId: recentMedia.id,
+              status: "running",
+              execution: "media",
+              capability: recentMedia.kind,
+              conversationId,
+              conversationTitle,
+              text: assistantText,
+              provider: recentMedia.provider,
+              model: recentMedia.model,
+              routeReason:
+                "CoOperative prevented a duplicate media generation while the previous job is still active.",
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        if (recentMedia.status === "completed" && recentMedia.result_url) {
+          const assistantText =
+            "The last media job already completed, so I didn’t start another copy. Its result should be available in this conversation.";
+          await admin.from("local_ai_messages").insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: input.message.trim(),
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: assistantText,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: recentMedia.kind,
+              conversationId,
+              conversationTitle,
+              text: assistantText,
+              mediaUrl: recentMedia.result_url,
+              provider: recentMedia.provider,
+              model: recentMedia.model,
+              routeReason:
+                "CoOperative prevented a duplicate retry because the previous media job already completed.",
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        const estimatedMicrousd = Number(
+          recentMedia.estimated_provider_cost_microusd || 0,
+        );
+        if (estimatedMicrousd > 0) {
+          const estimatedUsd = estimatedMicrousd / 1_000_000;
+          const assistantText =
+            `The last media attempt is no longer active, but retrying it could create another paid generation charge of about ${estimatedUsd.toFixed(2)}. I won’t duplicate that spend automatically. Approve another paid generation if you want me to retry it.`;
+
+          await admin.from("local_ai_messages").insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: input.message.trim(),
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: assistantText,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: recentMedia.kind,
+              conversationId,
+              conversationTitle,
+              text: assistantText,
+              provider: "code",
+              model: "media-retry-spend-gate",
+              routeReason:
+                "CoOperative blocked an automatic media retry because it could create a second paid generation charge.",
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        const stale =
+          recentMedia.status === "running" &&
+          (!Number.isFinite(deadline) || now > deadline);
+        if (stale) {
+          const staleAt = new Date().toISOString();
+          await admin
+            .from("media_generation_jobs")
+            .update({
+              status: "failed",
+              error:
+                "Previous media job passed its execution deadline without a reconciled result after status polling disconnected.",
+              completed_at: staleAt,
+              updated_at: staleAt,
+            })
+            .eq("id", recentMedia.id)
+            .eq("owner_ref", ownerRef)
+            .eq("status", "running");
+        }
+
+        const [openRouterService, nousRuntimeAuth] = await Promise.all([
+          recentMedia.provider === "openrouter"
+            ? businessOwnedServiceCredentialForOwner(
+                ownerRef,
+                "openrouter-api",
+              )
+            : Promise.resolve(null),
+          freshNousRuntimeAuthForOwner(ownerRef).catch(() => null),
+        ]);
+        const providerCredential =
+          openRouterService?.credential ||
+          process.env.OPENROUTER_API_KEY?.trim() ||
+          undefined;
+
+        if (recentMedia.provider === "openrouter" && !providerCredential) {
+          throw new Error(
+            "OpenRouter credential is unavailable for the media retry.",
+          );
+        }
+
+        const retryJobId = crypto.randomUUID();
+        const { error: retryInsertError } = await admin
+          .from("media_generation_jobs")
+          .insert({
+            id: retryJobId,
+            status: "queued",
+            owner_ref: ownerRef,
+            conversation_id: conversationId,
+            kind: recentMedia.kind,
+            prompt: recentMedia.prompt,
+            provider: recentMedia.provider,
+            model: recentMedia.model,
+            model_mixer: recentMedia.model_mixer || null,
+            request_max_spend_microusd:
+              recentMedia.request_max_spend_microusd ?? null,
+            media_level: recentMedia.media_level ?? 0,
+            estimated_provider_cost_microusd: 0,
+            pricing_source: recentMedia.pricing_source || "recovery-retry",
+          });
+        if (retryInsertError) throw retryInsertError;
+
+        const { error: retryUserMessageError } = await admin
+          .from("local_ai_messages")
+          .insert({
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: [],
+            job_id: null,
+          });
+        if (retryUserMessageError) throw retryUserMessageError;
+
+        try {
+          const started = await startHermesMediaTask({
+            jobId: retryJobId,
+            kind: recentMedia.kind,
+            userRequest: recentMedia.prompt,
+            provider: recentMedia.provider,
+            model: recentMedia.model,
+            providerCredential,
+            nousAuthJson: nousRuntimeAuth?.sandboxAuthJson,
+          });
+
+          const { error: retryStartError } = await admin
+            .from("media_generation_jobs")
+            .update({
+              status: "running",
+              sandbox_name: started.sandboxName,
+              started_at: started.startedAt,
+              deadline_at: started.deadlineAt,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", retryJobId)
+            .eq("owner_ref", ownerRef);
+          if (retryStartError) throw retryStartError;
+
+          await admin
+            .from("local_ai_conversations")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", conversationId)
+            .eq("owner_ref", ownerRef);
+
+          return NextResponse.json(
+            {
+              jobId: retryJobId,
+              status: "running",
+              execution: "media",
+              capability: recentMedia.kind,
+              conversationId,
+              conversationTitle,
+              provider: recentMedia.provider,
+              model: recentMedia.model,
+              routeReason:
+                "CoOperative closed the stale zero-cost media attempt and restarted the same generation once through the repaired Hermes route.",
+            },
+            { status: 202, headers: { "Cache-Control": "no-store" } },
+          );
+        } catch (retryFailure) {
+          const detail =
+            retryFailure instanceof Error
+              ? retryFailure.message
+              : "Hermes media retry could not start.";
+          const failedAt = new Date().toISOString();
+          await admin
+            .from("media_generation_jobs")
+            .update({
+              status: "failed",
+              error: detail.slice(0, 1200),
+              completed_at: failedAt,
+              updated_at: failedAt,
+            })
+            .eq("id", retryJobId)
+            .eq("owner_ref", ownerRef);
+
+          const recovery = await startRecoveryForJob(ownerRef, retryJobId);
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: recentMedia.kind,
+              conversationId,
+              conversationTitle,
+              text:
+                recovery.current_message ||
+                "The retry still could not start, so Recovery Agent is repairing the route in the background.",
+              provider: "recovery",
+              model: "local-first-recovery",
+              routeReason:
+                "The stale media attempt was closed, but the replacement cloud route also failed to start and was handed to Recovery Agent.",
+              recoveryIncidentId: recovery.id,
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
       }
     }
 
