@@ -8,6 +8,8 @@ export type HermesMediaStartSpec = {
   jobId: string;
   kind: HermesMediaKind;
   userRequest: string;
+  provider?: string;
+  model?: string;
 };
 
 export type HermesMediaStartResult = {
@@ -48,19 +50,25 @@ function safeIdentifier(value: string, label: string) {
   return value;
 }
 
-export function hermesMediaConfiguration(kind: HermesMediaKind) {
+export function hermesMediaConfiguration(
+  kind: HermesMediaKind,
+  override?: { provider?: string; model?: string },
+) {
   const provider = safeIdentifier(
-    (kind === "image"
-      ? process.env.HERMES_IMAGE_PROVIDER
-      : process.env.HERMES_VIDEO_PROVIDER
-    )?.trim() || "openrouter",
+    override?.provider?.trim() ||
+      (kind === "image"
+        ? process.env.HERMES_IMAGE_PROVIDER
+        : process.env.HERMES_VIDEO_PROVIDER
+      )?.trim() ||
+      "openrouter",
     "Media provider",
   );
   const model = safeIdentifier(
-    (kind === "image"
-      ? process.env.HERMES_IMAGE_MODEL
-      : process.env.HERMES_VIDEO_MODEL
-    )?.trim() ||
+    override?.model?.trim() ||
+      (kind === "image"
+        ? process.env.HERMES_IMAGE_MODEL
+        : process.env.HERMES_VIDEO_MODEL
+      )?.trim() ||
       (kind === "image"
         ? "inclusionai/ming-image-0.1-design"
         : "bytedance/seedance-2.0-fast:free"),
@@ -169,7 +177,10 @@ export async function startHermesMediaTask(
   if (!spec.userRequest.trim()) throw new Error("A media request is required.");
 
   const nousApiKey = requiredEnv("NOUS_API_KEY");
-  const config = hermesMediaConfiguration(spec.kind);
+  const config = hermesMediaConfiguration(spec.kind, {
+    provider: spec.provider,
+    model: spec.model,
+  });
 
   const env: Record<string, string> = {
     NOUS_API_KEY: nousApiKey,
