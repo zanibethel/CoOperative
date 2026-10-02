@@ -125,6 +125,40 @@ type JobResult = {
   detail?: string | null;
 };
 
+type RecoveryEvent = {
+  id: string | number;
+  kind: string;
+  message: string;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string;
+};
+
+type RecoveryIncident = {
+  id: string;
+  status:
+    | "diagnosing"
+    | "repairing"
+    | "waiting_user"
+    | "retrying"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  error_class: string;
+  current_message: string;
+  continuation_prompt?: string | null;
+  requires_user_action: boolean;
+  automatic_retry: boolean;
+  resolution_summary?: string | null;
+  updated_at?: string;
+};
+
+type RecoveryResult = {
+  incident?: RecoveryIncident;
+  events?: RecoveryEvent[];
+  error?: string;
+  detail?: string;
+};
+
 const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
 const ACTIVE_BUSINESS_KEY = "cooperative.local-ai.active-business";
 const MAX_ATTACHMENTS = 4;
@@ -185,6 +219,7 @@ function executionStep(
   if (status === "Using funded high-quality AI…") return status;
   if (status === "Generating image…") return status;
   if (status === "Generating video…") return status;
+  if (status === "Recovery running in background…") return status;
   if (status === "Stopping…") return status;
   if (status === "Copied") return status;
   if (status === "Ready") return "Ready";
@@ -221,6 +256,18 @@ function oauthServiceConnectDirective(content: string) {
 
   return {
     providerKey: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+function recoveryStatusDirective(content: string) {
+  const match = content.match(
+    /RECOVERY_STATUS:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
+  );
+  if (!match) return null;
+
+  return {
+    incidentId: match[1],
     text: content.replace(match[0], "").trim(),
   };
 }
@@ -585,6 +632,149 @@ function NousPortalConnectCard({
   );
 }
 
+
+type RecoveryStatusCardProps = {
+  incidentId: string;
+  onConversationChanged: () => Promise<void> | void;
+};
+
+function RecoveryStatusCard({
+  incidentId,
+  onConversationChanged,
+}: RecoveryStatusCardProps) {
+  const [result, setResult] = useState<RecoveryResult | null>(null);
+  const [cardError, setCardError] = useState("");
+  const lastStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+
+    async function refresh() {
+      try {
+        const response = await fetch(
+          `/api/local-ai/recovery?incidentId=${encodeURIComponent(incidentId)}`,
+          { cache: "no-store" },
+        );
+        const payload = (await response.json()) as RecoveryResult;
+        if (!response.ok || !payload.incident) {
+          throw new Error(
+            payload.detail || payload.error || "Could not read recovery status.",
+          );
+        }
+        if (cancelled) return;
+
+        const previousStatus = lastStatusRef.current;
+        lastStatusRef.current = payload.incident.status;
+        setResult(payload);
+        setCardError("");
+
+        if (
+          previousStatus &&
+          previousStatus !== payload.incident.status &&
+          (payload.incident.status === "completed" ||
+            payload.incident.status === "failed" ||
+            payload.incident.status === "waiting_user")
+        ) {
+          await onConversationChanged();
+        }
+
+        if (
+          payload.incident.status === "diagnosing" ||
+          payload.incident.status === "repairing" ||
+          payload.incident.status === "retrying"
+        ) {
+          timer = window.setTimeout(refresh, 2400);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCardError(
+            err instanceof Error ? err.message : "Could not read recovery status.",
+          );
+          timer = window.setTimeout(refresh, 5000);
+        }
+      }
+    }
+
+    void refresh();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [incidentId, onConversationChanged]);
+
+  const incident = result?.incident;
+  const events = result?.events || [];
+  const active =
+    incident?.status === "diagnosing" ||
+    incident?.status === "repairing" ||
+    incident?.status === "retrying";
+
+  return (
+    <div className="recovery-status-card">
+      <div className="recovery-status-current">
+        <span
+          className={
+            active
+              ? "recovery-status-dot active"
+              : incident?.status === "completed"
+                ? "recovery-status-dot complete"
+                : "recovery-status-dot"
+          }
+          aria-hidden="true"
+        />
+        <div>
+          <strong>Recovery Agent</strong>
+          <span>
+            {incident?.current_message ||
+              (cardError ? "Recovery status is temporarily unavailable." : "Checking recovery…")}
+          </span>
+        </div>
+      </div>
+
+      {incident?.continuation_prompt && active ? (
+        <p className="recovery-continuation">{incident.continuation_prompt}</p>
+      ) : null}
+
+      <details className="recovery-details">
+        <summary>Recovery details</summary>
+        <div className="recovery-event-list">
+          <small>
+            These are user-safe activity summaries, not private model reasoning.
+          </small>
+          {events.length === 0 ? (
+            <span>Collecting recovery activity…</span>
+          ) : (
+            events.map((event) => (
+              <div className="recovery-event" key={String(event.id)}>
+                <span>{event.message}</span>
+                {event.created_at ? (
+                  <time>
+                    {new Date(event.created_at).toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </time>
+                ) : null}
+              </div>
+            ))
+          )}
+          {incident?.resolution_summary ? (
+            <div className="recovery-resolution">
+              <strong>Resolution</strong>
+              <span>{incident.resolution_summary}</span>
+            </div>
+          ) : null}
+        </div>
+      </details>
+
+      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+    </div>
+  );
+}
+
 function loadBrowserImage(file: File) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -754,6 +944,35 @@ export default function LocalAiChat() {
     setError("");
   }, []);
 
+  const startBackgroundRecovery = useCallback(
+    async (jobId: string, targetConversationId?: string | null) => {
+      const response = await fetch("/api/local-ai/recovery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceJobId: jobId }),
+      });
+      const result = (await response.json()) as {
+        incident?: RecoveryIncident;
+        error?: string;
+        detail?: string;
+      };
+
+      if (!response.ok || !result.incident) {
+        throw new Error(
+          result.detail || result.error || "Could not start Recovery Agent.",
+        );
+      }
+
+      if (targetConversationId) {
+        await loadConversation(targetConversationId);
+        await refreshConversations();
+      }
+
+      return result.incident;
+    },
+    [loadConversation, refreshConversations],
+  );
+
   const pollJob = useCallback(
     async (jobId: string, fallbackMessages: ChatMessage[] = []) => {
       if (activePollRef.current === jobId) return;
@@ -905,6 +1124,28 @@ export default function LocalAiChat() {
             );
           }
 
+          if (result.status === "failed") {
+            setStreamingText("");
+            setStatus("Recovery running in background…");
+
+            try {
+              await startBackgroundRecovery(
+                pollingJobId,
+                result.conversationId || null,
+              );
+              window.localStorage.removeItem(ACTIVE_JOB_KEY);
+              setStatus("Ready");
+              break;
+            } catch (recoveryError) {
+              throw new Error(
+                recoveryError instanceof Error
+                  ? recoveryError.message
+                  : result.error ||
+                      "CoOperative AI failed and Recovery Agent could not start.",
+              );
+            }
+          }
+
           throw new Error(
             result.error ||
               `CoOperative AI job ended with status ${result.status || "unknown"}.`,
@@ -921,7 +1162,12 @@ export default function LocalAiChat() {
         }
       }
     },
-    [loadConversation, refreshBusinesses, refreshConversations],
+    [
+      loadConversation,
+      refreshBusinesses,
+      refreshConversations,
+      startBackgroundRecovery,
+    ],
   );
 
   useEffect(() => {
@@ -1478,6 +1724,24 @@ export default function LocalAiChat() {
                           onConnected={async () => {
                             setServiceConnectionRevision((current) => current + 1);
                             await refreshBusinesses();
+                            if (conversationId) {
+                              await loadConversation(conversationId);
+                              await refreshConversations();
+                            }
+                          }}
+                        />
+                      </>
+                    );
+                  }
+
+                  const recovery = recoveryStatusDirective(message.content);
+                  if (recovery) {
+                    return (
+                      <>
+                        {recovery.text ? <div>{recovery.text}</div> : null}
+                        <RecoveryStatusCard
+                          incidentId={recovery.incidentId}
+                          onConversationChanged={async () => {
                             if (conversationId) {
                               await loadConversation(conversationId);
                               await refreshConversations();
