@@ -122,7 +122,7 @@ export default function JoinClient({
             <div className="service-tags">
               <span>Private Personal Local AI</span>
               <span>Automatic model choice</span>
-              <span>Image understanding</span>
+              <span>Image understanding + local image creation</span>
               <span>PDF / Office / code files</span>
               <span>Local voice input + spoken replies</span>
               <span>Optional web search</span>
@@ -171,9 +171,9 @@ export default function JoinClient({
               </li>
               <li>
                 Leave Setup open until it says <strong>Connected</strong>. Setup also installs
-                <strong> CoOperative Local AI</strong> on the desktop with images, documents,
-                voice, optional web search, local history, project workspaces, and automatic model
-                choice. It is available while the PC is in use. After that, you can switch Windows
+                <strong> CoOperative Local AI</strong> on the desktop with image understanding and
+                local image creation, documents, voice, optional web search, local history, project
+                workspaces, and automatic model choice. It is available while the PC is in use. After that, you can switch Windows
                 users normally.
               </li>
             </ol>
