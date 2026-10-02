@@ -12,7 +12,6 @@ import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import { activeNodeIds } from "@/lib/unison/node-access";
 import {
-  hermesMediaConfiguration,
   pollHermesMediaTask,
   startHermesMediaTask,
 } from "@/lib/inference/hermes-media-cloud";
@@ -21,6 +20,8 @@ import {
   planMediaRequest,
 } from "@/lib/inference/media-request";
 import {
+  estimateOpenRouterMediaCostUsd,
+  openRouterKeySpendStatus,
   openRouterMediaCatalog,
   recommendedForRequest,
   type MediaCatalogModel,
@@ -136,14 +137,30 @@ function aspectRatioFromPrompt(value: string) {
 function estimatedMediaProviderCostUsd(
   model: MediaCatalogModel,
   durationSeconds: number | null,
+  resolution: string | null = null,
+  audio: boolean | null = null,
 ) {
-  const unitCost = model.minUnitCostUsd;
-  if (unitCost === null) return null;
-  if (model.unit === "second") {
-    return durationSeconds ? unitCost * durationSeconds : null;
-  }
-  if (model.unit === "image") return unitCost;
-  return model.free ? 0 : null;
+  return estimateOpenRouterMediaCostUsd(model, {
+    durationSeconds,
+    resolution,
+    audio,
+  });
+}
+
+function nextBudgetUsd(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return Math.ceil(value * 100) / 100;
+}
+
+function videoControlsFromPrompt(prompt: string) {
+  const resolution =
+    prompt.match(/Resolution:\s*(360p|480p|540p|720p|1080p|4k)/i)?.[1]?.toLowerCase() ||
+    null;
+  const audioMatch = prompt.match(/Generated audio:\s*(on|off)/i)?.[1]?.toLowerCase();
+  return {
+    resolution,
+    audio: audioMatch === "on" ? true : audioMatch === "off" ? false : null,
+  };
 }
 
 export async function POST(request: Request) {
@@ -873,129 +890,248 @@ export async function POST(request: Request) {
         4,
         Math.max(0, input.modelMixer?.agents.media ?? 0),
       ) as 0 | 1 | 2 | 3 | 4;
-      const requestCapUsd = input.modelMixer?.maxSpendUsd ?? null;
+      const requestCapUsd = input.modelMixer?.maxSpendUsd ?? 0.05;
 
+      // Media priority is deliberate: connected Nous/Hermes entitlement first,
+      // then owned/local or genuinely free hosted capacity, then paid OpenRouter.
+      // A paid route with unknown live pricing is never treated as affordable.
       const nousRuntimeAuth = await freshNousRuntimeAuthForOwner(ownerRef).catch(
         () => null,
       );
-      const nousChoice =
-        mediaPlan.kind === "image"
-          ? chooseNousManagedImage(mediaLevel, requestCapUsd)
-          : chooseNousManagedVideo(
+      const nousChoice = nousRuntimeAuth
+        ? mediaPlan.kind === "image"
+          ? await chooseNousManagedImage(mediaLevel, requestCapUsd)
+          : await chooseNousManagedVideo(
               mediaLevel,
               requestCapUsd,
               mediaPlan.durationSeconds,
+              mediaPlan.resolution,
+              mediaPlan.audio,
+            )
+        : null;
+
+      let liveCatalog:
+        | Awaited<ReturnType<typeof openRouterMediaCatalog>>
+        | null = null;
+      if (!nousChoice) {
+        try {
+          liveCatalog = await openRouterMediaCatalog(true);
+        } catch {
+          liveCatalog = null;
+        }
+      }
+
+      const requestShape = {
+        durationSeconds: mediaPlan.durationSeconds,
+        aspectRatio: mediaPlan.aspectRatio,
+        resolution: mediaPlan.resolution,
+        audio: mediaPlan.audio,
+      };
+      const openRouterPool = liveCatalog
+        ? mediaPlan.kind === "video"
+          ? liveCatalog.video
+          : liveCatalog.image
+        : [];
+      const freeHostedModel = recommendedForRequest(
+        openRouterPool.filter((model) => model.free),
+        0,
+        requestShape,
+      );
+
+      let localImageAvailable = false;
+      if (!nousChoice && mediaPlan.kind === "image") {
+        const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
+        if (authorizedNodeIds.length > 0) {
+          const { data: imageNodes, error: imageNodesError } = await admin
+            .from("unison_nodes")
+            .select("id,state,capabilities,policy,last_seen_at")
+            .in("id", authorizedNodeIds);
+          if (imageNodesError) throw imageNodesError;
+
+          const freshAfter = Date.now() - 90_000;
+          localImageAvailable = (imageNodes || []).some((node) => {
+            const capabilities = Array.isArray(node.capabilities)
+              ? node.capabilities
+              : [];
+            const policy =
+              node.policy && typeof node.policy === "object"
+                ? (node.policy as { allowImage?: unknown })
+                : {};
+            const seenAt = Date.parse(node.last_seen_at || "");
+            return (
+              capabilities.includes("image_generation") &&
+              policy.allowImage !== false &&
+              Number.isFinite(seenAt) &&
+              seenAt >= freshAfter &&
+              node.state !== "paused"
             );
+          });
+        }
+      }
 
-      if (
-        nousRuntimeAuth &&
-        mediaPlan.kind === "video" &&
-        mediaLevel > 0 &&
-        !nousChoice
-      ) {
-        const suggestion = affordableVideoSuggestion(
-          mediaPlan.durationSeconds,
-          requestCapUsd,
+      if (!nousChoice && localImageAvailable) {
+        const localJobId = crypto.randomUUID();
+        const generationPrompt = mediaPromptWithResolvedControls(
+          visibleUserText,
+          mediaPlan,
         );
-        const requestedSeconds = mediaPlan.durationSeconds || 0;
-        const suggestedSeconds = suggestion?.affordableSeconds || 0;
-        const minimumBudget = suggestion?.minimumRequestedBudget || 0;
-        const message =
-          suggestedSeconds >= 1
-            ? `Your current $${(requestCapUsd || 0).toFixed(2)} cap is below the estimated cost for a ${requestedSeconds}s video. To stay inside the cap, I can reduce the test to about ${suggestedSeconds}s at 360p with audio off. Or raise this request to about $${minimumBudget.toFixed(2)} for the full ${requestedSeconds}s low-cost test. Nous credits stay first; OpenRouter is only backup.`
-            : `Your current $${(requestCapUsd || 0).toFixed(2)} cap is below the cheapest managed video test I can price safely. Raise the request cap or reduce duration/quality before I spend anything. Nous credits stay first; OpenRouter is only backup.`;
+        const { error: localJobError } = await admin.from("inference_jobs").insert({
+          id: localJobId,
+          kind: "image",
+          status: "queued",
+          client_owner_ref: ownerRef,
+          prompt: generationPrompt,
+          aspect_ratio: mediaPlan.aspectRatio || "4:5",
+          profile: mediaLevel >= 2 ? "quality" : "fast",
+          variation_mode: "balanced",
+          seed:
+            Number.parseInt(localJobId.replaceAll("-", "").slice(0, 8), 16) %
+            2147483648,
+        });
+        if (localJobError) throw localJobError;
 
-        await admin.from("local_ai_messages").insert([
-          {
+        const { error: localMessageError } = await admin
+          .from("local_ai_messages")
+          .insert({
             conversation_id: conversationId,
             owner_ref: ownerRef,
             role: "user",
             content: visibleUserText,
             attachment_ids: [],
-            job_id: null,
-          },
-          {
-            conversation_id: conversationId,
-            owner_ref: ownerRef,
-            role: "assistant",
-            content: message,
-            attachment_ids: [],
-            job_id: null,
-          },
-        ]);
+            job_id: localJobId,
+          });
+        if (localMessageError) throw localMessageError;
+
+        await admin
+          .from("local_ai_conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversationId)
+          .eq("owner_ref", ownerRef);
 
         return NextResponse.json(
           {
-            status: "completed",
-            execution: "code",
-            capability: "video",
+            jobId: localJobId,
+            status: "queued",
+            execution: "media",
+            capability: "image",
             conversationId,
             conversationTitle,
-            text: message,
-            provider: "code",
-            model: "media-budget-options",
+            provider: "cooperative-local",
+            model: mediaLevel >= 2 ? "local-image-quality" : "local-image-fast",
             routeReason:
-              "CoOperative stopped before generation and suggested lower-cost controls or a higher request cap.",
+              "Nous did not have a live-priced route inside the approved ceiling, so CoOperative selected a fresh owned image node before considering paid OpenRouter capacity.",
+            estimatedProviderCostUsd: 0,
+            requestMaxSpendUsd: requestCapUsd,
           },
-          { status: 200, headers: { "Cache-Control": "no-store" } },
+          { status: 202, headers: { "Cache-Control": "no-store" } },
         );
       }
 
       let selectedMediaModel: MediaCatalogModel | null = null;
-      let pricingSource = nousRuntimeAuth && nousChoice
-        ? "nous-managed"
-        : "configured-fallback";
+      let selectedProvider: "nous" | "openrouter" | null = null;
+      let selectedModel = "";
+      let selectedFree = false;
+      let pricingSource = "";
+      let estimatedProviderCostUsd: number | null = null;
+      let selectedResolution: string | null = mediaPlan.resolution;
+      let selectedAudio: boolean | null = mediaPlan.audio;
 
-      if (!nousRuntimeAuth || !nousChoice) {
-        try {
-          const catalog = await openRouterMediaCatalog();
-          const pool =
-            mediaPlan.kind === "video" ? catalog.video : catalog.image;
-          selectedMediaModel = recommendedForRequest(pool, mediaLevel, {
-            durationSeconds: mediaPlan.durationSeconds,
-            aspectRatio: mediaPlan.aspectRatio,
-          });
-          pricingSource = catalog.source;
-        } catch {
-          selectedMediaModel = null;
+      if (nousRuntimeAuth && nousChoice) {
+        selectedProvider = "nous";
+        selectedModel = nousChoice.model;
+        selectedFree = false;
+        pricingSource = nousChoice.pricingSource;
+        estimatedProviderCostUsd = nousChoice.estimatedCostUsd;
+        selectedResolution = nousChoice.resolution || selectedResolution;
+        selectedAudio = nousChoice.audio ?? selectedAudio;
+      } else if (freeHostedModel) {
+        selectedProvider = "openrouter";
+        selectedMediaModel = freeHostedModel;
+        selectedModel = freeHostedModel.id;
+        selectedFree = true;
+        pricingSource = liveCatalog?.source || "openrouter-live";
+        estimatedProviderCostUsd = 0;
+      } else if (mediaLevel > 0 && openRouterPool.length > 0) {
+        selectedMediaModel = recommendedForRequest(
+          openRouterPool.filter((model) => !model.free),
+          mediaLevel,
+          requestShape,
+        );
+        if (selectedMediaModel) {
+          const estimate = estimatedMediaProviderCostUsd(
+            selectedMediaModel,
+            mediaPlan.durationSeconds,
+            mediaPlan.resolution,
+            mediaPlan.audio,
+          );
+          if (
+            estimate !== null &&
+            estimate <= requestCapUsd
+          ) {
+            selectedProvider = "openrouter";
+            selectedModel = selectedMediaModel.id;
+            selectedFree = false;
+            pricingSource = liveCatalog?.source || "openrouter-live";
+            estimatedProviderCostUsd = estimate;
+          }
         }
       }
 
-      const fallbackConfig = hermesMediaConfiguration(mediaPlan.kind);
-      const selectedProvider =
-        nousRuntimeAuth && nousChoice
-          ? "nous"
-          : selectedMediaModel
-            ? "openrouter"
-            : fallbackConfig.provider;
-      const selectedModel =
-        nousRuntimeAuth && nousChoice
-          ? nousChoice.model
-          : selectedMediaModel?.id || fallbackConfig.model;
-      const selectedFree =
-        selectedProvider === "nous"
-          ? false
-          : selectedMediaModel?.free ?? fallbackConfig.freeRoute;
-      const estimatedProviderCostUsd =
-        nousRuntimeAuth && nousChoice
-          ? nousChoice.estimatedCostUsd
-          : selectedMediaModel
-            ? estimatedMediaProviderCostUsd(
-                selectedMediaModel,
+      if (!selectedProvider) {
+        const nousSuggestion =
+          mediaPlan.kind === "video" && nousRuntimeAuth
+            ? await affordableVideoSuggestion(
                 mediaPlan.durationSeconds,
+                requestCapUsd,
+                mediaPlan.resolution,
+                mediaPlan.audio,
               )
-            : selectedFree
-              ? 0
-              : null;
+            : null;
+        const openRouterEstimate = selectedMediaModel
+          ? estimatedMediaProviderCostUsd(
+              selectedMediaModel,
+              mediaPlan.durationSeconds,
+              mediaPlan.resolution,
+              mediaPlan.audio,
+            )
+          : null;
+        const candidates = [
+          nousSuggestion?.minimumRequestedBudget,
+          openRouterEstimate,
+        ].filter((value): value is number =>
+          typeof value === "number" && Number.isFinite(value) && value > requestCapUsd
+        );
+        const suggestedBudget = nextBudgetUsd(
+          candidates.length ? Math.min(...candidates) : null,
+        );
 
-      if (
-        estimatedProviderCostUsd !== null &&
-        requestCapUsd !== null &&
-        estimatedProviderCostUsd > requestCapUsd
-      ) {
+        const requestedSeconds = mediaPlan.durationSeconds || 0;
+        const affordableSeconds = nousSuggestion?.affordableSeconds || 0;
+        const actions =
+          mediaPlan.kind === "video"
+            ? [
+                suggestedBudget
+                  ? `Increase budget to ~\$${suggestedBudget.toFixed(2)} for this request.`
+                  : null,
+                affordableSeconds >= 1
+                  ? `Reduce the clip to ${affordableSeconds}s at 360p${mediaPlan.audio === true ? " and turn generated audio off" : " without generated audio"} to stay near \$${requestCapUsd.toFixed(2)}.`
+                  : "Reduce duration and/or resolution.",
+                mediaPlan.audio === true ? "Generate without audio." : null,
+                "Lower the Media quality ceiling.",
+              ].filter(Boolean)
+            : [
+                suggestedBudget
+                  ? `Increase budget to ~\$${suggestedBudget.toFixed(2)}.`
+                  : null,
+                "Use the owned local image generator when a node is available.",
+                "Lower the Media quality ceiling.",
+              ].filter(Boolean);
+
         const message =
-          `The live estimate for ${selectedModel} is about $${estimatedProviderCostUsd.toFixed(2)}, above this request's $${requestCapUsd.toFixed(2)} max-spend cap. Raise the cap or lower the Media slider.`;
-        const { error: capError } = await admin
+          `I can’t safely fit the requested ${mediaPlan.kind} into the current \$${requestCapUsd.toFixed(2)} ceiling using a live-priced eligible route, so I did not start a paid generation. ` +
+          (actions.length ? `Useful options: ${actions.join(" ")}` : "No paid call was made.");
+
+        const { error: budgetError } = await admin
           .from("local_ai_messages")
           .insert([
             {
@@ -1015,7 +1151,7 @@ export async function POST(request: Request) {
               job_id: null,
             },
           ]);
-        if (capError) throw capError;
+        if (budgetError) throw budgetError;
 
         return NextResponse.json(
           {
@@ -1026,7 +1162,9 @@ export async function POST(request: Request) {
             conversationTitle,
             text: message,
             provider: "code",
-            model: "media-spend-cap",
+            model: "media-budget-options",
+            routeReason:
+              "CoOperative exhausted Nous plus local/free eligibility and stopped before any paid route whose live estimate was unknown or above the approved ceiling.",
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
@@ -1043,6 +1181,60 @@ export async function POST(request: Request) {
         openRouterService?.credential ||
         process.env.OPENROUTER_API_KEY?.trim() ||
         undefined;
+
+      if (
+        selectedProvider === "openrouter" &&
+        !selectedFree &&
+        providerCredential
+      ) {
+        const spendStatus = await openRouterKeySpendStatus(providerCredential);
+        const enoughKnownBalance =
+          spendStatus.accountCreditsRemainingUsd === null ||
+          estimatedProviderCostUsd === null ||
+          spendStatus.accountCreditsRemainingUsd >= estimatedProviderCostUsd;
+        const enoughKeyLimit =
+          spendStatus.keyLimitRemainingUsd === null ||
+          estimatedProviderCostUsd === null ||
+          spendStatus.keyLimitRemainingUsd >= estimatedProviderCostUsd;
+
+        if (!spendStatus.paidEligible || !enoughKnownBalance || !enoughKeyLimit) {
+          const message =
+            "OpenRouter is connected, but its live key/credit status does not currently approve this paid media call. I did not spend anything. Add OpenRouter credits or use the Nous/local route, then retry.";
+          await admin.from("local_ai_messages").insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: visibleUserText,
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: message,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: mediaPlan.kind,
+              conversationId,
+              conversationTitle,
+              text: message,
+              provider: "code",
+              model: "openrouter-spend-preflight",
+              routeReason:
+                "CoOperative verified the connected OpenRouter key before a paid call and stopped because paid capacity was not live-spend eligible.",
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+      }
 
       if (selectedProvider === "openrouter" && !providerCredential) {
         const message =
@@ -1094,8 +1286,12 @@ export async function POST(request: Request) {
         mediaPlan.kind === "video" &&
         selectedModel === "pixverse-v6"
       ) {
-        generationPrompt +=
-          "\nBudget test controls: use 360p output and disable generated audio.";
+        if (selectedResolution) {
+          generationPrompt += `\nBudget-approved resolution: ${selectedResolution}.`;
+        }
+        if (selectedAudio !== null) {
+          generationPrompt += `\nBudget-approved generated audio: ${selectedAudio ? "on" : "off"}.`;
+        }
       }
       const requestMaxSpendMicrousd = input.modelMixer
         ? Math.round(input.modelMixer.maxSpendUsd * 1_000_000)
@@ -1119,6 +1315,21 @@ export async function POST(request: Request) {
             estimatedProviderCostUsd === null
               ? null
               : Math.round(estimatedProviderCostUsd * 1_000_000),
+          estimated_user_charge_microusd: 0,
+          estimated_infrastructure_cost_microusd: null,
+          estimated_margin_microusd: null,
+          provider_cost_bearer:
+            selectedProvider === "nous" || selectedProvider === "openrouter"
+              ? "user-connected"
+              : "cooperative",
+          pricing_dimensions: {
+            durationSeconds: mediaPlan.durationSeconds,
+            aspectRatio: mediaPlan.aspectRatio,
+            resolution: selectedResolution,
+            audio: selectedAudio,
+            mediaLevel,
+            freeRoute: selectedFree,
+          },
           pricing_source: pricingSource,
         });
       if (mediaJobError) throw mediaJobError;
@@ -1176,7 +1387,7 @@ export async function POST(request: Request) {
             provider: started.provider,
             model: started.model,
             routeReason:
-              `CoOperative selected ${selectedModel} from ${pricingSource} at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal subscription credits are the first paid source." : "OpenRouter is being used as the connected backup provider."} The request remains bounded by the Model Mixer spend cap.`,
+              `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} Free/cheap Hermes reasoning refines the prompt before the single media-generation call, and the request remains bounded by the Model Mixer spend cap.`,
             estimatedProviderCostUsd,
             modelMixer: input.modelMixer || null,
             requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
