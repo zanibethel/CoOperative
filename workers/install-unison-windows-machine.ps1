@@ -269,7 +269,8 @@ while ((Get-Date) -lt $deadline) {
       $caps -contains "text_generation" -and
       $caps -contains "machine_wide" -and
       $caps -contains "whole_pc_idle" -and
-      $caps -contains "local_personal_chat"
+      $caps -contains "local_personal_chat" -and
+      $caps -contains "recovery_agent"
     ) {
       $verified = $true
       break
@@ -281,7 +282,7 @@ while ((Get-Date) -lt $deadline) {
 }
 
 if (-not $verified) {
-  throw "Machine-wide Unison started, but the whole-PC-idle worker and Personal Local AI were not both verified in time."
+  throw "Machine-wide Unison started, but whole-PC idle compute, Personal Local AI, and Recovery Agent were not all verified in time."
 }
 
 Write-Host ""
