@@ -536,6 +536,173 @@ async function appendRecoveryMessage(
     .eq("owner_ref", ownerRef);
 }
 
+async function queueRuntimeDebuggerTask(
+  admin: AdminClient,
+  ownerRef: string,
+  incidentId: string,
+  error: string,
+  context: string,
+) {
+  const taskId = crypto.randomUUID();
+  const objective = [
+    "BACKGROUND PERSONAL LOCAL-AI RECOVERY INCIDENT",
+    "Incident: " + incidentId,
+    "Failure evidence: " + error,
+    "User-safe context: " + context.slice(0, 1800),
+    "",
+    "Diagnose a failure in CoOperativeLocalAI / Windows local chat from repository evidence.",
+    "Prepare the smallest bounded repair only if code/configuration is responsible.",
+    "Do not read or modify secrets. Do not broaden permissions, spending, or auth scopes.",
+    "Keep Personal AI local-only: never replace local inference with cloud or paid inference.",
+    "Relevant areas commonly include workers/windows-local-chat.py, workers/windows-text-worker.py, Windows installer/repair scripts, Personal AI APIs, and local runtime setup.",
+    "If no repository change is justified, return a no-change diagnosis with the safest local recovery action.",
+  ].join("\n");
+
+  const { error: taskError } = await admin.from("agent_tasks").insert({
+    id: taskId,
+    owner_ref: ownerRef,
+    agent_key: "debugger",
+    repo_key: "cooperative",
+    mode: "prepare_change",
+    objective: objective.slice(0, 12000),
+    requested_profile: "quality",
+    status: "queued",
+  });
+  if (taskError) throw taskError;
+
+  await admin.from("agent_task_events").insert({
+    task_id: taskId,
+    owner_ref: ownerRef,
+    kind: "queued",
+    message: "Recovery debugger queued for CoOperativeLocalAI.",
+    metadata: {
+      incidentId,
+      sourceKind: "runtime",
+      executorPolicy: "local-first",
+      personalLocalOnly: true,
+    },
+  });
+
+  await admin
+    .from("recovery_incidents")
+    .update({
+      agent_task_id: taskId,
+      status: "repairing",
+      current_message:
+        "Recovery Agent is tracing the local chat failure with the local debugger in the background.",
+      updated_at: nowIso(),
+    })
+    .eq("id", incidentId)
+    .eq("owner_ref", ownerRef);
+
+  await addEvent(
+    admin,
+    incidentId,
+    ownerRef,
+    "debugger_queued",
+    "Local Debugger was queued to inspect the CoOperativeLocalAI route.",
+    { taskId, modelPolicy: "local-first", personalLocalOnly: true },
+  );
+
+  return taskId;
+}
+
+export async function startPersonalRuntimeRecovery(input: {
+  ownerRef: string;
+  userId: string;
+  conversationId: string;
+  error: string;
+  context?: string;
+}) {
+  const admin = createAdminSupabaseClient();
+  const cleanError = safeError(input.error);
+  const classification = classifyRecoveryFailure(cleanError, "runtime");
+  const incidentId = crypto.randomUUID();
+
+  const { data: incident, error: insertError } = await admin
+    .from("recovery_incidents")
+    .insert({
+      id: incidentId,
+      owner_ref: input.ownerRef,
+      conversation_id: null,
+      personal_conversation_id: input.conversationId,
+      source_kind: "runtime",
+      source_job_id: null,
+      status:
+        classification.strategy === "wait-user" ? "waiting_user" : "diagnosing",
+      error_class: classification.errorClass,
+      error_excerpt: cleanError,
+      current_message:
+        classification.strategy === "wait-user"
+          ? classification.currentMessage
+          : "Recovery Agent is diagnosing the local chat failure in the background.",
+      continuation_prompt:
+        "You can keep chatting instead of waiting. If there is another part of the task we can do locally, continue with it and I’ll report back when this route is ready.",
+      requires_user_action: classification.requiresUserAction,
+      automatic_retry: false,
+    })
+    .select("*")
+    .single();
+  if (insertError) throw insertError;
+
+  await addEvent(
+    admin,
+    incidentId,
+    input.ownerRef,
+    "detected",
+    "Recovery Agent captured a direct CoOperativeLocalAI runtime failure.",
+    {
+      errorClass: classification.errorClass,
+      sourceKind: "runtime",
+      personalLocalOnly: true,
+    },
+  );
+
+  if (classification.strategy !== "wait-user") {
+    await queueRuntimeDebuggerTask(
+      admin,
+      input.ownerRef,
+      incidentId,
+      cleanError,
+      input.context || "",
+    );
+  }
+
+  const content = [
+    classification.strategy === "wait-user"
+      ? classification.currentMessage
+      : "Recovery Agent is diagnosing the local chat route in the background.",
+    "",
+    "You can keep chatting instead of waiting. I’ll report back here when the local route is ready.",
+    "",
+    "RECOVERY_STATUS:" + incidentId,
+  ].join("\n");
+
+  const { error: messageError } = await admin.rpc("personal_ai_append_message", {
+    p_user_id: input.userId,
+    p_conversation_id: input.conversationId,
+    p_role: "assistant",
+    p_content: content,
+    p_source: "desktop",
+    p_source_job_id: null,
+    p_metadata: {
+      recoveryIncidentId: incidentId,
+      recoveryStatus: true,
+      personalLocalOnly: true,
+    },
+  });
+  if (messageError) throw messageError;
+
+  const { data: refreshed, error: refreshError } = await admin
+    .from("recovery_incidents")
+    .select("*")
+    .eq("id", incidentId)
+    .eq("owner_ref", input.ownerRef)
+    .single();
+  if (refreshError) throw refreshError;
+  return refreshed || incident;
+}
+
 export async function startRecoveryForJob(
   ownerRef: string,
   sourceJobId: string,
