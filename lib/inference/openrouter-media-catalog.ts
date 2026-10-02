@@ -421,3 +421,89 @@ export function estimateOpenRouterMediaCostUsd(
   }
   return null;
 }
+
+
+export type OpenRouterKeySpendStatus = {
+  checkedAt: string;
+  paidEligible: boolean;
+  freeTier: boolean | null;
+  keyLimitRemainingUsd: number | null;
+  accountCreditsRemainingUsd: number | null;
+  source: "credits" | "key" | "unavailable";
+};
+
+export async function openRouterKeySpendStatus(
+  credential: string,
+): Promise<OpenRouterKeySpendStatus> {
+  const headers = {
+    Accept: "application/json",
+    Authorization: `Bearer ${credential}`,
+  };
+  const checkedAt = new Date().toISOString();
+
+  try {
+    const creditsResponse = await fetch(`${API}/credits`, {
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (creditsResponse.ok) {
+      const payload = (await creditsResponse.json()) as {
+        data?: { total_credits?: unknown; total_usage?: unknown };
+      };
+      const total = numberValue(payload.data?.total_credits);
+      const used = numberValue(payload.data?.total_usage);
+      const remaining =
+        total !== null && used !== null ? Math.max(0, total - used) : null;
+      return {
+        checkedAt,
+        paidEligible: remaining !== null && remaining > 0,
+        freeTier: null,
+        keyLimitRemainingUsd: null,
+        accountCreditsRemainingUsd: remaining,
+        source: "credits",
+      };
+    }
+  } catch {
+    // A normal inference key may not have the management-key permission needed
+    // for /credits. Fall through to the current-key endpoint.
+  }
+
+  try {
+    const keyResponse = await fetch(`${API}/key`, {
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!keyResponse.ok) {
+      throw new Error(`OpenRouter key status returned HTTP ${keyResponse.status}.`);
+    }
+    const payload = (await keyResponse.json()) as {
+      data?: { is_free_tier?: unknown; limit_remaining?: unknown };
+    };
+    const freeTier =
+      typeof payload.data?.is_free_tier === "boolean"
+        ? payload.data.is_free_tier
+        : null;
+    const keyLimitRemainingUsd = numberValue(payload.data?.limit_remaining);
+    return {
+      checkedAt,
+      paidEligible:
+        freeTier === false &&
+        (keyLimitRemainingUsd === null || keyLimitRemainingUsd > 0),
+      freeTier,
+      keyLimitRemainingUsd,
+      accountCreditsRemainingUsd: null,
+      source: "key",
+    };
+  } catch {
+    return {
+      checkedAt,
+      paidEligible: false,
+      freeTier: null,
+      keyLimitRemainingUsd: null,
+      accountCreditsRemainingUsd: null,
+      source: "unavailable",
+    };
+  }
+}
