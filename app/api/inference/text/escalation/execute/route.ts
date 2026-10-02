@@ -32,6 +32,7 @@ const requestSchema = z.object({
     requestedOutputTokens: z.number().int().min(16).max(4096),
     localAttempts: z.number().int().min(0).max(20),
     localFailures: z.number().int().min(0).max(20),
+    localExecutionUnavailable: z.boolean().optional(),
     malformedStructuredOutputs: z.number().int().min(0).max(20).optional(),
     scopeGuardRejections: z.number().int().min(0).max(20).optional(),
     verificationStatus: z.enum(["not_run", "passed", "failed", "inconclusive"]),
