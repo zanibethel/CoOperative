@@ -346,8 +346,11 @@ function mediaRecommendationsDirective(content: string) {
       : [];
 
     if (!options.length) return null;
+    const rawText = content.replace(marker, "").trim();
     return {
-      text: content.replace(marker, "").trim(),
+      text: /^I understand the request\./i.test(rawText)
+        ? "I understand the request. Expand High, Medium, or Low to compare the live-priced exact-match options. No generation has started."
+        : rawText,
       currentCapUsd:
         typeof parsed.currentCapUsd === "number" &&
         Number.isFinite(parsed.currentCapUsd)
