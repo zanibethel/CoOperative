@@ -272,7 +272,9 @@ const FIELDS: IntakeDefinition[] = [
     key: "monthlyAiSpend",
     question: "About how much do you spend on AI in a typical month?",
     isMissing: (_business, profile) =>
-      profile.aiUsageToday !== "none" && !(numberValue(profile.monthlyAiSpend) ?? 0),
+      profile.aiUsageToday !== "none" &&
+      !factIsRecorded(profile, "monthlyAiSpend") &&
+      !(numberValue(profile.monthlyAiSpend) ?? 0),
     parse: (answer) => parseNumber(answer, "monthly AI spend", { min: 0, max: 1000000 }),
   },
   {
@@ -299,21 +301,27 @@ const FIELDS: IntakeDefinition[] = [
   {
     key: "monthlyTechnologySpend",
     question: "About how much do you currently spend per month on technology and software?",
-    isMissing: (_business, profile) => !(numberValue(profile.monthlyTechnologySpend) ?? 0),
+    isMissing: (_business, profile) =>
+      !factIsRecorded(profile, "monthlyTechnologySpend") &&
+      !(numberValue(profile.monthlyTechnologySpend) ?? 0),
     parse: (answer) =>
       parseNumber(answer, "monthly technology spend", { min: 0, max: 1000000 }),
   },
   {
     key: "monthlyTechnologyBudget",
     question: "What is the maximum total monthly technology budget you want me to respect?",
-    isMissing: (_business, profile) => !(numberValue(profile.monthlyTechnologyBudget) ?? 0),
+    isMissing: (_business, profile) =>
+      !factIsRecorded(profile, "monthlyTechnologyBudget") &&
+      !(numberValue(profile.monthlyTechnologyBudget) ?? 0),
     parse: (answer) =>
       parseNumber(answer, "monthly technology budget", { min: 0, max: 1000000 }),
   },
   {
     key: "maxCooperativeManagedSpend",
     question: "What is the maximum amount CoOperative may manage or spend per month without a new approval?",
-    isMissing: (_business, profile) => !(numberValue(profile.maxCooperativeManagedSpend) ?? 0),
+    isMissing: (_business, profile) =>
+      !factIsRecorded(profile, "maxCooperativeManagedSpend") &&
+      !(numberValue(profile.maxCooperativeManagedSpend) ?? 0),
     parse: (answer) =>
       parseNumber(answer, "CoOperative-managed monthly spend", { min: 0, max: 1000000 }),
   },
@@ -345,6 +353,11 @@ function skippedFields(profile: JsonRecord) {
   return Array.isArray(intake.skippedFields)
     ? intake.skippedFields.filter((item): item is string => typeof item === "string")
     : [];
+}
+
+function factIsRecorded(profile: JsonRecord, key: IntakeFieldKey) {
+  const facts = record(metadata(profile).facts);
+  return Boolean(record(facts[key]).updatedAt);
 }
 
 function activeField(profile: JsonRecord): IntakeFieldKey | null {
