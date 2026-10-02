@@ -302,8 +302,8 @@ export async function buildMediaRecommendationOptions(input: {
 
   const options = [
     asOption("high-end", "High-end", high, currentCapUsd, plan),
-    asOption("balanced", "Balanced", balanced, currentCapUsd, plan),
     asOption("lowest-cost", "Lowest cost", low, currentCapUsd, plan),
+    asOption("balanced", "Balanced", balanced, currentCapUsd, plan),
   ];
 
   return {
