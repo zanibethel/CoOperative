@@ -215,6 +215,16 @@ function serviceConnectDirective(content: string) {
   };
 }
 
+function oauthServiceConnectDirective(content: string) {
+  const match = content.match(/OAUTH_SERVICE_CONNECT:([a-z0-9-]+)/i);
+  if (!match) return null;
+
+  return {
+    providerKey: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
 function looksLikeCredentialText(value: string) {
   const text = value.trim();
   return (
@@ -364,6 +374,210 @@ function SecureServiceConnectCard({
             </a>
           ) : null}
         </>
+      )}
+
+      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+    </div>
+  );
+}
+
+type NousPortalConnectCardProps = {
+  conversationId: string | null;
+  onConnected: () => Promise<void> | void;
+};
+
+function NousPortalConnectCard({
+  conversationId,
+  onConnected,
+}: NousPortalConnectCardProps) {
+  const [checking, setChecking] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [verificationUrl, setVerificationUrl] = useState("");
+  const [userCode, setUserCode] = useState("");
+  const [pollIntervalMs, setPollIntervalMs] = useState(2000);
+  const [cardError, setCardError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/local-ai/nous-connect", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          connected?: boolean;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Could not check Nous Portal.");
+        if (!cancelled) setConnected(Boolean(payload.connected));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCardError(err instanceof Error ? err.message : "Could not check Nous Portal.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function startConnection() {
+    if (working) return;
+    setWorking(true);
+    setCardError("");
+    try {
+      const response = await fetch("/api/local-ai/nous-connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: conversationId || undefined,
+        }),
+      });
+      const payload = (await response.json()) as {
+        connected?: boolean;
+        sessionId?: string;
+        verificationUrl?: string;
+        userCode?: string;
+        pollIntervalSeconds?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        throw new Error(payload.error || "Could not start Nous Portal sign-in.");
+      }
+      if (payload.connected) {
+        setConnected(true);
+        await onConnected();
+        return;
+      }
+      if (!payload.sessionId || !payload.verificationUrl) {
+        throw new Error("Nous Portal did not return a usable sign-in session.");
+      }
+      setSessionId(payload.sessionId);
+      setVerificationUrl(payload.verificationUrl);
+      setUserCode(payload.userCode || "");
+      setPollIntervalMs(Math.max(1000, Number(payload.pollIntervalSeconds || 2) * 1000));
+      window.open(payload.verificationUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setCardError(
+        err instanceof Error ? err.message : "Could not start Nous Portal sign-in.",
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!sessionId || connected) return;
+
+    let cancelled = false;
+    const timer = window.setInterval(() => {
+      void fetch(
+        `/api/local-ai/nous-connect?sessionId=${encodeURIComponent(sessionId)}`,
+        { cache: "no-store" },
+      )
+        .then(async (response) => {
+          const payload = (await response.json()) as {
+            connected?: boolean;
+            status?: string;
+            pollIntervalSeconds?: number;
+            error?: string | null;
+          };
+          if (cancelled) return;
+
+          if (payload.connected || payload.status === "approved") {
+            window.clearInterval(timer);
+            setConnected(true);
+            setSessionId(null);
+            setCardError("");
+            await onConnected();
+            return;
+          }
+
+          if (
+            payload.status === "denied" ||
+            payload.status === "expired" ||
+            payload.status === "failed"
+          ) {
+            window.clearInterval(timer);
+            setSessionId(null);
+            setCardError(payload.error || "Nous Portal sign-in did not complete.");
+            return;
+          }
+
+          if (payload.pollIntervalSeconds) {
+            setPollIntervalMs(
+              Math.max(1000, Number(payload.pollIntervalSeconds) * 1000),
+            );
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setCardError(
+              err instanceof Error ? err.message : "Could not check Nous Portal sign-in.",
+            );
+          }
+        });
+    }, pollIntervalMs);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [sessionId, connected, pollIntervalMs, onConnected]);
+
+  return (
+    <div className="secure-service-card">
+      <div className="secure-service-head">
+        <span className="secure-service-lock" aria-hidden="true">↗</span>
+        <div>
+          <strong>Nous Portal connection</strong>
+          <small>
+            Sign in once. CoOperative keeps the rotating OAuth grant encrypted
+            and gives temporary Hermes workers only short-lived access.
+          </small>
+        </div>
+      </div>
+
+      {checking ? (
+        <div className="secure-service-status">Checking connection…</div>
+      ) : connected ? (
+        <div className="secure-service-connected">
+          <span>✓</span>
+          <div>
+            <strong>Connected</strong>
+            <small>Hermes can prefer your Nous Portal model/tool access.</small>
+          </div>
+        </div>
+      ) : sessionId ? (
+        <>
+          <div className="secure-service-oauth-code">
+            <small>Nous authorization code</small>
+            <strong>{userCode || "Open the approval page"}</strong>
+          </div>
+          <a
+            className="primary secure-service-button secure-service-oauth-link"
+            href={verificationUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Approve in Nous Portal
+          </a>
+          <div className="secure-service-status">
+            Waiting for your approval… This card will finish automatically.
+          </div>
+        </>
+      ) : (
+        <button
+          className="primary secure-service-button"
+          type="button"
+          onClick={() => void startConnection()}
+          disabled={working}
+        >
+          {working ? "Starting secure sign-in…" : "Connect Nous Portal"}
+        </button>
       )}
 
       {cardError ? <div className="secure-service-error">{cardError}</div> : null}
@@ -1254,6 +1468,26 @@ export default function LocalAiChat() {
                   </div>
                 ) : null}
                 {message.content ? (() => {
+                  const oauthConnect = oauthServiceConnectDirective(message.content);
+                  if (oauthConnect?.providerKey === "nous-portal") {
+                    return (
+                      <>
+                        {oauthConnect.text ? <div>{oauthConnect.text}</div> : null}
+                        <NousPortalConnectCard
+                          conversationId={conversationId}
+                          onConnected={async () => {
+                            setServiceConnectionRevision((current) => current + 1);
+                            await refreshBusinesses();
+                            if (conversationId) {
+                              await loadConversation(conversationId);
+                              await refreshConversations();
+                            }
+                          }}
+                        />
+                      </>
+                    );
+                  }
+
                   const serviceConnect = serviceConnectDirective(message.content);
                   if (serviceConnect) {
                     return (
