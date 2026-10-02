@@ -1136,8 +1136,11 @@ export async function POST(request: Request) {
       }
 
       if (!selectedProvider) {
+        // Live public pricing is useful for safe budget guidance even when the
+        // connected Nous entitlement is temporarily unavailable. It does not
+        // authorize a paid call by itself.
         const nousSuggestion =
-          mediaPlan.kind === "video" && nousRuntimeAuth
+          mediaPlan.kind === "video"
             ? await affordableVideoSuggestion(
                 mediaPlan.durationSeconds,
                 requestCapUsd,
@@ -1165,22 +1168,43 @@ export async function POST(request: Request) {
         const suggestedBudget = nextBudgetUsd(
           candidates.length ? Math.min(...candidates) : null,
         );
-        const affordableSeconds = nousSuggestion?.affordableSeconds || 0;
+
+        const bestWithinBudget = nousSuggestion?.bestWithinBudget || null;
+        const bestWithoutAudio = nousSuggestion?.bestWithoutAudio || null;
+        const formatVideoOption = (
+          label: string,
+          option:
+            | {
+                durationSeconds: number;
+                resolution: string;
+                audio: boolean;
+                estimatedCostUsd: number;
+              }
+            | null,
+        ) =>
+          option
+            ? `${label}: ${option.durationSeconds}s at ${option.resolution}${option.audio ? " with audio" : " without audio"} for about \${option.estimatedCostUsd.toFixed(3)}.`
+            : null;
+
         const actions =
           mediaPlan.kind === "video"
             ? [
-                suggestedBudget
-                  ? `Increase budget to ~\$${suggestedBudget.toFixed(2)} for this request.`
+                formatVideoOption("Closest fit that preserves audio", bestWithinBudget),
+                mediaPlan.audio === true &&
+                bestWithoutAudio &&
+                (!bestWithinBudget ||
+                  bestWithoutAudio.durationSeconds > bestWithinBudget.durationSeconds)
+                  ? formatVideoOption("Longest fit if audio is removed", bestWithoutAudio)
                   : null,
-                affordableSeconds >= 1
-                  ? `Reduce the clip to ${affordableSeconds}s at 360p${mediaPlan.audio === true ? " and turn generated audio off" : " without generated audio"} to stay near \$${requestCapUsd.toFixed(2)}.`
-                  : "Reduce duration and/or resolution.",
-                mediaPlan.audio === true ? "Generate without audio." : null,
+                suggestedBudget
+                  ? `Keep the original request by increasing the cap to about \${suggestedBudget.toFixed(2)}.`
+                  : null,
+                !bestWithinBudget ? "Reduce duration and/or resolution." : null,
                 "Lower the Media quality ceiling.",
               ].filter(Boolean)
             : [
                 suggestedBudget
-                  ? `Increase budget to ~\$${suggestedBudget.toFixed(2)}.`
+                  ? `Increase budget to ~\${suggestedBudget.toFixed(2)}.`
                   : null,
                 "Use the owned local image generator when a node is available.",
                 "Lower the Media quality ceiling.",
