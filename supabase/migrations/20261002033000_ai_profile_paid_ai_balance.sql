@@ -331,3 +331,13 @@ grant execute on function public.release_ai_profile_balance(uuid,jsonb)
   to service_role;
 grant execute on function public.credit_ai_profile_balance(text,bigint,text,text,jsonb)
   to service_role;
+
+
+-- Preserve local-failure evidence while making a paid fallback idempotent.
+alter table public.text_inference_jobs
+  add column if not exists fallback_for_job_id uuid
+    references public.text_inference_jobs(id) on delete set null;
+
+create unique index if not exists text_inference_jobs_fallback_source_unique_idx
+  on public.text_inference_jobs(fallback_for_job_id)
+  where fallback_for_job_id is not null;
