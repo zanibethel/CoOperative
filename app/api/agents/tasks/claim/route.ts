@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { AGENT_REGISTRY, AGENT_REPOSITORIES } from "@/lib/agents/registry";
-import { localWorkerAuthorized } from "@/lib/agents/server";
+import { authorizeAgentWorker } from "@/lib/agents/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 export async function POST(request: Request) {
-  if (!localWorkerAuthorized(request)) {
+  const authorization = await authorizeAgentWorker(request);
+  if (!authorization.authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -19,10 +20,17 @@ export async function POST(request: Request) {
         : "local-repo-agent";
 
     const admin = createAdminSupabaseClient();
-    const { data, error } = await admin.rpc("claim_next_agent_task", {
-      p_worker_id: workerId,
-    });
-    if (error) throw error;
+    const claimResult =
+      authorization.mode === "node"
+        ? await admin.rpc("claim_next_agent_task_for_owner", {
+            p_worker_id: workerId,
+            p_owner_ref: authorization.ownerRef,
+          })
+        : await admin.rpc("claim_next_agent_task", {
+            p_worker_id: workerId,
+          });
+    if (claimResult.error) throw claimResult.error;
+    const data = claimResult.data;
 
     const task = Array.isArray(data) ? data[0] : null;
     if (!task) return new Response(null, { status: 204 });
@@ -102,6 +110,8 @@ export async function POST(request: Request) {
         workerId,
         deniedExamplesLoaded: learningContext.length,
         paidExecutorApproved: Boolean(executorApproval),
+        workerAuthMode: authorization.mode,
+        nodeId: authorization.mode === "node" ? authorization.nodeId : null,
       },
     });
 
