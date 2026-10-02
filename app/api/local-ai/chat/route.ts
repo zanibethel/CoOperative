@@ -1973,27 +1973,17 @@ export async function GET(request: Request) {
         const completedAt = new Date().toISOString();
 
         if (mediaJob.provider === "nous") {
-          const openRouterService =
-            await businessOwnedServiceCredentialForOwner(
-              ownerRef,
-              "openrouter-api",
-            );
-          const openRouterCredential =
-            openRouterService?.credential ||
-            process.env.OPENROUTER_API_KEY?.trim() ||
-            undefined;
           const requestCapUsd =
             typeof mediaJob.request_max_spend_microusd === "number"
               ? mediaJob.request_max_spend_microusd / 1_000_000
-              : null;
+              : 0.05;
           const sourceEstimateUsd =
             typeof mediaJob.estimated_provider_cost_microusd === "number"
               ? mediaJob.estimated_provider_cost_microusd / 1_000_000
               : 0;
-          const remainingCapUsd =
-            requestCapUsd === null
-              ? null
-              : Math.max(0, requestCapUsd - sourceEstimateUsd);
+          // Reserve the original estimate after a failed paid attempt because the
+          // provider may still bill partial work. Never assume a failed call cost $0.
+          const remainingCapUsd = Math.max(0, requestCapUsd - sourceEstimateUsd);
           const mediaLevel = Math.min(
             4,
             Math.max(0, Number(mediaJob.media_level || 0)),
@@ -2010,28 +2000,162 @@ export async function GET(request: Request) {
             String(mediaJob.prompt || "").match(
               /(?:Aspect ratio|Preferred aspect ratio):\s*(16:9|9:16|1:1)/i,
             )?.[1] || null;
+          const controls = videoControlsFromPrompt(String(mediaJob.prompt || ""));
 
-          if (openRouterCredential && requestCapUsd !== 0) {
-            try {
-              const catalog = await openRouterMediaCatalog(true);
-              const pool =
-                mediaJob.kind === "video" ? catalog.video : catalog.image;
-              const backupModel = recommendedForRequest(pool, mediaLevel, {
-                durationSeconds,
-                aspectRatio,
+          if (mediaJob.kind === "image") {
+            const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
+            if (authorizedNodeIds.length > 0) {
+              const { data: imageNodes } = await admin
+                .from("unison_nodes")
+                .select("id,state,capabilities,policy,last_seen_at")
+                .in("id", authorizedNodeIds);
+              const freshAfter = Date.now() - 90_000;
+              const localAvailable = (imageNodes || []).some((node) => {
+                const capabilities = Array.isArray(node.capabilities)
+                  ? node.capabilities
+                  : [];
+                const policy =
+                  node.policy && typeof node.policy === "object"
+                    ? (node.policy as { allowImage?: unknown })
+                    : {};
+                const seenAt = Date.parse(node.last_seen_at || "");
+                return (
+                  capabilities.includes("image_generation") &&
+                  policy.allowImage !== false &&
+                  Number.isFinite(seenAt) &&
+                  seenAt >= freshAfter &&
+                  node.state !== "paused"
+                );
               });
-              const backupEstimate = backupModel
-                ? estimatedMediaProviderCostUsd(
-                    backupModel,
-                    durationSeconds,
+
+              if (localAvailable) {
+                await admin
+                  .from("media_generation_jobs")
+                  .update({
+                    status: "failed",
+                    usage: polled.usage,
+                    error: failure.slice(0, 1200),
+                    completed_at: completedAt,
+                    updated_at: completedAt,
+                  })
+                  .eq("id", mediaJob.id)
+                  .eq("owner_ref", ownerRef)
+                  .eq("status", "running");
+
+                const localJobId = crypto.randomUUID();
+                const { error: localJobError } = await admin
+                  .from("inference_jobs")
+                  .insert({
+                    id: localJobId,
+                    kind: "image",
+                    status: "queued",
+                    client_owner_ref: ownerRef,
+                    prompt: mediaJob.prompt,
+                    aspect_ratio: aspectRatio || "4:5",
+                    profile: mediaLevel >= 2 ? "quality" : "fast",
+                    variation_mode: "balanced",
+                    seed:
+                      Number.parseInt(
+                        localJobId.replaceAll("-", "").slice(0, 8),
+                        16,
+                      ) % 2147483648,
+                  });
+                if (localJobError) throw localJobError;
+
+                return NextResponse.json(
+                  {
+                    jobId: localJobId,
+                    execution: "media",
+                    status: "queued",
+                    conversationId: mediaJob.conversation_id,
+                    capability: "image",
+                    provider: "cooperative-local",
+                    model:
+                      mediaLevel >= 2
+                        ? "local-image-quality"
+                        : "local-image-fast",
+                    routeReason:
+                      "Nous was attempted first and failed. CoOperative preserved the spend boundary and moved to a fresh owned image node before considering paid OpenRouter.",
+                    estimatedProviderCostUsd: 0,
+                  },
+                  { headers: { "Cache-Control": "no-store" } },
+                );
+              }
+            }
+          }
+
+          try {
+            const catalog = await openRouterMediaCatalog(true);
+            const pool =
+              mediaJob.kind === "video" ? catalog.video : catalog.image;
+            const requestShape = {
+              durationSeconds,
+              aspectRatio,
+              resolution: controls.resolution,
+              audio: controls.audio,
+            };
+            const freeBackup = recommendedForRequest(
+              pool.filter((model) => model.free),
+              0,
+              requestShape,
+            );
+            const paidBackup =
+              mediaLevel > 0
+                ? recommendedForRequest(
+                    pool.filter((model) => !model.free),
+                    mediaLevel,
+                    requestShape,
                   )
                 : null;
-              const affordable =
-                backupModel &&
-                backupEstimate !== null &&
-                (remainingCapUsd === null || backupEstimate <= remainingCapUsd);
+            const backupModel = freeBackup || paidBackup;
+            const backupEstimate = backupModel
+              ? freeBackup
+                ? 0
+                : estimatedMediaProviderCostUsd(
+                    backupModel,
+                    durationSeconds,
+                    controls.resolution,
+                    controls.audio,
+                  )
+              : null;
+            const affordable =
+              backupModel &&
+              backupEstimate !== null &&
+              backupEstimate <= remainingCapUsd;
 
-              if (affordable && backupModel) {
+            if (affordable && backupModel) {
+              const openRouterService =
+                await businessOwnedServiceCredentialForOwner(
+                  ownerRef,
+                  "openrouter-api",
+                );
+              const openRouterCredential =
+                openRouterService?.credential ||
+                process.env.OPENROUTER_API_KEY?.trim() ||
+                undefined;
+
+              if (openRouterCredential) {
+                const freeRoute = Boolean(freeBackup);
+                if (!freeRoute) {
+                  const spendStatus =
+                    await openRouterKeySpendStatus(openRouterCredential);
+                  const enoughCredits =
+                    spendStatus.accountCreditsRemainingUsd === null ||
+                    spendStatus.accountCreditsRemainingUsd >= backupEstimate;
+                  const enoughLimit =
+                    spendStatus.keyLimitRemainingUsd === null ||
+                    spendStatus.keyLimitRemainingUsd >= backupEstimate;
+                  if (
+                    !spendStatus.paidEligible ||
+                    !enoughCredits ||
+                    !enoughLimit
+                  ) {
+                    throw new Error(
+                      "OpenRouter paid backup is not currently spend-eligible.",
+                    );
+                  }
+                }
+
                 await admin
                   .from("media_generation_jobs")
                   .update({
@@ -2058,15 +2182,28 @@ export async function GET(request: Request) {
                     provider: "openrouter",
                     model: backupModel.id,
                     model_mixer: mediaJob.model_mixer || null,
-                    request_max_spend_microusd:
-                      remainingCapUsd === null
-                        ? null
-                        : Math.round(remainingCapUsd * 1_000_000),
+                    request_max_spend_microusd: Math.round(
+                      remainingCapUsd * 1_000_000,
+                    ),
                     media_level: mediaLevel,
                     estimated_provider_cost_microusd: Math.round(
                       backupEstimate * 1_000_000,
                     ),
-                    pricing_source: "openrouter-backup",
+                    estimated_user_charge_microusd: 0,
+                    estimated_infrastructure_cost_microusd: null,
+                    estimated_margin_microusd: null,
+                    provider_cost_bearer: freeRoute
+                      ? "free"
+                      : "user-connected",
+                    pricing_dimensions: {
+                      durationSeconds,
+                      aspectRatio,
+                      resolution: controls.resolution,
+                      audio: controls.audio,
+                      mediaLevel,
+                      freeRoute,
+                    },
+                    pricing_source: catalog.source,
                     fallback_from_job_id: mediaJob.id,
                   });
                 if (backupInsertError) throw backupInsertError;
@@ -2104,24 +2241,23 @@ export async function GET(request: Request) {
                     capability: mediaJob.kind,
                     provider: "openrouter",
                     model: backupModel.id,
-                    routeReason:
-                      remainingCapUsd === null
-                        ? "Nous was tried first. Its managed media route failed, so CoOperative moved once to the connected OpenRouter backup."
-                        : `Nous was tried first. CoOperative reserved ${sourceEstimateUsd.toFixed(3)} against the original ${requestCapUsd!.toFixed(2)} request cap and moved once to an OpenRouter backup estimated at ${backupEstimate.toFixed(3)}, within the remaining ${remainingCapUsd.toFixed(3)}.`,
+                    routeReason: freeRoute
+                      ? "Nous failed, no owned local route was available for this media request, and CoOperative selected a live free OpenRouter route before any paid backup."
+                      : `Nous failed and no local/free route was available. CoOperative conservatively reserved \$${sourceEstimateUsd.toFixed(3)} from the original \$${requestCapUsd.toFixed(2)} ceiling, verified OpenRouter spend eligibility, and started one backup estimated at \$${backupEstimate.toFixed(3)} within the remaining \$${remainingCapUsd.toFixed(3)}.`,
                     estimatedProviderCostUsd: backupEstimate,
                   },
                   { headers: { "Cache-Control": "no-store" } },
                 );
               }
-            } catch (backupError) {
-              console.error("Nous-to-OpenRouter media backup could not start", {
-                sourceJobId: mediaJob.id,
-                detail:
-                  backupError instanceof Error
-                    ? backupError.message.slice(0, 800)
-                    : "Unknown backup error",
-              });
             }
+          } catch (backupError) {
+            console.error("Nous media fallback could not start", {
+              sourceJobId: mediaJob.id,
+              detail:
+                backupError instanceof Error
+                  ? backupError.message.slice(0, 800)
+                  : "Unknown fallback error",
+            });
           }
         }
 
