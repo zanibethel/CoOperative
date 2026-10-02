@@ -14,11 +14,11 @@ import {
 import { localWorkerAuthorized } from "@/lib/agents/server";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import {
-  aiProfileBalanceForUser,
+  aiProfileBalanceForOwnerRef,
+  profileRefFromAiOwnerRef,
   releaseAiProfileFunds,
   reserveAiProfileFunds,
   settleAiProfileFunds,
-  userIdFromAiOwnerRef,
 } from "@/lib/billing/ai-profile-balance";
 
 export const runtime = "nodejs";
@@ -91,10 +91,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const profileUserId = userIdFromAiOwnerRef(task.owner_ref);
-    const profileBalance = profileUserId
-      ? await aiProfileBalanceForUser(profileUserId)
-      : null;
+    const profileRef = profileRefFromAiOwnerRef(task.owner_ref);
+    const profileBalance = await aiProfileBalanceForOwnerRef(task.owner_ref);
 
     const evidence: EscalationEvidence = {
       taskClass: "coding",
@@ -166,7 +164,7 @@ export async function POST(request: Request) {
     if (!usingBusinessOwnedAi) {
       const estimatedCostUsd = decision.candidate.estimatedMarginalCostUsd;
       if (
-        !profileUserId ||
+        !profileRef ||
         !profileBalance?.funded ||
         typeof estimatedCostUsd !== "number" ||
         !Number.isFinite(estimatedCostUsd) ||
@@ -189,7 +187,7 @@ export async function POST(request: Request) {
       }
 
       fundingReservation = await reserveAiProfileFunds({
-        userId: profileUserId,
+        profileRef,
         estimatedCostUsd,
         source: "agent-paid-ai",
         referenceId: task.id,
