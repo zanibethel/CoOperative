@@ -82,6 +82,7 @@ type AttachmentResult = {
 
 type JobResult = {
   jobId?: string;
+  execution?: "code" | "local-ai" | "community-ai" | "paid-ai";
   status?: string;
   profile?: Profile;
   capability?: "text" | "vision";
@@ -679,8 +680,8 @@ export default function LocalAiChat() {
       });
 
       const queued = (await queuedResponse.json()) as JobResult;
-      if (!queuedResponse.ok || !queued.jobId) {
-        throw new Error(queued.detail || queued.error || "Could not queue local AI job.");
+      if (!queuedResponse.ok) {
+        throw new Error(queued.detail || queued.error || "Could not execute CoOperative request.");
       }
 
       setAttachments([]);
@@ -689,6 +690,23 @@ export default function LocalAiChat() {
       }
       if (queued.conversationTitle) {
         setConversationTitle(queued.conversationTitle);
+      }
+
+      if (
+        queued.execution === "code" &&
+        queued.status === "completed" &&
+        queued.conversationId
+      ) {
+        await loadConversation(queued.conversationId);
+        await refreshConversations();
+        setMeta(resultMeta(queued));
+        setStatus("Ready");
+        setBusy(false);
+        return;
+      }
+
+      if (!queued.jobId) {
+        throw new Error(queued.detail || queued.error || "Could not queue local AI job.");
       }
 
       await refreshConversations();
