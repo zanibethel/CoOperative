@@ -10,16 +10,78 @@ import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/busin
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
 import { classifyRecoveryFailure } from "@/lib/recovery/classifier";
 
+type TextRecoveryJob = {
+  id: string;
+  status: string;
+  client_owner_ref: string;
+  conversation_id: string | null;
+  error: string | null;
+  messages: unknown;
+  profile: string | null;
+  max_tokens: number | null;
+  temperature: number | null;
+  routing_mode: string | null;
+  task_class: string | null;
+  allow_paid_fallback: boolean | null;
+  human_approval_required: boolean | null;
+  model_registry_revision: string | null;
+  verification_status: string | null;
+  attachment_ids: string[] | null;
+  capability: string | null;
+  routing_preference: string | null;
+  model_mixer: unknown;
+  request_max_spend_microusd: number | null;
+};
+
+type MediaRecoveryJob = {
+  id: string;
+  status: string;
+  owner_ref: string;
+  conversation_id: string | null;
+  kind: "image" | "video";
+  prompt: string;
+  provider: string;
+  model: string;
+  model_mixer: unknown;
+  request_max_spend_microusd: number | null;
+  media_level: number | null;
+  estimated_provider_cost_microusd: number | null;
+  pricing_source: string | null;
+  error: string | null;
+};
+
+type RecoveryIncidentRow = {
+  id: string;
+  owner_ref: string;
+  conversation_id: string | null;
+  source_kind: "text" | "media" | "connector" | "runtime";
+  source_job_id: string | null;
+  status: string;
+  error_class: string;
+  error_excerpt: string | null;
+  current_message: string;
+  continuation_prompt: string | null;
+  requires_user_action: boolean;
+  automatic_retry: boolean;
+  agent_task_id: string | null;
+  retry_job_id: string | null;
+  attempt_count: number;
+  resolution_summary: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+};
+
 type FailedSource =
   | {
       kind: "text";
-      job: Record<string, any>;
+      job: TextRecoveryJob;
       conversationId: string | null;
       error: string;
     }
   | {
       kind: "media";
-      job: Record<string, any>;
+      job: MediaRecoveryJob;
       conversationId: string | null;
       error: string;
     };
@@ -71,7 +133,7 @@ async function readFailedSource(
   if (textJob) {
     return {
       kind: "text",
-      job: textJob,
+      job: textJob as TextRecoveryJob,
       conversationId: textJob.conversation_id || null,
       error: safeError(textJob.error),
     };
@@ -90,7 +152,7 @@ async function readFailedSource(
   if (mediaJob) {
     return {
       kind: "media",
-      job: mediaJob,
+      job: mediaJob as MediaRecoveryJob,
       conversationId: mediaJob.conversation_id || null,
       error: safeError(mediaJob.error),
     };
@@ -486,7 +548,7 @@ export async function startRecoveryForJob(
 
 async function finalizeTextRetry(
   admin: AdminClient,
-  incident: Record<string, any>,
+  incident: RecoveryIncidentRow,
 ) {
   if (!incident.retry_job_id) return incident;
 
@@ -549,7 +611,7 @@ async function finalizeTextRetry(
 
 async function finalizeMediaRetry(
   admin: AdminClient,
-  incident: Record<string, any>,
+  incident: RecoveryIncidentRow,
 ) {
   if (!incident.retry_job_id) return incident;
 
@@ -687,7 +749,7 @@ async function finalizeMediaRetry(
 
 async function syncDebuggerStatus(
   admin: AdminClient,
-  incident: Record<string, any>,
+  incident: RecoveryIncidentRow,
 ) {
   if (!incident.agent_task_id) return incident;
 
@@ -842,7 +904,7 @@ export async function refreshRecoveryIncident(
   if (error) throw error;
   if (!incident) return null;
 
-  let current = incident as Record<string, any>;
+  let current = incident as RecoveryIncidentRow;
 
   if (current.status === "retrying" && current.retry_job_id) {
     current =
