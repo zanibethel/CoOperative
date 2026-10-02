@@ -20,6 +20,11 @@ import {
   mediaPromptWithResolvedControls,
   planMediaRequest,
 } from "@/lib/inference/media-request";
+import {
+  openRouterMediaCatalog,
+  recommendedForLevel,
+  type MediaCatalogModel,
+} from "@/lib/inference/openrouter-media-catalog";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -67,6 +72,19 @@ function titleFromMessage(message: string, hasImages: boolean) {
   const compact = message.replace(/\s+/g, " ").trim();
   if (!compact) return hasImages ? "Image question" : "New chat";
   return compact.length > 72 ? `${compact.slice(0, 69)}…` : compact;
+}
+
+function estimatedMediaProviderCostUsd(
+  model: MediaCatalogModel,
+  durationSeconds: number | null,
+) {
+  const unitCost = model.minUnitCostUsd;
+  if (unitCost === null) return null;
+  if (model.unit === "second") {
+    return durationSeconds ? unitCost * durationSeconds : null;
+  }
+  if (model.unit === "image") return unitCost;
+  return model.free ? 0 : null;
 }
 
 export async function POST(request: Request) {
@@ -244,10 +262,40 @@ export async function POST(request: Request) {
         );
       }
 
-      const mediaConfig = hermesMediaConfiguration(mediaPlan.kind);
-      if (!mediaConfig.freeRoute && process.env.HERMES_MEDIA_PAID_ENABLED !== "true") {
+      const mediaLevel = input.modelMixer?.agents.media ?? 0;
+      let selectedMediaModel: MediaCatalogModel | null = null;
+      let pricingSource = "configured-fallback";
+
+      try {
+        const catalog = await openRouterMediaCatalog();
+        const pool = mediaPlan.kind === "video" ? catalog.video : catalog.image;
+        const requested = recommendedForLevel(pool, mediaLevel);
+        const freeFallback = pool.find((model) => model.free) || null;
+        const paidMediaEnabled =
+          process.env.HERMES_MEDIA_PAID_ENABLED === "true" && profileBalance.funded;
+
+        selectedMediaModel =
+          requested && (!requested.free && !paidMediaEnabled)
+            ? freeFallback
+            : requested || freeFallback;
+        pricingSource = catalog.source;
+      } catch {
+        selectedMediaModel = null;
+      }
+
+      const fallbackConfig = hermesMediaConfiguration(mediaPlan.kind);
+      const selectedProvider = selectedMediaModel ? "openrouter" : fallbackConfig.provider;
+      const selectedModel = selectedMediaModel?.id || fallbackConfig.model;
+      const selectedFree = selectedMediaModel?.free ?? fallbackConfig.freeRoute;
+      const estimatedProviderCostUsd = selectedMediaModel
+        ? estimatedMediaProviderCostUsd(selectedMediaModel, mediaPlan.durationSeconds)
+        : selectedFree
+          ? 0
+          : null;
+
+      if (!selectedFree && process.env.HERMES_MEDIA_PAID_ENABLED !== "true") {
         const message =
-          "This media route resolves to a paid generation model, but paid media is intentionally disabled until provider pricing and CoOperative margin rules are configured. The free smoke-test route is still available.";
+          "I found a paid media route, but paid media is still disabled until CoOperative's markup/margin rule is configured. Move the Media slider to Free or use the free smoke-test route for now.";
         const { error: paidGateError } = await admin
           .from("local_ai_messages")
           .insert([
@@ -285,6 +333,51 @@ export async function POST(request: Request) {
         );
       }
 
+      const requestCapUsd = input.modelMixer?.maxSpendUsd ?? null;
+      if (
+        estimatedProviderCostUsd !== null &&
+        requestCapUsd !== null &&
+        estimatedProviderCostUsd > requestCapUsd
+      ) {
+        const message =
+          `The live estimate for ${selectedModel} is about ${estimatedProviderCostUsd.toFixed(2)}, above this request's ${requestCapUsd.toFixed(2)} max-spend cap. Raise the cap or lower the Media slider.`;
+        const { error: capError } = await admin
+          .from("local_ai_messages")
+          .insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: visibleUserText,
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: message,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+        if (capError) throw capError;
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-spend-cap",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
       const jobId = crypto.randomUUID();
       const generationPrompt = mediaPromptWithResolvedControls(
         visibleUserText,
@@ -303,10 +396,16 @@ export async function POST(request: Request) {
           conversation_id: conversationId,
           kind: mediaPlan.kind,
           prompt: generationPrompt,
-          provider: mediaConfig.provider,
-          model: mediaConfig.model,
+          provider: selectedProvider,
+          model: selectedModel,
           model_mixer: input.modelMixer || null,
           request_max_spend_microusd: requestMaxSpendMicrousd,
+          media_level: mediaLevel,
+          estimated_provider_cost_microusd:
+            estimatedProviderCostUsd === null
+              ? null
+              : Math.round(estimatedProviderCostUsd * 1_000_000),
+          pricing_source: pricingSource,
         });
       if (mediaJobError) throw mediaJobError;
 
@@ -327,6 +426,8 @@ export async function POST(request: Request) {
           jobId,
           kind: mediaPlan.kind,
           userRequest: generationPrompt,
+          provider: selectedProvider,
+          model: selectedModel,
         });
 
         const { error: mediaStartError } = await admin
@@ -359,7 +460,8 @@ export async function POST(request: Request) {
             provider: started.provider,
             model: started.model,
             routeReason:
-              "CoOperative used a cheap/free Hermes orchestrator and one configured media-generation tool call.",
+              `CoOperative selected ${selectedModel} from the ${pricingSource} media catalog at Media level ${mediaLevel}, then used a cheap/free Hermes orchestrator for one media-generation call.`,
+            estimatedProviderCostUsd,
             modelMixer: input.modelMixer || null,
             requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
           },
