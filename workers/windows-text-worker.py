@@ -40,6 +40,7 @@ PLAN_PATH = HERE / "text-model-plan.json"
 BENCHMARK_PATH = HERE / "text-benchmark.json"
 READY_MARKER = HERE / "text-worker.ready"
 BUSY_MARKER = HERE / "text-worker.busy"
+LOCAL_CHAT_BUSY_MARKER = HERE / "local-chat.busy"
 
 QUEUE_URL = os.getenv(
     "COOPERATIVE_QUEUE_URL",
@@ -426,6 +427,17 @@ def complete_job(job_id: str, payload: dict):
     return response.json()
 
 
+def claim_job(personal_only: bool):
+    response = httpx.post(
+        f"{QUEUE_URL}/api/inference/text/jobs/claim",
+        headers=queue_headers(),
+        json={"workerId": WORKER_ID, "personalOnly": personal_only},
+        timeout=30.0,
+        follow_redirects=True,
+    )
+    return response
+
+
 def run_generation(job_id: str, job: dict):
     if job.get("capability") == "vision" or job.get("attachmentIds"):
         raise RuntimeError(
@@ -504,17 +516,20 @@ def queue_loop():
     while True:
         job_id = None
         try:
-            if not node_available():
-                time.sleep(QUEUE_POLL_SECONDS)
-                continue
+            # Personal remote requests are allowed while the PC is active and are
+            # checked before contributed work. If the local desktop Personal AI
+            # is already generating, let that personal request finish first.
+            response = None
+            if not LOCAL_CHAT_BUSY_MARKER.exists():
+                response = claim_job(personal_only=True)
 
-            response = httpx.post(
-                f"{QUEUE_URL}/api/inference/text/jobs/claim",
-                headers=queue_headers(),
-                json={"workerId": WORKER_ID},
-                timeout=30.0,
-                follow_redirects=True,
-            )
+            if response is None or response.status_code == 204:
+                # Community jobs remain whole-PC-idle only.
+                if not node_available():
+                    time.sleep(QUEUE_POLL_SECONDS)
+                    continue
+                response = claim_job(personal_only=False)
+
             if response.status_code == 204:
                 time.sleep(QUEUE_POLL_SECONDS)
                 continue
@@ -524,7 +539,8 @@ def queue_loop():
             job_id = str(job["jobId"])
             print(
                 f"Claimed async text job {job_id} "
-                f"({job.get('profile', 'fast')}, {job.get('capability', 'text')}).",
+                f"({job.get('profile', 'fast')}, {job.get('capability', 'text')}, "
+                f"{'personal' if job.get('personalUse') else 'community'}).",
                 flush=True,
             )
 
