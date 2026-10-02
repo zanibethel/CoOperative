@@ -1054,18 +1054,8 @@ export async function POST(request: Request) {
           );
         }
 
-        const lines = recommendationSet.options.map((option, index) => {
-          const increase =
-            option.increaseNeededUsd > 0
-              ? ` · +\$${option.increaseNeededUsd.toFixed(2)} above the current cap`
-              : " · fits the current cap";
-          return `${index + 1}. ${option.label}: ${option.summary} · estimated \$${option.estimatedCostUsd.toFixed(3)}${increase}`;
-        });
-
         return (
-          "I understand the request. Before generating, here are three live-priced ways to fulfill the ask without changing its requested duration, resolution, format, or audio settings:\n\n" +
-          lines.join("\n") +
-          "\n\nNo generation has started. Choose High-end, Lowest cost, or Balanced." +
+          "I understand the request. I found three live-priced exact-match options without changing the requested duration, resolution, format, or audio. Expand High, Medium, or Low to compare the details. No generation has started." +
           (recommendationMarker ? `\n\n${recommendationMarker}` : "")
         );
       };
