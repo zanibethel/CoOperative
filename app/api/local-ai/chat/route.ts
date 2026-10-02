@@ -1549,6 +1549,16 @@ export async function GET(request: Request) {
             : new Response(null, { status: 204 });
         }
 
+        const { data: localImageMessage } = await admin
+          .from("local_ai_messages")
+          .select("conversation_id")
+          .eq("owner_ref", ownerRef)
+          .eq("job_id", localImageJob.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const conversationId = localImageMessage?.conversation_id || null;
+
         let mediaUrl: string | null = null;
         if (localImageJob.status === "completed" && localImageJob.result_path) {
           const { data: signed, error: signError } = await admin.storage
