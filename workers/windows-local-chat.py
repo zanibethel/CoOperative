@@ -242,7 +242,9 @@ function renderProject(){
   if(!p)return;
   $("projectName").value=p.name||"";$("projectInstructions").value=p.instructions||"";
   const files=$("projectFileList");files.innerHTML="";
-  for(const f of p.files||[]){const row=document.createElement("div");row.className="file-row";const s=document.createElement("span");s.textContent=(f.kind==="image"?"🖼 ":"📄 ")+f.name;row.appendChild(s);const x=document.createElement("button");x.className="btn small";x.textContent="Remove";x.onclick=async()=>{p.files=(p.files||[]).filter(v=>v.id!==f.id);await dbDelete(f.id);saveState();renderProject()};row.appendChild(x);files.appendChild(row)}
+  for(const f of p.files||[]){const row=document.createElement("div");row.className="file-row";const s=document.createElement("span");s.textContent=(f.kind==="image"?"🖼 ":"📄 ")+f.name;row.appendChild(s);
+    if(f.kind==="image"){const use=document.createElement("button");use.className="btn small";use.textContent="Attach";use.onclick=async()=>{const item=await dbGet(f.id);if(item&&!pending.some(x=>x.id===item.id)){pending.push(item);renderAttachments()}};row.appendChild(use)}
+    const x=document.createElement("button");x.className="btn small";x.textContent="Remove";x.onclick=async()=>{p.files=(p.files||[]).filter(v=>v.id!==f.id);await dbDelete(f.id);saveState();renderProject()};row.appendChild(x);files.appendChild(row)}
   const tasks=$("tasks");tasks.innerHTML="";
   for(const t of p.tasks||[]){const row=document.createElement("div");row.className="task-row";const cb=document.createElement("input");cb.type="checkbox";cb.checked=!!t.done;cb.onchange=()=>{t.done=cb.checked;saveState()};const s=document.createElement("span");s.textContent=t.text;if(t.done)s.style.textDecoration="line-through";row.append(cb,s);const x=document.createElement("button");x.className="btn small";x.textContent="×";x.onclick=()=>{p.tasks=p.tasks.filter(v=>v.id!==t.id);saveState();renderProject()};row.appendChild(x);tasks.appendChild(row)}
 }
@@ -277,7 +279,6 @@ async function projectContext(){
   const files=[],images=[];let used=0;
   for(const ref of p.files||[]){const item=await dbGet(ref.id);if(!item)continue;
     if(item.kind==="text"&&used<60000){const text=(item.text||"").slice(0,Math.max(0,60000-used));files.push({name:item.name,text});used+=text.length}
-    else if(item.kind==="image"&&images.length<2){images.push({name:item.name,data:item.data})}
   }
   return {name:p.name,instructions:p.instructions||"",tasks:(p.tasks||[]).map(t=>({text:t.text,done:!!t.done})),files,images}
 }
