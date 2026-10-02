@@ -262,7 +262,10 @@ export async function POST(request: Request) {
         );
       }
 
-      const mediaLevel = input.modelMixer?.agents.media ?? 0;
+      const mediaLevel = Math.min(
+        4,
+        Math.max(0, input.modelMixer?.agents.media ?? 0),
+      ) as 0 | 1 | 2 | 3 | 4;
       let selectedMediaModel: MediaCatalogModel | null = null;
       let pricingSource = "configured-fallback";
 
