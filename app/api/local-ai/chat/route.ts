@@ -1085,10 +1085,18 @@ export async function POST(request: Request) {
       }
 
       const jobId = crypto.randomUUID();
-      const generationPrompt = mediaPromptWithResolvedControls(
+      let generationPrompt = mediaPromptWithResolvedControls(
         visibleUserText,
         mediaPlan,
       );
+      if (
+        selectedProvider === "nous" &&
+        mediaPlan.kind === "video" &&
+        selectedModel === "pixverse-v6"
+      ) {
+        generationPrompt +=
+          "\nBudget test controls: use 360p output and disable generated audio.";
+      }
       const requestMaxSpendMicrousd = input.modelMixer
         ? Math.round(input.modelMixer.maxSpendUsd * 1_000_000)
         : null;
@@ -1554,7 +1562,7 @@ export async function GET(request: Request) {
       let mediaQuery = admin
         .from("media_generation_jobs")
         .select(
-          "id,status,conversation_id,kind,provider,model,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
+          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_source,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
         )
         .eq("owner_ref", ownerRef);
 
