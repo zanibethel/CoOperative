@@ -267,12 +267,74 @@ def _memory_total_mb() -> int | None:
         return None
 
 
+def _gpu_vendor(name: str) -> str:
+    value = name.lower()
+    if "nvidia" in value or "geforce" in value or "quadro" in value:
+        return "nvidia"
+    if "amd" in value or "radeon" in value:
+        return "amd"
+    if "intel" in value or "arc" in value:
+        return "intel"
+    return "unknown"
+
+
+def _windows_video_controllers() -> list[dict]:
+    if platform.system() != "Windows":
+        return []
+    script = (
+        "Get-CimInstance Win32_VideoController | "
+        "Select-Object Name,AdapterRAM,DriverVersion | ConvertTo-Json -Compress"
+    )
+    try:
+        completed = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if completed.returncode != 0 or not completed.stdout.strip():
+            return []
+        value = json.loads(completed.stdout.strip())
+        rows = value if isinstance(value, list) else [value]
+        gpus = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("Name") or "").strip()
+            if not name:
+                continue
+            memory = None
+            try:
+                reported = int(int(row.get("AdapterRAM") or 0) / (1024 * 1024))
+                # Win32_VideoController.AdapterRAM is a legacy 32-bit field and
+                # commonly reports ~4GB for the 8GB Radeon RX 590.
+                if "rx 590" in name.lower() or "radeon 590" in name.lower():
+                    reported = max(reported, 8192)
+                memory = reported or None
+            except Exception:
+                memory = None
+            vendor = _gpu_vendor(name)
+            gpus.append(
+                {
+                    "name": name[:240],
+                    "memoryTotalMb": memory,
+                    "vendor": vendor,
+                    "driverVersion": str(row.get("DriverVersion") or "")[:120],
+                }
+            )
+        return gpus[:16]
+    except Exception:
+        return []
+
+
 def _detect_gpus() -> list[dict]:
+    windows = _windows_video_controllers()
     try:
         completed = subprocess.run(
             [
                 "nvidia-smi",
-                "--query-gpu=name,memory.total",
+                "--query-gpu=name,memory.total,driver_version",
                 "--format=csv,noheader,nounits",
             ],
             capture_output=True,
@@ -280,25 +342,37 @@ def _detect_gpus() -> list[dict]:
             timeout=4,
             check=False,
         )
-        if completed.returncode != 0:
-            return []
+        nvidia = []
+        if completed.returncode == 0:
+            for line in completed.stdout.splitlines():
+                if not line.strip():
+                    continue
+                parts = [part.strip() for part in line.split(",")]
+                name = parts[0][:240]
+                memory = None
+                if len(parts) > 1:
+                    try:
+                        memory = max(0, int(float(parts[1])))
+                    except ValueError:
+                        memory = None
+                nvidia.append(
+                    {
+                        "name": name,
+                        "memoryTotalMb": memory,
+                        "vendor": "nvidia",
+                        "driverVersion": parts[2][:120] if len(parts) > 2 else "",
+                    }
+                )
 
-        gpus = []
-        for line in completed.stdout.splitlines():
-            if not line.strip():
-                continue
-            parts = [part.strip() for part in line.split(",", 1)]
-            name = parts[0][:240]
-            memory = None
-            if len(parts) > 1:
-                try:
-                    memory = max(0, int(float(parts[1])))
-                except ValueError:
-                    memory = None
-            gpus.append({"name": name, "memoryTotalMb": memory})
-        return gpus[:16]
+        if not windows:
+            return nvidia[:16]
+        known = {str(item.get("name") or "").lower() for item in windows}
+        for item in nvidia:
+            if str(item.get("name") or "").lower() not in known:
+                windows.append(item)
+        return windows[:16]
     except Exception:
-        return []
+        return windows[:16]
 
 
 _HARDWARE = {
@@ -313,6 +387,7 @@ _HARDWARE = {
 _RUNTIME_DIR = Path(__file__).resolve().parent
 _MODEL_PLAN_PATH = _RUNTIME_DIR / "text-model-plan.json"
 _TEXT_BENCHMARK_PATH = _RUNTIME_DIR / "text-benchmark.json"
+_TEXT_BENCHMARK_SUITE_PATH = _RUNTIME_DIR / "text-benchmark-suite.json"
 
 
 def _read_json(path: Path) -> dict | None:
@@ -354,6 +429,45 @@ def _dynamic_resources() -> dict:
             ),
             "recordedAt": str(benchmark.get("recordedAt") or "")[:80],
         }
+
+    suite = _read_json(_TEXT_BENCHMARK_SUITE_PATH)
+    if suite:
+        acceleration = suite.get("acceleration") if isinstance(suite.get("acceleration"), dict) else {}
+        resources["textAcceleration"] = {
+            "preferred": str(acceleration.get("preferred") or "")[:80],
+            "observedBackend": str(acceleration.get("observedBackend") or "")[:80],
+            "gpuOffloadVerified": bool(acceleration.get("gpuOffloadVerified")),
+            "maxObservedGpuOffloadRatio": float(
+                acceleration.get("maxObservedGpuOffloadRatio") or 0.0
+            ),
+        }
+        raw_results = suite.get("results") if isinstance(suite.get("results"), list) else []
+        results = []
+        for item in raw_results[:8]:
+            if not isinstance(item, dict):
+                continue
+            results.append(
+                {
+                    "model": str(item.get("model") or "")[:160],
+                    "targetProfiles": [
+                        str(profile)[:32]
+                        for profile in (item.get("targetProfiles") or [])[:4]
+                        if isinstance(profile, str)
+                    ],
+                    "success": bool(item.get("success")),
+                    "latencyMs": max(0, int(item.get("latencyMs") or 0)),
+                    "tokensPerSecond": (
+                        float(item["tokensPerSecond"])
+                        if isinstance(item.get("tokensPerSecond"), (int, float))
+                        else None
+                    ),
+                    "vramBytes": max(0, int(item.get("vramBytes") or 0)),
+                    "modelSizeBytes": max(0, int(item.get("modelSizeBytes") or 0)),
+                    "gpuOffloadRatio": float(item.get("gpuOffloadRatio") or 0.0),
+                    "recordedAt": str(item.get("recordedAt") or "")[:80],
+                }
+            )
+        resources["textBenchmarks"] = results
     return resources
 
 
