@@ -2303,3 +2303,47 @@ b { color: var(--text); }
   letter-spacing: .045em;
   font-size: .63rem;
 }
+
+
+.recovery-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 2px 0 4px;
+}
+
+.recovery-suggestions button {
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  color: var(--text);
+  padding: 7px 10px;
+  font: inherit;
+  font-size: .7rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.recovery-suggestions button:hover,
+.recovery-suggestions button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel));
+}
+
+
+.model-mixer-test-cap {
+  margin-top: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: .68rem;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.model-mixer-test-cap:hover,
+.model-mixer-test-cap:focus-visible {
+  text-decoration: underline;
+}

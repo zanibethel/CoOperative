@@ -26,6 +26,29 @@ export function classifyRecoveryFailure(
 
   if (
     includesAny(value, [
+      "402",
+      "insufficient credits",
+      "purchase credits",
+      "pre-authorization",
+      "preauthorization",
+    ])
+  ) {
+    return {
+      errorClass: "provider_credit_boundary",
+      strategy: "wait-user",
+      currentMessage:
+        "Recovery Agent reached the connected provider, but that provider requires more prepaid credit before it will run this generation.",
+      continuationPrompt:
+        "Suggested next steps: use Nous subscription credits first when available, lower quality or duration to fit the current request cap, or fund the backup provider while keeping the same per-request cap.",
+      requiresUserAction: true,
+      automaticRetry: false,
+      publicDetail:
+        "This is a provider-account credit requirement, not permission to raise CoOperative's spending ceiling automatically.",
+    };
+  }
+
+  if (
+    includesAny(value, [
       "spend cap",
       "insufficient balance",
       "funded balance",

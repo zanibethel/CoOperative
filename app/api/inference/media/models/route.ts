@@ -27,25 +27,34 @@ export async function GET() {
   }
 
   try {
-    const [catalog, balance, openRouterService] = await Promise.all([
-      openRouterMediaCatalog(),
-      aiProfileBalanceForUser(userId),
-      businessOwnedServiceCredentialForOwner(
-        `coop-user:${userId}`,
-        "openrouter-api",
-      ),
-    ]);
+    const ownerRef = `coop-user:${userId}`;
+    const [catalog, balance, openRouterService, nousPortalService] =
+      await Promise.all([
+        openRouterMediaCatalog(),
+        aiProfileBalanceForUser(userId),
+        businessOwnedServiceCredentialForOwner(
+          ownerRef,
+          "openrouter-api",
+        ),
+        businessOwnedServiceCredentialForOwner(
+          ownerRef,
+          "nous-portal",
+        ),
+      ]);
 
     return NextResponse.json(
       {
         source: catalog.source,
         fetchedAt: catalog.fetchedAt,
         configured: {
-          nous: Boolean(process.env.NOUS_API_KEY?.trim()),
+          nous:
+            Boolean(nousPortalService?.credential) ||
+            Boolean(process.env.NOUS_API_KEY?.trim()),
           openRouter:
             Boolean(process.env.OPENROUTER_API_KEY?.trim()) ||
             Boolean(openRouterService?.credential),
         },
+        routingPriority: ["nous", "openrouter", "local"] as const,
         paidAiEligible: balance.funded,
         availableAiBalanceUsd: balance.availableUsd,
         image: {
