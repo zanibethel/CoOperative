@@ -1,5 +1,33 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
+
+type LiveMediaModel = {
+  id: string;
+  name: string;
+  free: boolean;
+  costLabel: string;
+};
+
+type LiveMediaTier = {
+  level: number;
+  model: LiveMediaModel | null;
+};
+
+type LiveMediaCatalog = {
+  fetchedAt: string;
+  configured: {
+    nous: boolean;
+    openRouter: boolean;
+  };
+  image: {
+    recommended: LiveMediaTier[];
+  };
+  video: {
+    recommended: LiveMediaTier[];
+  };
+};
+
 export type ModelMixerAgent =
   | "research"
   | "planner"
@@ -227,6 +255,44 @@ export default function ModelMixer({
   onChange,
   onClose,
 }: ModelMixerProps) {
+  const [mediaCatalog, setMediaCatalog] = useState<LiveMediaCatalog | null>(null);
+  const [mediaCatalogError, setMediaCatalogError] = useState(false);
+
+  useEffect(() => {
+    if (!open || mediaCatalog) return;
+
+    let cancelled = false;
+    void fetch("/api/inference/media/models", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Media catalog unavailable.");
+        return (await response.json()) as LiveMediaCatalog;
+      })
+      .then((payload) => {
+        if (!cancelled) {
+          setMediaCatalog(payload);
+          setMediaCatalogError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setMediaCatalogError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mediaCatalog]);
+
+  const liveMedia = useMemo(() => {
+    if (!mediaCatalog) return null;
+    const level = settings.agents.media;
+    return {
+      image:
+        mediaCatalog.image.recommended.find((entry) => entry.level === level)?.model || null,
+      video:
+        mediaCatalog.video.recommended.find((entry) => entry.level === level)?.model || null,
+    };
+  }, [mediaCatalog, settings.agents.media]);
+
   if (!open) return null;
 
   const estimate = estimateModelMixer(settings);
@@ -310,9 +376,24 @@ export default function ModelMixer({
                     <small>{agent.description}</small>
                   </div>
                   <div className="model-mixer-models" aria-label="Likely model blend">
-                    {agent.modelMix[level].map((model) => (
-                      <span key={model}>{model}</span>
-                    ))}
+                    {agent.key === "media" && liveMedia ? (
+                      <>
+                        {liveMedia.image ? (
+                          <span title={liveMedia.image.id}>
+                            Img · {liveMedia.image.name.replace(/^[^:]+:\s*/, "")} · {liveMedia.image.costLabel}
+                          </span>
+                        ) : null}
+                        {liveMedia.video ? (
+                          <span title={liveMedia.video.id}>
+                            Vid · {liveMedia.video.name.replace(/^[^:]+:\s*/, "")} · {liveMedia.video.costLabel}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : (
+                      agent.modelMix[level].map((model) => (
+                        <span key={model}>{model}</span>
+                      ))
+                    )}
                   </div>
                 </div>
 
@@ -392,9 +473,23 @@ export default function ModelMixer({
           <p>
             CoOperative routes each subtask to the cheapest capable model within your selected cap.
             The slider is a quality/cost ceiling for that agent, not a requirement to spend at that
-            level. Cost values are planning estimates until live provider pricing is synced.
+            level. {mediaCatalog
+              ? `Media prices are live from OpenRouter as of ${new Date(mediaCatalog.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
+              : mediaCatalogError
+                ? "Live media pricing is temporarily unavailable, so configured fallback routes will be used."
+                : "Loading live media pricing…"}
           </p>
         </div>
+
+        {mediaCatalog && !mediaCatalog.configured.openRouter ? (
+          <div className="model-mixer-funding-note">
+            <strong>OpenRouter generation key is not connected yet.</strong>
+            <span>
+              The live public catalog can still be shown, but image/video generation needs
+              OPENROUTER_API_KEY in the CoOperative Vercel environment.
+            </span>
+          </div>
+        ) : null}
       </aside>
     </>
   );
