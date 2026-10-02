@@ -84,17 +84,21 @@ export default async function UnisonContributorDashboard() {
           <Link href="/personal-ai">CoOperativeLocalAI</Link>
           <Link href="/unison/join">Add a PC</Link>
           {viewer.isOwner ? <Link href="/unison/owner">Owner dashboard</Link> : null}
-          <div className="badge">{viewer.contributor.display_name}</div>
+          <div className="badge">{viewer.contributor?.display_name || "Shared user"}</div>
         </div>
       </nav>
 
       <section className="hero compact-hero">
-        <div className="eyebrow">Contributor dashboard</div>
-        <h1>Your compute. Your contribution.</h1>
+        <div className="eyebrow">
+          {viewer.contributor ? "Contributor dashboard" : "Shared device access"}
+        </div>
+        <h1>
+          {viewer.contributor ? "Your compute. Your contribution." : "Your authorized AI devices."}
+        </h1>
         <p>
-          See what your devices have contributed to CoOperative and the earnings attached
-          to verified usage. Compensation rates are not enabled yet, so tracked earnings
-          remain at zero until a rate is deliberately published.
+          {viewer.contributor
+            ? "See what your devices have contributed to CoOperative and the verified usage attached to them. Compensation rates are not enabled yet, so tracked earnings remain at zero until a rate is deliberately published."
+            : "Use this PC for your own private CoOperativeLocalAI and mobile Personal AI. The machine is shared, but your conversations and hosted history remain tied to your account."}
         </p>
       </section>
 
