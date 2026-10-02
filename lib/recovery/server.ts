@@ -102,6 +102,25 @@ function safeError(value: unknown) {
   return value.replace(/sk-[A-Za-z0-9_-]{12,}/g, "[redacted]").slice(0, 1200);
 }
 
+function shouldPreferLocalRepairForCloudFailure(source: FailedSource) {
+  if (source.kind !== "media") return false;
+
+  const value = source.error.toLowerCase();
+  return [
+    "hermes installation failed",
+    "hermes media sandbox",
+    "sandbox",
+    "curl:",
+    "429",
+    "rate limit",
+    "provider configuration failed",
+    "could not start",
+    "service unavailable",
+    "gateway",
+    "cloud",
+  ].some((needle) => value.includes(needle));
+}
+
 async function addEvent(
   admin: AdminClient,
   incidentId: string,
@@ -173,6 +192,7 @@ async function queueDebuggerTask(
   source: FailedSource,
 ) {
   const taskId = crypto.randomUUID();
+  const cloudMediaFailure = shouldPreferLocalRepairForCloudFailure(source);
   const objective = [
     "BACKGROUND RECOVERY INCIDENT",
     "Incident: " + incidentId,
@@ -180,10 +200,14 @@ async function queueDebuggerTask(
     "Source job: " + source.job.id,
     "Failure evidence: " + source.error,
     "",
-    "Diagnose this CoOperative runtime failure from repository evidence and prepare the smallest bounded repair if code/configuration is responsible.",
+    cloudMediaFailure
+      ? "A cloud/Hermes media route failed. Use local/owned reasoning as the recovery brain before attempting that cloud route again."
+      : "Diagnose this CoOperative runtime failure from repository evidence and prepare the smallest bounded repair if code/configuration is responsible.",
+    cloudMediaFailure
+      ? "Do not use another cloud LLM to diagnose this incident. Inspect the cloud bootstrap/provider path locally and prefer deterministic route, installer, cache, or provider fixes."
+      : "Prefer deterministic fixes and existing routing patterns. Preserve owned/local and free/included execution before paid escalation.",
     "Do not read or modify secrets. Do not broaden permissions, spending limits, or auth scopes.",
-    "Prefer deterministic fixes and existing routing patterns. Preserve owned/local and free/included execution before paid escalation.",
-    "Relevant areas commonly include app/api/local-ai, lib/inference, lib/integrations, lib/recovery, and the chat UI.",
+    "Relevant areas commonly include app/api/local-ai, lib/inference, lib/integrations, lib/recovery, workers, and the chat UI.",
     "If the failure is external/transient and no code change is justified, return a no-change summary explaining the safe retry condition.",
   ].join("\n");
 
@@ -209,6 +233,7 @@ async function queueDebuggerTask(
       sourceKind: source.kind,
       sourceJobId: source.job.id,
       executorPolicy: "local-first",
+      cloudToLocalFallback: cloudMediaFailure,
     },
   });
 
@@ -217,8 +242,9 @@ async function queueDebuggerTask(
     .update({
       agent_task_id: taskId,
       status: "repairing",
-      current_message:
-        "Recovery Agent is tracing the failed route with the local debugger in the background.",
+      current_message: cloudMediaFailure
+        ? "The cloud route failed, so Recovery Agent handed diagnosis to the local debugger in the background."
+        : "Recovery Agent is tracing the failed route with the local debugger in the background.",
       updated_at: nowIso(),
     })
     .eq("id", incidentId)
@@ -230,8 +256,14 @@ async function queueDebuggerTask(
     incidentId,
     ownerRef,
     "debugger_queued",
-    "Local Debugger was queued to inspect the failed route.",
-    { taskId, modelPolicy: "local-first" },
+    cloudMediaFailure
+      ? "Cloud execution failed; Local Debugger was queued before another cloud retry."
+      : "Local Debugger was queued to inspect the failed route.",
+    {
+      taskId,
+      modelPolicy: "local-first",
+      cloudToLocalFallback: cloudMediaFailure,
+    },
   );
 
   return taskId;
@@ -727,6 +759,15 @@ export async function startRecoveryForJob(
   if (existing) return existing;
 
   const classification = classifyRecoveryFailure(source.error, source.kind);
+  const preferLocalRepair =
+    classification.strategy !== "wait-user" &&
+    shouldPreferLocalRepairForCloudFailure(source);
+  const currentMessage = preferLocalRepair
+    ? "The cloud route failed. Recovery Agent is using local/owned reasoning to diagnose and repair it before another cloud attempt."
+    : classification.currentMessage;
+  const continuationPrompt = preferLocalRepair
+    ? "You can keep chatting while the local Recovery Agent works on the cloud route. I’ll report back here when it is ready to retry."
+    : classification.continuationPrompt;
   const incidentId = crypto.randomUUID();
 
   const { data: incident, error: insertError } = await admin
@@ -748,8 +789,8 @@ export async function startRecoveryForJob(
         classification.strategy === "wait-user" ? "waiting_user" : "diagnosing",
       error_class: classification.errorClass,
       error_excerpt: source.error,
-      current_message: classification.currentMessage,
-      continuation_prompt: classification.continuationPrompt,
+      current_message: currentMessage,
+      continuation_prompt: continuationPrompt,
       requires_user_action: classification.requiresUserAction,
       automatic_retry: false,
     })
@@ -770,6 +811,21 @@ export async function startRecoveryForJob(
     },
   );
 
+  if (preferLocalRepair) {
+    await addEvent(
+      admin,
+      incidentId,
+      ownerRef,
+      "cloud_to_local_fallback",
+      "Cloud execution failed, so Recovery Agent moved diagnosis to local/owned reasoning before retrying the cloud route.",
+      {
+        sourceKind: source.kind,
+        spendChanged: false,
+        permissionsChanged: false,
+      },
+    );
+  }
+
   if (classification.strategy === "wait-user") {
     await addEvent(
       admin,
@@ -778,6 +834,8 @@ export async function startRecoveryForJob(
       "waiting_user",
       classification.publicDetail,
     );
+  } else if (preferLocalRepair) {
+    await queueDebuggerTask(admin, ownerRef, incidentId, source);
   } else if (classification.strategy === "retry-route") {
     const retryJobId =
       source.kind === "text"
@@ -796,8 +854,8 @@ export async function startRecoveryForJob(
     ownerRef,
     source,
     incidentId,
-    classification.currentMessage,
-    classification.continuationPrompt,
+    currentMessage,
+    continuationPrompt,
   );
 
   const { data: refreshed, error: refreshError } = await admin
