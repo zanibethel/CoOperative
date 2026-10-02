@@ -944,6 +944,35 @@ export default function LocalAiChat() {
     setError("");
   }, []);
 
+  const startBackgroundRecovery = useCallback(
+    async (jobId: string, targetConversationId?: string | null) => {
+      const response = await fetch("/api/local-ai/recovery", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceJobId: jobId }),
+      });
+      const result = (await response.json()) as {
+        incident?: RecoveryIncident;
+        error?: string;
+        detail?: string;
+      };
+
+      if (!response.ok || !result.incident) {
+        throw new Error(
+          result.detail || result.error || "Could not start Recovery Agent.",
+        );
+      }
+
+      if (targetConversationId) {
+        await loadConversation(targetConversationId);
+        await refreshConversations();
+      }
+
+      return result.incident;
+    },
+    [loadConversation, refreshConversations],
+  );
+
   const pollJob = useCallback(
     async (jobId: string, fallbackMessages: ChatMessage[] = []) => {
       if (activePollRef.current === jobId) return;
@@ -1095,6 +1124,28 @@ export default function LocalAiChat() {
             );
           }
 
+          if (result.status === "failed") {
+            setStreamingText("");
+            setStatus("Recovery running in background…");
+
+            try {
+              await startBackgroundRecovery(
+                pollingJobId,
+                result.conversationId || null,
+              );
+              window.localStorage.removeItem(ACTIVE_JOB_KEY);
+              setStatus("Ready");
+              break;
+            } catch (recoveryError) {
+              throw new Error(
+                recoveryError instanceof Error
+                  ? recoveryError.message
+                  : result.error ||
+                      "CoOperative AI failed and Recovery Agent could not start.",
+              );
+            }
+          }
+
           throw new Error(
             result.error ||
               `CoOperative AI job ended with status ${result.status || "unknown"}.`,
@@ -1111,7 +1162,12 @@ export default function LocalAiChat() {
         }
       }
     },
-    [loadConversation, refreshBusinesses, refreshConversations],
+    [
+      loadConversation,
+      refreshBusinesses,
+      refreshConversations,
+      startBackgroundRecovery,
+    ],
   );
 
   useEffect(() => {
