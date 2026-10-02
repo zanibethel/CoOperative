@@ -56,6 +56,62 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --disable-pip-version-check httpx
+          $mockSource = @'
+          import base64
+          import json
+          from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+          PIXEL = "data:image/png;base64," + base64.b64encode(
+              b"\x89PNG\r\n\x1a\n"
+          ).decode("ascii")
+
+          class Handler(BaseHTTPRequestHandler):
+              def log_message(self, *_args):
+                  return
+
+              def do_GET(self):
+                  if self.path == "/health":
+                      body = b'{"ok":true}'
+                      self.send_response(200)
+                      self.send_header("Content-Type", "application/json")
+                      self.send_header("Content-Length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+                      return
+                  self.send_response(404)
+                  self.end_headers()
+
+              def do_POST(self):
+                  if self.path != "/v1/images/generate":
+                      self.send_response(404)
+                      self.end_headers()
+                      return
+                  if self.headers.get("Authorization") != "Bearer ci-local-node-token":
+                      self.send_response(401)
+                      self.end_headers()
+                      return
+                  length = int(self.headers.get("Content-Length") or "0")
+                  payload = json.loads(self.rfile.read(length) or b"{}")
+                  body = json.dumps({
+                      "dataUrl": PIXEL,
+                      "model": "ci-local-image",
+                      "profile": payload.get("profile", "fast"),
+                      "seed": 1,
+                      "latencyMs": 1,
+                  }).encode()
+                  self.send_response(200)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(body)))
+                  self.end_headers()
+                  self.wfile.write(body)
+
+          ThreadingHTTPServer(("127.0.0.1", 11555), Handler).serve_forever()
+          '@
+          Set-Content -Path ".personal-ai-image-mock.py" -Value $mockSource -Encoding UTF8
+
+          $env:UNISON_NODE_TOKEN = "ci-local-node-token"
+          $env:UNISON_IMAGE_WORKER_URL = "http://127.0.0.1:11555"
+          $mockProcess = Start-Process python -ArgumentList ".personal-ai-image-mock.py" -PassThru -WindowStyle Hidden
           $process = Start-Process python -ArgumentList "workers/windows-local-chat.py" -PassThru -WindowStyle Hidden
           try {
             $ready = $false
@@ -74,8 +130,25 @@ jobs:
             Write-Host "Personal Local AI loopback server verified."
 
             python -c "import runpy; m=runpy.run_path('workers/windows-local-chat.py'); assert m['wants_image_generation']('create an image of a blue robot'); assert not m['wants_image_generation']('analyze this image'); assert m['image_aspect_ratio']('make a 16:9 wallpaper') == '16:9'; print('Personal AI image intent verified.')"
+
+            $payload = @{
+              modelMode = "auto"
+              webMode = "off"
+              messages = @(@{
+                role = "user"
+                content = "Create an image of a blue robot in 16:9."
+              })
+              images = @()
+              project = @{}
+            } | ConvertTo-Json -Depth 8
+            $generated = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:11436/api/chat" -ContentType "application/json" -Body $payload
+            if ($generated.imageGenerated -ne $true) { throw "Personal AI did not route the image request to the local image worker." }
+            if ($generated.model -ne "ci-local-image") { throw "Personal AI returned the wrong local image model." }
+            Write-Host "Personal AI local image-generation proxy verified."
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            Stop-Process -Id $mockProcess.Id -Force -ErrorAction SilentlyContinue
+            Remove-Item ".personal-ai-image-mock.py" -Force -ErrorAction SilentlyContinue
           }
 
       - name: Set up .NET
