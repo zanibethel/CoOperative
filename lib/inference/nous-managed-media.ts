@@ -152,6 +152,7 @@ export async function chooseNousManagedImage(
 }
 
 const PIXVERSE_URL = "https://fal.ai/models/fal-ai/pixverse/v6/text-to-video";
+const PIXVERSE_LLM_URL = `${PIXVERSE_URL}/llms.txt`;
 const LEVEL_RESOLUTION: Record<1 | 2 | 3 | 4, string[]> = {
   1: ["360p"],
   2: ["540p", "360p"],
@@ -160,33 +161,36 @@ const LEVEL_RESOLUTION: Record<1 | 2 | 3 | 4, string[]> = {
 };
 
 async function livePixversePricing(): Promise<PixversePricing | null> {
-  try {
-    const html = await liveText(PIXVERSE_URL);
-    const rates: PixversePricing["rates"] = {};
-    for (const resolution of ["360p", "540p", "720p", "1080p"]) {
-      const escaped = resolution.replace("p", "p");
-      const row = html.match(
-        new RegExp(
-          `For\\s+${escaped}[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+without\\s+audio[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+with\\s+audio`,
-          "i",
-        ),
-      );
-      if (!row) continue;
-      const withoutAudio = Number(row[1]);
-      const withAudio = Number(row[2]);
-      if (Number.isFinite(withoutAudio) && Number.isFinite(withAudio)) {
-        rates[resolution] = { withoutAudio, withAudio };
+  for (const source of [PIXVERSE_LLM_URL, PIXVERSE_URL]) {
+    try {
+      const html = await liveText(source);
+      const rates: PixversePricing["rates"] = {};
+      for (const resolution of ["360p", "540p", "720p", "1080p"]) {
+        const escaped = resolution.replace("p", "p");
+        const row = html.match(
+          new RegExp(
+            `For\\s+${escaped}[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+without\\s+audio[^$]*\\$([0-9.]+)\\s+per\\s+second\\s+with\\s+audio`,
+            "i",
+          ),
+        );
+        if (!row) continue;
+        const withoutAudio = Number(row[1]);
+        const withAudio = Number(row[2]);
+        if (Number.isFinite(withoutAudio) && Number.isFinite(withAudio)) {
+          rates[resolution] = { withoutAudio, withAudio };
+        }
       }
+      if (!Object.keys(rates).length) continue;
+      return {
+        fetchedAt: new Date().toISOString(),
+        source,
+        rates,
+      };
+    } catch {
+      // Try the next live fal source. Never substitute a stale hard-coded price.
     }
-    if (!Object.keys(rates).length) return null;
-    return {
-      fetchedAt: new Date().toISOString(),
-      source: PIXVERSE_URL,
-      rates,
-    };
-  } catch {
-    return null;
   }
+  return null;
 }
 
 export async function chooseNousManagedVideo(
