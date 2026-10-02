@@ -485,8 +485,9 @@ export default function ModelMixer({
           <div className="model-mixer-funding-note">
             <strong>OpenRouter generation key is not connected yet.</strong>
             <span>
-              The live public catalog can still be shown, but image/video generation needs
-              OPENROUTER_API_KEY in the CoOperative Vercel environment.
+              The live public catalog can still be shown. Connect OpenRouter once under{" "}
+              <a href="/services">Services</a>; CoOperative stores the API key in its encrypted
+              server-side vault and uses it for image/video generation.
             </span>
           </div>
         ) : null}
