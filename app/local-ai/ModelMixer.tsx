@@ -22,7 +22,19 @@ type LiveMediaCatalog = {
   };
   paidAiEligible?: boolean;
   availableAiBalanceUsd?: number;
-  routingPriority?: Array<"nous" | "openrouter" | "local">;
+  routingPriority?: Array<"nous" | "local-or-free" | "openrouter-paid">;
+  nous?: {
+    fetchedAt: string;
+    image: Array<{
+      model: string;
+      qualityLabel: string;
+      estimatedCostUsd: number;
+    }>;
+    video: {
+      model: string;
+      rates: Record<string, { withoutAudio: number; withAudio: number }>;
+    } | null;
+  };
   image: {
     recommended: LiveMediaTier[];
   };
@@ -478,11 +490,11 @@ export default function ModelMixer({
             {mediaCatalog?.configured.nous
               ? "Nous subscription/tool credits first"
               : "Nous not currently available"}
+            {" → "}owned/local or zero-provider-cost hosted capacity when capable
             {" → "}
             {mediaCatalog?.configured.openRouter
-              ? "OpenRouter backup"
-              : "OpenRouter backup not connected"}
-            {" → "}owned/local fallback when capable. The request cap is a hard ceiling;
+              ? "paid OpenRouter backup"
+              : "paid OpenRouter backup not connected"}. The request cap is a hard ceiling;
             CoOperative does not raise it automatically.
           </span>
           <small>
@@ -513,11 +525,12 @@ export default function ModelMixer({
           <p>
             CoOperative routes each subtask to the cheapest capable model within your selected cap.
             The slider is a quality/cost ceiling for that agent, not a requirement to spend at that
-            level. For connected paid media, Nous subscription credits are preferred first and
-            OpenRouter is used only as a bounded backup when needed. {mediaCatalog
-              ? `Media prices are live from OpenRouter as of ${new Date(mediaCatalog.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
+            level. For connected paid media, Nous subscription credits are preferred first,
+            owned/local or free capacity is next, and paid OpenRouter is used only as a bounded
+            backup. {mediaCatalog
+              ? `Media prices are live from Nous/FAL and OpenRouter as of ${new Date(mediaCatalog.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
               : mediaCatalogError
-                ? "Live media pricing is temporarily unavailable, so configured fallback routes will be used."
+                ? "Live media pricing is temporarily unavailable, so CoOperative will not assume an unverified paid route is affordable."
                 : "Loading live media pricing…"}
           </p>
         </div>
