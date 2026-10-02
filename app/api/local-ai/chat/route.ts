@@ -33,9 +33,11 @@ import {
 } from "@/lib/inference/openrouter-media-catalog";
 import {
   affordableVideoSuggestion,
-  chooseNousManagedImage,
-  chooseNousManagedVideo,
 } from "@/lib/inference/nous-managed-media";
+import {
+  buildMediaRecommendationOptions,
+  requestedMediaRecommendationTier,
+} from "@/lib/inference/media-recommendations";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
 import {
@@ -124,7 +126,8 @@ function looksLikeMediaFollowup(message: string) {
     /\b(?:without|no) audio\b/.test(value) ||
     /\b(?:360p|480p|540p|720p|1080p|4k)\b/.test(value) ||
     /\b(?:vertical|landscape|square|9:16|16:9|1:1)\b/.test(value) ||
-    /\b\d{1,2}\s*(?:-\s*)?(?:seconds?|secs?|s)\b/.test(value)
+    /\b\d{1,2}\s*(?:-\s*)?(?:seconds?|secs?|s)\b/.test(value) ||
+    /\b(?:high[- ]?end|premium|balanced|middle|medium|lowest[- ]?cost|cheapest|low[- ]?cost)\b.*\b(?:media )?(?:option|recommendation)\b/.test(value)
   );
 }
 
@@ -172,11 +175,6 @@ function estimatedMediaProviderCostUsd(
     resolution,
     audio,
   });
-}
-
-function nextBudgetUsd(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
-  return Math.ceil(value * 100) / 100;
 }
 
 function videoControlsFromPrompt(prompt: string) {
@@ -944,7 +942,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const mediaLevel = Math.min(
+      let mediaLevel = Math.min(
         4,
         Math.max(0, input.modelMixer?.agents.media ?? 0),
       ) as 0 | 1 | 2 | 3 | 4;
@@ -971,9 +969,6 @@ export async function POST(request: Request) {
         }
       }
 
-      // Media priority is deliberate: connected Nous/Hermes entitlement first,
-      // then owned/local or genuinely free hosted capacity, then paid OpenRouter.
-      // Unknown paid pricing is never treated as affordable.
       let nousAuthFailure: string | null = null;
       const nousRuntimeAuth = await freshNousRuntimeAuthForOwner(ownerRef).catch(
         (error) => {
@@ -981,55 +976,25 @@ export async function POST(request: Request) {
             error instanceof Error
               ? error.message.slice(0, 500)
               : "Nous Portal authorization is temporarily unavailable.";
-          console.warn("Nous-first media authorization unavailable; backup routing may be used", {
+          console.warn("Nous media authorization unavailable", {
             ownerRef,
             detail: nousAuthFailure,
           });
           return null;
         },
       );
-      const nousChoice = nousRuntimeAuth
-        ? mediaPlan.kind === "image"
-          ? await chooseNousManagedImage(mediaLevel, requestCapUsd)
-          : await chooseNousManagedVideo(
-              mediaLevel,
-              requestCapUsd,
-              mediaPlan.durationSeconds,
-              mediaPlan.resolution,
-              mediaPlan.audio,
-            )
-        : null;
 
       let liveCatalog:
         | Awaited<ReturnType<typeof openRouterMediaCatalog>>
         | null = null;
-      if (!nousChoice) {
-        try {
-          liveCatalog = await openRouterMediaCatalog(true);
-        } catch {
-          liveCatalog = null;
-        }
+      try {
+        liveCatalog = await openRouterMediaCatalog(true);
+      } catch {
+        liveCatalog = null;
       }
 
-      const requestShape = {
-        durationSeconds: mediaPlan.durationSeconds,
-        aspectRatio: mediaPlan.aspectRatio,
-        resolution: mediaPlan.resolution,
-        audio: mediaPlan.audio,
-      };
-      const openRouterPool = liveCatalog
-        ? mediaPlan.kind === "video"
-          ? liveCatalog.video
-          : liveCatalog.image
-        : [];
-      const freeHostedModel = recommendedForRequest(
-        openRouterPool.filter((model) => model.free),
-        0,
-        requestShape,
-      );
-
       let localImageAvailable = false;
-      if (!nousChoice && mediaPlan.kind === "image") {
+      if (mediaPlan.kind === "image") {
         const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
         if (authorizedNodeIds.length > 0) {
           const { data: imageNodes, error: imageNodesError } = await admin
@@ -1059,7 +1024,170 @@ export async function POST(request: Request) {
         }
       }
 
-      if (!nousChoice && localImageAvailable) {
+      const recommendationSet = await buildMediaRecommendationOptions({
+        plan: mediaPlan,
+        openRouterCatalog: liveCatalog,
+        currentCapUsd: requestCapUsd,
+        localImageAvailable,
+      });
+      const recommendationTier = requestedMediaRecommendationTier(input.message);
+      const selectedRecommendation = recommendationTier
+        ? recommendationSet.options.find(
+            (option) => option.tier === recommendationTier,
+          ) || null
+        : null;
+
+      const recommendationMarker =
+        recommendationSet.options.length > 0
+          ? `MEDIA_RECOMMENDATIONS:${encodeURIComponent(
+              JSON.stringify({
+                currentCapUsd: requestCapUsd,
+                options: recommendationSet.options,
+              }),
+            )}`
+          : "";
+
+      const recommendationText = () => {
+        if (!recommendationSet.options.length) {
+          return (
+            "I understand the media request, but I could not verify enough live exact-match pricing to offer the three choices safely. I did not start a generation."
+          );
+        }
+
+        const lines = recommendationSet.options.map((option, index) => {
+          const increase =
+            option.increaseNeededUsd > 0
+              ? ` · +\$${option.increaseNeededUsd.toFixed(2)} above the current cap`
+              : " · fits the current cap";
+          return `${index + 1}. ${option.label}: ${option.summary} · estimated \$${option.estimatedCostUsd.toFixed(3)}${increase}`;
+        });
+
+        return (
+          "I understand the request. Before generating, here are three live-priced ways to fulfill the ask without changing its requested duration, resolution, format, or audio settings:\n\n" +
+          lines.join("\n") +
+          "\n\nNo generation has started. Choose High-end, Lowest cost, or Balanced." +
+          (recommendationMarker ? `\n\n${recommendationMarker}` : "")
+        );
+      };
+
+      if (!recommendationTier) {
+        const message = recommendationText();
+        const { error: recommendationError } = await admin
+          .from("local_ai_messages")
+          .insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: visibleUserText,
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: message,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+        if (recommendationError) throw recommendationError;
+
+        await admin
+          .from("local_ai_conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversationId)
+          .eq("owner_ref", ownerRef);
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-three-tier-recommendations",
+            routeReason:
+              "The media request is clear, so CoOperative priced three exact-request quality/cost choices before starting any generation.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      if (!selectedRecommendation) {
+        const message = recommendationText();
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-three-tier-recommendations",
+            routeReason:
+              "The requested recommendation tier was not available from the current live catalog, so no generation started.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      if (selectedRecommendation.capUsd > requestCapUsd + 0.000001) {
+        const message =
+          `The ${selectedRecommendation.label} option is currently estimated at \$${selectedRecommendation.estimatedCostUsd.toFixed(3)}, so its safe request cap is \$${selectedRecommendation.capUsd.toFixed(2)}. Your current cap is \$${requestCapUsd.toFixed(2)}, so I did not start it.\n\n` +
+          recommendationText();
+
+        const { error: capError } = await admin
+          .from("local_ai_messages")
+          .insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: visibleUserText,
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: message,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+        if (capError) throw capError;
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-recommendation-cap-gate",
+            routeReason:
+              "The user selected a media recommendation, but the current request cap is below its live estimate.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      mediaLevel =
+        recommendationTier === "high-end"
+          ? 4
+          : recommendationTier === "balanced"
+            ? 2
+            : 1;
+
+      if (selectedRecommendation.provider === "cooperative-local") {
         const localJobId = crypto.randomUUID();
         const generationPrompt = mediaPromptWithResolvedControls(
           effectiveMediaRequestText,
@@ -1092,12 +1220,6 @@ export async function POST(request: Request) {
           });
         if (localMessageError) throw localMessageError;
 
-        await admin
-          .from("local_ai_conversations")
-          .update({ updated_at: new Date().toISOString() })
-          .eq("id", conversationId)
-          .eq("owner_ref", ownerRef);
-
         return NextResponse.json(
           {
             jobId: localJobId,
@@ -1107,9 +1229,9 @@ export async function POST(request: Request) {
             conversationId,
             conversationTitle,
             provider: "cooperative-local",
-            model: mediaLevel >= 2 ? "local-image-quality" : "local-image-fast",
+            model: selectedRecommendation.model,
             routeReason:
-              "Nous did not have a live-priced route inside the approved ceiling, so CoOperative selected a fresh owned image node before considering paid OpenRouter capacity.",
+              "The user selected the quoted lowest-cost owned/local recommendation.",
             estimatedProviderCostUsd: 0,
             requestMaxSpendUsd: requestCapUsd,
           },
@@ -1118,157 +1240,65 @@ export async function POST(request: Request) {
       }
 
       let selectedMediaModel: MediaCatalogModel | null = null;
-      let selectedProvider: "nous" | "openrouter" | null = null;
-      let selectedModel = "";
-      let selectedFree = false;
-      let pricingSource = "";
-      let estimatedProviderCostUsd: number | null = null;
-      let selectedResolution: string | null = mediaPlan.resolution;
-      let selectedAudio: boolean | null = mediaPlan.audio;
+      const selectedProvider: "nous" | "openrouter" | null =
+        selectedRecommendation.provider;
+      const selectedModel = selectedRecommendation.model;
+      const selectedFree = selectedRecommendation.estimatedCostUsd <= 0;
+      const pricingSource = selectedRecommendation.pricingSource;
+      const estimatedProviderCostUsd: number | null =
+        selectedRecommendation.estimatedCostUsd;
+      const selectedResolution: string | null =
+        selectedRecommendation.resolution || mediaPlan.resolution;
+      const selectedAudio: boolean | null =
+        selectedRecommendation.audio ?? mediaPlan.audio;
 
-      if (nousRuntimeAuth && nousChoice) {
-        selectedProvider = "nous";
-        selectedModel = nousChoice.model;
-        selectedFree = false;
-        pricingSource = nousChoice.pricingSource;
-        estimatedProviderCostUsd = nousChoice.estimatedCostUsd;
-        selectedResolution = nousChoice.resolution || selectedResolution;
-        selectedAudio = nousChoice.audio ?? selectedAudio;
-      } else if (freeHostedModel) {
-        selectedProvider = "openrouter";
-        selectedMediaModel = freeHostedModel;
-        selectedModel = freeHostedModel.id;
-        selectedFree = true;
-        pricingSource = liveCatalog?.source || "openrouter-live";
-        estimatedProviderCostUsd = 0;
-      } else if (mediaLevel > 0 && openRouterPool.length > 0) {
-        selectedMediaModel = recommendedForRequest(
-          openRouterPool.filter((model) => !model.free),
-          mediaLevel,
-          requestShape,
-        );
-        if (selectedMediaModel) {
-          const estimate = estimatedMediaProviderCostUsd(
-            selectedMediaModel,
-            mediaPlan.durationSeconds,
-            mediaPlan.resolution,
-            mediaPlan.audio,
+      if (selectedProvider === "openrouter") {
+        selectedMediaModel =
+          liveCatalog?.[mediaPlan.kind].find(
+            (model) => model.id === selectedModel,
+          ) || null;
+        if (!selectedMediaModel) {
+          const message =
+            "That quoted OpenRouter model is no longer present in the live catalog, so I did not start a generation. Ask me to refresh the three options.";
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: mediaPlan.kind,
+              conversationId,
+              conversationTitle,
+              text: message,
+              provider: "code",
+              model: "media-recommendation-stale",
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
           );
-          if (estimate !== null && estimate <= requestCapUsd) {
-            selectedProvider = "openrouter";
-            selectedModel = selectedMediaModel.id;
-            selectedFree = false;
-            pricingSource = liveCatalog?.source || "openrouter-live";
-            estimatedProviderCostUsd = estimate;
-          }
         }
       }
 
-      if (!selectedProvider) {
-        // Live public pricing is useful for safe budget guidance even when the
-        // connected Nous entitlement is temporarily unavailable. It does not
-        // authorize a paid call by itself.
-        const nousSuggestion =
-          mediaPlan.kind === "video"
-            ? await affordableVideoSuggestion(
-                mediaPlan.durationSeconds,
-                requestCapUsd,
-                mediaPlan.resolution,
-                mediaPlan.audio,
-              )
-            : null;
-        const openRouterEstimate = selectedMediaModel
-          ? estimatedMediaProviderCostUsd(
-              selectedMediaModel,
-              mediaPlan.durationSeconds,
-              mediaPlan.resolution,
-              mediaPlan.audio,
-            )
-          : null;
-        const candidates = [
-          nousSuggestion?.minimumRequestedBudget,
-          openRouterEstimate,
-        ].filter(
-          (value): value is number =>
-            typeof value === "number" &&
-            Number.isFinite(value) &&
-            value > requestCapUsd,
-        );
-        const suggestedBudget = nextBudgetUsd(
-          candidates.length ? Math.min(...candidates) : null,
-        );
-
-        const bestWithinBudget = nousSuggestion?.bestWithinBudget || null;
-        const bestWithoutAudio = nousSuggestion?.bestWithoutAudio || null;
-        const formatVideoOption = (
-          label: string,
-          option:
-            | {
-                durationSeconds: number;
-                resolution: string;
-                audio: boolean;
-                estimatedCostUsd: number;
-              }
-            | null,
-        ) =>
-          option
-            ? `${label}: ${option.durationSeconds}s at ${option.resolution}${option.audio ? " with audio" : " without audio"} for about \${option.estimatedCostUsd.toFixed(3)}.`
-            : null;
-
-        const actions =
-          mediaPlan.kind === "video"
-            ? [
-                formatVideoOption("Closest fit that preserves audio", bestWithinBudget),
-                mediaPlan.audio === true &&
-                bestWithoutAudio &&
-                (!bestWithinBudget ||
-                  bestWithoutAudio.durationSeconds > bestWithinBudget.durationSeconds)
-                  ? formatVideoOption("Longest fit if audio is removed", bestWithoutAudio)
-                  : null,
-                suggestedBudget
-                  ? `Keep the original request by increasing the cap to about \${suggestedBudget.toFixed(2)}.`
-                  : null,
-                !bestWithinBudget ? "Reduce duration and/or resolution." : null,
-                "Lower the Media quality ceiling.",
-              ].filter(Boolean)
-            : [
-                suggestedBudget
-                  ? `Increase budget to ~\${suggestedBudget.toFixed(2)}.`
-                  : null,
-                "Use the owned local image generator when a node is available.",
-                "Lower the Media quality ceiling.",
-              ].filter(Boolean);
-
-        const followupMarker = suggestedBudget
-          ? `BUDGET_FOLLOWUPS:${suggestedBudget.toFixed(2)}`
-          : "BUDGET_FOLLOWUPS";
+      if (selectedProvider === "nous" && !nousRuntimeAuth) {
         const message =
-          `I can’t safely fit the requested ${mediaPlan.kind} into the current \$${requestCapUsd.toFixed(2)} ceiling using a live-priced eligible route, so I did not start a paid generation. ` +
-          (actions.length ? `Useful options: ${actions.join(" ")}` : "No paid call was made.") +
-          `\n\n${followupMarker}`;
-
-        const { error: budgetError } = await admin
-          .from("local_ai_messages")
-          .insert([
-            {
-              conversation_id: conversationId,
-              owner_ref: ownerRef,
-              role: "user",
-              content: visibleUserText,
-              attachment_ids: [],
-              job_id: null,
-            },
-            {
-              conversation_id: conversationId,
-              owner_ref: ownerRef,
-              role: "assistant",
-              content: message,
-              attachment_ids: [],
-              job_id: null,
-            },
-          ]);
-        if (budgetError) throw budgetError;
-
+          "The selected recommendation uses Nous, but the Nous authorization is not currently usable. I did not start a generation. Reconnect or refresh Nous, then choose the option again." +
+          (nousAuthFailure ? ` Current status: ${nousAuthFailure}` : "") +
+          "\n\nOAUTH_SERVICE_CONNECT:nous-portal";
+        await admin.from("local_ai_messages").insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: visibleUserText,
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: message,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
         return NextResponse.json(
           {
             status: "completed",
@@ -1278,10 +1308,7 @@ export async function POST(request: Request) {
             conversationTitle,
             text: message,
             provider: "code",
-            model: "media-budget-options",
-            routeReason:
-              "CoOperative exhausted Nous plus local/free eligibility and stopped before any paid route whose live estimate was unknown or above the approved ceiling.",
-            nousAuthFailure,
+            model: "nous-media-auth-gate",
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );

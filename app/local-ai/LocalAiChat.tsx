@@ -300,6 +300,94 @@ function budgetFollowupDirective(content: string) {
   };
 }
 
+type MediaRecommendationOption = {
+  tier: "high-end" | "balanced" | "lowest-cost";
+  label: string;
+  provider: "nous" | "openrouter" | "cooperative-local";
+  model: string;
+  modelName: string;
+  estimatedCostUsd: number;
+  capUsd: number;
+  increaseNeededUsd: number;
+  summary: string;
+};
+
+function mediaRecommendationsDirective(content: string) {
+  const marker = /(?:^|\n)MEDIA_RECOMMENDATIONS:([^\s]+)\s*$/im;
+  const match = content.match(marker);
+  if (!match) return null;
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(match[1])) as {
+      currentCapUsd?: unknown;
+      options?: unknown;
+    };
+    const options = Array.isArray(parsed.options)
+      ? parsed.options.filter((option): option is MediaRecommendationOption => {
+          if (!option || typeof option !== "object") return false;
+          const value = option as Partial<MediaRecommendationOption>;
+          return (
+            (value.tier === "high-end" ||
+              value.tier === "balanced" ||
+              value.tier === "lowest-cost") &&
+            typeof value.label === "string" &&
+            typeof value.provider === "string" &&
+            typeof value.model === "string" &&
+            typeof value.modelName === "string" &&
+            typeof value.estimatedCostUsd === "number" &&
+            Number.isFinite(value.estimatedCostUsd) &&
+            typeof value.capUsd === "number" &&
+            Number.isFinite(value.capUsd) &&
+            typeof value.increaseNeededUsd === "number" &&
+            Number.isFinite(value.increaseNeededUsd) &&
+            typeof value.summary === "string"
+          );
+        })
+      : [];
+
+    if (!options.length) return null;
+    return {
+      text: content.replace(marker, "").trim(),
+      currentCapUsd:
+        typeof parsed.currentCapUsd === "number" &&
+        Number.isFinite(parsed.currentCapUsd)
+          ? parsed.currentCapUsd
+          : null,
+      options,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function MediaRecommendationChoices({
+  options,
+  onChoose,
+}: {
+  options: MediaRecommendationOption[];
+  onChoose: (option: MediaRecommendationOption) => void;
+}) {
+  return (
+    <div className="recovery-suggestions" aria-label="Media recommendations">
+      {options.map((option) => (
+        <button
+          type="button"
+          key={option.tier}
+          onClick={() => onChoose(option)}
+          title={option.summary}
+        >
+          {option.label} · {option.estimatedCostUsd.toLocaleString(undefined, {
+            style: "currency",
+            currency: "USD",
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 3,
+          })}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 type BudgetFollowupsProps = {
   onSuggestion?: (value: string) => void;
   onCapChange?: (value: number) => void;
@@ -1931,6 +2019,41 @@ export default function LocalAiChat() {
                               await loadConversation(conversationId);
                               await refreshConversations();
                             }
+                          }}
+                        />
+                      </>
+                    );
+                  }
+
+                  const mediaRecommendations =
+                    mediaRecommendationsDirective(message.content);
+                  if (mediaRecommendations) {
+                    return (
+                      <>
+                        {mediaRecommendations.text ? (
+                          <div>{mediaRecommendations.text}</div>
+                        ) : null}
+                        <MediaRecommendationChoices
+                          options={mediaRecommendations.options}
+                          onChoose={(option) => {
+                            const mediaLevel =
+                              option.tier === "high-end"
+                                ? 4
+                                : option.tier === "balanced"
+                                  ? 2
+                                  : 1;
+                            setModelMixer((current) => ({
+                              ...current,
+                              preset: "custom",
+                              maxSpendUsd: option.capUsd,
+                              agents: {
+                                ...current.agents,
+                                media: mediaLevel,
+                              },
+                            }));
+                            setInput(
+                              `Use the ${option.label} media recommendation exactly as quoted.`,
+                            );
                           }}
                         />
                       </>
