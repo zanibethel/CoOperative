@@ -141,6 +141,151 @@ function estimatedMediaProviderCostUsd(
   return model.free ? 0 : null;
 }
 
+const DEFAULT_TEST_SPEND_USD = 0.05;
+
+type NousManagedMediaChoice = {
+  model: string;
+  estimatedCostUsd: number;
+  pricingSource: string;
+};
+
+function nousManagedMediaChoice(
+  kind: "image" | "video",
+  mediaLevel: 0 | 1 | 2 | 3 | 4,
+  requestCapUsd: number,
+  durationSeconds: number | null,
+): NousManagedMediaChoice | null {
+  if (requestCapUsd <= 0) return null;
+
+  if (kind === "image") {
+    const candidates: Array<{
+      minLevel: number;
+      model: string;
+      estimatedCostUsd: number;
+    }> = [
+      {
+        minLevel: 0,
+        model: "fal-ai/flux-2/klein/9b",
+        estimatedCostUsd: 0.01,
+      },
+      {
+        minLevel: 2,
+        model: "fal-ai/qwen-image",
+        estimatedCostUsd: 0.03,
+      },
+      {
+        minLevel: 3,
+        model: "fal-ai/gpt-image-1.5",
+        estimatedCostUsd: 0.04,
+      },
+      {
+        minLevel: 4,
+        model: "fal-ai/gpt-image-2",
+        estimatedCostUsd: 0.06,
+      },
+    ];
+
+    const affordable = candidates
+      .filter(
+        (candidate) =>
+          candidate.minLevel <= mediaLevel &&
+          candidate.estimatedCostUsd <= requestCapUsd,
+      )
+      .sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd)[0];
+
+    return affordable
+      ? {
+          model: affordable.model,
+          estimatedCostUsd: affordable.estimatedCostUsd,
+          pricingSource: "nous-managed-planning-estimate",
+        }
+      : null;
+  }
+
+  const duration = durationSeconds || 5;
+  const estimatedCostUsd = duration * 0.05;
+  if (estimatedCostUsd > requestCapUsd) return null;
+
+  return {
+    model: mediaLevel >= 2 ? "seedance-2.0-mini" : "pixverse-v6",
+    estimatedCostUsd,
+    pricingSource: "nous-managed-video-planning-estimate",
+  };
+}
+
+function affordableOpenRouterModel(
+  models: MediaCatalogModel[],
+  level: 0 | 1 | 2 | 3 | 4,
+  request: { durationSeconds?: number | null; aspectRatio?: string | null },
+  capUsd: number,
+) {
+  const capable = models.filter((model) => {
+    const durationOk =
+      !request.durationSeconds ||
+      model.durations.length === 0 ||
+      model.durations.includes(request.durationSeconds);
+    const aspectOk =
+      !request.aspectRatio ||
+      model.aspectRatios.length === 0 ||
+      model.aspectRatios.includes(request.aspectRatio);
+    return durationOk && aspectOk;
+  });
+  const pool = capable.length ? capable : models;
+  const requested = recommendedForRequest(pool, level, request);
+  const requestedCost = requested
+    ? estimatedMediaProviderCostUsd(requested, request.durationSeconds || null)
+    : null;
+
+  if (
+    requested &&
+    requestedCost !== null &&
+    requestedCost <= capUsd
+  ) {
+    return { model: requested, estimatedCostUsd: requestedCost };
+  }
+
+  const affordable = pool
+    .map((model) => ({
+      model,
+      estimatedCostUsd: estimatedMediaProviderCostUsd(
+        model,
+        request.durationSeconds || null,
+      ),
+    }))
+    .filter(
+      (
+        row,
+      ): row is { model: MediaCatalogModel; estimatedCostUsd: number } =>
+        row.estimatedCostUsd !== null && row.estimatedCostUsd <= capUsd,
+    )
+    .sort((a, b) => {
+      if (a.model.free !== b.model.free) return a.model.free ? 1 : -1;
+      return b.estimatedCostUsd - a.estimatedCostUsd;
+    })[0];
+
+  return affordable || null;
+}
+
+function mediaBudgetSuggestion(
+  kind: "image" | "video",
+  capUsd: number,
+  estimateUsd: number | null,
+) {
+  if (kind === "video") {
+    const suggested = Math.max(0.25, estimateUsd || 0);
+    return (
+      `Paid video is unlikely to fit inside a ${capUsd.toFixed(2)} cap. ` +
+      `Keep the cap and lower the quality/duration, use a free route if one is available, or raise this request to about ${suggested.toFixed(2)} for a short paid-video test.`
+    );
+  }
+
+  const suggested = Math.max(0.1, estimateUsd || 0);
+  return (
+    `I could not find a paid image route that fits the current ${capUsd.toFixed(2)} cap. ` +
+    `I can lower the Media quality, use local/free generation, or raise this request to about ${suggested.toFixed(2)}.`
+  );
+}
+
 export async function POST(request: Request) {
   const owner = await currentOwner();
   if (!owner) {
