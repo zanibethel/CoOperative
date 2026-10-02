@@ -1081,6 +1081,17 @@ export default function LocalAiChat() {
 
           readFailureCount = 0;
 
+          if (
+            result.jobId &&
+            result.jobId !== pollingJobId &&
+            (result.status === "queued" || result.status === "running")
+          ) {
+            pollingJobId = result.jobId;
+            activePollRef.current = pollingJobId;
+            setActiveJobId(pollingJobId);
+            window.localStorage.setItem(ACTIVE_JOB_KEY, pollingJobId);
+          }
+
           if (result.profile === "fast" || result.profile === "quality") {
             setProfile(result.profile);
           }
