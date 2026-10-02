@@ -208,7 +208,7 @@ function renderProjects(){
 function renderHistory(){
   const box=$("history");box.innerHTML="";
   const rows=state.conversations.filter(c=>state.activeProjectId?c.projectId===state.activeProjectId:true).slice(0,40);
-  for(const c of rows){const b=document.createElement("button");b.textContent=c.title||"Chat";if(c.id===state.activeConversationId)b.className="active";b.onclick=()=>{state.activeConversationId=c.id;state.activeProjectId=c.projectId||state.activeProjectId;saveState();renderAll()};box.appendChild(b)}
+  for(const c of rows){const b=document.createElement("button");b.textContent=c.title||"Chat";if(c.id===state.activeConversationId)b.className="active";b.onclick=()=>{state.activeConversationId=c.id;state.activeProjectId=c.projectId||null;saveState();renderAll()};box.appendChild(b)}
 }
 function renderMessages(){
   const box=$("messages");box.innerHTML="";const c=currentConversation();
@@ -265,9 +265,9 @@ async function handleFiles(files,storeInProject=false){
       let item={id:uid(),name:file.name,type:file.type,size:file.size,kind:"text",createdAt:Date.now()};
       if(file.type.startsWith("image/")){item.kind="image";item.data=await compressImage(file)}
       else{const x=await extractFile(file);item.kind="text";item.text=x.text;item.documentKind=x.kind}
-      pending.push(item);
       const p=currentProject();
       if(storeInProject&&p){await dbPut(item);p.files=p.files||[];p.files.push({id:item.id,name:item.name,kind:item.kind,size:item.size});saveState()}
+      else{pending.push(item)}
     }
   }catch(e){$("error").textContent=e.message||String(e)}
   finally{$("status").textContent="Ready";renderAll();$("fileInput").value=""}
