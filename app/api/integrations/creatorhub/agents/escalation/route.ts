@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { evaluateAgentTaskEscalation } from "@/lib/inference/agent-escalation";
-import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
+import { aiProfileBalanceForOwnerRef } from "@/lib/billing/ai-profile-balance";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -54,11 +54,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const profileBalance = await aiProfileBalanceForUser(input.userId);
+    const profileBalance = await aiProfileBalanceForOwnerRef(owner);
     const recommendation = await evaluateAgentTaskEscalation(admin, task, {
-      allowPaidFallback: profileBalance.funded,
-      automaticPaidBudgetUsd: profileBalance.availableUsd,
-      fundedPaidBalanceUsd: profileBalance.availableUsd,
+      allowPaidFallback: profileBalance?.funded === true,
+      automaticPaidBudgetUsd: profileBalance?.availableUsd ?? 0,
+      fundedPaidBalanceUsd: profileBalance?.availableUsd ?? 0,
       requiredSuccessRate: 0.8,
     });
 
@@ -67,10 +67,10 @@ export async function POST(request: Request) {
         {
           recommendation,
           profileBalance: {
-            availableMicrousd: profileBalance.availableMicrousd,
-            availableUsd: profileBalance.availableUsd,
-            funded: profileBalance.funded,
-            paidAiEligible: profileBalance.funded,
+            availableMicrousd: profileBalance?.availableMicrousd ?? 0,
+            availableUsd: profileBalance?.availableUsd ?? 0,
+            funded: profileBalance?.funded === true,
+            paidAiEligible: profileBalance?.funded === true,
           },
         },
         { headers: { "Cache-Control": "no-store" } },
@@ -103,16 +103,16 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!profileBalance.funded || profileBalance.availableUsd + 1e-9 < estimatedCostUsd) {
+    if (!profileBalance?.funded || profileBalance.availableUsd + 1e-9 < estimatedCostUsd) {
       return NextResponse.json(
         {
           error:
             "A funded profile AI balance is required and must cover the estimated stronger-model cost.",
           recommendation,
           profileBalance: {
-            availableMicrousd: profileBalance.availableMicrousd,
-            availableUsd: profileBalance.availableUsd,
-            funded: profileBalance.funded,
+            availableMicrousd: profileBalance?.availableMicrousd ?? 0,
+            availableUsd: profileBalance?.availableUsd ?? 0,
+            funded: profileBalance?.funded === true,
           },
         },
         { status: 409, headers: { "Cache-Control": "no-store" } },
@@ -121,8 +121,8 @@ export async function POST(request: Request) {
 
     const approvedMaxCostUsd =
       typeof input.approvedMaxCostUsd === "number"
-        ? Math.min(input.approvedMaxCostUsd, profileBalance.availableUsd)
-        : profileBalance.availableUsd;
+        ? Math.min(input.approvedMaxCostUsd, profileBalance?.availableUsd ?? 0)
+        : profileBalance?.availableUsd ?? 0;
 
     if (approvedMaxCostUsd + 1e-9 < estimatedCostUsd) {
       return NextResponse.json(
@@ -146,7 +146,7 @@ export async function POST(request: Request) {
       approvedMaxCostUsd,
       estimatedCostUsd,
       approvalSource: "creatorhub-funded-profile",
-      profileAvailableUsdAtApproval: profileBalance.availableUsd,
+      profileAvailableUsdAtApproval: profileBalance?.availableUsd ?? 0,
     };
 
     const { error: insertError } = await admin.from("agent_tasks").insert({
