@@ -149,9 +149,47 @@ def create_worktree(source_repo, repository, task_id):
     repo_dir = re.sub(r"[^a-zA-Z0-9._-]", "-", str(repository["localDirName"]))
     worktree = (WORKTREE_ROOT / repo_dir / safe_task).resolve()
     worktree.parent.mkdir(parents=True, exist_ok=True)
+
+    # Task IDs are unique and this worker executes one task at a time. If the
+    # exact task worktree already exists, it is residue from an interrupted or
+    # retried attempt and can be cleaned before recreating the isolated branch.
     if worktree.exists():
-        raise AgentError(f"Agent worktree already exists at {worktree}.")
-    run(["git","worktree","add","-b",branch,str(worktree),f"origin/{branch_base}"], source_repo, timeout=180)
+        listed = run(
+            ["git", "worktree", "list", "--porcelain"],
+            source_repo,
+            timeout=30,
+            check=False,
+        ).stdout
+        registered = f"worktree {worktree}" in listed
+        if registered:
+            run(
+                ["git", "worktree", "remove", "--force", str(worktree)],
+                source_repo,
+                timeout=120,
+                check=False,
+            )
+        if worktree.exists():
+            shutil.rmtree(worktree, ignore_errors=False)
+
+    existing_branch = run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        source_repo,
+        timeout=30,
+        check=False,
+    ).returncode == 0
+    if existing_branch:
+        run(
+            ["git", "branch", "-D", branch],
+            source_repo,
+            timeout=30,
+            check=False,
+        )
+
+    run(
+        ["git","worktree","add","-b",branch,str(worktree),f"origin/{branch_base}"],
+        source_repo,
+        timeout=180,
+    )
     source_modules = source_repo / "node_modules"
     target_modules = worktree / "node_modules"
     if source_modules.is_dir() and not target_modules.exists():
