@@ -102,7 +102,8 @@ export default function JoinClient({
             <span>PDF / Office / code files</span>
             <span>Voice input + spoken replies</span>
             <span>Optional web search</span>
-            <span>Local chat history</span>
+            <span>Encrypted synced history</span>
+            <span>Phone access to your PC AI</span>
             <span>Projects + tasks</span>
             <span>Machine-wide Unison node</span>
             <span>Whole-PC idle protection</span>
