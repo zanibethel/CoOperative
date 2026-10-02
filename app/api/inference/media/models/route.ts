@@ -5,16 +5,17 @@ import {
   mediaLevelBands,
   openRouterMediaCatalog,
   recommendedForLevel,
+  type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
 import { authenticatedUserId } from "@/lib/supabase/auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-function tierRows<T extends { id: string }>(models: T[]) {
+function tierRows(models: MediaCatalogModel[]) {
   return ([0, 1, 2, 3, 4] as const).map((level) => ({
     level,
-    model: recommendedForLevel(models as never, level),
+    model: recommendedForLevel(models, level),
   }));
 }
 
