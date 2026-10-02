@@ -1035,18 +1035,51 @@ export default function LocalAiChat() {
       setError("");
 
       try {
+        let readFailureCount = 0;
+
         for (;;) {
-          const response = await fetch(
-            `/api/local-ai/chat?jobId=${encodeURIComponent(pollingJobId)}`,
-            { cache: "no-store" },
-          );
-          const result = (await response.json()) as JobResult;
+          let response: Response;
+          let result: JobResult;
+
+          try {
+            response = await fetch(
+              `/api/local-ai/chat?jobId=${encodeURIComponent(pollingJobId)}`,
+              { cache: "no-store" },
+            );
+            result = (await response.json()) as JobResult;
+          } catch {
+            if (activePollRef.current !== pollingJobId) return;
+
+            readFailureCount += 1;
+            setError("");
+            setStatus(
+              readFailureCount > 3
+                ? "Connection interrupted — still reconnecting…"
+                : "Connection interrupted — reconnecting…",
+            );
+            await wait(Math.min(8000, 750 * 2 ** Math.min(readFailureCount - 1, 4)));
+            continue;
+          }
 
           if (activePollRef.current !== pollingJobId) return;
 
           if (!response.ok) {
+            if ([429, 502, 503, 504].includes(response.status)) {
+              readFailureCount += 1;
+              setError("");
+              setStatus(
+                readFailureCount > 3
+                  ? "Cloud status check is delayed — still reconnecting…"
+                  : "Cloud status check is delayed — retrying…",
+              );
+              await wait(Math.min(8000, 750 * 2 ** Math.min(readFailureCount - 1, 4)));
+              continue;
+            }
+
             throw new Error(result.detail || result.error || "Could not read CoOperative AI job.");
           }
+
+          readFailureCount = 0;
 
           if (result.profile === "fast" || result.profile === "quality") {
             setProfile(result.profile);
