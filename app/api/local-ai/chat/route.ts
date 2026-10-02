@@ -128,6 +128,14 @@ function looksLikeMediaFollowup(message: string) {
   );
 }
 
+function asksToReduceMediaToFit(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\breduce quality to fit\b/.test(value) ||
+    /\breduce .{0,100}\b(?:fit|within (?:the )?(?:budget|cap))\b/.test(value)
+  );
+}
+
 function conciseFailureDetail(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return null;
   return value
@@ -941,6 +949,27 @@ export async function POST(request: Request) {
         Math.max(0, input.modelMixer?.agents.media ?? 0),
       ) as 0 | 1 | 2 | 3 | 4;
       const requestCapUsd = input.modelMixer?.maxSpendUsd ?? 0.05;
+
+      if (
+        mediaPlan.kind === "video" &&
+        asksToReduceMediaToFit(input.message)
+      ) {
+        const fitSuggestion = await affordableVideoSuggestion(
+          mediaPlan.durationSeconds,
+          requestCapUsd,
+          mediaPlan.resolution,
+          mediaPlan.audio,
+        );
+        const fit = fitSuggestion?.bestWithinBudget || null;
+        if (fit) {
+          mediaPlan = {
+            ...mediaPlan,
+            durationSeconds: fit.durationSeconds,
+            resolution: fit.resolution as typeof mediaPlan.resolution,
+            audio: fit.audio,
+          };
+        }
+      }
 
       // Media priority is deliberate: connected Nous/Hermes entitlement first,
       // then owned/local or genuinely free hosted capacity, then paid OpenRouter.
