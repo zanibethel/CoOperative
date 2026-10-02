@@ -7,11 +7,12 @@
 
 """Private, loopback-only Personal Local AI for Windows Unison nodes.
 
-The chat UI, chat history, projects, and project file cache live on the local
-Windows/browser profile. Inference is sent only to the node's loopback Ollama
-runtime. Optional web search sends the search query to a search provider only
-when the user enables Web mode. Personal prompts never enter the CoOperative
-community job queue.
+The chat UI runs on the local Windows node and inference is sent only to the
+node's loopback Ollama runtime. Conversation history can synchronize to the
+authenticated CoOperative account using encrypted hosted history so desktop and
+mobile can continue the same chats. Optional web search sends the search query
+to a search provider only when the user enables Web mode. Personal inference
+never enters the contributed-compute queue.
 """
 
 from __future__ import annotations
@@ -100,7 +101,7 @@ button,input,textarea,select{font:inherit}.app{display:grid;grid-template-column
   <aside class="sidebar">
     <div>
       <div class="brand">CoOperative Local AI</div>
-      <div class="privacy">Private assistant running on this PC. Personal prompts are not sent to the CoOperative job queue.</div>
+      <div class="privacy">Inference runs on this PC. Chat history syncs encrypted to your authenticated CoOperative account so you can continue on mobile.</div>
       <span class="badge">LOCAL INFERENCE</span>
     </div>
     <div class="side-actions">
