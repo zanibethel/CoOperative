@@ -17,6 +17,10 @@ WORKER_ID = os.getenv(
     f"{NODE_ID or socket.gethostname()}-repo-agent",
 )[:160]
 POLL_SECONDS = max(2, int(os.getenv("COOPERATIVE_AGENT_QUEUE_POLL_SECONDS", "4")))
+LOCAL_REASONING_TIMEOUT_SECONDS = max(
+    120,
+    int(os.getenv("COOPERATIVE_AGENT_REASONING_TIMEOUT_SECONDS", "900")),
+)
 WORKSPACE_ROOT = Path(os.getenv("COOPERATIVE_AGENT_WORKSPACE_ROOT", str(Path.cwd().parent))).expanduser().resolve()
 WORKTREE_ROOT = Path(os.getenv("COOPERATIVE_AGENT_WORKTREE_ROOT", str(WORKSPACE_ROOT / ".cooperative-agent-worktrees"))).expanduser().resolve()
 
@@ -215,13 +219,37 @@ def queue_llm(task_id, profile, messages, max_tokens):
     return str(response.json()["jobId"])
 
 def wait_llm(task_id, job_id):
+    deadline = time.monotonic() + LOCAL_REASONING_TIMEOUT_SECONDS
     while True:
-        response = httpx.get(f"{QUEUE_URL}/api/agents/tasks/llm", headers=headers(), params={"taskId":task_id,"jobId":job_id}, timeout=30.0, follow_redirects=True)
+        response = httpx.get(
+            f"{QUEUE_URL}/api/agents/tasks/llm",
+            headers=headers(),
+            params={"taskId": task_id, "jobId": job_id},
+            timeout=30.0,
+            follow_redirects=True,
+        )
         response.raise_for_status()
         result = response.json()
-        if result.get("status") == "completed": return result
-        if result.get("status") in {"failed","cancelled"}:
-            raise AgentError(result.get("error") or f"Local AI job {result.get('status')}.")
+        if result.get("status") == "completed":
+            return result
+        if result.get("status") in {"failed", "cancelled"}:
+            raise AgentError(
+                result.get("error") or f"Local AI job {result.get('status')}."
+            )
+        if time.monotonic() >= deadline:
+            try:
+                httpx.delete(
+                    f"{QUEUE_URL}/api/agents/tasks/llm",
+                    headers=headers(),
+                    params={"taskId": task_id, "jobId": job_id},
+                    timeout=30.0,
+                    follow_redirects=True,
+                )
+            except Exception:
+                pass
+            raise AgentError(
+                "Local AI reasoning timed out waiting for available text capacity."
+            )
         time.sleep(1.5)
 
 def run_reasoning(task_id, profile, messages, max_tokens, executor_approval=None):
