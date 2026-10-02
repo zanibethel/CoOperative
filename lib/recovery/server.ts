@@ -1154,6 +1154,84 @@ async function syncDebuggerStatus(
   }
 
   if (task.status === "completed") {
+    if (
+      incident.source_kind === "media" &&
+      incident.source_job_id &&
+      !incident.retry_job_id
+    ) {
+      const source = await readFailedSource(
+        admin,
+        incident.owner_ref,
+        incident.source_job_id,
+      );
+
+      if (
+        source?.kind === "media" &&
+        shouldPreferLocalRepairForCloudFailure(source)
+      ) {
+        await addEvent(
+          admin,
+          incident.id,
+          incident.owner_ref,
+          "local_diagnosis_completed",
+          "Local Recovery Agent finished diagnosing the cloud route and is attempting one bounded cloud retry.",
+          { spendChanged: false },
+        );
+
+        const retryJobId = await retryFreeMediaJob(
+          admin,
+          incident.owner_ref,
+          incident.id,
+          source,
+        );
+
+        if (retryJobId) {
+          return {
+            ...incident,
+            status: "retrying",
+            retry_job_id: retryJobId,
+            current_message:
+              "Local Recovery Agent finished diagnosis. Retrying the original cloud media route once now.",
+          };
+        }
+
+        const retryMessage =
+          "Local Recovery Agent finished diagnosis, but the cloud route still could not restart safely. I stopped after the bounded repair attempt.";
+        await admin
+          .from("recovery_incidents")
+          .update({
+            status: "failed",
+            current_message: retryMessage,
+            resolution_summary:
+              task.result &&
+              typeof task.result === "object" &&
+              typeof (task.result as Record<string, unknown>).analysis === "string"
+                ? String(
+                    (task.result as Record<string, unknown>).analysis,
+                  ).slice(0, 3000)
+                : "Local diagnosis completed, but the cloud retry could not start.",
+            resolved_at: nowIso(),
+            updated_at: nowIso(),
+          })
+          .eq("id", incident.id)
+          .eq("owner_ref", incident.owner_ref);
+
+        await addEvent(
+          admin,
+          incident.id,
+          incident.owner_ref,
+          "bounded_retry_stopped",
+          "The cloud route still could not start after local diagnosis, so Recovery Agent stopped instead of looping.",
+        );
+
+        return {
+          ...incident,
+          status: "failed",
+          current_message: retryMessage,
+        };
+      }
+    }
+
     const message =
       "Recovery Agent finished diagnosis and did not find a code change that should be applied automatically.";
     await admin
