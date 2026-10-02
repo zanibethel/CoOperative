@@ -158,7 +158,7 @@ function nousManagedMediaChoice(
   requestCapUsd: number,
   durationSeconds: number | null,
 ): NousManagedMediaChoice | null {
-  if (requestCapUsd <= 0) return null;
+  if (requestCapUsd <= 0 || mediaLevel === 0) return null;
 
   if (kind === "image") {
     const candidates: Array<{
@@ -234,6 +234,11 @@ function affordableOpenRouterModel(
     return durationOk && aspectOk;
   });
   const pool = capable.length ? capable : models;
+  if (level === 0) {
+    const free = pool.find((model) => model.free) || null;
+    return free ? { model: free, estimatedCostUsd: 0 } : null;
+  }
+
   const requested = recommendedForRequest(pool, level, request);
   const requestedCost = requested
     ? estimatedMediaProviderCostUsd(requested, request.durationSeconds || null)
