@@ -4,7 +4,7 @@
 # ///
 
 from __future__ import annotations
-import ast, difflib, json, os, re, shlex, socket, subprocess, time
+import ast, difflib, json, os, re, shlex, shutil, socket, subprocess, time
 from pathlib import Path
 from typing import Any
 import httpx
@@ -881,4 +881,6 @@ def queue_loop():
 if __name__ == "__main__":
     if not WORKER_TOKEN:
         raise AgentError("A local worker or Unison node token is required.")
+    if shutil.which("git") is None:
+        raise AgentError("Git is required for Recovery Agent repository repair.")
     queue_loop()
