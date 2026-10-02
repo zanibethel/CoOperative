@@ -253,18 +253,65 @@ export async function affordableVideoSuggestion(
 
   const requestedCost =
     durationSeconds * (audio ? requestedRate.withAudio : requestedRate.withoutAudio);
-  const cheapest = pricing.rates["360p"];
-  if (!cheapest) return null;
-  const cheapestRate = audio ? cheapest.withAudio : cheapest.withoutAudio;
-  const affordableSeconds = Math.floor(maxSpendUsd / cheapestRate);
+
+  const resolutionOrder = ["1080p", "720p", "540p", "360p"];
+  const bestVariant = (withAudio: boolean) => {
+    let best:
+      | {
+          durationSeconds: number;
+          resolution: string;
+          audio: boolean;
+          estimatedCostUsd: number;
+          rateUsdPerSecond: number;
+        }
+      | null = null;
+
+    for (const resolution of resolutionOrder) {
+      const rates = pricing.rates[resolution];
+      if (!rates) continue;
+      const rate = withAudio ? rates.withAudio : rates.withoutAudio;
+      if (!Number.isFinite(rate) || rate <= 0) continue;
+
+      const affordableSeconds = Math.min(
+        durationSeconds,
+        Math.floor((maxSpendUsd + 1e-9) / rate),
+      );
+      if (affordableSeconds < 1) continue;
+
+      const candidate = {
+        durationSeconds: affordableSeconds,
+        resolution,
+        audio: withAudio,
+        estimatedCostUsd: affordableSeconds * rate,
+        rateUsdPerSecond: rate,
+      };
+
+      if (
+        !best ||
+        candidate.durationSeconds > best.durationSeconds ||
+        (candidate.durationSeconds === best.durationSeconds &&
+          resolutionOrder.indexOf(candidate.resolution) <
+            resolutionOrder.indexOf(best.resolution))
+      ) {
+        best = candidate;
+      }
+    }
+
+    return best;
+  };
+
+  const bestWithinBudget = bestVariant(audio);
+  const bestWithoutAudio = audio ? bestVariant(false) : null;
 
   return {
-    affordableSeconds: Math.max(0, affordableSeconds),
+    affordableSeconds: bestWithinBudget?.durationSeconds || 0,
     minimumRequestedBudget: requestedCost,
-    rateUsdPerSecond: cheapestRate,
+    rateUsdPerSecond: bestWithinBudget?.rateUsdPerSecond || null,
     requestedResolution: requestedResolution || "360p",
-    suggestedResolution: "360p",
+    suggestedResolution: bestWithinBudget?.resolution || null,
     audio,
+    bestWithinBudget,
+    bestWithoutAudio,
     pricingSource: pricing.source,
   };
 }
