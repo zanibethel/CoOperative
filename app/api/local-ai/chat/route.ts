@@ -139,6 +139,15 @@ function asksToReduceMediaToFit(message: string) {
   );
 }
 
+function explicitlyReusesRecentImage(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\b(?:this|that|same|previous|last)\s+(?:image|photo|picture|reference)\b/.test(value) ||
+    /\b(?:use|edit|change|modify|analyze|describe|reference)\s+(?:it|this|that|the same one)\b/.test(value) ||
+    /\b(?:use|edit|change|modify|analyze|describe|reference)\s+(?:the )?(?:same|previous|last)\s+(?:image|photo|picture)\b/.test(value)
+  );
+}
+
 function conciseFailureDetail(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return null;
   return value
@@ -1771,7 +1780,10 @@ export async function POST(request: Request) {
 
     if (historyError) throw historyError;
 
-    if (currentAttachmentIds.length === 0) {
+    if (
+      currentAttachmentIds.length === 0 &&
+      explicitlyReusesRecentImage(input.message)
+    ) {
       const latestImageMessage = (previousMessages || []).find(
         (message) =>
           Array.isArray(message.attachment_ids) && message.attachment_ids.length > 0,
