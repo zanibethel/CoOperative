@@ -45,6 +45,13 @@ jobs:
         run: |
           python -m py_compile workers/windows-text-worker.py workers/windows-local-chat.py workers/windows-local-file-extract.py workers/windows-local-voice.py workers/windows-local-web-search.py workers/windows-model-plan.py workers/unison_runtime.py workers/hf-image-worker.py
 
+      - name: Validate Personal Local AI browser script
+        shell: pwsh
+        run: |
+          python -c "from pathlib import Path; c=Path('workers/windows-local-chat.py').read_text(encoding='utf-8'); s=c.split('<script>',1)[1].split('</script>',1)[0]; Path('.personal-ai-ui.js').write_text(s,encoding='utf-8')"
+          node --check .personal-ai-ui.js
+          Remove-Item .personal-ai-ui.js -Force
+
       - name: Smoke test Personal Local AI server
         shell: pwsh
         run: |
