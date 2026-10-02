@@ -466,10 +466,12 @@ $textReadyVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
 }
 $recoveryProcess = Start-RecoveryRuntime
 if ($recoveryProcess) {
+  $env:COOPERATIVE_RECOVERY_AGENT_ACTIVE = "1"
   $textCapabilities += "recovery_agent"
   Send-StartupHeartbeat -WorkerVersion $textReadyVersion -Capabilities $textCapabilities
   Write-Host "Local Recovery Agent started."
 } else {
+  $env:COOPERATIVE_RECOVERY_AGENT_ACTIVE = "0"
   Write-Host "Local Recovery Agent did not start; core node compute remains available."
 }
 
