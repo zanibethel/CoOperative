@@ -178,3 +178,108 @@ revoke all on function public.claim_unison_node_user_link(text,uuid,text)
   from public, anon, authenticated;
 grant execute on function public.claim_unison_node_user_link(text,uuid,text)
   to service_role;
+
+
+-- Keep new machine pairing compatible with the access table: the contributor
+-- who registers the physical node becomes its owner/admin identity.
+create or replace function public.claim_unison_pairing_code(
+  p_code_hash text,
+  p_node_id text,
+  p_display_name text,
+  p_token_hash text
+)
+returns table(owner_ref text, node_class text, contributor_user_id uuid)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_pair public.unison_pairing_codes%rowtype;
+  v_node_id text := left(p_node_id, 160);
+begin
+  select *
+  into v_pair
+  from public.unison_pairing_codes
+  where code_hash = p_code_hash
+    and claimed_at is null
+    and expires_at > now()
+  for update;
+
+  if not found then
+    return;
+  end if;
+
+  insert into public.unison_nodes (
+    id,
+    display_name,
+    owner_ref,
+    node_class,
+    contributor_user_id,
+    state,
+    platform,
+    capabilities,
+    resources,
+    policy,
+    worker_version,
+    token_hash,
+    first_seen_at,
+    last_seen_at,
+    created_at,
+    updated_at
+  )
+  values (
+    v_node_id,
+    left(p_display_name, 160),
+    v_pair.owner_ref,
+    v_pair.node_class,
+    v_pair.contributor_user_id,
+    'online',
+    '{}'::jsonb,
+    '[]'::jsonb,
+    '{}'::jsonb,
+    '{}'::jsonb,
+    'paired',
+    p_token_hash,
+    now(),
+    now(),
+    now(),
+    now()
+  );
+
+  if v_pair.contributor_user_id is not null then
+    insert into public.unison_node_users(
+      node_id,
+      user_id,
+      role,
+      status,
+      linked_at,
+      updated_at
+    )
+    values (
+      v_node_id,
+      v_pair.contributor_user_id,
+      'owner',
+      'active',
+      now(),
+      now()
+    )
+    on conflict (node_id, user_id) do update
+    set role = 'owner',
+        status = 'active',
+        updated_at = now();
+  end if;
+
+  update public.unison_pairing_codes
+  set claimed_at = now(),
+      claimed_node_id = v_node_id
+  where id = v_pair.id;
+
+  return query
+  select v_pair.owner_ref, v_pair.node_class, v_pair.contributor_user_id;
+end;
+$$;
+
+revoke all on function public.claim_unison_pairing_code(text,text,text,text)
+  from public, anon, authenticated;
+grant execute on function public.claim_unison_pairing_code(text,text,text,text)
+  to service_role;
