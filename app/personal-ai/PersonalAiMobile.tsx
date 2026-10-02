@@ -209,18 +209,24 @@ function PersonalRecoveryCard({
             <strong>Device</strong>{" "}
             {result.executor.waitingForWorker
               ? "waiting for local worker"
-              : result.executor.deviceName ||
-                result.executor.workerId ||
-                "local/owned"}
+              : result.executor.taskStatus === "cancelled" &&
+                  !result.executor.workerId
+                ? "not used"
+                : result.executor.deviceName ||
+                  result.executor.workerId ||
+                  "local/owned"}
           </span>
           <span>
             <strong>Model</strong>{" "}
             {result.executor.model ||
               (result.executor.waitingForWorker
                 ? "not selected yet"
-                : result.executor.requestedProfile
-                  ? result.executor.requestedProfile + " profile"
-                  : "pending")}
+                : result.executor.taskStatus === "cancelled" &&
+                    !result.executor.workerId
+                  ? "not used"
+                  : result.executor.requestedProfile
+                    ? result.executor.requestedProfile + " profile"
+                    : "pending")}
           </span>
         </div>
       ) : null}
