@@ -81,7 +81,7 @@ export async function POST(request: Request) {
     const { data: sourceJob, error: sourceError } = await admin
       .from("text_inference_jobs")
       .select(
-        "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error",
+        "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd",
       )
       .eq("id", input.jobId)
       .eq("client_owner_ref", ownerRef)
@@ -141,6 +141,25 @@ export async function POST(request: Request) {
       );
     }
 
+    const requestSpendCapUsd =
+      typeof sourceJob.request_max_spend_microusd === "number"
+        ? sourceJob.request_max_spend_microusd / 1_000_000
+        : null;
+    const effectivePaidBudgetUsd =
+      requestSpendCapUsd === null
+        ? profileBalance.availableUsd
+        : Math.min(profileBalance.availableUsd, requestSpendCapUsd);
+
+    if (effectivePaidBudgetUsd <= 0) {
+      return NextResponse.json(
+        {
+          error: "This request's Model Mixer spend cap does not allow paid AI usage.",
+          requestSpendCapUsd,
+        },
+        { status: 409 },
+      );
+    }
+
     const evidence: EscalationEvidence = {
       taskClass: parsedTaskClass.data,
       localProfile: parsedProfile.data,
@@ -154,7 +173,7 @@ export async function POST(request: Request) {
       localExecutionUnavailable: true,
       verificationStatus: "inconclusive",
       allowPaidFallback: true,
-      automaticPaidBudgetUsd: profileBalance.availableUsd,
+      automaticPaidBudgetUsd: effectivePaidBudgetUsd,
       fundedPaidBalanceUsd: profileBalance.availableUsd,
       requiredSuccessRate: 0.8,
     };
@@ -196,6 +215,20 @@ export async function POST(request: Request) {
       );
     }
 
+    if (
+      requestSpendCapUsd !== null &&
+      estimatedCostUsd > requestSpendCapUsd
+    ) {
+      return NextResponse.json(
+        {
+          error: "The selected paid model would exceed this request's Model Mixer spend cap.",
+          requestSpendCapUsd,
+          estimatedCostUsd,
+        },
+        { status: 409 },
+      );
+    }
+
     const paidJobId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
     const { error: insertError } = await admin.from("text_inference_jobs").insert({
@@ -216,6 +249,8 @@ export async function POST(request: Request) {
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
+      model_mixer: sourceJob.model_mixer || null,
+      request_max_spend_microusd: sourceJob.request_max_spend_microusd ?? null,
       capability: "text",
       routing_preference: "default",
       fallback_for_job_id: sourceJob.id,
@@ -257,6 +292,7 @@ export async function POST(request: Request) {
         conversationId: sourceJob.conversation_id,
         provider: decision.candidate.provider,
         model: decision.candidate.model,
+        requestSpendCapUsd,
       },
     });
 
@@ -361,6 +397,7 @@ export async function POST(request: Request) {
         responseId: result.responseId,
         promptTokens: result.promptTokens,
         outputTokens: result.outputTokens,
+        requestSpendCapUsd,
       },
     });
 
