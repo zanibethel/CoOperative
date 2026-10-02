@@ -1,0 +1,362 @@
+import "server-only";
+
+import { Sandbox } from "@vercel/sandbox";
+
+export type HermesMediaKind = "image" | "video";
+
+export type HermesMediaStartSpec = {
+  jobId: string;
+  kind: HermesMediaKind;
+  userRequest: string;
+};
+
+export type HermesMediaStartResult = {
+  sandboxName: string;
+  provider: string;
+  model: string;
+  orchestratorModel: string;
+  startedAt: string;
+  deadlineAt: string;
+};
+
+export type HermesMediaPollResult = {
+  state: "running" | "completed" | "failed";
+  mediaUrl: string | null;
+  stdout: string;
+  stderr: string;
+  usage: Record<string, unknown> | null;
+  error: string | null;
+};
+
+const HERMES_RELEASE = "v2026.9.14";
+const HERMES_INSTALL_URL =
+  `https://raw.githubusercontent.com/NousResearch/hermes-agent/${HERMES_RELEASE}/scripts/install.sh`;
+const STATUS_DIR = "/tmp/cooperative-media";
+const IMAGE_TIMEOUT_MS = 10 * 60 * 1000;
+const VIDEO_TIMEOUT_MS = 15 * 60 * 1000;
+
+function requiredEnv(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required for Hermes media generation.`);
+  return value;
+}
+
+function safeIdentifier(value: string, label: string) {
+  if (!/^[a-z0-9_.:/-]+$/i.test(value)) {
+    throw new Error(`${label} contains unsupported characters.`);
+  }
+  return value;
+}
+
+export function hermesMediaConfiguration(kind: HermesMediaKind) {
+  const provider = safeIdentifier(
+    (kind === "image"
+      ? process.env.HERMES_IMAGE_PROVIDER
+      : process.env.HERMES_VIDEO_PROVIDER
+    )?.trim() || "openrouter",
+    "Media provider",
+  );
+  const model = safeIdentifier(
+    (kind === "image"
+      ? process.env.HERMES_IMAGE_MODEL
+      : process.env.HERMES_VIDEO_MODEL
+    )?.trim() ||
+      (kind === "image"
+        ? "inclusionai/ming-image-0.1-design"
+        : "bytedance/seedance-2.0-fast:free"),
+    "Media model",
+  );
+  const orchestratorModel = safeIdentifier(
+    process.env.HERMES_CLOUD_MODEL?.trim() || "poolside/laguna-s-2.1:free",
+    "Hermes orchestrator model",
+  );
+
+  return {
+    provider,
+    model,
+    orchestratorModel,
+    freeRoute:
+      model.endsWith(":free") ||
+      model === "inclusionai/ming-image-0.1-design" ||
+      model === "inclusionai/ming-image-0.1-design-layer",
+  };
+}
+
+export function hermesMediaProviderStatus() {
+  const image = hermesMediaConfiguration("image");
+  const video = hermesMediaConfiguration("video");
+
+  return {
+    nousConfigured: Boolean(process.env.NOUS_API_KEY?.trim()),
+    openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
+    image,
+    video,
+  };
+}
+
+function promptFor(spec: HermesMediaStartSpec) {
+  const tool = spec.kind === "image" ? "image_generate" : "video_generate";
+
+  return [
+    "You are CoOperative's media production worker.",
+    "Convert the user's request into the strongest production-ready generation prompt you can before spending media-generation compute.",
+    `You MUST call the ${tool} tool exactly once.`,
+    "Do not ask the user a follow-up question; CoOperative has already handled clarification.",
+    "Do not retry a failed generation and do not call a second image/video model.",
+    "Honor explicit duration, aspect ratio, platform, style, camera, audio, and subject requirements in the request.",
+    "After the tool succeeds, answer briefly and include the returned media URL using the exact prefix MEDIA:.",
+    "If the tool fails, report the failure concisely and stop.",
+    "",
+    "USER REQUEST:",
+    spec.userRequest.trim(),
+  ].join("\n");
+}
+
+function runnerScript(args: {
+  kind: HermesMediaKind;
+  orchestratorModel: string;
+}) {
+  const toolset = args.kind === "image" ? "image_gen" : "video_gen";
+  return `#!/usr/bin/env bash
+set +e
+mkdir -p ${STATUS_DIR}
+echo running > ${STATUS_DIR}/state
+HERMES_BIN="$HOME/.local/bin/hermes"
+if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN="/usr/local/bin/hermes"; fi
+"$HERMES_BIN" chat --oneshot \
+  --query-file /tmp/cooperative-media-prompt.md \
+  --provider nous-api \
+  --model ${args.orchestratorModel} \
+  --max-turns 8 \
+  --run-budget 840 \
+  --toolsets ${toolset} \
+  --usage-file ${STATUS_DIR}/usage.json \
+  > ${STATUS_DIR}/stdout.txt 2> ${STATUS_DIR}/stderr.txt
+CODE=$?
+echo "$CODE" > ${STATUS_DIR}/exit-code
+if [ "$CODE" -eq 0 ]; then
+  echo completed > ${STATUS_DIR}/state
+else
+  echo failed > ${STATUS_DIR}/state
+fi
+exit 0
+`;
+}
+
+async function readText(sandbox: Sandbox, path: string) {
+  const result = await sandbox.runCommand({
+    cmd: "bash",
+    args: ["-lc", `cat ${path} 2>/dev/null || true`],
+  });
+  return (await result.stdout()).trim();
+}
+
+function extractMediaUrl(stdout: string) {
+  const mediaMatches = [...stdout.matchAll(/MEDIA:\s*(https?:\/\/\S+)/gi)];
+  const media = mediaMatches.at(-1)?.[1];
+  if (media) return media.replace(/[)\]}>.,]+$/, "");
+
+  const urls = [...stdout.matchAll(/https?:\/\/[^\s"'<>]+/g)].map((match) => match[0]);
+  const likelyMedia = urls
+    .filter((url) => /\.(?:png|jpe?g|webp|gif|mp4|webm)(?:\?|$)/i.test(url))
+    .at(-1);
+  return likelyMedia?.replace(/[)\]}>.,]+$/, "") || null;
+}
+
+export async function startHermesMediaTask(
+  spec: HermesMediaStartSpec,
+): Promise<HermesMediaStartResult> {
+  if (!spec.userRequest.trim()) throw new Error("A media request is required.");
+
+  const nousApiKey = requiredEnv("NOUS_API_KEY");
+  const config = hermesMediaConfiguration(spec.kind);
+
+  const env: Record<string, string> = {
+    NOUS_API_KEY: nousApiKey,
+  };
+
+  if (config.provider === "openrouter") {
+    env.OPENROUTER_API_KEY = requiredEnv("OPENROUTER_API_KEY");
+  } else {
+    throw new Error(
+      `Media provider ${config.provider} is not enabled in the first CoOperative cloud-media slice.`,
+    );
+  }
+
+  const timeoutMs = spec.kind === "image" ? IMAGE_TIMEOUT_MS : VIDEO_TIMEOUT_MS;
+  const startedAt = new Date();
+  const deadlineAt = new Date(startedAt.getTime() + timeoutMs);
+  const sandboxName = `cooperative-media-${spec.jobId.toLowerCase()}`;
+
+  const sandbox = await Sandbox.create({
+    name: sandboxName,
+    persistent: true,
+    runtime: "node24",
+    timeout: timeoutMs,
+    env,
+  });
+
+  const install = await sandbox.runCommand({
+    cmd: "bash",
+    args: [
+      "-lc",
+      `curl -fsSL ${HERMES_INSTALL_URL} -o /tmp/hermes-install.sh && bash /tmp/hermes-install.sh --skip-setup --skip-browser --skip-computer-use --non-interactive --branch ${HERMES_RELEASE}`,
+    ],
+  });
+  if (install.exitCode !== 0) {
+    const stderr = await install.stderr();
+    await sandbox.stop();
+    throw new Error(`Hermes installation failed: ${stderr.slice(-800)}`);
+  }
+
+  const category = spec.kind === "image" ? "image_gen" : "video_gen";
+  const configure = await sandbox.runCommand({
+    cmd: "bash",
+    args: [
+      "-lc",
+      [
+        'HERMES_BIN="$HOME/.local/bin/hermes"',
+        '[ -x "$HERMES_BIN" ] || HERMES_BIN="/usr/local/bin/hermes"',
+        `"$HERMES_BIN" config set ${category}.provider ${config.provider}`,
+        `"$HERMES_BIN" config set ${category}.model ${config.model}`,
+      ].join(" && "),
+    ],
+  });
+  if (configure.exitCode !== 0) {
+    const stderr = await configure.stderr();
+    await sandbox.stop();
+    throw new Error(`Hermes media provider configuration failed: ${stderr.slice(-800)}`);
+  }
+
+  await sandbox.writeFiles([
+    {
+      path: "/tmp/cooperative-media-prompt.md",
+      content: Buffer.from(promptFor(spec), "utf8"),
+    },
+    {
+      path: "/tmp/cooperative-media-run.sh",
+      content: Buffer.from(
+        runnerScript({
+          kind: spec.kind,
+          orchestratorModel: config.orchestratorModel,
+        }),
+        "utf8",
+      ),
+    },
+  ]);
+
+  const launch = await sandbox.runCommand({
+    cmd: "bash",
+    args: ["/tmp/cooperative-media-run.sh"],
+    detached: true,
+  });
+  if (launch.exitCode !== 0) {
+    const stderr = await launch.stderr();
+    await sandbox.stop();
+    throw new Error(`Hermes media worker could not start: ${stderr.slice(-800)}`);
+  }
+
+  return {
+    sandboxName,
+    provider: config.provider,
+    model: config.model,
+    orchestratorModel: config.orchestratorModel,
+    startedAt: startedAt.toISOString(),
+    deadlineAt: deadlineAt.toISOString(),
+  };
+}
+
+export async function pollHermesMediaTask(args: {
+  sandboxName: string;
+  deadlineAt: string;
+}): Promise<HermesMediaPollResult> {
+  let sandbox: Sandbox;
+  try {
+    sandbox = await Sandbox.get({ name: args.sandboxName });
+  } catch (error) {
+    return {
+      state: "failed",
+      mediaUrl: null,
+      stdout: "",
+      stderr: "",
+      usage: null,
+      error:
+        error instanceof Error
+          ? `Hermes media sandbox is unavailable: ${error.message}`
+          : "Hermes media sandbox is unavailable.",
+    };
+  }
+
+  const state = await readText(sandbox, `${STATUS_DIR}/state`);
+
+  if (!state || state === "running") {
+    if (Date.now() <= Date.parse(args.deadlineAt)) {
+      return {
+        state: "running",
+        mediaUrl: null,
+        stdout: "",
+        stderr: "",
+        usage: null,
+        error: null,
+      };
+    }
+
+    await sandbox.stop();
+    return {
+      state: "failed",
+      mediaUrl: null,
+      stdout: "",
+      stderr: "",
+      usage: null,
+      error: "Hermes media generation exceeded its execution deadline.",
+    };
+  }
+
+  const [stdout, stderr, usageText, exitCodeText] = await Promise.all([
+    readText(sandbox, `${STATUS_DIR}/stdout.txt`),
+    readText(sandbox, `${STATUS_DIR}/stderr.txt`),
+    readText(sandbox, `${STATUS_DIR}/usage.json`),
+    readText(sandbox, `${STATUS_DIR}/exit-code`),
+  ]);
+
+  let usage: Record<string, unknown> | null = null;
+  if (usageText) {
+    try {
+      const parsed = JSON.parse(usageText);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        usage = parsed as Record<string, unknown>;
+      }
+    } catch {
+      usage = null;
+    }
+  }
+
+  const exitCode = Number(exitCodeText);
+  const mediaUrl = extractMediaUrl(stdout);
+  const completed = state === "completed" && exitCode === 0 && Boolean(mediaUrl);
+
+  await sandbox.stop();
+
+  if (completed) {
+    return {
+      state: "completed",
+      mediaUrl,
+      stdout,
+      stderr,
+      usage,
+      error: null,
+    };
+  }
+
+  return {
+    state: "failed",
+    mediaUrl,
+    stdout,
+    stderr,
+    usage,
+    error:
+      stderr.slice(-1000) ||
+      stdout.slice(-1000) ||
+      "Hermes media generation finished without a usable media URL.",
+  };
+}
