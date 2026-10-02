@@ -116,6 +116,7 @@ $localChatLogPath = Join-Path $PSScriptRoot "local-chat.log"
 $localChatErrorLogPath = Join-Path $PSScriptRoot "local-chat-error.log"
 $localChatReadyPath = Join-Path $PSScriptRoot "local-chat.ready"
 $localChatBusyPath = Join-Path $PSScriptRoot "local-chat.busy"
+$imagePortPath = Join-Path $PSScriptRoot "image-worker.port"
 
 Remove-Item -Force $textReadyPath,$textBusyPath,$localChatReadyPath,$localChatBusyPath -ErrorAction SilentlyContinue
 
@@ -327,13 +328,15 @@ if (Test-Path $localChatReadyPath) {
     "local_personal_chat",
     "local_ai_auto_model",
     "local_ai_images",
-    "local_ai_image_generation",
     "local_ai_files",
     "local_ai_web_search",
     "local_ai_voice",
     "local_ai_history",
     "local_ai_projects"
   )
+  if (Test-Path $imagePortPath) {
+    $textCapabilities += "local_ai_image_generation"
+  }
 }
 $textReadyVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
   "windows-unison-1.0.0-machine-text-only"
@@ -387,16 +390,18 @@ while (-not $imageProcess.HasExited -and -not $textProcess.HasExited) {
     }
     if (Test-Path $localChatReadyPath) {
       $imageStartingCapabilities += @(
-    "local_personal_chat",
-    "local_ai_auto_model",
-    "local_ai_images",
-    "local_ai_image_generation",
-    "local_ai_files",
-    "local_ai_web_search",
-    "local_ai_voice",
-    "local_ai_history",
-    "local_ai_projects"
-  )
+        "local_personal_chat",
+        "local_ai_auto_model",
+        "local_ai_images",
+        "local_ai_files",
+        "local_ai_web_search",
+        "local_ai_voice",
+        "local_ai_history",
+        "local_ai_projects"
+      )
+      if (Test-Path $imagePortPath) {
+        $imageStartingCapabilities += "local_ai_image_generation"
+      }
     }
 
     $imageStartingVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
@@ -458,16 +463,18 @@ if ($imageExitedFirst) {
   }
   if (Test-Path $localChatReadyPath) {
     $degradedCapabilities += @(
-    "local_personal_chat",
-    "local_ai_auto_model",
-    "local_ai_images",
-    "local_ai_image_generation",
-    "local_ai_files",
-    "local_ai_web_search",
-    "local_ai_voice",
-    "local_ai_history",
-    "local_ai_projects"
-  )
+      "local_personal_chat",
+      "local_ai_auto_model",
+      "local_ai_images",
+      "local_ai_files",
+      "local_ai_web_search",
+      "local_ai_voice",
+      "local_ai_history",
+      "local_ai_projects"
+    )
+    if (Test-Path $imagePortPath) {
+      $degradedCapabilities += "local_ai_image_generation"
+    }
   }
 
   while (-not $textProcess.HasExited) {
