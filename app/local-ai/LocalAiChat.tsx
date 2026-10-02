@@ -1,6 +1,11 @@
 "use client";
 
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import ModelMixer, {
+  DEFAULT_MODEL_MIXER_SETTINGS,
+  ModelMixerTrigger,
+  type ModelMixerSettings,
+} from "./ModelMixer";
 
 type Profile = "fast" | "quality";
 type NodeRouting = "default" | "prefer-owned" | "require-node";
@@ -270,6 +275,11 @@ export default function LocalAiChat() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
+  const [modelMixerOpen, setModelMixerOpen] = useState(false);
+  const [modelMixer, setModelMixer] = useState<ModelMixerSettings>({
+    ...DEFAULT_MODEL_MIXER_SETTINGS,
+    agents: { ...DEFAULT_MODEL_MIXER_SETTINGS.agents },
+  });
   const activePollRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -612,6 +622,10 @@ export default function LocalAiChat() {
     setMeta("");
     setError("");
     setStatus("Ready");
+    setModelMixer({
+      ...DEFAULT_MODEL_MIXER_SETTINGS,
+      agents: { ...DEFAULT_MODEL_MIXER_SETTINGS.agents },
+    });
   }
 
   async function switchConversation(id: string) {
@@ -759,6 +773,11 @@ export default function LocalAiChat() {
           temperature: 0.2,
           nodeRouting,
           requiredNodeId: nodeRouting === "require-node" ? requiredNodeId : undefined,
+          modelMixer: {
+            preset: modelMixer.preset,
+            maxSpendUsd: modelMixer.maxSpendUsd,
+            agents: modelMixer.agents,
+          },
         }),
       });
 
@@ -928,9 +947,15 @@ export default function LocalAiChat() {
           <strong>{conversationTitle}</strong>
           <p>Ask CoOperative what you need. Routing and model choice stay in the background.</p>
         </div>
-        <div className="local-ai-status">
-          <span className={busy ? "status-dot active" : "status-dot"} />
-          {executionStep(status, undefined, Boolean(streamingText))}
+        <div className="local-ai-toolbar-actions">
+          <div className="local-ai-status">
+            <span className={busy ? "status-dot active" : "status-dot"} />
+            {executionStep(status, undefined, Boolean(streamingText))}
+          </div>
+          <ModelMixerTrigger
+            active={modelMixerOpen}
+            onClick={() => setModelMixerOpen((current) => !current)}
+          />
         </div>
         <details className="local-ai-execution-details">
           <summary>Execution details</summary>
@@ -1126,6 +1151,10 @@ export default function LocalAiChat() {
             >
               {uploadingImages ? "Uploading…" : "＋ Image"}
             </button>
+            <ModelMixerTrigger
+              active={modelMixerOpen}
+              onClick={() => setModelMixerOpen((current) => !current)}
+            />
             <button
               className="text-button"
               type="button"
@@ -1148,6 +1177,14 @@ export default function LocalAiChat() {
           </details>
         ) : null}
       </div>
+
+      <ModelMixer
+        open={modelMixerOpen}
+        settings={modelMixer}
+        paidAiEligible={Boolean(aiBalance?.paidAiEligible)}
+        onChange={setModelMixer}
+        onClose={() => setModelMixerOpen(false)}
+      />
     </section>
   );
 }
