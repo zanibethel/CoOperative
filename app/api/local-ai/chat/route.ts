@@ -22,7 +22,7 @@ import {
 } from "@/lib/inference/media-request";
 import {
   openRouterMediaCatalog,
-  recommendedForLevel,
+  recommendedForRequest,
   type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
 
@@ -269,7 +269,10 @@ export async function POST(request: Request) {
       try {
         const catalog = await openRouterMediaCatalog();
         const pool = mediaPlan.kind === "video" ? catalog.video : catalog.image;
-        const requested = recommendedForLevel(pool, mediaLevel);
+        const requested = recommendedForRequest(pool, mediaLevel, {
+          durationSeconds: mediaPlan.durationSeconds,
+          aspectRatio: mediaPlan.aspectRatio,
+        });
         const freeFallback = pool.find((model) => model.free) || null;
         const paidMediaEnabled =
           process.env.HERMES_MEDIA_PAID_ENABLED === "true" && profileBalance.funded;
