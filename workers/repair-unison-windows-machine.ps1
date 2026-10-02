@@ -51,6 +51,9 @@ $workerFiles = @(
   "hf-image-worker.py",
   "windows-text-worker.py",
   "windows-local-chat.py",
+  "windows-local-file-extract.py",
+  "windows-local-voice.py",
+  "windows-local-web-search.py",
   "windows-model-plan.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
@@ -103,6 +106,7 @@ if (Test-Path $modelPlanner) {
     Set-MachineEnv "WINDOWS_TEXT_FAST_MODEL_ID" ([string]$plan.models.fast)
     Set-MachineEnv "WINDOWS_TEXT_QUALITY_MODEL_ID" ([string]$plan.models.quality)
     Set-MachineEnv "WINDOWS_TEXT_HEAVY_MODEL_ID" ([string]$plan.models.heavy)
+    if ($plan.models.vision) { Set-MachineEnv "WINDOWS_VISION_MODEL_ID" ([string]$plan.models.vision) }
   }
 }
 

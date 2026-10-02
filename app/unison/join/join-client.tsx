@@ -121,17 +121,25 @@ export default function JoinClient({
             </div>
             <div className="service-tags">
               <span>Private Personal Local AI</span>
+              <span>Automatic model choice</span>
+              <span>Image understanding</span>
+              <span>PDF / Office / code files</span>
+              <span>Local voice input + spoken replies</span>
+              <span>Optional web search</span>
+              <span>Local chat history</span>
+              <span>Project workspaces + tasks</span>
               <span>Machine-wide Unison node</span>
-              <span>Adaptive Fast / Quality / Heavy models</span>
               <span>Whole-PC idle protection</span>
               <span>Desktop + Start Menu shortcuts</span>
               <span>Tray access</span>
             </div>
             <p>
-              <strong>Personal Local AI stays on this computer.</strong> Your personal prompts,
-              responses, and browser-stored conversation history do not enter the CoOperative
-              community job queue. When you are actively using the PC, your local AI remains
-              available and contributed work stays blocked by the idle policy.
+              <strong>Personal Local AI stays local by default.</strong> Your personal prompts,
+              responses, project data, attached-file context, and browser-stored conversation
+              history do not enter the CoOperative community job queue. Web search is optional;
+              when enabled, only the search request is sent to an external search service while
+              model inference still runs on this PC. When you are actively using the PC, your
+              local AI remains available and contributed work stays blocked by the idle policy.
             </p>
           </div>
 
@@ -163,8 +171,10 @@ export default function JoinClient({
               </li>
               <li>
                 Leave Setup open until it says <strong>Connected</strong>. Setup also installs
-                <strong> CoOperative Local AI</strong> on the desktop for private personal chat
-                while the PC is in use. After that, you can switch Windows users normally.
+                <strong> CoOperative Local AI</strong> on the desktop with images, documents,
+                voice, optional web search, local history, project workspaces, and automatic model
+                choice. It is available while the PC is in use. After that, you can switch Windows
+                users normally.
               </li>
             </ol>
           </div>

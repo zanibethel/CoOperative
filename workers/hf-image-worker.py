@@ -83,6 +83,7 @@ MODEL_LOCK = threading.Lock()
 UNISON_BUSY = threading.Event()
 TEXT_READY_MARKER = Path(__file__).with_name("text-worker.ready")
 TEXT_BUSY_MARKER = Path(__file__).with_name("text-worker.busy")
+LOCAL_CHAT_READY_MARKER = Path(__file__).with_name("local-chat.ready")
 loaded_profile: str | None = None
 text_pipe = None
 image_pipe = None
@@ -557,7 +558,18 @@ def unison_capabilities():
     if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine":
         capabilities.extend(["machine_wide", "whole_pc_idle"])
     if platform.system() == "Windows" and LOCAL_CHAT_READY_MARKER.exists():
-        capabilities.append("local_personal_chat")
+        capabilities.extend(
+            [
+                "local_personal_chat",
+                "local_ai_auto_model",
+                "local_ai_images",
+                "local_ai_files",
+                "local_ai_web_search",
+                "local_ai_voice",
+                "local_ai_history",
+                "local_ai_projects",
+            ]
+        )
     return capabilities
 
 

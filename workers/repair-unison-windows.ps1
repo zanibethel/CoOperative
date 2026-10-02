@@ -89,6 +89,9 @@ $workerFiles = @(
   "hf-image-worker.py",
   "windows-text-worker.py",
   "windows-local-chat.py",
+  "windows-local-file-extract.py",
+  "windows-local-voice.py",
+  "windows-local-web-search.py",
   "windows-model-plan.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
@@ -146,6 +149,7 @@ if (Test-Path $modelPlanner) {
         Set-UserEnv "WINDOWS_TEXT_FAST_MODEL_ID" ([string]$plan.models.fast)
         Set-UserEnv "WINDOWS_TEXT_QUALITY_MODEL_ID" ([string]$plan.models.quality)
         Set-UserEnv "WINDOWS_TEXT_HEAVY_MODEL_ID" ([string]$plan.models.heavy)
+        if ($plan.models.vision) { Set-UserEnv "WINDOWS_VISION_MODEL_ID" ([string]$plan.models.vision) }
         Write-Host "Adaptive text plan ready: Fast=$($plan.models.fast) Quality=$($plan.models.quality) Heavy=$($plan.models.heavy)"
       } else {
         Write-Host "Ollama is unavailable; preserving the current safe text backend."
