@@ -142,13 +142,13 @@ const PRESETS: Record<
   Omit<ModelMixerSettings, "preset">
 > = {
   economy: {
-    maxSpendUsd: 0.25,
+    maxSpendUsd: 0.05,
     agents: {
       research: 0,
       planner: 1,
       builder: 1,
       verifier: 1,
-      media: 0,
+      media: 1,
     },
   },
   balanced: {
@@ -174,8 +174,8 @@ const PRESETS: Record<
 };
 
 export const DEFAULT_MODEL_MIXER_SETTINGS: ModelMixerSettings = {
-  preset: "balanced",
-  ...PRESETS.balanced,
+  preset: "economy",
+  ...PRESETS.economy,
 };
 
 export function estimateModelMixer(settings: ModelMixerSettings) {
