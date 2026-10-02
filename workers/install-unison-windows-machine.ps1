@@ -170,6 +170,7 @@ $values = @{
   "WINDOWS_TEXT_FAST_MODEL_ID" = $adaptiveFastModel
   "WINDOWS_TEXT_QUALITY_MODEL_ID" = $adaptiveQualityModel
   "WINDOWS_TEXT_HEAVY_MODEL_ID" = $adaptiveHeavyModel
+  "UNISON_LOCAL_CHAT_PORT" = "11436"
   "UNISON_SHARED_UV_EXE" = $uvExe
   "UV_CACHE_DIR" = $env:UV_CACHE_DIR
   "UV_PYTHON_INSTALL_DIR" = $env:UV_PYTHON_INSTALL_DIR
@@ -191,6 +192,7 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     $_.CommandLine -and (
       $_.CommandLine -like "*hf-image-worker.py*" -or
       $_.CommandLine -like "*windows-text-worker.py*" -or
+      $_.CommandLine -like "*windows-local-chat.py*" -or
       $_.CommandLine -like "*start-unison-windows.ps1*"
     )
   } |
@@ -230,7 +232,8 @@ while ((Get-Date) -lt $deadline) {
       [string]$status.workerVersion -like "windows-unison-1.*" -and
       $caps -contains "text_generation" -and
       $caps -contains "machine_wide" -and
-      $caps -contains "whole_pc_idle"
+      $caps -contains "whole_pc_idle" -and
+      $caps -contains "local_personal_chat"
     ) {
       $verified = $true
       break
@@ -242,7 +245,7 @@ while ((Get-Date) -lt $deadline) {
 }
 
 if (-not $verified) {
-  throw "Machine-wide Unison started, but a verified whole-PC-idle heartbeat was not received in time."
+  throw "Machine-wide Unison started, but the whole-PC-idle worker and Personal Local AI were not both verified in time."
 }
 
 Write-Host ""

@@ -88,6 +88,7 @@ $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/w
 $workerFiles = @(
   "hf-image-worker.py",
   "windows-text-worker.py",
+  "windows-local-chat.py",
   "windows-model-plan.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
@@ -213,6 +214,7 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     (
       $_.CommandLine -like "*hf-image-worker.py*" -or
       $_.CommandLine -like "*windows-text-worker.py*" -or
+      $_.CommandLine -like "*windows-local-chat.py*" -or
       $_.CommandLine -like "*start-unison-windows.ps1*"
     )
   } |

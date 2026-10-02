@@ -140,8 +140,9 @@ export default function JoinClient({
                 not just the current Windows profile.
               </li>
               <li>
-                Leave Setup open until it says <strong>Connected</strong>. After that, you can
-                switch Windows users normally.
+                Leave Setup open until it says <strong>Connected</strong>. Setup also installs
+                <strong> CoOperative Local AI</strong> on the desktop for private personal chat
+                while the PC is in use. After that, you can switch Windows users normally.
               </li>
             </ol>
           </div>
@@ -155,9 +156,10 @@ export default function JoinClient({
             </a>
           </div>
           <p>
-            After setup, the dashboard should show <strong>Whole-PC idle</strong>. Unison then runs
-            independently of the signed-in Windows profile and only accepts new work after the
-            entire computer has been idle for the configured period.
+            After setup, the dashboard should show <strong>Whole-PC idle</strong>. Community
+            compute remains idle-only, while <strong>CoOperative Local AI</strong> can be opened
+            from the desktop or tray whenever someone is actively using this PC. Personal local
+            chat stays on the computer and does not enter the CoOperative job queue.
           </p>
           <details>
             <summary>Advanced / manual setup</summary>

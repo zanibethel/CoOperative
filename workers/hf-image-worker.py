@@ -556,6 +556,8 @@ def unison_capabilities():
         )
     if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine":
         capabilities.extend(["machine_wide", "whole_pc_idle"])
+    if platform.system() == "Windows" and LOCAL_CHAT_READY_MARKER.exists():
+        capabilities.append("local_personal_chat")
     return capabilities
 
 

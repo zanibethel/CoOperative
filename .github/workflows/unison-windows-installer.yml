@@ -40,6 +40,11 @@ jobs:
             Write-Host "Validated $($script.Name)"
           }
 
+      - name: Validate Windows Python workers
+        shell: pwsh
+        run: |
+          python -m py_compile workers/windows-text-worker.py workers/windows-local-chat.py workers/unison_runtime.py workers/hf-image-worker.py
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:

@@ -50,6 +50,7 @@ $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/w
 $workerFiles = @(
   "hf-image-worker.py",
   "windows-text-worker.py",
+  "windows-local-chat.py",
   "windows-model-plan.py",
   "unison_runtime.py",
   "start-unison-windows.ps1",
@@ -76,6 +77,7 @@ try {
       $_.CommandLine -and (
         $_.CommandLine -like "*hf-image-worker.py*" -or
         $_.CommandLine -like "*windows-text-worker.py*" -or
+        $_.CommandLine -like "*windows-local-chat.py*" -or
         $_.CommandLine -like "*start-unison-windows.ps1*"
       )
     } |
@@ -165,7 +167,8 @@ while ((Get-Date) -lt $deadline) {
       [string]$status.workerVersion -like "windows-unison-1.*" -and
       $caps -contains "text_generation" -and
       $caps -contains "machine_wide" -and
-      $caps -contains "whole_pc_idle"
+      $caps -contains "whole_pc_idle" -and
+      $caps -contains "local_personal_chat"
     ) {
       $verified = $true
       break
@@ -177,7 +180,7 @@ while ((Get-Date) -lt $deadline) {
 }
 
 if (-not $verified) {
-  throw "Machine-wide repair restarted Unison, but a verified whole-PC-idle heartbeat was not received in time."
+  throw "Machine-wide repair restarted Unison, but the whole-PC-idle worker and Personal Local AI were not both verified in time."
 }
 
 Write-Host ""

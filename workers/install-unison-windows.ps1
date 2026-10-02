@@ -121,6 +121,7 @@ $values = @{
   "WINDOWS_TEXT_FAST_MODEL_ID" = $adaptiveFastModel
   "WINDOWS_TEXT_QUALITY_MODEL_ID" = $adaptiveQualityModel
   "WINDOWS_TEXT_HEAVY_MODEL_ID" = $adaptiveHeavyModel
+  "UNISON_LOCAL_CHAT_PORT" = "11436"
 }
 
 foreach ($entry in $values.GetEnumerator()) {

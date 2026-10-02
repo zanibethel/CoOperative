@@ -63,6 +63,7 @@ MAX_CPU_PERCENT = _env_int("UNISON_MAX_CPU_PERCENT", 50, 1, 100)
 MAX_GPU_PERCENT = _env_int("UNISON_MAX_GPU_PERCENT", 80, 1, 100)
 MAX_MEMORY_MB = _env_int("UNISON_MAX_MEMORY_MB", 8192, 256, 1048576)
 NODE_PAUSED = _env_bool("UNISON_NODE_PAUSED", False)
+LOCAL_CHAT_BUSY_PATH = Path(__file__).resolve().parent / "local-chat.busy"
 
 
 class _LastInputInfo(ctypes.Structure):
@@ -210,6 +211,9 @@ def windows_idle_seconds() -> float | None:
 
 def node_available() -> bool:
     if NODE_PAUSED:
+        return False
+    if LOCAL_CHAT_BUSY_PATH.exists():
+        # Personal on-device use always takes priority over contributed work.
         return False
     if not IDLE_ONLY:
         return True
