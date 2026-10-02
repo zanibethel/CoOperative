@@ -1240,16 +1240,16 @@ export async function POST(request: Request) {
       }
 
       let selectedMediaModel: MediaCatalogModel | null = null;
-      let selectedProvider: "nous" | "openrouter" | null =
+      const selectedProvider: "nous" | "openrouter" | null =
         selectedRecommendation.provider;
-      let selectedModel = selectedRecommendation.model;
-      let selectedFree = selectedRecommendation.estimatedCostUsd <= 0;
-      let pricingSource = selectedRecommendation.pricingSource;
-      let estimatedProviderCostUsd: number | null =
+      const selectedModel = selectedRecommendation.model;
+      const selectedFree = selectedRecommendation.estimatedCostUsd <= 0;
+      const pricingSource = selectedRecommendation.pricingSource;
+      const estimatedProviderCostUsd: number | null =
         selectedRecommendation.estimatedCostUsd;
-      let selectedResolution: string | null =
+      const selectedResolution: string | null =
         selectedRecommendation.resolution || mediaPlan.resolution;
-      let selectedAudio: boolean | null =
+      const selectedAudio: boolean | null =
         selectedRecommendation.audio ?? mediaPlan.audio;
 
       if (selectedProvider === "openrouter") {
