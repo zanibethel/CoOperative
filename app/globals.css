@@ -2283,3 +2283,23 @@ b { color: var(--text); }
   text-transform: uppercase;
   letter-spacing: .045em;
 }
+
+
+.personal-recovery-executor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--muted);
+  font-size: .66rem;
+}
+
+.personal-recovery-executor strong {
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: .045em;
+  font-size: .63rem;
+}
