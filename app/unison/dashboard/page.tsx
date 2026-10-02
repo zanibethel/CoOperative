@@ -118,7 +118,12 @@ export default async function UnisonContributorDashboard() {
               const resources = (node.resources || {}) as {
                 cpuLogical?: number;
                 memoryTotalMb?: number;
-                gpus?: Array<{ name?: string; memoryTotalMb?: number | null }>;
+                gpus?: Array<{
+                  name?: string;
+                  memoryTotalMb?: number | null;
+                  vendor?: string;
+                  driverVersion?: string;
+                }>;
                 textModelPlan?: {
                   revision?: string;
                   backend?: string;
@@ -134,6 +139,23 @@ export default async function UnisonContributorDashboard() {
                   tokensPerSecond?: number | null;
                   recordedAt?: string;
                 };
+                textAcceleration?: {
+                  preferred?: string;
+                  observedBackend?: string;
+                  gpuOffloadVerified?: boolean;
+                  maxObservedGpuOffloadRatio?: number;
+                };
+                textBenchmarks?: Array<{
+                  model?: string;
+                  targetProfiles?: string[];
+                  success?: boolean;
+                  latencyMs?: number;
+                  tokensPerSecond?: number | null;
+                  vramBytes?: number;
+                  modelSizeBytes?: number;
+                  gpuOffloadRatio?: number;
+                  recordedAt?: string;
+                }>;
               };
               const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
               const policy = (node.policy || {}) as {
@@ -181,7 +203,37 @@ export default async function UnisonContributorDashboard() {
                           ? <> · Vision <code>{resources.textModelPlan.models.vision}</code></>
                           : null}
                       </p>
-                      {resources.textBenchmark?.model ? (
+                      {resources.textAcceleration ? (
+                        <p>
+                          <strong>Acceleration:</strong>{" "}
+                          {resources.textAcceleration.observedBackend || resources.textAcceleration.preferred || "pending"}
+                          {resources.textAcceleration.gpuOffloadVerified ? " · GPU offload verified" : ""}
+                          {typeof resources.textAcceleration.maxObservedGpuOffloadRatio === "number"
+                            ? ` · ${Math.round(resources.textAcceleration.maxObservedGpuOffloadRatio * 100)}% max model residency`
+                            : ""}
+                        </p>
+                      ) : null}
+                      {resources.textBenchmarks?.length ? (
+                        <div className="service-tags">
+                          {resources.textBenchmarks
+                            .filter((benchmark) => benchmark.success)
+                            .slice(0, 4)
+                            .map((benchmark) => (
+                              <span key={`${benchmark.model}-${benchmark.targetProfiles?.join("-")}`}>
+                                {benchmark.targetProfiles?.join("/") || "model"} · {benchmark.model || "unknown"}
+                                {typeof benchmark.tokensPerSecond === "number"
+                                  ? ` · ${benchmark.tokensPerSecond.toFixed(1)} tok/s`
+                                  : ""}
+                                {typeof benchmark.latencyMs === "number"
+                                  ? ` · ${(benchmark.latencyMs / 1000).toFixed(1)}s`
+                                  : ""}
+                                {typeof benchmark.vramBytes === "number" && benchmark.vramBytes > 0
+                                  ? ` · ${(benchmark.vramBytes / 1024 / 1024 / 1024).toFixed(1)} GB VRAM`
+                                  : ""}
+                              </span>
+                            ))}
+                        </div>
+                      ) : resources.textBenchmark?.model ? (
                         <p>
                           <strong>Latest benchmark:</strong>{" "}
                           {resources.textBenchmark.model}
@@ -193,7 +245,7 @@ export default async function UnisonContributorDashboard() {
                             : ""}
                         </p>
                       ) : (
-                        <p>Real throughput benchmark will appear after this node completes text work.</p>
+                        <p>Installer benchmark will appear after this node finishes hardware profiling.</p>
                       )}
                     </div>
                   ) : null}
