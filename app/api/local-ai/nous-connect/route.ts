@@ -173,12 +173,46 @@ export async function GET(request: Request) {
   }
 
   const sessionId = new URL(request.url).searchParams.get("sessionId") || "";
-  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) {
-    return NextResponse.json({ error: "OAuth session is required." }, { status: 400 });
-  }
-
   const ownerRef = ownerRefFor(userId);
   const admin = createAdminSupabaseClient();
+
+  if (!sessionId) {
+    const organization = await ownerOrganization(userId);
+    if (!organization) {
+      return NextResponse.json(
+        {
+          connected: false,
+          providerKey: "nous-portal",
+          providerName: "Nous Portal",
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const { data: service, error: serviceError } = await admin
+      .from("connected_services")
+      .select("id,connection_status,last_synced_at")
+      .eq("organization_id", organization.id)
+      .eq("provider_key", "nous-portal")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (serviceError) throw serviceError;
+
+    return NextResponse.json(
+      {
+        connected: service?.connection_status === "connected",
+        providerKey: "nous-portal",
+        providerName: "Nous Portal",
+        lastVerifiedAt: service?.last_synced_at || null,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId)) {
+    return NextResponse.json({ error: "OAuth session is invalid." }, { status: 400 });
+  }
 
   try {
     const { data: session, error: sessionError } = await admin
