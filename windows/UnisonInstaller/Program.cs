@@ -550,7 +550,7 @@ internal sealed class InstallerForm : Form
                 try
                 {
                     using var response = await http.PostAsync(
-                        LocalChatUrl + "api/device-link-proof",
+                        Program.LocalChatUrl + "api/device-link-proof",
                         new StringContent("{}", Encoding.UTF8, "application/json"),
                         deadline.Token
                     );
