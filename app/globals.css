@@ -1844,3 +1844,117 @@ b { color: var(--text); }
   display: grid;
   gap: 2px;
 }
+
+
+/* Keep CoOperative Chat composer reachable like the local/mobile chat experience. */
+.cooperative-chat-shell {
+  padding-bottom: 150px;
+}
+
+.local-ai-chat {
+  padding-bottom: 18px;
+}
+
+.local-ai-composer {
+  position: fixed;
+  z-index: 72;
+  left: 50%;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(calc(100vw - 32px), 980px);
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--panel) 96%, black);
+  box-shadow: 0 16px 46px #0009, inset 0 1px 0 #ffffff0a;
+  backdrop-filter: blur(16px);
+}
+
+.local-ai-composer textarea {
+  min-height: 52px;
+  max-height: 132px;
+  resize: vertical;
+  border-radius: 15px;
+  padding: 13px 14px;
+}
+
+.local-ai-composer .pending-attachments {
+  padding: 2px 4px 0;
+}
+
+.local-ai-actions {
+  padding: 0 3px 1px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.local-ai-attachment-note {
+  padding: 0 4px 2px;
+}
+
+.local-ai-messages {
+  scroll-padding-bottom: 170px;
+}
+
+@media (max-width: 760px) {
+  .cooperative-chat-shell {
+    padding-bottom: 128px;
+  }
+
+  .local-ai-chat {
+    padding: 12px 12px 96px;
+  }
+
+  .local-ai-messages {
+    min-height: 260px;
+    padding-bottom: 12px;
+  }
+
+  .local-ai-composer {
+    bottom: max(8px, env(safe-area-inset-bottom));
+    width: calc(100vw - 16px);
+    padding: 7px;
+    gap: 7px;
+    border-radius: 20px;
+  }
+
+  .local-ai-composer textarea {
+    min-height: 48px;
+    max-height: 112px;
+    resize: none;
+    padding: 12px 13px;
+    border-radius: 14px;
+  }
+
+  .local-ai-actions {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 1px;
+  }
+
+  .local-ai-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .local-ai-actions > button,
+  .local-ai-actions > .model-mixer-trigger {
+    flex: 0 0 auto;
+  }
+
+  .local-ai-actions > .text-button {
+    display: none;
+  }
+
+  .local-ai-attachment-note {
+    display: none;
+  }
+
+  .pending-attachment {
+    flex-basis: 64px;
+    width: 64px;
+    height: 64px;
+  }
+}
