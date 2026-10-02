@@ -17,6 +17,7 @@ export type HermesMediaStartResult = {
   sandboxName: string;
   provider: string;
   model: string;
+  orchestratorProvider: string;
   orchestratorModel: string;
   startedAt: string;
   deadlineAt: string;
@@ -37,12 +38,6 @@ const HERMES_INSTALL_URL =
 const STATUS_DIR = "/tmp/cooperative-media";
 const IMAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const VIDEO_TIMEOUT_MS = 15 * 60 * 1000;
-
-function requiredEnv(name: string) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required for Hermes media generation.`);
-  return value;
-}
 
 function safeIdentifier(value: string, label: string) {
   if (!/^[a-z0-9_.:/-]+$/i.test(value)) {
@@ -75,14 +70,24 @@ export function hermesMediaConfiguration(
         : "bytedance/seedance-2.0-fast:free"),
     "Media model",
   );
+  const nousConfigured = Boolean(process.env.NOUS_API_KEY?.trim());
+  const orchestratorProvider = safeIdentifier(
+    process.env.HERMES_CLOUD_PROVIDER?.trim() ||
+      (nousConfigured ? "nous-api" : "openrouter"),
+    "Hermes orchestrator provider",
+  );
   const orchestratorModel = safeIdentifier(
-    process.env.HERMES_CLOUD_MODEL?.trim() || "poolside/laguna-s-2.1:free",
+    process.env.HERMES_CLOUD_MODEL?.trim() ||
+      (orchestratorProvider === "nous-api"
+        ? "poolside/laguna-s-2.1:free"
+        : "openrouter/free"),
     "Hermes orchestrator model",
   );
 
   return {
     provider,
     model,
+    orchestratorProvider,
     orchestratorModel,
     freeRoute:
       model.endsWith(":free") ||
@@ -98,6 +103,8 @@ export function hermesMediaProviderStatus() {
   return {
     nousConfigured: Boolean(process.env.NOUS_API_KEY?.trim()),
     openRouterConfigured: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
+    orchestratorProvider: image.orchestratorProvider,
+    orchestratorModel: image.orchestratorModel,
     image,
     video,
   };
@@ -123,6 +130,7 @@ function promptFor(spec: HermesMediaStartSpec) {
 
 function runnerScript(args: {
   kind: HermesMediaKind;
+  orchestratorProvider: string;
   orchestratorModel: string;
 }) {
   const toolset = args.kind === "image" ? "image_gen" : "video_gen";
@@ -134,7 +142,7 @@ HERMES_BIN="$HOME/.local/bin/hermes"
 if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN="/usr/local/bin/hermes"; fi
 "$HERMES_BIN" chat --oneshot \
   --query-file /tmp/cooperative-media-prompt.md \
-  --provider nous-api \
+  --provider ${args.orchestratorProvider} \
   --model ${args.orchestratorModel} \
   --max-turns 8 \
   --run-budget 840 \
@@ -177,17 +185,16 @@ export async function startHermesMediaTask(
 ): Promise<HermesMediaStartResult> {
   if (!spec.userRequest.trim()) throw new Error("A media request is required.");
 
-  const nousApiKey = requiredEnv("NOUS_API_KEY");
   const config = hermesMediaConfiguration(spec.kind, {
     provider: spec.provider,
     model: spec.model,
   });
 
-  const env: Record<string, string> = {
-    NOUS_API_KEY: nousApiKey,
-  };
+  const env: Record<string, string> = {};
+  const nousApiKey = process.env.NOUS_API_KEY?.trim();
+  if (nousApiKey) env.NOUS_API_KEY = nousApiKey;
 
-  if (config.provider === "openrouter") {
+  if (config.provider === "openrouter" || config.orchestratorProvider === "openrouter") {
     const credential =
       spec.providerCredential?.trim() || process.env.OPENROUTER_API_KEY?.trim();
     if (!credential) {
@@ -196,9 +203,17 @@ export async function startHermesMediaTask(
       );
     }
     env.OPENROUTER_API_KEY = credential;
-  } else {
+  }
+
+  if (config.provider !== "openrouter") {
     throw new Error(
       `Media provider ${config.provider} is not enabled in the first CoOperative cloud-media slice.`,
+    );
+  }
+
+  if (config.orchestratorProvider === "nous-api" && !nousApiKey) {
+    throw new Error(
+      "Hermes is configured to use Nous for orchestration, but NOUS_API_KEY is not connected.",
     );
   }
 
@@ -257,6 +272,7 @@ export async function startHermesMediaTask(
       content: Buffer.from(
         runnerScript({
           kind: spec.kind,
+          orchestratorProvider: config.orchestratorProvider,
           orchestratorModel: config.orchestratorModel,
         }),
         "utf8",
@@ -274,6 +290,7 @@ export async function startHermesMediaTask(
     sandboxName,
     provider: config.provider,
     model: config.model,
+    orchestratorProvider: config.orchestratorProvider,
     orchestratorModel: config.orchestratorModel,
     startedAt: startedAt.toISOString(),
     deadlineAt: deadlineAt.toISOString(),
