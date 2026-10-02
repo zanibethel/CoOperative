@@ -8,6 +8,7 @@ type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
 
 export type UnisonNodeMembership = {
   nodeId: string;
+  userId: string;
   role: "owner" | "admin" | "member";
 };
 
@@ -29,7 +30,7 @@ export async function activeNodeMemberships(
         typeof row.node_id === "string" &&
         (row.role === "owner" || row.role === "admin" || row.role === "member"),
     )
-    .map((row) => ({ nodeId: row.node_id, role: row.role }));
+    .map((row) => ({ nodeId: row.node_id, userId, role: row.role }));
 }
 
 export async function activeNodeIds(
@@ -57,7 +58,7 @@ export async function nodeMembership(
     return null;
   }
 
-  return { nodeId: data.node_id, role: data.role };
+  return { nodeId: data.node_id, userId, role: data.role };
 }
 
 export async function canManageNode(
