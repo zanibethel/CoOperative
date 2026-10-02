@@ -234,10 +234,16 @@ export async function startHermesMediaTask(
 
   if (
     config.provider !== "openrouter" &&
-    !(spec.kind === "image" && config.provider === "nous")
+    config.provider !== "nous"
   ) {
     throw new Error(
       `Media provider ${config.provider} is not enabled for this CoOperative media job.`,
+    );
+  }
+
+  if (config.provider === "nous" && !spec.nousAuthJson && !nousApiKey) {
+    throw new Error(
+      "Nous Portal is selected for media generation but is not connected to this CoOperative profile.",
     );
   }
 
