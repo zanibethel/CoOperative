@@ -219,6 +219,7 @@ function executionStep(
   if (status === "Using funded high-quality AI…") return status;
   if (status === "Generating image…") return status;
   if (status === "Generating video…") return status;
+  if (status === "Recovery running in background…") return status;
   if (status === "Stopping…") return status;
   if (status === "Copied") return status;
   if (status === "Ready") return "Ready";
@@ -255,6 +256,18 @@ function oauthServiceConnectDirective(content: string) {
 
   return {
     providerKey: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+function recoveryStatusDirective(content: string) {
+  const match = content.match(
+    /RECOVERY_STATUS:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
+  );
+  if (!match) return null;
+
+  return {
+    incidentId: match[1],
     text: content.replace(match[0], "").trim(),
   };
 }
@@ -613,6 +626,149 @@ function NousPortalConnectCard({
           {working ? "Starting secure sign-in…" : "Connect Nous Portal"}
         </button>
       )}
+
+      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+    </div>
+  );
+}
+
+
+type RecoveryStatusCardProps = {
+  incidentId: string;
+  onConversationChanged: () => Promise<void> | void;
+};
+
+function RecoveryStatusCard({
+  incidentId,
+  onConversationChanged,
+}: RecoveryStatusCardProps) {
+  const [result, setResult] = useState<RecoveryResult | null>(null);
+  const [cardError, setCardError] = useState("");
+  const lastStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+
+    async function refresh() {
+      try {
+        const response = await fetch(
+          `/api/local-ai/recovery?incidentId=${encodeURIComponent(incidentId)}`,
+          { cache: "no-store" },
+        );
+        const payload = (await response.json()) as RecoveryResult;
+        if (!response.ok || !payload.incident) {
+          throw new Error(
+            payload.detail || payload.error || "Could not read recovery status.",
+          );
+        }
+        if (cancelled) return;
+
+        const previousStatus = lastStatusRef.current;
+        lastStatusRef.current = payload.incident.status;
+        setResult(payload);
+        setCardError("");
+
+        if (
+          previousStatus &&
+          previousStatus !== payload.incident.status &&
+          (payload.incident.status === "completed" ||
+            payload.incident.status === "failed" ||
+            payload.incident.status === "waiting_user")
+        ) {
+          await onConversationChanged();
+        }
+
+        if (
+          payload.incident.status === "diagnosing" ||
+          payload.incident.status === "repairing" ||
+          payload.incident.status === "retrying"
+        ) {
+          timer = window.setTimeout(refresh, 2400);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCardError(
+            err instanceof Error ? err.message : "Could not read recovery status.",
+          );
+          timer = window.setTimeout(refresh, 5000);
+        }
+      }
+    }
+
+    void refresh();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [incidentId, onConversationChanged]);
+
+  const incident = result?.incident;
+  const events = result?.events || [];
+  const active =
+    incident?.status === "diagnosing" ||
+    incident?.status === "repairing" ||
+    incident?.status === "retrying";
+
+  return (
+    <div className="recovery-status-card">
+      <div className="recovery-status-current">
+        <span
+          className={
+            active
+              ? "recovery-status-dot active"
+              : incident?.status === "completed"
+                ? "recovery-status-dot complete"
+                : "recovery-status-dot"
+          }
+          aria-hidden="true"
+        />
+        <div>
+          <strong>Recovery Agent</strong>
+          <span>
+            {incident?.current_message ||
+              (cardError ? "Recovery status is temporarily unavailable." : "Checking recovery…")}
+          </span>
+        </div>
+      </div>
+
+      {incident?.continuation_prompt && active ? (
+        <p className="recovery-continuation">{incident.continuation_prompt}</p>
+      ) : null}
+
+      <details className="recovery-details">
+        <summary>Recovery details</summary>
+        <div className="recovery-event-list">
+          <small>
+            These are user-safe activity summaries, not private model reasoning.
+          </small>
+          {events.length === 0 ? (
+            <span>Collecting recovery activity…</span>
+          ) : (
+            events.map((event) => (
+              <div className="recovery-event" key={String(event.id)}>
+                <span>{event.message}</span>
+                {event.created_at ? (
+                  <time>
+                    {new Date(event.created_at).toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit",
+                      second: "2-digit",
+                    })}
+                  </time>
+                ) : null}
+              </div>
+            ))
+          )}
+          {incident?.resolution_summary ? (
+            <div className="recovery-resolution">
+              <strong>Resolution</strong>
+              <span>{incident.resolution_summary}</span>
+            </div>
+          ) : null}
+        </div>
+      </details>
 
       {cardError ? <div className="secure-service-error">{cardError}</div> : null}
     </div>
