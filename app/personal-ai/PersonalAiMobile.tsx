@@ -66,8 +66,20 @@ type RecoveryIncident = {
   resolution_summary?: string | null;
 };
 
+type RecoveryExecutor = {
+  agent?: string | null;
+  taskStatus?: string | null;
+  workerId?: string | null;
+  deviceName?: string | null;
+  requestedProfile?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  waitingForWorker?: boolean;
+};
+
 type RecoveryResult = {
   incident?: RecoveryIncident;
+  executor?: RecoveryExecutor;
   events?: RecoveryEvent[];
   error?: string;
   detail?: string;
@@ -189,6 +201,28 @@ function PersonalRecoveryCard({
 
       {incident?.continuation_prompt && active ? (
         <p>{incident.continuation_prompt}</p>
+      ) : null}
+
+      {result?.executor ? (
+        <div className="personal-recovery-executor">
+          <span>
+            <strong>Device</strong>{" "}
+            {result.executor.waitingForWorker
+              ? "waiting for local worker"
+              : result.executor.deviceName ||
+                result.executor.workerId ||
+                "local/owned"}
+          </span>
+          <span>
+            <strong>Model</strong>{" "}
+            {result.executor.model ||
+              (result.executor.waitingForWorker
+                ? "not selected yet"
+                : result.executor.requestedProfile
+                  ? result.executor.requestedProfile + " profile"
+                  : "pending")}
+          </span>
+        </div>
       ) : null}
 
       <details>
