@@ -1236,9 +1236,9 @@ export async function POST(request: Request) {
         visibleUserText,
         mediaPlan,
       );
-      const requestMaxSpendMicrousd = input.modelMixer
-        ? Math.round(input.modelMixer.maxSpendUsd * 1_000_000)
-        : null;
+      const requestMaxSpendMicrousd = Math.round(
+        requestCapUsd * 1_000_000,
+      );
 
       const { error: mediaJobError } = await admin
         .from("media_generation_jobs")
@@ -1315,10 +1315,12 @@ export async function POST(request: Request) {
             provider: started.provider,
             model: started.model,
             routeReason:
-              `CoOperative selected ${selectedModel} from the ${pricingSource} media catalog at Media level ${mediaLevel}, then used ${nousRuntimeAuth ? "Nous Portal/Hermes" : "the OpenRouter free fallback"} for low-cost orchestration before one media-generation call.`,
+              selectedProvider === "nous"
+                ? `CoOperative used the connected Nous Portal balance first for ${selectedModel}, within the ${requestCapUsd.toFixed(2)} request cap. OpenRouter remains the backup provider if Nous reports a billing/credit boundary.`
+                : `CoOperative selected OpenRouter backup model ${selectedModel} within the ${requestCapUsd.toFixed(2)} request cap after checking the preferred Nous route.`,
             estimatedProviderCostUsd,
             modelMixer: input.modelMixer || null,
-            requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
+            requestMaxSpendUsd: requestCapUsd,
           },
           { status: 202, headers: { "Cache-Control": "no-store" } },
         );
@@ -1701,7 +1703,7 @@ export async function GET(request: Request) {
       let mediaQuery = admin
         .from("media_generation_jobs")
         .select(
-          "id,status,conversation_id,kind,provider,model,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
+          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_source,fallback_from_job_id,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
         )
         .eq("owner_ref", ownerRef);
 
