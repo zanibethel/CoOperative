@@ -286,23 +286,32 @@ function recoveryStatusDirective(content: string) {
 }
 
 function budgetFollowupDirective(content: string) {
-  const marker = /(?:^|\n)BUDGET_FOLLOWUPS\s*$/im;
-  if (!marker.test(content)) return null;
+  const marker = /(?:^|\n)BUDGET_FOLLOWUPS(?::([0-9]+(?:\.[0-9]+)?))?\s*$/im;
+  const match = content.match(marker);
+  if (!match) return null;
 
+  const parsedCap = match[1] ? Number(match[1]) : null;
   return {
     text: content.replace(marker, "").trim(),
+    suggestedCap:
+      parsedCap !== null && Number.isFinite(parsedCap) && parsedCap > 0
+        ? parsedCap
+        : null,
   };
 }
 
 type BudgetFollowupsProps = {
   onSuggestion?: (value: string) => void;
   onCapChange?: (value: number) => void;
+  suggestedCap?: number | null;
 };
 
 function BudgetFollowups({
   onSuggestion,
   onCapChange,
+  suggestedCap,
 }: BudgetFollowupsProps) {
+  const nextCap = suggestedCap ?? 0.1;
   return (
     <div className="recovery-suggestions" aria-label="Suggested budget follow-ups">
       <button
@@ -328,13 +337,16 @@ function BudgetFollowups({
       <button
         type="button"
         onClick={() => {
-          onCapChange?.(0.1);
+          onCapChange?.(nextCap);
           onSuggestion?.(
-            "Retry with a $0.10 max-spend cap. Still use Nous first and OpenRouter only as backup.",
+            `Retry with a ${nextCap.toFixed(2)} max-spend cap. Still use Nous first and OpenRouter only as backup.`,
           );
         }}
       >
-        Raise cap to $0.10
+        Raise cap to {nextCap.toLocaleString(undefined, {
+          style: "currency",
+          currency: "USD",
+        })}
       </button>
       <a className="recovery-suggestion-link" href="/balance">
         Add AI balance
@@ -1932,6 +1944,7 @@ export default function LocalAiChat() {
                         {budgetFollowup.text ? <div>{budgetFollowup.text}</div> : null}
                         <BudgetFollowups
                           onSuggestion={(value) => setInput(value)}
+                          suggestedCap={budgetFollowup.suggestedCap}
                           onCapChange={(value) =>
                             setModelMixer((current) => ({
                               ...current,
