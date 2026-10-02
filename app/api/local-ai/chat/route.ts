@@ -8,6 +8,7 @@ import {
   COOPERATIVE_BUSINESS_POLICY_REVISION,
 } from "@/lib/ai/business-chat-policy";
 import { buildBusinessChatContext } from "@/lib/ai/business-context";
+import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 
 export const runtime = "nodejs";
@@ -58,6 +59,8 @@ export async function POST(request: Request) {
       owner.userId,
       input.businessId,
     );
+    const profileBalance =
+      businessContext?.aiBalance ?? (await aiProfileBalanceForUser(owner.userId));
 
     let conversationId = input.conversationId;
     let conversationTitle = "";
@@ -341,7 +344,7 @@ export async function POST(request: Request) {
       allow_paid_fallback:
         requestedCapability === "text" &&
         input.nodeRouting !== "require-node" &&
-        businessContext?.aiBalance.funded === true,
+        profileBalance.funded,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
@@ -388,8 +391,8 @@ export async function POST(request: Request) {
         paidAiEligible:
           requestedCapability === "text" &&
           input.nodeRouting !== "require-node" &&
-          businessContext?.aiBalance.funded === true,
-        availableAiBalanceUsd: businessContext?.aiBalance.availableUsd ?? 0,
+          profileBalance.funded,
+        availableAiBalanceUsd: profileBalance.availableUsd,
       },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
