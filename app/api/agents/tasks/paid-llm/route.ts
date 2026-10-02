@@ -13,6 +13,13 @@ import {
 } from "@/lib/inference/openai-paid-executor";
 import { localWorkerAuthorized } from "@/lib/agents/server";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
+import {
+  aiProfileBalanceForUser,
+  releaseAiProfileFunds,
+  reserveAiProfileFunds,
+  settleAiProfileFunds,
+  userIdFromAiOwnerRef,
+} from "@/lib/billing/ai-profile-balance";
 
 export const runtime = "nodejs";
 export const maxDuration = 210;
@@ -105,7 +112,12 @@ export async function POST(request: Request) {
     const businessOpenAi = businessOpenAiService
       ? configuredBusinessOpenAiCandidate(evidence)
       : null;
-    const platformOpenAi = configuredOpenAiCandidate(evidence);
+    const profileUserId = userIdFromAiOwnerRef(task.owner_ref);
+    const profileBalance = profileUserId
+      ? await aiProfileBalanceForUser(profileUserId)
+      : null;
+    const platformOpenAi =
+      profileBalance?.funded === true ? configuredOpenAiCandidate(evidence) : null;
     const candidates = [businessOpenAi, platformOpenAi].filter(
       (candidate): candidate is NonNullable<typeof candidate> =>
         Boolean(candidate),
@@ -145,6 +157,59 @@ export async function POST(request: Request) {
       );
     }
 
+    let fundingReservation:
+      | Awaited<ReturnType<typeof reserveAiProfileFunds>>
+      | null = null;
+
+    if (!usingBusinessOwnedAi) {
+      const estimatedCostUsd = decision.candidate.estimatedMarginalCostUsd;
+      if (
+        !profileUserId ||
+        !profileBalance?.funded ||
+        typeof estimatedCostUsd !== "number" ||
+        !Number.isFinite(estimatedCostUsd) ||
+        estimatedCostUsd <= 0
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Platform-paid AI requires a funded profile balance and a known estimated cost.",
+            profileBalance: profileBalance
+              ? {
+                  availableMicrousd: profileBalance.availableMicrousd,
+                  availableUsd: profileBalance.availableUsd,
+                  funded: profileBalance.funded,
+                }
+              : null,
+          },
+          { status: 409 },
+        );
+      }
+
+      fundingReservation = await reserveAiProfileFunds({
+        userId: profileUserId,
+        estimatedCostUsd,
+        source: "agent-paid-ai",
+        referenceId: task.id,
+        metadata: {
+          provider,
+          model,
+          approvedMaxCostUsd,
+          agentTaskId: task.id,
+        },
+      });
+
+      if (!fundingReservation) {
+        return NextResponse.json(
+          {
+            error:
+              "The profile AI balance no longer has enough available funds for this paid request.",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     await admin.from("agent_task_events").insert({
       task_id: task.id,
       owner_ref: task.owner_ref,
@@ -157,18 +222,69 @@ export async function POST(request: Request) {
         model,
         executorSource: usingBusinessOwnedAi
           ? "business-connected-service"
-          : "cooperative-platform",
+          : "cooperative-platform-funded-balance",
         approvedMaxCostUsd,
+        fundingReservationId: fundingReservation?.id || null,
         estimatedCostUsd: decision.candidate.estimatedMarginalCostUsd,
       },
     });
 
-    const result = await executeOpenAiPaidText(evidence, {
-      apiKey: usingBusinessOwnedAi
-        ? businessOpenAiService?.credential
-        : undefined,
-      model: decision.candidate.model,
-    });
+    let result;
+    try {
+      result = await executeOpenAiPaidText(evidence, {
+        apiKey: usingBusinessOwnedAi
+          ? businessOpenAiService?.credential
+          : undefined,
+        model: decision.candidate.model,
+      });
+    } catch (executionError) {
+      if (fundingReservation) {
+        await releaseAiProfileFunds({
+          reservationId: fundingReservation.id,
+          metadata: {
+            reason: "paid-ai-execution-failed",
+            agentTaskId: task.id,
+          },
+        });
+      }
+      throw executionError;
+    }
+
+    if (fundingReservation) {
+      if (
+        typeof result.estimatedCostUsd !== "number" ||
+        !Number.isFinite(result.estimatedCostUsd) ||
+        result.estimatedCostUsd < 0
+      ) {
+        await releaseAiProfileFunds({
+          reservationId: fundingReservation.id,
+          metadata: {
+            reason: "paid-ai-cost-unavailable",
+            agentTaskId: task.id,
+          },
+        });
+        return NextResponse.json(
+          {
+            error:
+              "The paid model returned usage without a measurable configured cost; the result was quarantined.",
+          },
+          { status: 409 },
+        );
+      }
+
+      await settleAiProfileFunds({
+        reservationId: fundingReservation.id,
+        actualCostUsd: result.estimatedCostUsd,
+        metadata: {
+          provider,
+          model: result.model,
+          responseId: result.responseId,
+          promptTokens: result.promptTokens,
+          outputTokens: result.outputTokens,
+          agentTaskId: task.id,
+        },
+      });
+    }
 
     if (
       typeof result.estimatedCostUsd === "number" &&
@@ -212,7 +328,8 @@ export async function POST(request: Request) {
         approvedMaxCostUsd,
         executorSource: usingBusinessOwnedAi
           ? "business-connected-service"
-          : "cooperative-platform",
+          : "cooperative-platform-funded-balance",
+        fundingReservationId: fundingReservation?.id || null,
       },
     });
 
