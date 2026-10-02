@@ -520,6 +520,49 @@ def hosted_history_request(
     return value if isinstance(value, dict) else {}
 
 
+def hosted_recovery_request(
+    method: str,
+    profile_token: str | None,
+    incident_id: str | None = None,
+    payload: dict | None = None,
+) -> dict:
+    if not NODE_ID or not NODE_TOKEN:
+        raise RuntimeError("This CoOperativeLocalAI is not linked to a Unison node.")
+    if not profile_token:
+        raise RuntimeError(
+            "This Windows profile is not linked to a CoOperative user yet. "
+            "Run the Unison installer once from this Windows profile."
+        )
+
+    url = f"{COOPERATIVE_URL}/api/personal-ai/node/recovery"
+    params = {"nodeId": NODE_ID}
+    if incident_id:
+        params["incidentId"] = incident_id
+
+    response = httpx.request(
+        method,
+        url,
+        params=params if method == "GET" else None,
+        headers={
+            "Authorization": f"Bearer {NODE_TOKEN}",
+            "X-Cooperative-Profile-Token": profile_token,
+            "Content-Type": "application/json",
+        },
+        json=payload if method != "GET" else None,
+        timeout=45.0,
+        follow_redirects=True,
+    )
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail") or response.json().get("error")
+        except Exception:
+            detail = response.text
+        raise RuntimeError(str(detail or "Local recovery request failed.")[:700])
+
+    value = response.json()
+    return value if isinstance(value, dict) else {}
+
+
 def device_link_proof() -> dict:
     if not NODE_ID or not NODE_TOKEN:
         raise RuntimeError("This PC is not linked to a Unison node.")
