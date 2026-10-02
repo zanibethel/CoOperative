@@ -1065,7 +1065,7 @@ export async function POST(request: Request) {
         return (
           "I understand the request. Before generating, here are three live-priced ways to fulfill the ask without changing its requested duration, resolution, format, or audio settings:\n\n" +
           lines.join("\n") +
-          "\n\nNo generation has started. Choose High-end, Balanced, or Lowest cost." +
+          "\n\nNo generation has started. Choose High-end, Lowest cost, or Balanced." +
           (recommendationMarker ? `\n\n${recommendationMarker}` : "")
         );
       };
