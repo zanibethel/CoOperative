@@ -17,7 +17,6 @@ import {
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import { activeNodeIds } from "@/lib/unison/node-access";
 import {
-  hermesMediaConfiguration,
   pollHermesMediaTask,
   startHermesMediaTask,
 } from "@/lib/inference/hermes-media-cloud";
@@ -26,6 +25,8 @@ import {
   planMediaRequest,
 } from "@/lib/inference/media-request";
 import {
+  estimateOpenRouterMediaCostUsd,
+  openRouterKeySpendStatus,
   openRouterMediaCatalog,
   recommendedForRequest,
   type MediaCatalogModel,
@@ -141,14 +142,30 @@ function aspectRatioFromPrompt(value: string) {
 function estimatedMediaProviderCostUsd(
   model: MediaCatalogModel,
   durationSeconds: number | null,
+  resolution: string | null = null,
+  audio: boolean | null = null,
 ) {
-  const unitCost = model.minUnitCostUsd;
-  if (unitCost === null) return null;
-  if (model.unit === "second") {
-    return durationSeconds ? unitCost * durationSeconds : null;
-  }
-  if (model.unit === "image") return unitCost;
-  return model.free ? 0 : null;
+  return estimateOpenRouterMediaCostUsd(model, {
+    durationSeconds,
+    resolution,
+    audio,
+  });
+}
+
+function nextBudgetUsd(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return Math.ceil(value * 100) / 100;
+}
+
+function videoControlsFromPrompt(prompt: string) {
+  const resolution =
+    prompt.match(/Resolution:\s*(360p|480p|540p|720p|1080p|4k)/i)?.[1]?.toLowerCase() ||
+    null;
+  const audioMatch = prompt.match(/Generated audio:\s*(on|off)/i)?.[1]?.toLowerCase();
+  return {
+    resolution,
+    audio: audioMatch === "on" ? true : audioMatch === "off" ? false : null,
+  };
 }
 
 export async function POST(request: Request) {
