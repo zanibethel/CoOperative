@@ -334,6 +334,7 @@ def _dynamic_resources() -> dict:
                 "fast": str((plan.get("models") or {}).get("fast") or "")[:160],
                 "quality": str((plan.get("models") or {}).get("quality") or "")[:160],
                 "heavy": str((plan.get("models") or {}).get("heavy") or "")[:160],
+                "vision": str((plan.get("models") or {}).get("vision") or "")[:160],
             },
             "selectionReason": str(plan.get("selectionReason") or "")[:1000],
         }
