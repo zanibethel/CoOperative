@@ -117,8 +117,87 @@ $localChatErrorLogPath = Join-Path $PSScriptRoot "local-chat-error.log"
 $localChatReadyPath = Join-Path $PSScriptRoot "local-chat.ready"
 $localChatBusyPath = Join-Path $PSScriptRoot "local-chat.busy"
 $imagePortPath = Join-Path $PSScriptRoot "image-worker.port"
+$modelPlanPath = Join-Path $PSScriptRoot "text-model-plan.json"
+$textBenchmarkPath = Join-Path $PSScriptRoot "text-benchmark.json"
+$textBenchmarkSuitePath = Join-Path $PSScriptRoot "text-benchmark-suite.json"
 
 Remove-Item -Force $textReadyPath,$textBusyPath,$localChatReadyPath,$localChatBusyPath -ErrorAction SilentlyContinue
+
+function Get-AdaptiveResources {
+  $resources = @{}
+
+  if (Test-Path $modelPlanPath) {
+    try {
+      $plan = Get-Content $modelPlanPath -Raw | ConvertFrom-Json
+      if ($plan.hardware.cpuLogical) { $resources["cpuLogical"] = [int]$plan.hardware.cpuLogical }
+      if ($plan.hardware.memoryTotalMb) { $resources["memoryTotalMb"] = [int]$plan.hardware.memoryTotalMb }
+      if ($plan.hardware.gpus) { $resources["gpus"] = @($plan.hardware.gpus) }
+      $resources["textModelPlan"] = @{
+        revision = [string]$plan.revision
+        backend = [string]$plan.backend
+        models = @{
+          fast = [string]$plan.models.fast
+          quality = [string]$plan.models.quality
+          heavy = [string]$plan.models.heavy
+          vision = [string]$plan.models.vision
+        }
+        selectionReason = [string]$plan.selectionReason
+      }
+    } catch {
+      Add-Content -Path $errorLogPath -Value "Could not load adaptive model plan for heartbeat: $($_.Exception.Message)"
+    }
+  }
+
+  if (Test-Path $textBenchmarkPath) {
+    try {
+      $benchmark = Get-Content $textBenchmarkPath -Raw | ConvertFrom-Json
+      $resources["textBenchmark"] = @{
+        profile = [string]$benchmark.profile
+        model = [string]$benchmark.model
+        provider = [string]$benchmark.provider
+        outputTokens = [int]$benchmark.outputTokens
+        latencyMs = [int]$benchmark.latencyMs
+        tokensPerSecond = $(if ($null -ne $benchmark.tokensPerSecond) { [double]$benchmark.tokensPerSecond } else { $null })
+        recordedAt = [string]$benchmark.recordedAt
+      }
+    } catch {}
+  }
+
+  if (Test-Path $textBenchmarkSuitePath) {
+    try {
+      $suite = Get-Content $textBenchmarkSuitePath -Raw | ConvertFrom-Json
+      $resources["textAcceleration"] = @{
+        preferred = [string]$suite.acceleration.preferred
+        observedBackend = [string]$suite.acceleration.observedBackend
+        gpuOffloadVerified = [bool]$suite.acceleration.gpuOffloadVerified
+        maxObservedGpuOffloadRatio = [double]$suite.acceleration.maxObservedGpuOffloadRatio
+      }
+      $benchmarkRows = @()
+      foreach ($result in @($suite.results) | Select-Object -First 8) {
+        $benchmarkRows += @{
+          model = [string]$result.model
+          targetProfiles = @($result.targetProfiles)
+          success = [bool]$result.success
+          latencyMs = [int]$result.latencyMs
+          tokensPerSecond = $(if ($null -ne $result.tokensPerSecond) { [double]$result.tokensPerSecond } else { $null })
+          vramBytes = [int64]$result.vramBytes
+          modelSizeBytes = [int64]$result.modelSizeBytes
+          gpuOffloadRatio = [double]$result.gpuOffloadRatio
+          recordedAt = [string]$result.recordedAt
+        }
+      }
+      $resources["textBenchmarks"] = $benchmarkRows
+    } catch {
+      Add-Content -Path $errorLogPath -Value "Could not load benchmark suite for heartbeat: $($_.Exception.Message)"
+    }
+  }
+
+  $resources["maxCpuPercent"] = $(if ($env:UNISON_MAX_CPU_PERCENT) { [double]$env:UNISON_MAX_CPU_PERCENT } else { 50 })
+  $resources["maxGpuPercent"] = $(if ($env:UNISON_MAX_GPU_PERCENT) { [double]$env:UNISON_MAX_GPU_PERCENT } else { 80 })
+  if ($env:UNISON_MAX_MEMORY_MB) { $resources["maxMemoryMb"] = [int]$env:UNISON_MAX_MEMORY_MB }
+
+  return $resources
+}
 
 function Send-StartupHeartbeat(
   [string]$WorkerVersion,
@@ -140,7 +219,7 @@ function Send-StartupHeartbeat(
         machine = $env:PROCESSOR_ARCHITECTURE
       }
       capabilities = $Capabilities
-      resources = @{}
+      resources = Get-AdaptiveResources
       policy = @{
         idleOnly = $true
         idleThresholdSeconds = [Math]::Max(0, $IdleMinutes) * 60
@@ -149,7 +228,7 @@ function Send-StartupHeartbeat(
         idleScope = $(if ($env:UNISON_INSTALL_SCOPE -eq "machine") { "machine" } else { "session" })
       }
       workerVersion = $WorkerVersion
-    } | ConvertTo-Json -Depth 6
+    } | ConvertTo-Json -Depth 9
 
     Invoke-RestMethod `
       -Method Post `
@@ -339,7 +418,7 @@ if (Test-Path $localChatReadyPath) {
   }
 }
 $textReadyVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
-  "windows-unison-1.0.0-machine-text-only"
+  "windows-unison-1.1.0-machine-adaptive"
 } else {
   "starting-windows-text-ready-0.5"
 }
@@ -405,7 +484,7 @@ while (-not $imageProcess.HasExited -and -not $textProcess.HasExited) {
     }
 
     $imageStartingVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
-      "windows-unison-1.0.0-machine-text-only"
+      "windows-unison-1.1.0-machine-adaptive"
     } else {
       "starting-windows-0.4"
     }
@@ -480,9 +559,9 @@ if ($imageExitedFirst) {
   while (-not $textProcess.HasExited) {
     $state = if (Test-Path $textBusyPath) { "busy" } else { "online" }
     $degradedVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
-      "windows-unison-1.0.0-machine-text-only"
+      "windows-unison-1.1.0-machine-adaptive"
     } else {
-      "windows-unison-0.9.3-text-only"
+      "windows-unison-1.1.0-text-adaptive"
     }
     Send-StartupHeartbeat `
       -WorkerVersion $degradedVersion `
