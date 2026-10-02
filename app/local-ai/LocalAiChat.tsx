@@ -1678,6 +1678,24 @@ export default function LocalAiChat() {
                     );
                   }
 
+                  const recovery = recoveryStatusDirective(message.content);
+                  if (recovery) {
+                    return (
+                      <>
+                        {recovery.text ? <div>{recovery.text}</div> : null}
+                        <RecoveryStatusCard
+                          incidentId={recovery.incidentId}
+                          onConversationChanged={async () => {
+                            if (conversationId) {
+                              await loadConversation(conversationId);
+                              await refreshConversations();
+                            }
+                          }}
+                        />
+                      </>
+                    );
+                  }
+
                   const serviceConnect = serviceConnectDirective(message.content);
                   if (serviceConnect) {
                     return (
