@@ -20,6 +20,12 @@ export type AgentWorkerAuthorization =
     }
   | {
       authorized: true;
+      mode: "platform-node";
+      nodeId: string;
+      ownerRef: null;
+    }
+  | {
+      authorized: true;
       mode: "node";
       nodeId: string;
       ownerRef: string;
@@ -76,6 +82,15 @@ export async function authorizeAgentWorker(
       authorized: false,
       mode: "none",
       nodeId: null,
+      ownerRef: null,
+    };
+  }
+
+  if (node.owner_ref === "platform-private") {
+    return {
+      authorized: true,
+      mode: "platform-node",
+      nodeId: node.id,
       ownerRef: null,
     };
   }
