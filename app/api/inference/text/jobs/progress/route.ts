@@ -39,7 +39,7 @@ export async function POST(request: Request) {
     const admin = createAdminSupabaseClient();
     const { data: job, error: jobError } = await admin
       .from("text_inference_jobs")
-      .select("id,status,worker_id")
+      .select("id,status,worker_id,personal_use")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -61,7 +61,8 @@ export async function POST(request: Request) {
     const partialText =
       typeof body.text === "string" ? body.text.slice(0, 200000) : "";
     const update: Record<string, unknown> = {
-      partial_text: partialText,
+      // Personal prompts/responses are not retained in plaintext queue progress.
+      partial_text: job.personal_use ? null : partialText,
       progress_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
