@@ -2330,6 +2330,26 @@ b { color: var(--text); }
   background: color-mix(in srgb, var(--accent) 9%, var(--panel));
 }
 
+.recovery-suggestion-link {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  color: var(--accent);
+  padding: 7px 10px;
+  font-size: .7rem;
+  line-height: 1.2;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.recovery-suggestion-link:hover,
+.recovery-suggestion-link:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+}
+
 
 .model-mixer-test-cap {
   margin-top: 6px;

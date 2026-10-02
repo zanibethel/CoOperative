@@ -20,6 +20,9 @@ type LiveMediaCatalog = {
     nous: boolean;
     openRouter: boolean;
   };
+  paidAiEligible?: boolean;
+  availableAiBalanceUsd?: number;
+  routingPriority?: Array<"nous" | "openrouter" | "local">;
   image: {
     recommended: LiveMediaTier[];
   };
@@ -469,13 +472,35 @@ export default function ModelMixer({
           </label>
         </div>
 
-        {!paidAiEligible ? (
+        <div className="model-mixer-funding-note">
+          <strong>Media provider order</strong>
+          <span>
+            {mediaCatalog?.configured.nous
+              ? "Nous subscription/tool credits first"
+              : "Nous not currently available"}
+            {" → "}
+            {mediaCatalog?.configured.openRouter
+              ? "OpenRouter backup"
+              : "OpenRouter backup not connected"}
+            {" → "}owned/local fallback when capable. The request cap is a hard ceiling;
+            CoOperative does not raise it automatically.
+          </span>
+          <small>
+            CoOperative AI balance: $
+            {(mediaCatalog?.availableAiBalanceUsd ?? 0).toFixed(2)}. This balance gates
+            CoOperative-funded paid routes; a connected BYOK provider still uses that provider
+            account&apos;s own credits.
+          </small>
+        </div>
+
+        {!paidAiEligible && !mediaCatalog?.configured.nous ? (
           <div className="model-mixer-funding-note">
-            <strong>Paid routing is currently unavailable.</strong>
+            <strong>CoOperative-funded paid routing is currently unavailable.</strong>
             <span>
-              Free and owned/local routes remain available. Paid portions will activate only when
-              the profile has funded AI balance and a connected paid executor.
+              Free and owned/local routes remain available. Add AI balance to enable
+              CoOperative-funded paid fallbacks.
             </span>
+            <a href="/balance">Add AI balance</a>
           </div>
         ) : null}
 

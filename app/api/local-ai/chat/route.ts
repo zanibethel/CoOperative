@@ -8,7 +8,12 @@ import {
   COOPERATIVE_BUSINESS_POLICY_REVISION,
 } from "@/lib/ai/business-chat-policy";
 import { buildBusinessChatContext } from "@/lib/ai/business-context";
-import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
+import {
+  aiProfileBalanceForUser,
+  releaseAiProfileFunds,
+  reserveAiProfileFunds,
+  settleAiProfileFunds,
+} from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import { activeNodeIds } from "@/lib/unison/node-access";
 import {
@@ -584,7 +589,7 @@ export async function POST(request: Request) {
         if (estimatedMicrousd > 0) {
           const estimatedUsd = estimatedMicrousd / 1_000_000;
           const assistantText =
-            `The last media attempt is no longer active, but retrying it could create another paid generation charge of about ${estimatedUsd.toFixed(2)}. I won’t duplicate that spend automatically. Approve another paid generation if you want me to retry it.`;
+            `The last media attempt is no longer active, but retrying it could create another paid generation charge of about ${estimatedUsd.toFixed(2)}. I won’t duplicate that spend automatically. Choose a lower-cost route, keep Nous first, or raise the cap explicitly before retrying.\n\nBUDGET_FOLLOWUPS`;
 
           await admin.from("local_ai_messages").insert([
             {
@@ -875,8 +880,19 @@ export async function POST(request: Request) {
       ) as 0 | 1 | 2 | 3 | 4;
       const requestCapUsd = input.modelMixer?.maxSpendUsd ?? null;
 
+      let nousAuthFailure: string | null = null;
       const nousRuntimeAuth = await freshNousRuntimeAuthForOwner(ownerRef).catch(
-        () => null,
+        (error) => {
+          nousAuthFailure =
+            error instanceof Error
+              ? error.message.slice(0, 500)
+              : "Nous Portal authorization is temporarily unavailable.";
+          console.warn("Nous-first media authorization unavailable; backup routing may be used", {
+            ownerRef,
+            detail: nousAuthFailure,
+          });
+          return null;
+        },
       );
       const nousChoice =
         mediaPlan.kind === "image"
@@ -902,8 +918,8 @@ export async function POST(request: Request) {
         const minimumBudget = suggestion?.minimumRequestedBudget || 0;
         const message =
           suggestedSeconds >= 1
-            ? `Your current $${(requestCapUsd || 0).toFixed(2)} cap is below the estimated cost for a ${requestedSeconds}s video. To stay inside the cap, I can reduce the test to about ${suggestedSeconds}s at 360p with audio off. Or raise this request to about $${minimumBudget.toFixed(2)} for the full ${requestedSeconds}s low-cost test. Nous credits stay first; OpenRouter is only backup.`
-            : `Your current $${(requestCapUsd || 0).toFixed(2)} cap is below the cheapest managed video test I can price safely. Raise the request cap or reduce duration/quality before I spend anything. Nous credits stay first; OpenRouter is only backup.`;
+            ? `Your current ${(requestCapUsd || 0).toFixed(2)} cap is below the estimated cost for a ${requestedSeconds}s video. To stay inside the cap, I can reduce the test to about ${suggestedSeconds}s at 360p with audio off. Or raise this request to about ${minimumBudget.toFixed(2)} for the full ${requestedSeconds}s low-cost test. Nous credits stay first; OpenRouter is only backup.\n\nBUDGET_FOLLOWUPS`
+            : `Your current ${(requestCapUsd || 0).toFixed(2)} cap is below the cheapest managed video test I can price safely. Raise the request cap or reduce duration/quality before I spend anything. Nous credits stay first; OpenRouter is only backup.\n\nBUDGET_FOLLOWUPS`;
 
         await admin.from("local_ai_messages").insert([
           {
@@ -944,7 +960,9 @@ export async function POST(request: Request) {
       let selectedMediaModel: MediaCatalogModel | null = null;
       let pricingSource = nousRuntimeAuth && nousChoice
         ? "nous-managed"
-        : "configured-fallback";
+        : nousAuthFailure
+          ? "openrouter-backup-nous-auth-unavailable"
+          : "configured-fallback";
 
       if (!nousRuntimeAuth || !nousChoice) {
         try {
@@ -994,7 +1012,7 @@ export async function POST(request: Request) {
         estimatedProviderCostUsd > requestCapUsd
       ) {
         const message =
-          `The live estimate for ${selectedModel} is about $${estimatedProviderCostUsd.toFixed(2)}, above this request's $${requestCapUsd.toFixed(2)} max-spend cap. Raise the cap or lower the Media slider.`;
+          `The live estimate for ${selectedModel} is about ${estimatedProviderCostUsd.toFixed(2)}, above this request's ${requestCapUsd.toFixed(2)} max-spend cap. Raise the cap or lower the Media slider. Nous remains the first managed paid source; OpenRouter stays backup.\n\nBUDGET_FOLLOWUPS`;
         const { error: capError } = await admin
           .from("local_ai_messages")
           .insert([
@@ -1027,6 +1045,51 @@ export async function POST(request: Request) {
             text: message,
             provider: "code",
             model: "media-spend-cap",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      if (
+        selectedProvider === "openrouter" &&
+        !selectedFree &&
+        estimatedProviderCostUsd === null &&
+        requestCapUsd !== null
+      ) {
+        const message =
+          `I can reach an OpenRouter backup, but I cannot verify this model's generation price well enough to enforce your ${requestCapUsd.toFixed(2)} hard cap. I stopped before spending. Keep Nous first, choose a lower-cost model with a known price, or use owned/local generation.\n\nBUDGET_FOLLOWUPS`;
+
+        await admin.from("local_ai_messages").insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: visibleUserText,
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: message,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-price-unknown-gate",
+            routeReason:
+              "CoOperative refused an unpriced paid media route because it could not prove the request would stay under the hard spend cap.",
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );

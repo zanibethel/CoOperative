@@ -242,6 +242,7 @@ async function refreshNousState(state: NousState) {
     {
       grant_type: "refresh_token",
       client_id: CLIENT_ID,
+      refresh_token: refreshToken,
     },
     { "x-nous-refresh-token": refreshToken },
   );
