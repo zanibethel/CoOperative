@@ -82,6 +82,26 @@ function titleFromMessage(message: string, hasImages: boolean) {
   return compact.length > 72 ? `${compact.slice(0, 69)}…` : compact;
 }
 
+function asksAboutRecentFailure(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\bwhat caused (the )?(failure|error)\b/.test(value) ||
+    /\bwhy did (it|that|this).{0,40}(fail|error)\b/.test(value) ||
+    /\bwhat (went wrong|happened)\b/.test(value) ||
+    /\bwhy (did )?(it|that|this) fail\b/.test(value) ||
+    /\bload failed\b/.test(value)
+  );
+}
+
+function conciseFailureDetail(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  return value
+    .replace(/sk-[A-Za-z0-9_-]{12,}/g, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 700);
+}
+
 function estimatedMediaProviderCostUsd(
   model: MediaCatalogModel,
   durationSeconds: number | null,
@@ -253,6 +273,114 @@ export async function POST(request: Request) {
         },
         { status: 200, headers: { "Cache-Control": "no-store" } },
       );
+    }
+
+    if (
+      input.attachmentIds.length === 0 &&
+      asksAboutRecentFailure(input.message)
+    ) {
+      const [{ data: recentMedia }, { data: recentRecovery }] = await Promise.all([
+        admin
+          .from("media_generation_jobs")
+          .select(
+            "id,status,kind,provider,model,error,started_at,deadline_at,completed_at,created_at",
+          )
+          .eq("owner_ref", ownerRef)
+          .eq("conversation_id", conversationId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        admin
+          .from("recovery_incidents")
+          .select(
+            "id,status,error_class,error_excerpt,current_message,resolution_summary,created_at,resolved_at",
+          )
+          .eq("owner_ref", ownerRef)
+          .eq("conversation_id", conversationId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      if (recentMedia || recentRecovery) {
+        const now = Date.now();
+        const deadline = recentMedia?.deadline_at
+          ? Date.parse(recentMedia.deadline_at)
+          : Number.NaN;
+        const pastDeadline =
+          recentMedia?.status === "running" &&
+          Number.isFinite(deadline) &&
+          now > deadline;
+        const rawFailure =
+          conciseFailureDetail(recentMedia?.error) ||
+          conciseFailureDetail(recentRecovery?.resolution_summary) ||
+          conciseFailureDetail(recentRecovery?.error_excerpt);
+
+        let assistantText: string;
+        if (recentMedia?.status === "running" && !pastDeadline) {
+          assistantText =
+            `The media generator has not reported a confirmed failure. ${recentMedia.model || "The selected media model"} successfully started through ${recentMedia.provider || "the configured provider"}, and the job is still marked running. The “Load failed” message came from the browser/status request losing its connection while it was checking the job. I’m treating that as a transport/status-poll interruption rather than a generation failure.`;
+        } else if (pastDeadline) {
+          assistantText =
+            `The first problem was the status connection, not a confirmed image-model failure. ${recentMedia?.model || "The selected media model"} successfully started, but the browser stopped receiving status updates and the job was left marked running past its execution deadline. That means this attempt now needs reconciliation before CoOperative can say whether the provider produced a usable result. This is a job-tracking/recovery problem, not evidence by itself that the image model failed.`;
+        } else if (recentMedia?.status === "failed") {
+          assistantText =
+            rawFailure
+              ? `The latest media route did fail. The recorded cause was: ${rawFailure}`
+              : "The latest media route is recorded as failed, but it did not preserve a useful failure detail.";
+        } else if (recentRecovery?.status === "completed" && recentRecovery.resolution_summary) {
+          assistantText = `Recovery Agent found the cause: ${recentRecovery.resolution_summary}`;
+        } else {
+          assistantText =
+            rawFailure
+              ? `The latest recorded failure detail is: ${rawFailure}`
+              : "CoOperative has a recent recovery incident, but there is not enough recorded detail yet to state the cause confidently.";
+        }
+
+        const { error: failureMessageError } = await admin
+          .from("local_ai_messages")
+          .insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: input.message.trim(),
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: assistantText,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+        if (failureMessageError) throw failureMessageError;
+
+        await admin
+          .from("local_ai_conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversationId)
+          .eq("owner_ref", ownerRef);
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: "text",
+            conversationId,
+            conversationTitle,
+            text: assistantText,
+            provider: "code",
+            model: "operational-failure-state",
+            routeReason:
+              "CoOperative answered from persisted job/recovery state instead of waiting for an AI model.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
     }
 
     const mediaPlan = planMediaRequest(input.message);
