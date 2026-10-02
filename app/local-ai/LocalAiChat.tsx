@@ -68,8 +68,16 @@ type ConversationResult = {
   detail?: string;
 };
 
+type AiBalanceSummary = {
+  availableMicrousd: number;
+  availableUsd: number;
+  funded: boolean;
+  paidAiEligible: boolean;
+};
+
 type BusinessResult = {
   businesses?: BusinessSummary[];
+  aiBalance?: AiBalanceSummary;
   error?: string;
   detail?: string;
 };
@@ -102,6 +110,11 @@ type JobResult = {
   preferredNodeId?: string | null;
   targetNodeId?: string | null;
   routeReason?: string | null;
+  paidFallbackAllowed?: boolean;
+  funding?: {
+    chargedUsd?: number;
+    availableMicrousd?: number;
+  } | null;
   error?: string | null;
   detail?: string | null;
 };
@@ -144,6 +157,9 @@ function resultMeta(result: JobResult) {
     typeof result.promptTokens === "number" && typeof result.outputTokens === "number"
       ? `${result.promptTokens} in / ${result.outputTokens} out`
       : null,
+    typeof result.funding?.chargedUsd === "number"
+      ? `${result.funding.chargedUsd.toFixed(6)} charged`
+      : null,
   ].filter(Boolean);
 
   return details.join(" · ");
@@ -160,6 +176,7 @@ function executionStep(
   if (status === "Waiting for local capacity…") return status;
   if (status === "Using local vision…") return status;
   if (status === "Using local AI…") return status;
+  if (status === "Using funded high-quality AI…") return status;
   if (status === "Stopping…") return status;
   if (status === "Copied") return status;
   if (status === "Ready") return "Ready";
@@ -236,6 +253,7 @@ export default function LocalAiChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
+  const [aiBalance, setAiBalance] = useState<AiBalanceSummary | null>(null);
   const [ownedNodes, setOwnedNodes] = useState<OwnedNode[]>([]);
   const [nodeRouting, setNodeRouting] = useState<NodeRouting>("prefer-owned");
   const [requiredNodeId, setRequiredNodeId] = useState("");
@@ -280,6 +298,7 @@ export default function LocalAiChat() {
 
     const items = result.businesses || [];
     setBusinesses(items);
+    setAiBalance(result.aiBalance || null);
 
     const saved = window.localStorage.getItem(ACTIVE_BUSINESS_KEY) || "";
     const selected =
@@ -331,8 +350,9 @@ export default function LocalAiChat() {
     async (jobId: string, fallbackMessages: ChatMessage[] = []) => {
       if (activePollRef.current === jobId) return;
 
-      activePollRef.current = jobId;
-      setActiveJobId(jobId);
+      let pollingJobId = jobId;
+      activePollRef.current = pollingJobId;
+      setActiveJobId(pollingJobId);
       setStreamingText("");
       setBusy(true);
       setError("");
@@ -340,15 +360,15 @@ export default function LocalAiChat() {
       try {
         for (;;) {
           const response = await fetch(
-            `/api/local-ai/chat?jobId=${encodeURIComponent(jobId)}`,
+            `/api/local-ai/chat?jobId=${encodeURIComponent(pollingJobId)}`,
             { cache: "no-store" },
           );
           const result = (await response.json()) as JobResult;
 
-          if (activePollRef.current !== jobId) return;
+          if (activePollRef.current !== pollingJobId) return;
 
           if (!response.ok) {
-            throw new Error(result.detail || result.error || "Could not read local AI job.");
+            throw new Error(result.detail || result.error || "Could not read CoOperative AI job.");
           }
 
           if (result.profile === "fast" || result.profile === "quality") {
@@ -363,10 +383,18 @@ export default function LocalAiChat() {
           }
 
           const runningLabel =
-            result.capability === "vision" ? "Using local vision…" : "Using local AI…";
+            result.execution === "paid-ai"
+              ? "Using funded high-quality AI…"
+              : result.capability === "vision"
+                ? "Using local vision…"
+                : "Using local AI…";
 
           if (result.status === "queued") {
-            setStatus("Waiting for local capacity…");
+            setStatus(
+              result.execution === "paid-ai"
+                ? "Using funded high-quality AI…"
+                : "Waiting for local capacity…",
+            );
             await wait(1000);
             continue;
           }
@@ -403,6 +431,9 @@ export default function LocalAiChat() {
               );
             }
 
+            if (result.execution === "paid-ai") {
+              await refreshBusinesses();
+            }
             setStreamingText("");
             setMeta(resultMeta(result));
             setStatus("Ready");
@@ -410,23 +441,75 @@ export default function LocalAiChat() {
             break;
           }
 
+          if (
+            result.status === "failed" &&
+            result.capability === "text" &&
+            result.paidFallbackAllowed === true
+          ) {
+            setStreamingText("");
+            setStatus("Using funded high-quality AI…");
+
+            const paidResponse = await fetch("/api/local-ai/chat/paid-fallback", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ jobId: pollingJobId }),
+            });
+            const paid = (await paidResponse.json()) as JobResult;
+
+            if (!paidResponse.ok) {
+              throw new Error(
+                paid.detail ||
+                  paid.error ||
+                  result.error ||
+                  "Local AI failed and funded paid fallback was unavailable.",
+              );
+            }
+
+            if (paid.status === "completed") {
+              if (paid.conversationId) {
+                await loadConversation(paid.conversationId);
+              }
+              await Promise.all([refreshConversations(), refreshBusinesses()]);
+              setMeta(resultMeta(paid));
+              setStatus("Ready");
+              window.localStorage.removeItem(ACTIVE_JOB_KEY);
+              break;
+            }
+
+            if (
+              paid.jobId &&
+              paid.jobId !== pollingJobId &&
+              (paid.status === "running" || paid.status === "queued")
+            ) {
+              pollingJobId = paid.jobId;
+              activePollRef.current = pollingJobId;
+              setActiveJobId(pollingJobId);
+              window.localStorage.setItem(ACTIVE_JOB_KEY, pollingJobId);
+              continue;
+            }
+
+            throw new Error(
+              paid.error || "Funded high-quality AI did not complete the request.",
+            );
+          }
+
           throw new Error(
             result.error ||
-              `Local AI job ended with status ${result.status || "unknown"}.`,
+              `CoOperative AI job ended with status ${result.status || "unknown"}.`,
           );
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Local AI request failed.");
+        setError(err instanceof Error ? err.message : "CoOperative AI request failed.");
         setStatus("Ready");
       } finally {
-        if (activePollRef.current === jobId) {
+        if (activePollRef.current === pollingJobId) {
           activePollRef.current = null;
           setActiveJobId(null);
           setBusy(false);
         }
       }
     },
-    [loadConversation, refreshConversations],
+    [loadConversation, refreshBusinesses, refreshConversations],
   );
 
   useEffect(() => {
@@ -781,6 +864,12 @@ export default function LocalAiChat() {
                 {activeBusiness.connectedServicesCount} services · {activeBusiness.connectedAiCount} AI
               </strong>
             </span>
+            <span>
+              <small>Funded AI balance</small>
+              <strong>
+                {aiBalance ? `${aiBalance.availableUsd.toFixed(4)}` : "$0.0000"}
+              </strong>
+            </span>
           </div>
         ) : (
           <p className="local-ai-context-empty">
@@ -894,8 +983,8 @@ export default function LocalAiChat() {
               Require this node prevents another worker from taking the job.
             </small>
             <small>
-              CoOperative keeps paid fallback disabled here. Owned/local execution stays inside the
-              existing approval and spending gates.
+              Owned/local execution stays first. Platform-paid high-quality AI is eligible only when
+              this profile has a funded AI balance and the estimated request cost fits inside it.
             </small>
             {meta ? <small>{meta}</small> : null}
           </div>

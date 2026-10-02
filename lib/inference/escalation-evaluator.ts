@@ -32,11 +32,13 @@ export type EscalationEvidence = {
   requestedOutputTokens: number;
   localAttempts: number;
   localFailures: number;
+  localExecutionUnavailable?: boolean;
   malformedStructuredOutputs?: number;
   scopeGuardRejections?: number;
   verificationStatus: EscalationVerificationStatus;
   allowPaidFallback: boolean;
   automaticPaidBudgetUsd?: number;
+  fundedPaidBalanceUsd?: number;
   requiredSuccessRate?: number;
 };
 
@@ -104,6 +106,11 @@ function escalationScore(evidence: EscalationEvidence) {
   if (evidence.localFailures > 0) {
     score += bounded(evidence.localFailures, 0, 3);
     reasonCodes.push("local-failure");
+  }
+
+  if (evidence.localExecutionUnavailable) {
+    score += 4;
+    reasonCodes.push("local-execution-unavailable");
   }
 
   if (evidence.localAttempts >= 2) {
@@ -281,6 +288,25 @@ export function evaluatePaidEscalation(
     };
   }
 
+  if (!candidate.businessOwned) {
+    const fundedBalance = evidence.fundedPaidBalanceUsd ?? 0;
+    if (fundedBalance <= 0 || marginalCost > fundedBalance + 1e-9) {
+      return {
+        action: "approval-required",
+        justified: true,
+        score,
+        reasonCodes,
+        candidate,
+        reason:
+          fundedBalance <= 0
+            ? "A stronger platform-paid executor is justified, but the profile has no funded AI balance."
+            : `The selected platform-paid executor is justified, but its estimated marginal cost (${marginalCost.toFixed(
+                4,
+              )}) exceeds the currently available profile AI balance (${fundedBalance.toFixed(4)}).`,
+      };
+    }
+  }
+
   if (marginalCost > budget) {
     return {
       action: "approval-required",
@@ -288,9 +314,9 @@ export function evaluatePaidEscalation(
       score,
       reasonCodes,
       candidate,
-      reason: `The selected executor is justified, but its estimated marginal cost ($${marginalCost.toFixed(
+      reason: `The selected executor is justified, but its estimated marginal cost (${marginalCost.toFixed(
         4,
-      )}) exceeds the automatic paid budget ($${budget.toFixed(4)}).`,
+      )}) exceeds the automatic paid budget (${budget.toFixed(4)}).`,
     };
   }
 

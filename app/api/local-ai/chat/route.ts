@@ -8,6 +8,7 @@ import {
   COOPERATIVE_BUSINESS_POLICY_REVISION,
 } from "@/lib/ai/business-chat-policy";
 import { buildBusinessChatContext } from "@/lib/ai/business-context";
+import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 
 export const runtime = "nodejs";
@@ -58,6 +59,8 @@ export async function POST(request: Request) {
       owner.userId,
       input.businessId,
     );
+    const profileBalance =
+      businessContext?.aiBalance ?? (await aiProfileBalanceForUser(owner.userId));
 
     let conversationId = input.conversationId;
     let conversationTitle = "";
@@ -338,7 +341,10 @@ export async function POST(request: Request) {
         input.profile === "quality"
           ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}`
           : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}`,
-      allow_paid_fallback: false,
+      allow_paid_fallback:
+        requestedCapability === "text" &&
+        input.nodeRouting !== "require-node" &&
+        profileBalance.funded,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
@@ -382,6 +388,11 @@ export async function POST(request: Request) {
         routingPreference: input.nodeRouting,
         preferredNodeId,
         targetNodeId,
+        paidAiEligible:
+          requestedCapability === "text" &&
+          input.nodeRouting !== "require-node" &&
+          profileBalance.funded,
+        availableAiBalanceUsd: profileBalance.availableUsd,
       },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
@@ -410,7 +421,7 @@ export async function GET(request: Request) {
     let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,error,created_at,completed_at",
+        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,created_at,completed_at",
       )
       .eq("client_owner_ref", ownerRef);
 
@@ -433,6 +444,8 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         jobId: job.id,
+        execution:
+          job.worker_id === "cooperative-paid-router" ? "paid-ai" : undefined,
         status: job.status,
         profile: job.profile,
         conversationId: job.conversation_id,
@@ -452,6 +465,7 @@ export async function GET(request: Request) {
         preferredNodeId: job.preferred_node_id,
         targetNodeId: job.target_node_id,
         routeReason: job.route_reason,
+        paidFallbackAllowed: job.allow_paid_fallback === true,
         error: job.error,
         createdAt: job.created_at,
         completedAt: job.completed_at,

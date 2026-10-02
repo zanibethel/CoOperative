@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { businessSummariesForUser } from "@/lib/ai/business-context";
 import { authenticatedUserId } from "@/lib/supabase/auth";
+import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -14,9 +15,20 @@ export async function GET() {
   }
 
   try {
-    const businesses = await businessSummariesForUser(userId);
+    const [businesses, aiBalance] = await Promise.all([
+      businessSummariesForUser(userId),
+      aiProfileBalanceForUser(userId),
+    ]);
     return NextResponse.json(
-      { businesses },
+      {
+        businesses,
+        aiBalance: {
+          availableMicrousd: aiBalance.availableMicrousd,
+          availableUsd: aiBalance.availableUsd,
+          funded: aiBalance.funded,
+          paidAiEligible: aiBalance.funded,
+        },
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

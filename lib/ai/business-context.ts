@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { aiProfileBalanceForUser, type AiProfileBalance } from "@/lib/billing/ai-profile-balance";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -19,6 +20,7 @@ export type BusinessEconomicSummary = {
 
 export type BusinessChatContext = {
   business: BusinessEconomicSummary;
+  aiBalance: AiProfileBalance;
   systemContext: string;
 };
 
@@ -139,6 +141,7 @@ export async function buildBusinessChatContext(
   }
 
   const admin = createAdminSupabaseClient();
+  const aiBalance = await aiProfileBalanceForUser(userId);
   const { data: businessRow, error: businessError } = await admin
     .from("businesses")
     .select("organization_id,profile")
@@ -223,7 +226,9 @@ export async function buildBusinessChatContext(
     `Business-owned compute: ${ownedCompute}`,
     `Owned-compute preference: ${localPreference}`,
     `Connected AI providers: ${business.connectedAiCount}`,
-    "Funded CoOperative balance: not yet available in the ledger; do not invent a balance.",
+    `Funded profile AI balance: ${aiBalance.availableUsd.toFixed(6)} available`,
+    `Platform-paid high-quality AI eligible: ${aiBalance.funded ? "yes, within the funded balance and routing policy" : "no, profile balance is zero"}`,
+    "Never treat a configured API key or model as permission to spend. Platform-paid AI requires available funded profile balance.",
     serviceLines.length
       ? "Connected services (structured evidence):\n" + serviceLines.map((line) => `- ${line}`).join("\n")
       : "Connected services: none recorded yet.",
@@ -231,5 +236,5 @@ export async function buildBusinessChatContext(
     "Do not authorize or imply permission for paid work when a budget value is unknown.",
   ].join("\n");
 
-  return { business, systemContext };
+  return { business, aiBalance, systemContext };
 }

@@ -53,6 +53,7 @@ export async function evaluateAgentTaskEscalation(
   options?: {
     allowPaidFallback?: boolean;
     automaticPaidBudgetUsd?: number;
+    fundedPaidBalanceUsd?: number;
     requiredSuccessRate?: number;
   },
 ): Promise<AgentEscalationRecommendation> {
@@ -102,6 +103,7 @@ export async function evaluateAgentTaskEscalation(
     verificationStatus: verificationStatus(task),
     allowPaidFallback: options?.allowPaidFallback ?? false,
     automaticPaidBudgetUsd: options?.automaticPaidBudgetUsd ?? 0,
+    fundedPaidBalanceUsd: options?.fundedPaidBalanceUsd ?? 0,
     requiredSuccessRate: options?.requiredSuccessRate ?? 0.8,
   };
 
