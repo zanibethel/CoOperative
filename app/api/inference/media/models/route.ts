@@ -8,6 +8,7 @@ import {
   type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
 import { authenticatedUserId } from "@/lib/supabase/auth";
+import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -26,9 +27,13 @@ export async function GET() {
   }
 
   try {
-    const [catalog, balance] = await Promise.all([
+    const [catalog, balance, openRouterService] = await Promise.all([
       openRouterMediaCatalog(),
       aiProfileBalanceForUser(userId),
+      businessOwnedServiceCredentialForOwner(
+        `coop-user:${userId}`,
+        "openrouter-api",
+      ),
     ]);
 
     return NextResponse.json(
@@ -37,7 +42,9 @@ export async function GET() {
         fetchedAt: catalog.fetchedAt,
         configured: {
           nous: Boolean(process.env.NOUS_API_KEY?.trim()),
-          openRouter: Boolean(process.env.OPENROUTER_API_KEY?.trim()),
+          openRouter:
+            Boolean(process.env.OPENROUTER_API_KEY?.trim()) ||
+            Boolean(openRouterService?.credential),
         },
         paidAiEligible: balance.funded,
         availableAiBalanceUsd: balance.availableUsd,
