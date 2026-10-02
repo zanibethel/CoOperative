@@ -173,7 +173,7 @@ function Get-AdaptiveResources {
         maxObservedGpuOffloadRatio = [double]$suite.acceleration.maxObservedGpuOffloadRatio
       }
       $benchmarkRows = @()
-      foreach ($result in @($suite.results) | Select-Object -First 8) {
+      foreach ($result in (@($suite.results) | Select-Object -First 8)) {
         $benchmarkRows += @{
           model = [string]$result.model
           targetProfiles = @($result.targetProfiles)
@@ -207,6 +207,7 @@ function Send-StartupHeartbeat(
   try {
     $allowImage = $Capabilities -contains "image_generation"
     $allowText = $Capabilities -contains "text_generation"
+    $adaptiveResources = Get-AdaptiveResources
     $heartbeat = @{
       nodeId = $env:UNISON_NODE_ID
       displayName = $NodeName
@@ -219,7 +220,7 @@ function Send-StartupHeartbeat(
         machine = $env:PROCESSOR_ARCHITECTURE
       }
       capabilities = $Capabilities
-      resources = Get-AdaptiveResources
+      resources = $adaptiveResources
       policy = @{
         idleOnly = $true
         idleThresholdSeconds = [Math]::Max(0, $IdleMinutes) * 60
