@@ -93,16 +93,24 @@ export async function POST(request: Request) {
     }
 
     const modelTags = check.models.slice(0, 20).map((model) => `model:${model}`);
+    const mediaCapabilities =
+      providerKey === "openrouter-api"
+        ? ["image-generation", "video-generation"]
+        : [];
     const { error: updateError } = await supabase
       .from("connected_services")
       .update({
         connection_status: "connected",
         data_available: [
           "text-generation",
+          ...mediaCapabilities,
           "migration-assist",
           ...modelTags,
         ],
-        permissions: ["inference:execute"],
+        permissions:
+          providerKey === "openrouter-api"
+            ? ["inference:execute", "media:generate"]
+            : ["inference:execute"],
         last_synced_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })

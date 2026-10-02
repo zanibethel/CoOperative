@@ -376,7 +376,11 @@ export default function ServicesPage() {
                   ) : (
                     <div className="service-connect-box">
                       <div className="field">
-                        <label>Business API credential</label>
+                        <label>
+                          {service.provider_key === "openrouter-api"
+                            ? "OpenRouter API key"
+                            : "Business API credential"}
+                        </label>
                         <input
                           type="password"
                           autoComplete="off"
@@ -391,6 +395,19 @@ export default function ServicesPage() {
                         />
                         <small>
                           CoOperative verifies it directly with the provider, encrypts it in the server-side vault, and does not display it again.
+                          {service.provider_key === "openrouter-api" ? (
+                            <>
+                              {" "}
+                              <a
+                                href="https://openrouter.ai/settings/keys"
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Create an OpenRouter key
+                              </a>
+                              .
+                            </>
+                          ) : null}
                         </small>
                       </div>
                       <button

@@ -10,6 +10,7 @@ export type HermesMediaStartSpec = {
   userRequest: string;
   provider?: string;
   model?: string;
+  providerCredential?: string;
 };
 
 export type HermesMediaStartResult = {
@@ -187,7 +188,14 @@ export async function startHermesMediaTask(
   };
 
   if (config.provider === "openrouter") {
-    env.OPENROUTER_API_KEY = requiredEnv("OPENROUTER_API_KEY");
+    const credential =
+      spec.providerCredential?.trim() || process.env.OPENROUTER_API_KEY?.trim();
+    if (!credential) {
+      throw new Error(
+        "OpenRouter is not connected. Connect an OpenRouter API key in CoOperative Services.",
+      );
+    }
+    env.OPENROUTER_API_KEY = credential;
   } else {
     throw new Error(
       `Media provider ${config.provider} is not enabled in the first CoOperative cloud-media slice.`,
