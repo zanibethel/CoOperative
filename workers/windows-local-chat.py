@@ -1050,6 +1050,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(502, {"error": str(exc)[:800]})
             return
 
+        if parsed.path == "/api/recovery":
+            incident_id = (parse_qs(parsed.query).get("incidentId") or [None])[0]
+            profile_token = self.headers.get("X-Cooperative-Profile-Token")
+            if not incident_id:
+                self._json(400, {"error": "incidentId is required."})
+                return
+            try:
+                self._json(
+                    200,
+                    hosted_recovery_request(
+                        "GET",
+                        profile_token=profile_token,
+                        incident_id=incident_id,
+                    ),
+                )
+            except Exception as exc:
+                self._json(502, {"error": str(exc)[:800]})
+            return
+
         if parsed.path == "/api/status":
             self._json(
                 200,
@@ -1123,6 +1142,27 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     raise RuntimeError("Unknown hosted history action.")
                 self._json(200, result)
+                return
+
+            if parsed.path == "/api/recovery":
+                body = json.loads(self._read_body(128_000) or b"{}")
+                profile_token = self.headers.get("X-Cooperative-Profile-Token")
+                conversation_id = str(body.get("conversationId") or "")
+                error_text = str(body.get("error") or "")
+                context = str(body.get("context") or "")
+                if not conversation_id or not error_text:
+                    raise RuntimeError("conversationId and error are required.")
+                result = hosted_recovery_request(
+                    "POST",
+                    profile_token=profile_token,
+                    payload={
+                        "nodeId": NODE_ID,
+                        "conversationId": conversation_id,
+                        "error": error_text[:4000],
+                        "context": context[:4000],
+                    },
+                )
+                self._json(202, result)
                 return
 
             if parsed.path == "/api/extract":
