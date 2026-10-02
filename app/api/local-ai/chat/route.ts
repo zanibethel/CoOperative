@@ -544,6 +544,10 @@ export async function POST(request: Request) {
       }
     }
 
+    let retryMediaContext:
+      | { content: string; attachmentIds: string[] }
+      | null = null;
+
     if (
       input.attachmentIds.length === 0 &&
       asksToRetryRecentMedia(input.message)
@@ -560,7 +564,45 @@ export async function POST(request: Request) {
         .maybeSingle();
       if (recentMediaError) throw recentMediaError;
 
-      if (recentMedia) {
+      const { data: recentRequestedMediaRows, error: recentRequestedMediaError } =
+        await admin
+          .from("local_ai_messages")
+          .select("content,attachment_ids,job_id,created_at")
+          .eq("conversation_id", conversationId)
+          .eq("owner_ref", ownerRef)
+          .eq("role", "user")
+          .order("created_at", { ascending: false })
+          .limit(16);
+      if (recentRequestedMediaError) throw recentRequestedMediaError;
+
+      const pendingRequest = (recentRequestedMediaRows || []).find((row) => {
+        if (row.job_id || typeof row.content !== "string") return false;
+        return Boolean(planMediaRequest(row.content));
+      });
+      const pendingCreatedAt = pendingRequest
+        ? Date.parse(pendingRequest.created_at || "")
+        : Number.NaN;
+      const recentJobCreatedAt = recentMedia
+        ? Date.parse(recentMedia.created_at || "")
+        : Number.NEGATIVE_INFINITY;
+
+      if (
+        pendingRequest &&
+        Number.isFinite(pendingCreatedAt) &&
+        pendingCreatedAt > recentJobCreatedAt
+      ) {
+        retryMediaContext = {
+          content:
+            pendingRequest.content.trim() +
+            "\nFollow-up preference: " +
+            input.message.trim(),
+          attachmentIds: Array.isArray(pendingRequest.attachment_ids)
+            ? pendingRequest.attachment_ids.slice(0, 4)
+            : [],
+        };
+      }
+
+      if (recentMedia && !retryMediaContext) {
         const now = Date.now();
         const deadline = recentMedia.deadline_at
           ? Date.parse(recentMedia.deadline_at)
@@ -909,8 +951,11 @@ export async function POST(request: Request) {
       }
     }
 
-    let effectiveMediaRequestText = input.message.trim();
-    let effectiveMediaAttachmentIds = [...input.attachmentIds];
+    let effectiveMediaRequestText =
+      retryMediaContext?.content || input.message.trim();
+    let effectiveMediaAttachmentIds = retryMediaContext
+      ? [...retryMediaContext.attachmentIds]
+      : [...input.attachmentIds];
     let mediaPlan = planMediaRequest(effectiveMediaRequestText);
 
     if (
@@ -1100,7 +1145,6 @@ export async function POST(request: Request) {
             .in("id", authorizedNodeIds);
           if (imageNodesError) throw imageNodesError;
 
-          const freshAfter = Date.now() - 90_000;
           localImageAvailable = (imageNodes || []).some((node) => {
             const capabilities = Array.isArray(node.capabilities)
               ? node.capabilities
@@ -1109,7 +1153,6 @@ export async function POST(request: Request) {
               node.policy && typeof node.policy === "object"
                 ? (node.policy as { allowImage?: unknown })
                 : {};
-            const seenAt = Date.parse(node.last_seen_at || "");
             const supportsRequestedImageMode = requiresReferenceImage
               ? capabilities.includes("image_to_image") ||
                 capabilities.includes("single_reference_identity")
@@ -1117,8 +1160,6 @@ export async function POST(request: Request) {
             return (
               supportsRequestedImageMode &&
               policy.allowImage !== false &&
-              Number.isFinite(seenAt) &&
-              seenAt >= freshAfter &&
               node.state !== "paused"
             );
           });
