@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { authorizeUnisonNode } from "@/lib/unison/auth";
+import { resolveNodeProfileToken } from "@/lib/unison/node-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -23,17 +25,18 @@ const mutationSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-async function nodeOwner(nodeId: string) {
+async function profileForNodeRequest(request: Request, nodeId: string) {
+  if (!(await authorizeUnisonNode(request, nodeId))) {
+    return { error: "node" as const };
+  }
+
   const admin = createAdminSupabaseClient();
-  const { data, error } = await admin
-    .from("unison_nodes")
-    .select("id,contributor_user_id")
-    .eq("id", nodeId)
-    .maybeSingle();
-  if (error) throw error;
-  return data?.contributor_user_id
-    ? { admin, userId: data.contributor_user_id as string }
-    : null;
+  const profileToken = request.headers.get("x-cooperative-profile-token");
+  const membership = await resolveNodeProfileToken(admin, nodeId, profileToken);
+
+  return membership
+    ? { admin, membership }
+    : { error: "profile" as const };
 }
 
 export async function GET(request: Request) {
@@ -41,19 +44,30 @@ export async function GET(request: Request) {
   const nodeId = (url.searchParams.get("nodeId") || "").slice(0, 160);
   const conversationId = url.searchParams.get("conversationId");
 
-  if (!nodeId || !(await authorizeUnisonNode(request, nodeId))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!nodeId) {
+    return NextResponse.json({ error: "nodeId is required." }, { status: 400 });
   }
 
   try {
-    const owner = await nodeOwner(nodeId);
-    if (!owner) {
-      return NextResponse.json({ error: "Node owner not found." }, { status: 404 });
+    const access = await profileForNodeRequest(request, nodeId);
+    if ("error" in access) {
+      return NextResponse.json(
+        {
+          error:
+            access.error === "node"
+              ? "Unauthorized node."
+              : "This Windows profile is not linked to a CoOperative user for hosted history.",
+        },
+        { status: access.error === "node" ? 401 : 409 },
+      );
     }
 
+    const userId = access.membership.userId;
+    const admin = access.admin;
+
     if (!conversationId) {
-      const { data, error } = await owner.admin.rpc("personal_ai_list_conversations", {
-        p_user_id: owner.userId,
+      const { data, error } = await admin.rpc("personal_ai_list_conversations", {
+        p_user_id: userId,
       });
       if (error) throw error;
 
@@ -74,11 +88,11 @@ export async function GET(request: Request) {
       );
     }
 
-    const { data: conversation, error: conversationError } = await owner.admin
+    const { data: conversation, error: conversationError } = await admin
       .from("personal_ai_conversations")
       .select("id,user_id,node_id,source,created_at,updated_at")
       .eq("id", conversationId)
-      .eq("user_id", owner.userId)
+      .eq("user_id", userId)
       .eq("node_id", nodeId)
       .maybeSingle();
 
@@ -89,12 +103,13 @@ export async function GET(request: Request) {
 
     const [{ data: titles, error: titleError }, { data: messages, error: messagesError }] =
       await Promise.all([
-        owner.admin.rpc("personal_ai_list_conversations", { p_user_id: owner.userId }),
-        owner.admin.rpc("personal_ai_read_messages", {
-          p_user_id: owner.userId,
+        admin.rpc("personal_ai_list_conversations", { p_user_id: userId }),
+        admin.rpc("personal_ai_read_messages", {
+          p_user_id: userId,
           p_conversation_id: conversationId,
         }),
       ]);
+
     if (titleError) throw titleError;
     if (messagesError) throw messagesError;
 
@@ -145,21 +160,29 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!(await authorizeUnisonNode(request, input.nodeId))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
   try {
-    const owner = await nodeOwner(input.nodeId);
-    if (!owner) {
-      return NextResponse.json({ error: "Node owner not found." }, { status: 404 });
+    const access = await profileForNodeRequest(request, input.nodeId);
+    if ("error" in access) {
+      return NextResponse.json(
+        {
+          error:
+            access.error === "node"
+              ? "Unauthorized node."
+              : "This Windows profile is not linked to a CoOperative user for hosted history.",
+        },
+        { status: access.error === "node" ? 401 : 409 },
+      );
     }
 
-    const { data: settings, error: settingsError } = await owner.admin
+    const userId = access.membership.userId;
+    const admin = access.admin;
+
+    const { data: settings, error: settingsError } = await admin
       .from("personal_ai_settings")
       .select("hosted_history_enabled")
-      .eq("user_id", owner.userId)
+      .eq("user_id", userId)
       .maybeSingle();
+
     if (settingsError) throw settingsError;
     if (settings && settings.hosted_history_enabled === false) {
       return NextResponse.json(
@@ -169,8 +192,8 @@ export async function POST(request: Request) {
     }
 
     if (input.action === "create") {
-      const { data, error } = await owner.admin.rpc("personal_ai_create_conversation", {
-        p_user_id: owner.userId,
+      const { data, error } = await admin.rpc("personal_ai_create_conversation", {
+        p_user_id: userId,
         p_node_id: input.nodeId,
         p_title: input.title,
         p_source: "desktop",
@@ -179,20 +202,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ conversationId: data }, { status: 201 });
     }
 
-    const { data: conversation, error: conversationError } = await owner.admin
+    const { data: conversation, error: conversationError } = await admin
       .from("personal_ai_conversations")
       .select("id")
       .eq("id", input.conversationId)
-      .eq("user_id", owner.userId)
+      .eq("user_id", userId)
       .eq("node_id", input.nodeId)
       .maybeSingle();
+
     if (conversationError) throw conversationError;
     if (!conversation) {
       return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
     }
 
-    const { data, error } = await owner.admin.rpc("personal_ai_append_message", {
-      p_user_id: owner.userId,
+    const { data, error } = await admin.rpc("personal_ai_append_message", {
+      p_user_id: userId,
       p_conversation_id: input.conversationId,
       p_role: input.role,
       p_content: input.content,
