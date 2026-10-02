@@ -2303,3 +2303,28 @@ b { color: var(--text); }
   letter-spacing: .045em;
   font-size: .63rem;
 }
+
+
+.media-budget-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.media-budget-suggestions button {
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent) 8%);
+  color: var(--text);
+  padding: 7px 11px;
+  font: inherit;
+  font-size: .72rem;
+  cursor: pointer;
+}
+
+.media-budget-suggestions button:hover,
+.media-budget-suggestions button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--line));
+  background: color-mix(in srgb, var(--panel) 82%, var(--accent) 18%);
+}
