@@ -1,10 +1,13 @@
 export type MediaRequestKind = "image" | "video";
+export type VideoResolution = "360p" | "480p" | "540p" | "720p" | "1080p" | "4k";
 
 export type MediaRequestPlan = {
   kind: MediaRequestKind;
   clarification: string | null;
   durationSeconds: number | null;
   aspectRatio: "16:9" | "9:16" | "1:1" | null;
+  resolution: VideoResolution | null;
+  audio: boolean | null;
 };
 
 const CREATE_VERBS = /\b(create|generate|make|render|produce|design|animate)\b/i;
@@ -23,6 +26,17 @@ function aspectFrom(message: string): MediaRequestPlan["aspectRatio"] {
   if (/\b(9:16|vertical|portrait|reel|tiktok|shorts?)\b/i.test(message)) return "9:16";
   if (/\b(16:9|landscape|widescreen|youtube)\b/i.test(message)) return "16:9";
   if (/\b(1:1|square)\b/i.test(message)) return "1:1";
+  return null;
+}
+
+function resolutionFrom(message: string): VideoResolution | null {
+  const match = message.match(/\b(360p|480p|540p|720p|1080p|4k)\b/i);
+  return match ? (match[1].toLowerCase() as VideoResolution) : null;
+}
+
+function audioFrom(message: string): boolean | null {
+  if (/\b(no audio|without audio|silent|mute|muted)\b/i.test(message)) return false;
+  if (/\b(with audio|generate audio|include audio|sound|voice|dialogue|music)\b/i.test(message)) return true;
   return null;
 }
 
@@ -51,6 +65,8 @@ export function planMediaRequest(message: string): MediaRequestPlan | null {
 
   const durationSeconds = kind === "video" ? durationFrom(text) : null;
   const aspectRatio = aspectFrom(text);
+  const resolution = kind === "video" ? resolutionFrom(text) : null;
+  const audio = kind === "video" ? audioFrom(text) : null;
 
   if (kind === "video") {
     const missing: string[] = [];
@@ -69,6 +85,8 @@ export function planMediaRequest(message: string): MediaRequestPlan | null {
         kind,
         durationSeconds,
         aspectRatio,
+        resolution,
+        audio,
         clarification:
           "Before I spend any video-generation credits, tell me " +
           details.join(" and ") +
@@ -81,6 +99,8 @@ export function planMediaRequest(message: string): MediaRequestPlan | null {
     kind,
     durationSeconds,
     aspectRatio,
+    resolution,
+    audio,
     clarification: null,
   };
 }
@@ -94,6 +114,8 @@ export function mediaPromptWithResolvedControls(
   if (plan.kind === "video") {
     if (plan.durationSeconds) lines.push(`Duration: ${plan.durationSeconds} seconds.`);
     if (plan.aspectRatio) lines.push(`Aspect ratio: ${plan.aspectRatio}.`);
+    if (plan.resolution) lines.push(`Resolution: ${plan.resolution}.`);
+    if (plan.audio !== null) lines.push(`Generated audio: ${plan.audio ? "on" : "off"}.`);
   } else if (plan.aspectRatio) {
     lines.push(`Preferred aspect ratio: ${plan.aspectRatio}.`);
   }
