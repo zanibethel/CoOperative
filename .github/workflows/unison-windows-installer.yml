@@ -43,7 +43,7 @@ jobs:
       - name: Validate Windows Python workers
         shell: pwsh
         run: |
-          python -m py_compile workers/windows-text-worker.py workers/windows-local-chat.py workers/unison_runtime.py workers/hf-image-worker.py
+          python -m py_compile workers/windows-text-worker.py workers/windows-local-chat.py workers/windows-local-file-extract.py workers/windows-local-voice.py workers/windows-local-web-search.py workers/windows-model-plan.py workers/unison_runtime.py workers/hf-image-worker.py
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
