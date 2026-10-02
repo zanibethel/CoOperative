@@ -1050,6 +1050,51 @@ export async function POST(request: Request) {
         );
       }
 
+      if (
+        selectedProvider === "openrouter" &&
+        !selectedFree &&
+        estimatedProviderCostUsd === null &&
+        requestCapUsd !== null
+      ) {
+        const message =
+          `I can reach an OpenRouter backup, but I cannot verify this model's generation price well enough to enforce your ${requestCapUsd.toFixed(2)} hard cap. I stopped before spending. Keep Nous first, choose a lower-cost model with a known price, or use owned/local generation.\n\nBUDGET_FOLLOWUPS`;
+
+        await admin.from("local_ai_messages").insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: visibleUserText,
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: message,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-price-unknown-gate",
+            routeReason:
+              "CoOperative refused an unpriced paid media route because it could not prove the request would stay under the hard spend cap.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
       const openRouterService =
         selectedProvider === "openrouter"
           ? await businessOwnedServiceCredentialForOwner(
