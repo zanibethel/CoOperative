@@ -99,6 +99,7 @@ $adaptiveBackend = "transformers"
 $adaptiveFastModel = "Qwen/Qwen2.5-1.5B-Instruct"
 $adaptiveQualityModel = $adaptiveFastModel
 $adaptiveHeavyModel = $adaptiveFastModel
+$adaptiveVisionModel = "qwen2.5vl:3b"
 
 if (Test-Path $modelPlanner) {
   Write-Host "Profiling this PC for its local AI model plan..."
@@ -108,6 +109,7 @@ if (Test-Path $modelPlanner) {
     $adaptiveFastModel = [string]$plan.models.fast
     $adaptiveQualityModel = [string]$plan.models.quality
     $adaptiveHeavyModel = [string]$plan.models.heavy
+    if ($plan.models.vision) { $adaptiveVisionModel = [string]$plan.models.vision }
   }
 }
 
@@ -170,6 +172,7 @@ $values = @{
   "WINDOWS_TEXT_FAST_MODEL_ID" = $adaptiveFastModel
   "WINDOWS_TEXT_QUALITY_MODEL_ID" = $adaptiveQualityModel
   "WINDOWS_TEXT_HEAVY_MODEL_ID" = $adaptiveHeavyModel
+  "WINDOWS_VISION_MODEL_ID" = $adaptiveVisionModel
   "UNISON_LOCAL_CHAT_PORT" = "11436"
   "UNISON_SHARED_UV_EXE" = $uvExe
   "UV_CACHE_DIR" = $env:UV_CACHE_DIR
