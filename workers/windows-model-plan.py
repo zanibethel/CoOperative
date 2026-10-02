@@ -15,7 +15,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-PLAN_REVISION = "2026-10-01.1"
+PLAN_REVISION = "2026-10-02.1"
 HERE = Path(__file__).resolve().parent
 PLAN_PATH = HERE / "text-model-plan.json"
 
@@ -99,7 +99,13 @@ def choose_models(ram_mb: int, gpu_mb: int) -> dict:
         quality = "qwen3:30b-instruct"
         heavy = "qwen3:32b"
 
-    return {"fast": fast, "quality": quality, "heavy": heavy}
+    vision = "qwen2.5vl:3b"
+    if effective_mb >= 20_000 or gpu_mb >= 10_000:
+        vision = "qwen2.5vl:7b"
+    if effective_mb >= 48_000 or gpu_mb >= 24_000:
+        vision = "qwen2.5vl:32b"
+
+    return {"fast": fast, "quality": quality, "heavy": heavy, "vision": vision}
 
 
 def build_plan() -> dict:
@@ -120,10 +126,10 @@ def build_plan() -> dict:
         "models": models,
         "install": {
             "preload": ["fast"],
-            "lazy": ["quality", "heavy"],
+            "lazy": ["quality", "heavy", "vision"],
             "note": (
-                "Fast is preloaded for immediate work. Quality and Heavy remain lazy "
-                "until a routed workload needs them, avoiding unnecessary downloads."
+                "Fast is preloaded for immediate work. Quality, Heavy, and Vision remain "
+                "lazy until a routed workload needs them, avoiding unnecessary downloads."
             ),
         },
         "selectionReason": (
