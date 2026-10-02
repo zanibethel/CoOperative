@@ -79,11 +79,11 @@ export function mediaPromptWithResolvedControls(
   const lines = [message.trim()];
 
   if (plan.kind === "video") {
-    if (plan.durationSeconds) lines.push(\`Duration: \${plan.durationSeconds} seconds.\`);
-    if (plan.aspectRatio) lines.push(\`Aspect ratio: \${plan.aspectRatio}.\`);
+    if (plan.durationSeconds) lines.push(`Duration: ${plan.durationSeconds} seconds.`);
+    if (plan.aspectRatio) lines.push(`Aspect ratio: ${plan.aspectRatio}.`);
   } else if (plan.aspectRatio) {
-    lines.push(\`Preferred aspect ratio: \${plan.aspectRatio}.\`);
+    lines.push(`Preferred aspect ratio: ${plan.aspectRatio}.`);
   }
 
-  return lines.join("\\n");
+  return lines.join("\n");
 }
