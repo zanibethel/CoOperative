@@ -32,6 +32,7 @@ import {
   planServiceConnectIntent,
   serviceConnectAssistantMessage,
 } from "@/lib/runtime/service-connect-intent";
+import { startRecoveryForJob } from "@/lib/recovery/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -626,7 +627,43 @@ export async function POST(request: Request) {
           })
           .eq("id", jobId)
           .eq("owner_ref", ownerRef);
-        throw mediaStartFailure;
+
+        try {
+          const recovery = await startRecoveryForJob(ownerRef, jobId);
+          await admin
+            .from("local_ai_conversations")
+            .update({ updated_at: new Date().toISOString() })
+            .eq("id", conversationId)
+            .eq("owner_ref", ownerRef);
+
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: mediaPlan.kind,
+              conversationId,
+              conversationTitle,
+              text:
+                recovery.current_message ||
+                "Recovery Agent is repairing the failed cloud route in the background.",
+              provider: "recovery",
+              model: "local-first-recovery",
+              routeReason:
+                "The cloud/Hermes route failed before media generation started. CoOperative handed diagnosis to local/owned Recovery Agent capacity and released the chat while repair continues.",
+              recoveryIncidentId: recovery.id,
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        } catch (recoveryError) {
+          console.error("Could not start cloud-to-local recovery", {
+            jobId,
+            detail:
+              recoveryError instanceof Error
+                ? recoveryError.message.slice(0, 800)
+                : "Unknown recovery error",
+          });
+          throw mediaStartFailure;
+        }
       }
     }
 

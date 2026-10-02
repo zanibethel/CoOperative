@@ -34,8 +34,10 @@ export type HermesMediaPollResult = {
 };
 
 const HERMES_RELEASE = "v2026.9.14";
-const HERMES_INSTALL_URL =
-  `https://raw.githubusercontent.com/NousResearch/hermes-agent/${HERMES_RELEASE}/scripts/install.sh`;
+const HERMES_INSTALL_URLS = [
+  "https://hermes-agent.nousresearch.com/install.sh",
+  `https://raw.githubusercontent.com/NousResearch/hermes-agent/${HERMES_RELEASE}/scripts/install.sh`,
+];
 const STATUS_DIR = "/tmp/cooperative-media";
 const IMAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const VIDEO_TIMEOUT_MS = 15 * 60 * 1000;
@@ -250,17 +252,39 @@ export async function startHermesMediaTask(
     env,
   });
 
-  const install = await sandbox.runCommand({
-    cmd: "bash",
-    args: [
-      "-lc",
-      `curl -fsSL ${HERMES_INSTALL_URL} -o /tmp/hermes-install.sh && bash /tmp/hermes-install.sh --skip-setup --skip-browser --skip-computer-use --non-interactive --branch ${HERMES_RELEASE}`,
-    ],
-  });
-  if (install.exitCode !== 0) {
+  let installSucceeded = false;
+  const installErrors: string[] = [];
+
+  for (const installUrl of HERMES_INSTALL_URLS) {
+    const install = await sandbox.runCommand({
+      cmd: "bash",
+      args: [
+        "-lc",
+        [
+          "rm -f /tmp/hermes-install.sh",
+          `curl --retry 2 --retry-delay 2 --retry-all-errors -fsSL "${installUrl}" -o /tmp/hermes-install.sh`,
+          `bash /tmp/hermes-install.sh --skip-setup --skip-browser --skip-computer-use --non-interactive --branch ${HERMES_RELEASE}`,
+        ].join(" && "),
+      ],
+    });
+
+    if (install.exitCode === 0) {
+      installSucceeded = true;
+      break;
+    }
+
     const stderr = await install.stderr();
+    const stdout = await install.stdout();
+    installErrors.push(
+      `${installUrl}: ${(stderr || stdout || "install failed").slice(-500)}`,
+    );
+  }
+
+  if (!installSucceeded) {
     await sandbox.stop();
-    throw new Error(`Hermes installation failed: ${stderr.slice(-800)}`);
+    throw new Error(
+      `Hermes installation failed after official + GitHub fallback: ${installErrors.join(" | ").slice(-1200)}`,
+    );
   }
 
   if (spec.nousAuthJson) {
