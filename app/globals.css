@@ -1109,3 +1109,110 @@ b { color: var(--text); }
     padding-inline: 6px;
   }
 }
+
+
+/* Funded AI balance */
+.ai-balance-layout {
+  display: grid;
+  gap: 18px;
+  max-width: 920px;
+  margin: 0 auto;
+}
+.ai-balance-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
+  gap: 24px;
+  align-items: center;
+}
+.ai-balance-hero h1 {
+  margin: 6px 0 8px;
+  font-size: clamp(2.2rem, 7vw, 4rem);
+  letter-spacing: -.045em;
+}
+.ai-balance-hero p,
+.ai-balance-card p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.ai-balance-summary {
+  display: grid;
+  gap: 8px;
+}
+.ai-balance-summary span {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2);
+  padding: 11px 12px;
+}
+.ai-balance-summary small,
+.ai-balance-status {
+  color: var(--muted);
+}
+.ai-balance-card {
+  display: grid;
+  gap: 16px;
+}
+.ai-balance-card h2 {
+  margin: 0;
+}
+.ai-balance-topups,
+.ai-balance-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ai-balance-ledger {
+  display: grid;
+}
+.ai-balance-ledger-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.ai-balance-ledger-row:first-child {
+  border-top: 0;
+}
+.ai-balance-ledger-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.ai-balance-ledger-row small {
+  color: var(--muted);
+}
+.ai-balance-ledger-row .credit {
+  color: var(--accent-2);
+}
+.ai-balance-ledger-row .debit {
+  color: var(--text);
+}
+.personal-chat-balance-link {
+  text-align: center;
+  text-decoration: none;
+}
+.local-ai-balance-link {
+  display: inline-block;
+  margin-top: 5px;
+  color: var(--accent);
+  font-size: .7rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+.local-ai-balance-link:hover {
+  text-decoration: underline;
+}
+@media (max-width: 760px) {
+  .ai-balance-hero {
+    grid-template-columns: 1fr;
+  }
+  .ai-balance-topups .secondary-button {
+    flex: 1 1 calc(50% - 10px);
+  }
+}
