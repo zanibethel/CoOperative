@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { authenticatedUserId } from "@/lib/supabase/auth";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { activeNodeMemberships } from "@/lib/unison/node-access";
 
 export const runtime = "nodejs";
 
@@ -49,6 +50,12 @@ export async function GET(request: Request) {
     }
   }
 
+  const memberships =
+    scope === "mine" ? await activeNodeMemberships(admin, userId) : [];
+  const membershipRole = new Map(
+    memberships.map((membership) => [membership.nodeId, membership.role]),
+  );
+
   let query = admin
     .from("unison_nodes")
     .select(
@@ -57,7 +64,28 @@ export async function GET(request: Request) {
     .order("last_seen_at", { ascending: false });
 
   if (scope === "mine") {
-    query = query.eq("contributor_user_id", userId);
+    const nodeIds = memberships.map((membership) => membership.nodeId);
+    if (nodeIds.length === 0) {
+      return NextResponse.json(
+        {
+          scope,
+          serverTime: new Date().toISOString(),
+          counts: {
+            total: 0,
+            online: 0,
+            idle: 0,
+            busy: 0,
+            paused: 0,
+            starting: 0,
+            error: 0,
+            offline: 0,
+          },
+          nodes: [],
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    query = query.in("id", nodeIds);
   }
 
   const { data: nodes, error } = await query;
@@ -109,6 +137,7 @@ export async function GET(request: Request) {
       contributorName: node.contributor_user_id
         ? contributorNames.get(node.contributor_user_id) ?? null
         : null,
+      accessRole: scope === "mine" ? membershipRole.get(node.id) ?? null : null,
       nodeClass: node.node_class,
       status,
       reportedState: node.state,
