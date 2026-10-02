@@ -15,6 +15,19 @@ import { activeNodeIds } from "@/lib/unison/node-access";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
+const modelMixerLevelSchema = z.number().int().min(0).max(4);
+const modelMixerSchema = z.object({
+  preset: z.enum(["economy", "balanced", "premium", "custom"]),
+  maxSpendUsd: z.number().min(0).max(100),
+  agents: z.object({
+    research: modelMixerLevelSchema,
+    planner: modelMixerLevelSchema,
+    builder: modelMixerLevelSchema,
+    verifier: modelMixerLevelSchema,
+    media: modelMixerLevelSchema,
+  }),
+});
+
 const chatRequestSchema = z
   .object({
     conversationId: z.string().uuid().optional(),
@@ -26,6 +39,7 @@ const chatRequestSchema = z
     temperature: z.number().min(0).max(2).default(0.2),
     nodeRouting: z.enum(["default", "prefer-owned", "require-node"]).default("default"),
     requiredNodeId: z.string().min(1).max(160).optional(),
+    modelMixer: modelMixerSchema.optional(),
   })
   .refine(
     (value) => Boolean(value.message.trim()) || value.attachmentIds.length > 0,
@@ -325,6 +339,12 @@ export async function POST(request: Request) {
       userMessage,
     ];
     const jobId = crypto.randomUUID();
+    const mixerRouteNote = input.modelMixer
+      ? ` Model Mixer ${input.modelMixer.preset}; max request spend ${input.modelMixer.maxSpendUsd.toFixed(2)}; levels research=${input.modelMixer.agents.research}, planner=${input.modelMixer.agents.planner}, builder=${input.modelMixer.agents.builder}, verifier=${input.modelMixer.agents.verifier}, media=${input.modelMixer.agents.media}.`
+      : "";
+    const requestMaxSpendMicrousd = input.modelMixer
+      ? Math.round(input.modelMixer.maxSpendUsd * 1_000_000)
+      : null;
 
     const { error: jobError } = await admin.from("text_inference_jobs").insert({
       id: jobId,
@@ -344,8 +364,8 @@ export async function POST(request: Request) {
       task_class: "general",
       route_reason:
         input.profile === "quality"
-          ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}`
-          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}`,
+          ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`
+          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`,
       allow_paid_fallback:
         requestedCapability === "text" &&
         input.nodeRouting !== "require-node" &&
@@ -353,6 +373,8 @@ export async function POST(request: Request) {
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
+      model_mixer: input.modelMixer || null,
+      request_max_spend_microusd: requestMaxSpendMicrousd,
     });
 
     if (jobError) throw jobError;
@@ -398,6 +420,8 @@ export async function POST(request: Request) {
           input.nodeRouting !== "require-node" &&
           profileBalance.funded,
         availableAiBalanceUsd: profileBalance.availableUsd,
+        modelMixer: input.modelMixer || null,
+        requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
       },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
