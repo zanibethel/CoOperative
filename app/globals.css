@@ -2329,3 +2329,21 @@ b { color: var(--text); }
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
   background: color-mix(in srgb, var(--accent) 9%, var(--panel));
 }
+
+
+.model-mixer-test-cap {
+  margin-top: 6px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: .68rem;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.model-mixer-test-cap:hover,
+.model-mixer-test-cap:focus-visible {
+  text-decoration: underline;
+}
