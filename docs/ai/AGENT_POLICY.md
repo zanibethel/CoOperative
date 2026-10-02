@@ -117,3 +117,17 @@ message
 ```
 
 Do not ask for information that is already saved unless a workflow specifically needs confirmation that it changed.
+
+
+### Paid AI funding boundary
+
+Platform-paid AI is not an ambient agent capability. An agent may only receive a platform-paid executor when all of the following are true:
+
+- deterministic/local/community execution has produced sufficient escalation evidence;
+- the executor is benchmark-qualified for the requested capability;
+- the request has a known configured marginal cost estimate;
+- the authenticated profile has available funded AI balance;
+- the estimated request fits within that available balance and any narrower task budget;
+- the execution path reserves funds before the provider call and settles actual metered usage afterward.
+
+A provider API key or configured model never counts as spending authority. Business-owned AI connections are distinct because their provider billing belongs to the connected business account.
