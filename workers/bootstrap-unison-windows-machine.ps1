@@ -67,6 +67,7 @@ New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR,$env:UV_PYTHON_INSTA
 $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/workers"
 $workerFiles = @(
   "hf-image-worker.py",
+  "repo-agent-worker.py",
   "windows-text-worker.py",
   "windows-local-chat.py",
   "windows-local-file-extract.py",
