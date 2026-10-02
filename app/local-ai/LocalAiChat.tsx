@@ -285,6 +285,64 @@ function recoveryStatusDirective(content: string) {
   };
 }
 
+function budgetFollowupDirective(content: string) {
+  const marker = /(?:^|\n)BUDGET_FOLLOWUPS\s*$/im;
+  if (!marker.test(content)) return null;
+
+  return {
+    text: content.replace(marker, "").trim(),
+  };
+}
+
+type BudgetFollowupsProps = {
+  onSuggestion?: (value: string) => void;
+  onCapChange?: (value: number) => void;
+};
+
+function BudgetFollowups({
+  onSuggestion,
+  onCapChange,
+}: BudgetFollowupsProps) {
+  return (
+    <div className="recovery-suggestions" aria-label="Suggested budget follow-ups">
+      <button
+        type="button"
+        onClick={() =>
+          onSuggestion?.(
+            "Keep my current budget. Reduce quality, resolution, or duration enough to fit it, then retry.",
+          )
+        }
+      >
+        Reduce quality to fit
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onSuggestion?.(
+            "Use my Nous subscription/tool credits first. Use OpenRouter only as backup if it still fits my request cap.",
+          )
+        }
+      >
+        Use Nous first
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          onCapChange?.(0.1);
+          onSuggestion?.(
+            "Retry with a $0.10 max-spend cap. Still use Nous first and OpenRouter only as backup.",
+          );
+        }}
+      >
+        Raise cap to $0.10
+      </button>
+      <a className="recovery-suggestion-link" href="/balance">
+        Add AI balance
+      </a>
+    </div>
+  );
+}
+
 function looksLikeCredentialText(value: string) {
   const text = value.trim();
   return (
@@ -650,12 +708,14 @@ type RecoveryStatusCardProps = {
   incidentId: string;
   onConversationChanged: () => Promise<void> | void;
   onSuggestion?: (value: string) => void;
+  onCapChange?: (value: number) => void;
 };
 
 function RecoveryStatusCard({
   incidentId,
   onConversationChanged,
   onSuggestion,
+  onCapChange,
 }: RecoveryStatusCardProps) {
   const [result, setResult] = useState<RecoveryResult | null>(null);
   const [cardError, setCardError] = useState("");
@@ -792,38 +852,10 @@ function RecoveryStatusCard({
       {incident?.status === "waiting_user" &&
       (incident.error_class === "spend_boundary" ||
         incident.error_class === "provider_credit_boundary") ? (
-        <div className="recovery-suggestions">
-          <button
-            type="button"
-            onClick={() =>
-              onSuggestion?.(
-                "Keep my current budget and reduce quality or duration enough to fit it.",
-              )
-            }
-          >
-            Reduce quality to fit budget
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              onSuggestion?.(
-                "Use my Nous subscription credits first, then OpenRouter only as backup, and retry.",
-              )
-            }
-          >
-            Use Nous first
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              onSuggestion?.(
-                "Increase this request's max spend to $0.10 and retry only if needed.",
-              )
-            }
-          >
-            Increase cap to $0.10
-          </button>
-        </div>
+        <BudgetFollowups
+          onSuggestion={onSuggestion}
+          onCapChange={onCapChange}
+        />
       ) : null}
 
       <details className="recovery-details">
@@ -1875,12 +1907,38 @@ export default function LocalAiChat() {
                         <RecoveryStatusCard
                           incidentId={recovery.incidentId}
                           onSuggestion={(value) => setInput(value)}
+                          onCapChange={(value) =>
+                            setModelMixer((current) => ({
+                              ...current,
+                              preset: "custom",
+                              maxSpendUsd: value,
+                            }))
+                          }
                           onConversationChanged={async () => {
                             if (conversationId) {
                               await loadConversation(conversationId);
                               await refreshConversations();
                             }
                           }}
+                        />
+                      </>
+                    );
+                  }
+
+                  const budgetFollowup = budgetFollowupDirective(message.content);
+                  if (budgetFollowup) {
+                    return (
+                      <>
+                        {budgetFollowup.text ? <div>{budgetFollowup.text}</div> : null}
+                        <BudgetFollowups
+                          onSuggestion={(value) => setInput(value)}
+                          onCapChange={(value) =>
+                            setModelMixer((current) => ({
+                              ...current,
+                              preset: "custom",
+                              maxSpendUsd: value,
+                            }))
+                          }
                         />
                       </>
                     );
