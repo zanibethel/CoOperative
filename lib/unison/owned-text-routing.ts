@@ -1,4 +1,5 @@
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { activeNodeIds } from "@/lib/unison/node-access";
 
 type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
 
@@ -21,10 +22,13 @@ export async function preferredOwnedTextNode(
   admin: AdminClient,
   userId: string,
 ): Promise<OwnedTextNodePreference | null> {
+  const nodeIds = await activeNodeIds(admin, userId);
+  if (nodeIds.length === 0) return null;
+
   const { data, error } = await admin
     .from("unison_nodes")
     .select("id,display_name,state,capabilities,policy,last_seen_at")
-    .eq("contributor_user_id", userId)
+    .in("id", nodeIds)
     .order("last_seen_at", { ascending: false });
 
   if (error) throw error;
