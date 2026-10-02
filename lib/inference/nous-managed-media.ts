@@ -268,3 +268,43 @@ export async function affordableVideoSuggestion(
     pricingSource: pricing.source,
   };
 }
+
+
+export async function nousManagedMediaCatalog() {
+  const image = (
+    await Promise.all(
+      IMAGE_CANDIDATES.map(async (candidate) => {
+        try {
+          const html = await liveText(candidate.url);
+          const estimatedCostUsd = candidate.parseCostUsd(html);
+          return estimatedCostUsd === null
+            ? null
+            : {
+                model: candidate.model,
+                qualityLabel: candidate.qualityLabel,
+                minLevel: candidate.minLevel,
+                estimatedCostUsd,
+                pricingSource: candidate.url,
+              };
+        } catch {
+          return null;
+        }
+      }),
+    )
+  ).filter((item): item is NonNullable<typeof item> => item !== null);
+
+  const pixverse = await livePixversePricing();
+  return {
+    fetchedAt: new Date().toISOString(),
+    source: "nous-managed-live" as const,
+    image,
+    video: pixverse
+      ? {
+          model: "pixverse-v6",
+          durationSeconds: { min: 1, max: 15 },
+          rates: pixverse.rates,
+          pricingSource: pixverse.source,
+        }
+      : null,
+  };
+}
