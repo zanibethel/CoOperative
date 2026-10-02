@@ -177,11 +177,6 @@ function estimatedMediaProviderCostUsd(
   });
 }
 
-function nextBudgetUsd(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
-  return Math.ceil(value * 100) / 100;
-}
-
 function videoControlsFromPrompt(prompt: string) {
   const resolution =
     prompt.match(/Resolution:\s*(360p|480p|540p|720p|1080p|4k)/i)?.[1]?.toLowerCase() ||
