@@ -171,7 +171,7 @@ security definer
 set search_path = public
 as $$
 declare
-  v_changed boolean := false;
+  v_row_count integer := 0;
 begin
   update public.ai_balance_funding_intents
   set status = 'expired',
@@ -181,8 +181,8 @@ begin
   where id = p_intent_id
     and status = 'pending';
 
-  get diagnostics v_changed = row_count;
-  return v_changed;
+  get diagnostics v_row_count = row_count;
+  return v_row_count > 0;
 end;
 $$;
 
