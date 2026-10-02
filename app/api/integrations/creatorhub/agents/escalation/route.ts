@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { evaluateAgentTaskEscalation } from "@/lib/inference/agent-escalation";
+import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -53,15 +54,24 @@ export async function POST(request: Request) {
       );
     }
 
+    const profileBalance = await aiProfileBalanceForUser(input.userId);
     const recommendation = await evaluateAgentTaskEscalation(admin, task, {
-      allowPaidFallback: false,
-      automaticPaidBudgetUsd: 0,
+      allowPaidFallback: profileBalance.funded,
+      automaticPaidBudgetUsd: profileBalance.availableUsd,
       requiredSuccessRate: 0.8,
     });
 
     if (input.action === "evaluate") {
       return NextResponse.json(
-        { recommendation },
+        {
+          recommendation,
+          profileBalance: {
+            availableMicrousd: profileBalance.availableMicrousd,
+            availableUsd: profileBalance.availableUsd,
+            funded: profileBalance.funded,
+            paidAiEligible: profileBalance.funded,
+          },
+        },
         { headers: { "Cache-Control": "no-store" } },
       );
     }
@@ -92,15 +102,32 @@ export async function POST(request: Request) {
       );
     }
 
-    const approvedMaxCostUsd = input.approvedMaxCostUsd;
-    if (
-      typeof approvedMaxCostUsd !== "number" ||
-      approvedMaxCostUsd + 1e-9 < estimatedCostUsd
-    ) {
+    if (!profileBalance.funded || profileBalance.availableUsd + 1e-9 < estimatedCostUsd) {
       return NextResponse.json(
         {
           error:
-            "approvedMaxCostUsd must cover the currently estimated maximum marginal cost.",
+            "A funded profile AI balance is required and must cover the estimated stronger-model cost.",
+          recommendation,
+          profileBalance: {
+            availableMicrousd: profileBalance.availableMicrousd,
+            availableUsd: profileBalance.availableUsd,
+            funded: profileBalance.funded,
+          },
+        },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const approvedMaxCostUsd =
+      typeof input.approvedMaxCostUsd === "number"
+        ? Math.min(input.approvedMaxCostUsd, profileBalance.availableUsd)
+        : profileBalance.availableUsd;
+
+    if (approvedMaxCostUsd + 1e-9 < estimatedCostUsd) {
+      return NextResponse.json(
+        {
+          error:
+            "The requested paid-AI ceiling does not cover the currently estimated cost.",
           recommendation,
         },
         { status: 400, headers: { "Cache-Control": "no-store" } },
@@ -117,7 +144,8 @@ export async function POST(request: Request) {
       approvedAt,
       approvedMaxCostUsd,
       estimatedCostUsd,
-      approvalSource: "creatorhub-human-click",
+      approvalSource: "creatorhub-funded-profile",
+      profileAvailableUsdAtApproval: profileBalance.availableUsd,
     };
 
     const { error: insertError } = await admin.from("agent_tasks").insert({
@@ -141,7 +169,7 @@ export async function POST(request: Request) {
       owner_ref: owner,
       kind: "paid_escalation_approved",
       message:
-        "Owner approved a stronger executor retry after deterministic escalation evaluation.",
+        "Owner approved a stronger executor retry funded from the profile AI balance after deterministic escalation evaluation.",
       metadata: {
         sourceTaskId: task.id,
         provider: decision.candidate.provider,
