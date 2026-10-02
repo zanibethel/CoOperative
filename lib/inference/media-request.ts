@@ -10,7 +10,7 @@ export type MediaRequestPlan = {
   audio: boolean | null;
 };
 
-const CREATE_VERBS = /\b(create|generate|make|render|produce|design|animate)\b/i;
+const CREATE_VERBS = /\b(create|generate|make|render|produce|design|animate|provide)\b/i;
 const IMAGE_NOUNS = /\b(image|picture|photo|portrait|illustration|graphic|poster|thumbnail)\b/i;
 const VIDEO_NOUNS = /\b(video|clip|reel|animation|movie|film)\b|\b(?:youtube|instagram|tiktok)\s+short\b/i;
 const AMBIGUOUS_MEDIA_NOUNS = /\b(ad|advertisement|commercial)\b/i;
