@@ -202,9 +202,6 @@ async function buildCatalog(): Promise<MediaCatalog> {
     const row = entry as Record<string, unknown>;
     const id = String(row.id || "");
     if (!id) return [];
-    const architecture = row.architecture && typeof row.architecture === "object"
-      ? (row.architecture as Record<string, unknown>)
-      : {};
     const pricing = videoPricing(row.pricing_skus);
     const durations = Array.isArray(row.supported_durations)
       ? row.supported_durations.map(numberValue).filter((value): value is number => value !== null)
