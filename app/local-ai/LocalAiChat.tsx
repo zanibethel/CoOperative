@@ -367,22 +367,83 @@ function MediaRecommendationChoices({
   options: MediaRecommendationOption[];
   onChoose: (option: MediaRecommendationOption) => void;
 }) {
+  const order: Record<MediaRecommendationOption["tier"], number> = {
+    "high-end": 0,
+    balanced: 1,
+    "lowest-cost": 2,
+  };
+  const tierName: Record<MediaRecommendationOption["tier"], string> = {
+    "high-end": "High",
+    balanced: "Medium",
+    "lowest-cost": "Low",
+  };
+
+  const sorted = [...options].sort((a, b) => order[a.tier] - order[b.tier]);
+
   return (
-    <div className="recovery-suggestions" aria-label="Media recommendations">
-      {options.map((option) => (
-        <button
-          type="button"
-          key={option.tier}
-          onClick={() => onChoose(option)}
-          title={option.summary}
-        >
-          {option.label} · {option.estimatedCostUsd.toLocaleString(undefined, {
-            style: "currency",
-            currency: "USD",
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 3,
-          })}
-        </button>
+    <div className="media-recommendation-list" aria-label="Media recommendations">
+      {sorted.map((option) => (
+        <details className={`media-recommendation-card ${option.tier}`} key={option.tier}>
+          <summary>
+            <span className="media-recommendation-title">
+              <small>{tierName[option.tier]}</small>
+              <strong>{option.label}</strong>
+            </span>
+            <span className="media-recommendation-price">
+              {option.estimatedCostUsd.toLocaleString(undefined, {
+                style: "currency",
+                currency: "USD",
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 3,
+              })}
+            </span>
+          </summary>
+
+          <div className="media-recommendation-details">
+            <p>{option.summary}</p>
+            <div className="media-recommendation-meta">
+              <span>
+                <small>Provider</small>
+                <strong>{option.provider}</strong>
+              </span>
+              <span>
+                <small>Model</small>
+                <strong>{option.modelName}</strong>
+              </span>
+              <span>
+                <small>Estimated cost</small>
+                <strong>
+                  {option.estimatedCostUsd.toLocaleString(undefined, {
+                    style: "currency",
+                    currency: "USD",
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 3,
+                  })}
+                </strong>
+              </span>
+              <span>
+                <small>Cap change</small>
+                <strong>
+                  {option.increaseNeededUsd > 0
+                    ? `+${option.increaseNeededUsd.toLocaleString(undefined, {
+                        style: "currency",
+                        currency: "USD",
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`
+                    : "Fits current cap"}
+                </strong>
+              </span>
+            </div>
+            <button
+              className="media-recommendation-use"
+              type="button"
+              onClick={() => onChoose(option)}
+            >
+              Use {option.label}
+            </button>
+          </div>
+        </details>
       ))}
     </div>
   );
@@ -1085,12 +1146,14 @@ export default function LocalAiChat() {
   const [uploadingImages, setUploadingImages] = useState(false);
   const [modelMixerOpen, setModelMixerOpen] = useState(false);
   const [serviceConnectionRevision, setServiceConnectionRevision] = useState(0);
+  const [chatMinimized, setChatMinimized] = useState(false);
   const [modelMixer, setModelMixer] = useState<ModelMixerSettings>({
     ...DEFAULT_MODEL_MIXER_SETTINGS,
     agents: { ...DEFAULT_MODEL_MIXER_SETTINGS.agents },
   });
   const activePollRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messageScrollRef = useRef<HTMLDivElement | null>(null);
 
   const refreshOwnedNodes = useCallback(async () => {
     const response = await fetch("/api/local-ai/nodes", { cache: "no-store" });
@@ -1742,6 +1805,18 @@ export default function LocalAiChat() {
     }
   }
 
+  useEffect(() => {
+    if (chatMinimized) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      const container = messageScrollRef.current;
+      if (!container) return;
+      container.scrollTop = container.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [busy, chatMinimized, conversationId, messages, streamingText]);
+
   const activeBusiness =
     businesses.find((item) => item.id === selectedBusinessId) || null;
 
@@ -1937,8 +2012,40 @@ export default function LocalAiChat() {
         </details>
       </div>
 
-      <div className="local-ai-chat card">
-        <div className="local-ai-messages">
+      {!chatMinimized ? (
+        <div className="local-ai-chat local-ai-chat-dock card" aria-label="CoOperative AI chat">
+          <div className="local-ai-chat-dock-head">
+            <div className="local-ai-chat-dock-title">
+              <strong>CoOperative AI</strong>
+              <span>
+                <i className={busy ? "status-dot active" : "status-dot"} />
+                {conversationTitle} · {executionStep(status, undefined, Boolean(streamingText))}
+              </span>
+            </div>
+            <div className="local-ai-chat-dock-actions">
+              <button
+                className="local-ai-dock-action"
+                type="button"
+                onClick={() => setModelMixerOpen(true)}
+              >
+                Settings
+              </button>
+              <button
+                className="local-ai-dock-action icon"
+                type="button"
+                onClick={() => {
+                  setChatMinimized(true);
+                  setModelMixerOpen(false);
+                }}
+                aria-label="Minimize chat"
+                title="Minimize chat"
+              >
+                —
+              </button>
+            </div>
+          </div>
+
+          <div className="local-ai-messages" ref={messageScrollRef}>
           {messages.length === 0 ? (
             <div className="local-ai-empty">
               <strong>CoOperative</strong>
@@ -2242,7 +2349,19 @@ export default function LocalAiChat() {
             <p className="local-ai-meta">{meta}</p>
           </details>
         ) : null}
-      </div>
+        </div>
+      ) : (
+        <button
+          className="local-ai-chat-launcher"
+          type="button"
+          onClick={() => setChatMinimized(false)}
+          aria-label="Open CoOperative AI chat"
+          title="Open CoOperative AI chat"
+        >
+          <span className={busy ? "status-dot active" : "status-dot"} />
+          <strong>AI</strong>
+        </button>
+      )}
 
       <ModelMixer
         open={modelMixerOpen}
