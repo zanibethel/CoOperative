@@ -9,7 +9,8 @@ export type MediaRequestPlan = {
 
 const CREATE_VERBS = /\b(create|generate|make|render|produce|design|animate)\b/i;
 const IMAGE_NOUNS = /\b(image|picture|photo|portrait|illustration|graphic|poster|thumbnail)\b/i;
-const VIDEO_NOUNS = /\b(video|clip|reel|short|animation|movie|commercial|ad)\b/i;
+const VIDEO_NOUNS = /\b(video|clip|reel|animation|movie|film)\b|\b(?:youtube|instagram|tiktok)\s+short\b/i;
+const AMBIGUOUS_MEDIA_NOUNS = /\b(ad|advertisement|commercial)\b/i;
 
 function durationFrom(message: string) {
   const match = message.match(/\b(\d{1,2})\s*(?:seconds?|secs?|s)\b/i);
@@ -25,15 +26,27 @@ function aspectFrom(message: string): MediaRequestPlan["aspectRatio"] {
   return null;
 }
 
+function mediaKindFrom(message: string): MediaRequestKind | null {
+  const hasImage = IMAGE_NOUNS.test(message);
+  const hasVideo = VIDEO_NOUNS.test(message);
+
+  // Explicit video language wins when the request clearly asks for motion, even
+  // if it also mentions a source/reference image ("make a video from this image").
+  if (hasVideo) return "video";
+  if (hasImage) return "image";
+
+  // "ad" and "commercial" describe purpose/style as often as they describe a
+  // video. Do not silently turn them into video generation without a medium.
+  if (AMBIGUOUS_MEDIA_NOUNS.test(message)) return null;
+
+  return null;
+}
+
 export function planMediaRequest(message: string): MediaRequestPlan | null {
   const text = message.trim();
   if (!text || !CREATE_VERBS.test(text)) return null;
 
-  const kind: MediaRequestKind | null = VIDEO_NOUNS.test(text)
-    ? "video"
-    : IMAGE_NOUNS.test(text)
-      ? "image"
-      : null;
+  const kind = mediaKindFrom(text);
   if (!kind) return null;
 
   const durationSeconds = kind === "video" ? durationFrom(text) : null;
