@@ -156,14 +156,13 @@ mkdir -p ${STATUS_DIR}
 echo running > ${STATUS_DIR}/state
 HERMES_BIN="$HOME/.local/bin/hermes"
 if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN="/usr/local/bin/hermes"; fi
-"$HERMES_BIN" chat --oneshot \
+"$HERMES_BIN" --usage-file ${STATUS_DIR}/usage.json chat --oneshot \
   --query-file /tmp/cooperative-media-prompt.md \
   --provider ${args.orchestratorProvider} \
   --model ${args.orchestratorModel} \
   --max-turns 8 \
   --run-budget 840 \
   --toolsets ${toolset} \
-  --usage-file ${STATUS_DIR}/usage.json \
   > ${STATUS_DIR}/stdout.txt 2> ${STATUS_DIR}/stderr.txt
 CODE=$?
 echo "$CODE" > ${STATUS_DIR}/exit-code
