@@ -58,6 +58,7 @@ export async function POST(request: Request) {
     const recommendation = await evaluateAgentTaskEscalation(admin, task, {
       allowPaidFallback: profileBalance.funded,
       automaticPaidBudgetUsd: profileBalance.availableUsd,
+      fundedPaidBalanceUsd: profileBalance.availableUsd,
       requiredSuccessRate: 0.8,
     });
 
