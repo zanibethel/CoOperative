@@ -12,11 +12,19 @@ import {
   textInferenceMessageSchema,
   textTaskClassSchema,
 } from "@/lib/inference/contracts";
+import {
+  aiProfileBalanceForUser,
+  releaseAiProfileFunds,
+  reserveAiProfileFunds,
+  settleAiProfileFunds,
+  userIdFromAiOwnerRef,
+} from "@/lib/billing/ai-profile-balance";
 
 export const runtime = "nodejs";
 export const maxDuration = 210;
 
 const requestSchema = z.object({
+  ownerRef: z.string().min(1).max(200),
   evidence: z.object({
     taskClass: textTaskClassSchema,
     localProfile: z.enum(["fast", "quality"]),
@@ -48,8 +56,24 @@ export async function POST(request: Request) {
 
   try {
     const input = requestSchema.parse(await request.json());
-    const evidence = input.evidence as EscalationEvidence;
-    const openAiCandidate = configuredOpenAiCandidate(evidence);
+    const profileUserId = userIdFromAiOwnerRef(input.ownerRef);
+    const profileBalance = profileUserId
+      ? await aiProfileBalanceForUser(profileUserId)
+      : null;
+    const requestedEvidence = input.evidence as EscalationEvidence;
+    const fundedBalanceUsd = profileBalance?.availableUsd ?? 0;
+    const requestedBudget = requestedEvidence.automaticPaidBudgetUsd ?? 0;
+    const evidence: EscalationEvidence = {
+      ...requestedEvidence,
+      allowPaidFallback:
+        requestedEvidence.allowPaidFallback && profileBalance?.funded === true,
+      automaticPaidBudgetUsd: Math.min(requestedBudget, fundedBalanceUsd),
+      fundedPaidBalanceUsd: fundedBalanceUsd,
+    };
+    const openAiCandidate =
+      profileBalance?.funded === true
+        ? configuredOpenAiCandidate(evidence)
+        : null;
     const decision = evaluatePaidEscalation(
       evidence,
       openAiCandidate ? [openAiCandidate] : [],
@@ -75,13 +99,101 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await executeOpenAiPaidText(evidence);
+    const estimatedCostUsd = decision.candidate.estimatedMarginalCostUsd;
+    if (
+      !profileUserId ||
+      !profileBalance?.funded ||
+      typeof estimatedCostUsd !== "number" ||
+      !Number.isFinite(estimatedCostUsd) ||
+      estimatedCostUsd <= 0
+    ) {
+      return NextResponse.json(
+        {
+          executed: false,
+          decision,
+          error:
+            "Platform-paid AI requires a funded profile balance and a known estimated cost.",
+        },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const reservation = await reserveAiProfileFunds({
+      userId: profileUserId,
+      estimatedCostUsd,
+      source: "text-escalation",
+      referenceId: crypto.randomUUID(),
+      metadata: {
+        provider: decision.candidate.provider,
+        model: decision.candidate.model,
+      },
+    });
+
+    if (!reservation) {
+      return NextResponse.json(
+        {
+          executed: false,
+          decision,
+          error:
+            "The profile AI balance no longer has enough available funds for this paid request.",
+        },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    let result;
+    try {
+      result = await executeOpenAiPaidText(evidence);
+    } catch (executionError) {
+      await releaseAiProfileFunds({
+        reservationId: reservation.id,
+        metadata: { reason: "paid-ai-execution-failed" },
+      });
+      throw executionError;
+    }
+
+    if (
+      typeof result.estimatedCostUsd !== "number" ||
+      !Number.isFinite(result.estimatedCostUsd) ||
+      result.estimatedCostUsd < 0
+    ) {
+      await releaseAiProfileFunds({
+        reservationId: reservation.id,
+        metadata: { reason: "paid-ai-cost-unavailable" },
+      });
+      return NextResponse.json(
+        {
+          executed: false,
+          decision,
+          error:
+            "The paid model returned usage without a measurable configured cost; the result was quarantined.",
+        },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const availableMicrousd = await settleAiProfileFunds({
+      reservationId: reservation.id,
+      actualCostUsd: result.estimatedCostUsd,
+      metadata: {
+        provider: result.provider,
+        model: result.model,
+        responseId: result.responseId,
+        promptTokens: result.promptTokens,
+        outputTokens: result.outputTokens,
+      },
+    });
 
     return NextResponse.json(
       {
         executed: true,
         decision,
         result,
+        funding: {
+          reservationId: reservation.id,
+          chargedUsd: result.estimatedCostUsd,
+          availableMicrousd,
+        },
       },
       { status: 200, headers: { "Cache-Control": "no-store" } },
     );
