@@ -104,12 +104,34 @@ export default function JoinClient({
       {joined ? (
         <section className="card unison-stack">
           <div>
-            <div className="eyebrow">Add this Windows PC</div>
-            <h2>Install Unison on this computer.</h2>
+            <div className="eyebrow">Unison + Personal AI</div>
+            <h2>Install Unison and your own Local AI on this computer.</h2>
             <p>
-              CoOperative links the physical PC to the contributor who authorizes setup. New installs
-              run machine-wide, so the node keeps working across Windows profiles and only accepts
-              work after the whole PC is idle. Windows will request one administrator approval.
+              One setup turns this PC into a machine-wide Unison contributor node and installs
+              <strong> CoOperative Local AI</strong> for private personal chat while the computer is
+              in use. Community compute only starts after the whole PC is idle. Windows will request
+              one administrator approval.
+            </p>
+          </div>
+
+          <div className="card unison-stack">
+            <div>
+              <div className="eyebrow">Included with setup</div>
+              <h3>Your PC works for you first.</h3>
+            </div>
+            <div className="service-tags">
+              <span>Private Personal Local AI</span>
+              <span>Machine-wide Unison node</span>
+              <span>Adaptive Fast / Quality / Heavy models</span>
+              <span>Whole-PC idle protection</span>
+              <span>Desktop + Start Menu shortcuts</span>
+              <span>Tray access</span>
+            </div>
+            <p>
+              <strong>Personal Local AI stays on this computer.</strong> Your personal prompts,
+              responses, and browser-stored conversation history do not enter the CoOperative
+              community job queue. When you are actively using the PC, your local AI remains
+              available and contributed work stays blocked by the idle policy.
             </p>
           </div>
 
@@ -152,7 +174,7 @@ export default function JoinClient({
               className="primary"
               href="https://github.com/zanibethel/CoOperative/releases/download/unison-windows-preview/CoOperative-Unison-Setup.exe"
             >
-              Download latest Setup.exe
+              Install Unison + Personal AI
             </a>
           </div>
           <p>
