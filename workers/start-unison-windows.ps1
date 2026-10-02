@@ -323,7 +323,16 @@ if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
   $textCapabilities += @("machine_wide", "whole_pc_idle")
 }
 if (Test-Path $localChatReadyPath) {
-  $textCapabilities += "local_personal_chat"
+  $textCapabilities += @(
+    "local_personal_chat",
+    "local_ai_auto_model",
+    "local_ai_images",
+    "local_ai_files",
+    "local_ai_web_search",
+    "local_ai_voice",
+    "local_ai_history",
+    "local_ai_projects"
+  )
 }
 $textReadyVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
   "windows-unison-1.0.0-machine-text-only"
@@ -376,7 +385,16 @@ while (-not $imageProcess.HasExited -and -not $textProcess.HasExited) {
       $imageStartingCapabilities += @("machine_wide", "whole_pc_idle")
     }
     if (Test-Path $localChatReadyPath) {
-      $imageStartingCapabilities += "local_personal_chat"
+      $imageStartingCapabilities += @(
+    "local_personal_chat",
+    "local_ai_auto_model",
+    "local_ai_images",
+    "local_ai_files",
+    "local_ai_web_search",
+    "local_ai_voice",
+    "local_ai_history",
+    "local_ai_projects"
+  )
     }
 
     $imageStartingVersion = if ($env:UNISON_INSTALL_SCOPE -eq "machine") {
@@ -437,7 +455,16 @@ if ($imageExitedFirst) {
     $degradedCapabilities += @("machine_wide", "whole_pc_idle")
   }
   if (Test-Path $localChatReadyPath) {
-    $degradedCapabilities += "local_personal_chat"
+    $degradedCapabilities += @(
+    "local_personal_chat",
+    "local_ai_auto_model",
+    "local_ai_images",
+    "local_ai_files",
+    "local_ai_web_search",
+    "local_ai_voice",
+    "local_ai_history",
+    "local_ai_projects"
+  )
   }
 
   while (-not $textProcess.HasExited) {
