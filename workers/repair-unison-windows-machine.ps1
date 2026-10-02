@@ -49,6 +49,7 @@ if (-not $uvExe -or -not (Test-Path $uvExe)) {
 $baseUrl = "https://raw.githubusercontent.com/zanibethel/CoOperative/$Revision/workers"
 $workerFiles = @(
   "hf-image-worker.py",
+  "repo-agent-worker.py",
   "windows-text-worker.py",
   "windows-local-chat.py",
   "windows-local-file-extract.py",
