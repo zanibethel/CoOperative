@@ -252,6 +252,16 @@ function generatedMedia(content: string) {
   };
 }
 
+function hasMediaBudgetSuggestions(content: string) {
+  const value = content.toLowerCase();
+  return (
+    value.includes("suggested follow-ups:") &&
+    (value.includes("media quality") ||
+      value.includes("request cap") ||
+      value.includes("local/free"))
+  );
+}
+
 
 function serviceConnectDirective(content: string) {
   const match = content.match(/SECURE_SERVICE_CONNECT:([a-z0-9-]+)/i);
@@ -920,6 +930,49 @@ export default function LocalAiChat() {
   });
   const activePollRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  function applyMediaBudgetSuggestion(
+    action: "increase" | "lower" | "free",
+  ) {
+    if (action === "increase") {
+      setModelMixer((current) => ({
+        ...current,
+        preset: "custom",
+        maxSpendUsd: Math.min(
+          100,
+          Math.max(
+            0.1,
+            Math.round((current.maxSpendUsd + 0.05) * 100) / 100,
+          ),
+        ),
+      }));
+      setInput("Retry that media request.");
+      return;
+    }
+
+    if (action === "lower") {
+      setModelMixer((current) => ({
+        ...current,
+        preset: "custom",
+        agents: {
+          ...current.agents,
+          media: Math.max(0, current.agents.media - 1) as 0 | 1 | 2 | 3 | 4,
+        },
+      }));
+      setInput("Retry that media request with the lower quality setting.");
+      return;
+    }
+
+    setModelMixer((current) => ({
+      ...current,
+      preset: "custom",
+      agents: {
+        ...current.agents,
+        media: 0,
+      },
+    }));
+    setInput("Retry that media request using local/free generation only.");
+  }
 
   const refreshOwnedNodes = useCallback(async () => {
     const response = await fetch("/api/local-ai/nodes", { cache: "no-store" });
@@ -1891,6 +1944,29 @@ export default function LocalAiChat() {
                     </>
                   );
                 })() : null}
+                {message.role === "assistant" &&
+                hasMediaBudgetSuggestions(message.content) ? (
+                  <div className="media-budget-suggestions">
+                    <button
+                      type="button"
+                      onClick={() => applyMediaBudgetSuggestion("increase")}
+                    >
+                      Increase cap +$0.05
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyMediaBudgetSuggestion("lower")}
+                    >
+                      Lower media quality
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => applyMediaBudgetSuggestion("free")}
+                    >
+                      Local/free only
+                    </button>
+                  </div>
+                ) : null}
               </div>
             ))
           )}
