@@ -84,6 +84,7 @@ OLLAMA_URL = os.getenv("UNISON_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/"
 PROFILE_MODELS = {
     "fast": FAST_MODEL_ID,
     "quality": QUALITY_MODEL_ID,
+    "heavy": HEAVY_MODEL_ID,
 }
 
 loaded_model_id: str | None = None
@@ -447,7 +448,8 @@ def run_generation(job_id: str, job: dict):
 
     messages = clean_messages(job)
     max_tokens, temperature = generation_settings(job)
-    profile = "quality" if job.get("profile") == "quality" else "fast"
+    requested_profile = str(job.get("profile") or "fast").lower()
+    profile = requested_profile if requested_profile in PROFILE_MODELS else "fast"
     model_id = PROFILE_MODELS[profile]
 
     post_progress(job_id, "", 0, None)
