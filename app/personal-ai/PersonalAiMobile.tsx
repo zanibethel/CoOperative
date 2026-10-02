@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 type ModelMode = "auto" | "fast" | "quality" | "heavy";
 
@@ -46,7 +52,7 @@ export default function PersonalAiMobile() {
   const [nodes, setNodes] = useState<NodeSummary[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [conversationId, setConversationId] = useState<string>("");
+  const [conversationId, setConversationId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [modelMode, setModelMode] = useState<ModelMode>("auto");
@@ -55,6 +61,9 @@ export default function PersonalAiMobile() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [meta, setMeta] = useState("");
+  const [showHistory, setShowHistory] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const personalNodes = useMemo(
     () => nodes.filter((node) => node.availableForPersonalAi),
@@ -67,10 +76,15 @@ export default function PersonalAiMobile() {
     nodes[0] ||
     null;
 
+  const activeConversation =
+    conversations.find((conversation) => conversation.id === conversationId) || null;
+
   const refreshNodes = useCallback(async () => {
     const response = await fetch("/api/local-ai/nodes", { cache: "no-store" });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || result.error || "Could not load your PCs.");
+    if (!response.ok) {
+      throw new Error(result.detail || result.error || "Could not load your PCs.");
+    }
     const next = (result.nodes || []) as NodeSummary[];
     setNodes(next);
     return next;
@@ -79,16 +93,26 @@ export default function PersonalAiMobile() {
   const refreshSettings = useCallback(async () => {
     const response = await fetch("/api/personal-ai/settings", { cache: "no-store" });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || result.error || "Could not load Personal AI settings.");
+    if (!response.ok) {
+      throw new Error(
+        result.detail || result.error || "Could not load Personal AI settings.",
+      );
+    }
     const next = result.settings as Settings;
     setSettings(next);
     return next;
   }, []);
 
   const refreshConversations = useCallback(async () => {
-    const response = await fetch("/api/personal-ai/conversations", { cache: "no-store" });
+    const response = await fetch("/api/personal-ai/conversations", {
+      cache: "no-store",
+    });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || result.error || "Could not load Personal AI history.");
+    if (!response.ok) {
+      throw new Error(
+        result.detail || result.error || "Could not load Personal AI history.",
+      );
+    }
     const next = (result.conversations || []) as Conversation[];
     setConversations(next);
     return next;
@@ -100,7 +124,11 @@ export default function PersonalAiMobile() {
       { cache: "no-store" },
     );
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || result.error || "Could not load conversation.");
+    if (!response.ok) {
+      throw new Error(
+        result.detail || result.error || "Could not load conversation.",
+      );
+    }
     setConversationId(id);
     setMessages((result.messages || []) as Message[]);
     if (result.conversation?.nodeId) setNodeId(result.conversation.nodeId);
@@ -109,6 +137,7 @@ export default function PersonalAiMobile() {
 
   useEffect(() => {
     let cancelled = false;
+
     void (async () => {
       try {
         const [nextNodes, nextSettings, nextConversations] = await Promise.all([
@@ -118,9 +147,13 @@ export default function PersonalAiMobile() {
         ]);
         if (cancelled) return;
 
-        const readyNodes = nextNodes.filter((node) => node.availableForPersonalAi);
+        const readyNodes = nextNodes.filter(
+          (node) => node.availableForPersonalAi,
+        );
         const preferred =
-          readyNodes.find((node) => node.id === nextSettings.preferredNodeId)?.id ||
+          readyNodes.find(
+            (node) => node.id === nextSettings.preferredNodeId,
+          )?.id ||
           readyNodes[0]?.id ||
           "";
         setNodeId(preferred);
@@ -128,10 +161,12 @@ export default function PersonalAiMobile() {
         if (nextConversations[0]) {
           await loadConversation(nextConversations[0].id);
         }
-        setStatus(preferred ? "PC connected" : "Personal AI PC offline");
+        setStatus(preferred ? "Connected" : "PC offline");
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Could not load Personal AI.");
+          setError(
+            err instanceof Error ? err.message : "Could not load Personal AI.",
+          );
           setStatus("Unavailable");
         }
       }
@@ -140,7 +175,16 @@ export default function PersonalAiMobile() {
     return () => {
       cancelled = true;
     };
-  }, [loadConversation, refreshConversations, refreshNodes, refreshSettings]);
+  }, [
+    loadConversation,
+    refreshConversations,
+    refreshNodes,
+    refreshSettings,
+  ]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, busy, status]);
 
   async function updateSettings(patch: Partial<Settings>) {
     const response = await fetch("/api/personal-ai/settings", {
@@ -149,7 +193,11 @@ export default function PersonalAiMobile() {
       body: JSON.stringify(patch),
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || result.error || "Could not update settings.");
+    if (!response.ok) {
+      throw new Error(
+        result.detail || result.error || "Could not update settings.",
+      );
+    }
     setSettings(result.settings);
   }
 
@@ -160,6 +208,19 @@ export default function PersonalAiMobile() {
     setInput("");
     setMeta("");
     setError("");
+    setShowHistory(false);
+  }
+
+  async function chooseConversation(id: string) {
+    if (busy) return;
+    setShowHistory(false);
+    try {
+      await loadConversation(id);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not load conversation.",
+      );
+    }
   }
 
   async function pollJob(jobId: string, id: string) {
@@ -170,8 +231,11 @@ export default function PersonalAiMobile() {
         { cache: "no-store" },
       );
       const result = await response.json();
+
       if (!response.ok) {
-        throw new Error(result.detail || result.error || "Could not read Personal AI response.");
+        throw new Error(
+          result.detail || result.error || "Could not read Personal AI response.",
+        );
       }
 
       if (result.status === "queued") {
@@ -179,7 +243,7 @@ export default function PersonalAiMobile() {
         continue;
       }
       if (result.status === "running") {
-        setStatus("Your PC is thinking…");
+        setStatus("Thinking on your PC…");
         continue;
       }
       if (result.status === "completed") {
@@ -189,7 +253,6 @@ export default function PersonalAiMobile() {
           [
             result.model,
             result.provider,
-            result.nodeId ? `PC ${result.nodeId}` : null,
             typeof result.latencyMs === "number"
               ? `${(result.latencyMs / 1000).toFixed(1)}s`
               : null,
@@ -197,11 +260,14 @@ export default function PersonalAiMobile() {
             .filter(Boolean)
             .join(" · "),
         );
-        setStatus("PC connected");
+        setStatus("Connected");
         return;
       }
 
-      throw new Error(result.error || `Personal AI ended with status ${result.status || "unknown"}.`);
+      throw new Error(
+        result.error ||
+          `Personal AI ended with status ${result.status || "unknown"}.`,
+      );
     }
   }
 
@@ -213,11 +279,13 @@ export default function PersonalAiMobile() {
     setError("");
     setMeta("");
     setStatus("Sending to your PC…");
+
     const optimistic: Message = {
       id: `pending-${Date.now()}`,
       role: "user",
       content: text,
     };
+
     setMessages((current) => [...current, optimistic]);
     setInput("");
 
@@ -233,173 +301,320 @@ export default function PersonalAiMobile() {
         }),
       });
       const result = await response.json();
+
       if (!response.ok || !result.jobId || !result.conversationId) {
-        throw new Error(result.detail || result.error || "Could not send to your Personal AI PC.");
+        throw new Error(
+          result.detail ||
+            result.error ||
+            "Could not send to your Personal AI PC.",
+        );
       }
 
       setConversationId(result.conversationId);
       setStatus(`Using ${result.node?.displayName || "your PC"}…`);
       await pollJob(result.jobId, result.conversationId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Personal AI request failed.");
-      setStatus(selectedNode?.availableForPersonalAi ? "PC connected" : "Personal AI PC offline");
+      setError(
+        err instanceof Error ? err.message : "Personal AI request failed.",
+      );
+      setStatus(
+        selectedNode?.availableForPersonalAi ? "Connected" : "PC offline",
+      );
+
       if (conversationId) {
         await loadConversation(conversationId).catch(() => {});
       } else {
-        setMessages((current) => current.filter((message) => message.id !== optimistic.id));
+        setMessages((current) =>
+          current.filter((message) => message.id !== optimistic.id),
+        );
       }
     } finally {
       setBusy(false);
     }
   }
 
+  async function copyMessage(content: string) {
+    try {
+      await navigator.clipboard.writeText(content);
+      setStatus("Copied");
+      window.setTimeout(
+        () =>
+          setStatus(
+            selectedNode?.availableForPersonalAi ? "Connected" : "PC offline",
+          ),
+        900,
+      );
+    } catch {
+      setError("Could not copy this message.");
+    }
+  }
+
   const online = Boolean(selectedNode?.availableForPersonalAi);
 
   return (
-    <section className="personal-ai-mobile">
-      <div className="card personal-ai-mobile-head">
-        <div>
-          <div className="eyebrow">Your PC · Your AI</div>
-          <h1>Personal AI</h1>
-          <p>
-            Use your own PC&apos;s AI from this phone. Your PC performs the inference;
-            CoOperative securely syncs your encrypted history and delivers the response.
+    <section className="personal-chat-app">
+      <header className="personal-chat-header">
+        <button
+          type="button"
+          className="personal-chat-icon-button"
+          onClick={() => setShowHistory((current) => !current)}
+          aria-label="Open conversation history"
+          aria-expanded={showHistory}
+        >
+          ☰
+        </button>
+
+        <button
+          type="button"
+          className="personal-chat-title-button"
+          onClick={() => setShowHistory((current) => !current)}
+          aria-expanded={showHistory}
+        >
+          <strong>{activeConversation?.title || "Personal AI"}</strong>
+          <span>
+            <i className={online ? "personal-chat-online-dot online" : "personal-chat-online-dot"} />
+            {selectedNode?.displayName || "No PC"} · {status}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          className="personal-chat-icon-button"
+          onClick={() => setShowControls((current) => !current)}
+          aria-label="Personal AI settings"
+          aria-expanded={showControls}
+        >
+          ⚙
+        </button>
+      </header>
+
+      {showHistory ? (
+        <div className="personal-chat-popover personal-chat-history">
+          <div className="personal-chat-popover-head">
+            <strong>Chats</strong>
+            <button
+              type="button"
+              className="personal-chat-new"
+              onClick={() => void newChat()}
+              disabled={busy}
+            >
+              ＋ New chat
+            </button>
+          </div>
+          <div className="personal-chat-history-list">
+            {conversations.length === 0 ? (
+              <p>No saved conversations yet.</p>
+            ) : (
+              conversations.map((conversation) => (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  className={
+                    conversation.id === conversationId
+                      ? "personal-chat-history-item active"
+                      : "personal-chat-history-item"
+                  }
+                  onClick={() => void chooseConversation(conversation.id)}
+                  disabled={busy}
+                >
+                  <strong>{conversation.title}</strong>
+                  <small>
+                    {conversation.updatedAt
+                      ? new Date(conversation.updatedAt).toLocaleString()
+                      : "Saved chat"}
+                  </small>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {showControls ? (
+        <div className="personal-chat-popover personal-chat-controls">
+          <div className="personal-chat-popover-head">
+            <div>
+              <strong>Personal AI</strong>
+              <small>Inference stays on your selected PC.</small>
+            </div>
+            <button
+              type="button"
+              className="personal-chat-close"
+              onClick={() => setShowControls(false)}
+              aria-label="Close settings"
+            >
+              ×
+            </button>
+          </div>
+
+          <label className="field">
+            <span>PC</span>
+            <select
+              value={nodeId}
+              onChange={(event) => {
+                const id = event.target.value;
+                setNodeId(id);
+                void updateSettings({ preferredNodeId: id || null }).catch(
+                  (err) =>
+                    setError(
+                      err instanceof Error
+                        ? err.message
+                        : "Could not save preferred PC.",
+                    ),
+                );
+              }}
+              disabled={busy || conversationId !== ""}
+            >
+              {personalNodes.length === 0 ? (
+                <option value="">No Personal AI PC online</option>
+              ) : null}
+              {personalNodes.map((node) => (
+                <option value={node.id} key={node.id}>
+                  {node.displayName} · {node.state}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Model</span>
+            <select
+              value={modelMode}
+              onChange={(event) =>
+                setModelMode(event.target.value as ModelMode)
+              }
+              disabled={busy}
+            >
+              <option value="auto">Auto — choose for me</option>
+              <option value="fast">Fast</option>
+              <option value="quality">Quality</option>
+              <option value="heavy">Heavy</option>
+            </select>
+          </label>
+
+          <label className="personal-chat-setting-row">
+            <input
+              type="checkbox"
+              checked={Boolean(settings?.improvementOptIn)}
+              onChange={(event) => {
+                const checked = event.target.checked;
+                setSettings((current) =>
+                  current
+                    ? { ...current, improvementOptIn: checked }
+                    : current,
+                );
+                void updateSettings({ improvementOptIn: checked }).catch(
+                  (err) =>
+                    setError(
+                      err instanceof Error
+                        ? err.message
+                        : "Could not update learning preference.",
+                    ),
+                );
+              }}
+            />
+            <span>
+              <strong>Help improve CoOperative</strong>
+              <small>
+                Allow authorized improvement systems to learn from this
+                encrypted Personal AI history.
+              </small>
+            </span>
+          </label>
+
+          <p className="personal-chat-privacy-note">
+            No paid or cloud AI fallback. If this PC is offline, the request
+            stays unavailable rather than being sent elsewhere.
           </p>
         </div>
-        <div className={online ? "personal-ai-pc-state online" : "personal-ai-pc-state"}>
-          <span className={online ? "status-dot active" : "status-dot"} />
-          <strong>{selectedNode?.displayName || "No Personal AI PC"}</strong>
-          <small>{online ? "Online · personal use has priority" : "Offline"}</small>
-        </div>
-      </div>
+      ) : null}
 
-      <div className="card personal-ai-mobile-controls">
-        <label className="field">
-          <span>Personal AI PC</span>
-          <select
-            value={nodeId}
-            onChange={(event) => {
-              const id = event.target.value;
-              setNodeId(id);
-              void updateSettings({ preferredNodeId: id || null }).catch((err) =>
-                setError(err instanceof Error ? err.message : "Could not save preferred PC."),
-              );
-            }}
-            disabled={busy || conversationId !== ""}
-          >
-            {personalNodes.length === 0 ? <option value="">No Personal AI PC online</option> : null}
-            {personalNodes.map((node) => (
-              <option value={node.id} key={node.id}>
-                {node.displayName} · {node.state}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="field">
-          <span>Model</span>
-          <select
-            value={modelMode}
-            onChange={(event) => setModelMode(event.target.value as ModelMode)}
-            disabled={busy}
-          >
-            <option value="auto">Auto — choose for me</option>
-            <option value="fast">Fast</option>
-            <option value="quality">Quality</option>
-            <option value="heavy">Heavy</option>
-          </select>
-        </label>
-
-        <label className="personal-ai-toggle">
-          <input
-            type="checkbox"
-            checked={Boolean(settings?.improvementOptIn)}
-            onChange={(event) => {
-              const checked = event.target.checked;
-              setSettings((current) => current ? { ...current, improvementOptIn: checked } : current);
-              void updateSettings({ improvementOptIn: checked }).catch((err) =>
-                setError(err instanceof Error ? err.message : "Could not update learning preference."),
-              );
-            }}
-          />
-          <span>
-            <strong>Help improve CoOperative</strong>
-            <small>
-              Allow authorized improvement systems to learn from this encrypted Personal AI history.
-            </small>
-          </span>
-        </label>
-      </div>
-
-      <div className="card local-ai-threadbar">
-        <label className="field local-ai-thread-select">
-          <span>History</span>
-          <select
-            value={conversationId}
-            onChange={(event) => {
-              const id = event.target.value;
-              if (!id) void newChat();
-              else void loadConversation(id).catch((err) =>
-                setError(err instanceof Error ? err.message : "Could not load conversation."),
-              );
-            }}
-            disabled={busy}
-          >
-            <option value="">New conversation</option>
-            {conversations.map((conversation) => (
-              <option key={conversation.id} value={conversation.id}>
-                {conversation.title}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button className="secondary-button" type="button" onClick={() => void newChat()} disabled={busy}>
-          New chat
-        </button>
-      </div>
-
-      <div className="card local-ai-chat personal-ai-chat-card">
-        <div className="local-ai-messages">
-          {messages.length === 0 ? (
-            <div className="local-ai-empty">
-              <strong>Personal AI on your PC</strong>
-              <p>
-                Send a message from your phone. It will run on {selectedNode?.displayName || "your linked PC"},
-                even while that PC is being used.
-              </p>
-            </div>
-          ) : (
-            messages.map((message) => (
-              <div
-                className={`chat-bubble ${message.role === "user" ? "user" : "assistant"}`}
+      <main className="personal-chat-thread">
+        {messages.length === 0 ? (
+          <div className="personal-chat-empty">
+            <div className="personal-chat-mark">C</div>
+            <h1>What can I help with?</h1>
+            <p>
+              Your Personal AI runs on{" "}
+              {selectedNode?.displayName || "your linked PC"}.
+            </p>
+            {!online ? (
+              <div className="personal-chat-offline">
+                <strong>No Personal AI PC online</strong>
+                <span>
+                  Once the current machine-wide Unison build is installed on
+                  the PC, it will appear here automatically.
+                </span>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="personal-chat-message-list">
+            {messages.map((message) => (
+              <article
+                className={
+                  message.role === "user"
+                    ? "personal-chat-message user"
+                    : "personal-chat-message assistant"
+                }
                 key={message.id}
               >
-                <div className="chat-bubble-head">
-                  <span>{message.role === "user" ? "You" : "Personal AI"}</span>
+                {message.role === "assistant" ? (
+                  <div className="personal-chat-avatar">C</div>
+                ) : null}
+                <div className="personal-chat-message-body">
+                  <div className="personal-chat-message-text">
+                    {message.content}
+                  </div>
+                  {message.role === "assistant" ? (
+                    <div className="personal-chat-message-actions">
+                      <button
+                        type="button"
+                        onClick={() => void copyMessage(message.content)}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-                <div>{message.content}</div>
-              </div>
-            ))
-          )}
+              </article>
+            ))}
 
-          {busy ? (
-            <div className="chat-bubble assistant pending">
-              <div className="chat-bubble-head"><span>Personal AI</span></div>
-              <div className="execution-trace">
-                <span className="execution-trace-dot" />
-                <span>{status}</span>
-              </div>
-            </div>
-          ) : null}
+            {busy ? (
+              <article className="personal-chat-message assistant pending">
+                <div className="personal-chat-avatar">C</div>
+                <div className="personal-chat-message-body">
+                  <div className="personal-chat-thinking">
+                    <span className="personal-chat-thinking-dot" />
+                    <span>{status}</span>
+                  </div>
+                </div>
+              </article>
+            ) : null}
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </main>
+
+      {error ? (
+        <div className="personal-chat-error" role="alert">
+          {error}
         </div>
+      ) : null}
 
-        <div className="local-ai-composer personal-ai-mobile-composer">
+      <footer className="personal-chat-composer-shell">
+        <div className="personal-chat-composer">
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder={online ? "Message your Personal AI…" : "Your Personal AI PC is offline"}
+            placeholder={
+              online
+                ? "Message Personal AI"
+                : "Your Personal AI PC is offline"
+            }
             disabled={busy || !online}
             maxLength={16000}
+            rows={1}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -407,27 +622,25 @@ export default function PersonalAiMobile() {
               }
             }}
           />
-          <div className="local-ai-actions">
-            <button
-              className="primary"
-              type="button"
-              onClick={() => void send()}
-              disabled={busy || !online || !input.trim()}
-            >
-              {busy ? "Working…" : "Send to my PC"}
-            </button>
-            <span className="personal-ai-mobile-status">{status}</span>
-          </div>
+          <button
+            className="personal-chat-send"
+            type="button"
+            onClick={() => void send()}
+            disabled={busy || !online || !input.trim()}
+            aria-label="Send message"
+          >
+            ↑
+          </button>
         </div>
 
-        {error ? <p className="error">{error}</p> : null}
-        {meta ? <p className="local-ai-meta">{meta}</p> : null}
-      </div>
-
-      <p className="personal-ai-mobile-note">
-        No cloud AI fallback is used here. If your PC is offline, Personal AI waits for your PC
-        instead of spending money elsewhere.
-      </p>
+        <div className="personal-chat-composer-meta">
+          <span>
+            {selectedNode?.displayName || "No PC"} ·{" "}
+            {modelMode === "auto" ? "Auto model" : modelMode}
+          </span>
+          {meta ? <span>{meta}</span> : null}
+        </div>
+      </footer>
     </section>
   );
 }
