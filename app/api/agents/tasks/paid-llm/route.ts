@@ -91,6 +91,11 @@ export async function POST(request: Request) {
       );
     }
 
+    const profileUserId = userIdFromAiOwnerRef(task.owner_ref);
+    const profileBalance = profileUserId
+      ? await aiProfileBalanceForUser(profileUserId)
+      : null;
+
     const evidence: EscalationEvidence = {
       taskClass: "coding",
       localProfile: "quality",
@@ -101,6 +106,7 @@ export async function POST(request: Request) {
       verificationStatus: "inconclusive",
       allowPaidFallback: true,
       automaticPaidBudgetUsd: approvedMaxCostUsd,
+      fundedPaidBalanceUsd: profileBalance?.availableUsd ?? 0,
       requiredSuccessRate: 0.8,
     };
 
@@ -111,10 +117,6 @@ export async function POST(request: Request) {
       );
     const businessOpenAi = businessOpenAiService
       ? configuredBusinessOpenAiCandidate(evidence)
-      : null;
-    const profileUserId = userIdFromAiOwnerRef(task.owner_ref);
-    const profileBalance = profileUserId
-      ? await aiProfileBalanceForUser(profileUserId)
       : null;
     const platformOpenAi =
       profileBalance?.funded === true ? configuredOpenAiCandidate(evidence) : null;
