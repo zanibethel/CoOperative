@@ -148,7 +148,7 @@ const PRESETS: Record<
       planner: 1,
       builder: 1,
       verifier: 1,
-      media: 0,
+      media: 1,
     },
   },
   balanced: {
