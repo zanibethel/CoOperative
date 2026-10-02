@@ -7,21 +7,21 @@ export type MediaRequestPlan = {
   aspectRatio: "16:9" | "9:16" | "1:1" | null;
 };
 
-const CREATE_VERBS = /(create|generate|make|render|produce|design|animate)/i;
-const IMAGE_NOUNS = /(image|picture|photo|portrait|illustration|graphic|poster|thumbnail)/i;
-const VIDEO_NOUNS = /(video|clip|reel|short|animation|movie|commercial|ad)/i;
+const CREATE_VERBS = /\b(create|generate|make|render|produce|design|animate)\b/i;
+const IMAGE_NOUNS = /\b(image|picture|photo|portrait|illustration|graphic|poster|thumbnail)\b/i;
+const VIDEO_NOUNS = /\b(video|clip|reel|short|animation|movie|commercial|ad)\b/i;
 
 function durationFrom(message: string) {
-  const match = message.match(/(d{1,2})s*(?:seconds?|secs?|s)/i);
+  const match = message.match(/\b(\d{1,2})\s*(?:seconds?|secs?|s)\b/i);
   if (!match) return null;
   const value = Number(match[1]);
   return value >= 1 && value <= 30 ? value : null;
 }
 
 function aspectFrom(message: string): MediaRequestPlan["aspectRatio"] {
-  if (/(9:16|vertical|portrait|reel|tiktok|shorts?)/i.test(message)) return "9:16";
-  if (/(16:9|landscape|widescreen|youtube)/i.test(message)) return "16:9";
-  if (/(1:1|square)/i.test(message)) return "1:1";
+  if (/\b(9:16|vertical|portrait|reel|tiktok|shorts?)\b/i.test(message)) return "9:16";
+  if (/\b(16:9|landscape|widescreen|youtube)\b/i.test(message)) return "16:9";
+  if (/\b(1:1|square)\b/i.test(message)) return "1:1";
   return null;
 }
 
@@ -45,9 +45,13 @@ export function planMediaRequest(message: string): MediaRequestPlan | null {
     if (!aspectRatio) missing.push("format");
 
     if (missing.length > 0) {
-      const details = [];
-      if (missing.includes("duration")) details.push("how long it should be (for example 5 or 8 seconds)");
-      if (missing.includes("format")) details.push("vertical 9:16, landscape 16:9, or square 1:1");
+      const details: string[] = [];
+      if (missing.includes("duration")) {
+        details.push("how long it should be (for example 5 or 8 seconds)");
+      }
+      if (missing.includes("format")) {
+        details.push("vertical 9:16, landscape 16:9, or square 1:1");
+      }
       return {
         kind,
         durationSeconds,
