@@ -109,7 +109,7 @@ export default async function UnisonContributorDashboard() {
                 textModelPlan?: {
                   revision?: string;
                   backend?: string;
-                  models?: { fast?: string; quality?: string; heavy?: string };
+                  models?: { fast?: string; quality?: string; heavy?: string; vision?: string };
                   selectionReason?: string;
                 };
                 textBenchmark?: {
@@ -144,6 +144,12 @@ export default async function UnisonContributorDashboard() {
                     <span>{resources.memoryTotalMb ? `${Math.round(resources.memoryTotalMb / 1024)} GB RAM` : "RAM pending"}</span>
                     <span>{policy.idleScope === "machine" ? "Whole-PC idle" : "Profile idle"}</span>
                     {capabilities.includes("local_personal_chat") ? <span>Personal Local AI ready</span> : null}
+                    {capabilities.includes("local_ai_images") ? <span>Images</span> : null}
+                    {capabilities.includes("local_ai_files") ? <span>Files</span> : null}
+                    {capabilities.includes("local_ai_web_search") ? <span>Web search</span> : null}
+                    {capabilities.includes("local_ai_voice") ? <span>Voice</span> : null}
+                    {capabilities.includes("local_ai_projects") ? <span>Projects</span> : null}
+                    {capabilities.includes("local_ai_auto_model") ? <span>Auto model</span> : null}
                     <span>{node.worker_version || "Worker version pending"}</span>
                     <span>Last seen {new Date(node.last_seen_at).toLocaleString()}</span>
                   </div>
@@ -156,6 +162,9 @@ export default async function UnisonContributorDashboard() {
                         <code>{resources.textModelPlan.models.quality || "pending"}</code>
                         {resources.textModelPlan.models.heavy
                           ? <> · Heavy candidate <code>{resources.textModelPlan.models.heavy}</code></>
+                          : null}
+                        {resources.textModelPlan.models.vision
+                          ? <> · Vision <code>{resources.textModelPlan.models.vision}</code></>
                           : null}
                       </p>
                       {resources.textBenchmark?.model ? (
