@@ -155,6 +155,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Node owner not found." }, { status: 404 });
     }
 
+    const { data: settings, error: settingsError } = await owner.admin
+      .from("personal_ai_settings")
+      .select("hosted_history_enabled")
+      .eq("user_id", owner.userId)
+      .maybeSingle();
+    if (settingsError) throw settingsError;
+    if (settings && settings.hosted_history_enabled === false) {
+      return NextResponse.json(
+        { error: "Hosted Personal AI history is disabled for this account." },
+        { status: 409 },
+      );
+    }
+
     if (input.action === "create") {
       const { data, error } = await owner.admin.rpc("personal_ai_create_conversation", {
         p_user_id: owner.userId,
