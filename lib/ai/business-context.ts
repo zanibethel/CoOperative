@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
+import { aiProfileBalanceForUser, type AiProfileBalance } from "@/lib/billing/ai-profile-balance";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -20,6 +20,7 @@ export type BusinessEconomicSummary = {
 
 export type BusinessChatContext = {
   business: BusinessEconomicSummary;
+  aiBalance: AiProfileBalance;
   systemContext: string;
 };
 
@@ -235,5 +236,5 @@ export async function buildBusinessChatContext(
     "Do not authorize or imply permission for paid work when a budget value is unknown.",
   ].join("\n");
 
-  return { business, systemContext };
+  return { business, aiBalance, systemContext };
 }
