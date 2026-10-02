@@ -360,3 +360,14 @@ export async function pollHermesMediaTask(args: {
       "Hermes media generation finished without a usable media URL.",
   };
 }
+
+
+export async function cancelHermesMediaTask(sandboxName: string) {
+  try {
+    const sandbox = await Sandbox.get({ name: sandboxName });
+    await sandbox.stop();
+    return true;
+  } catch {
+    return false;
+  }
+}
