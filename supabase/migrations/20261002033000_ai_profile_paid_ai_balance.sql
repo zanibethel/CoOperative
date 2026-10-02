@@ -1,8 +1,13 @@
 -- Funded AI balance for profile-gated paid model execution.
 -- Values are stored in micro-USD (1 USD = 1,000,000 micro-USD) so sub-cent model usage remains auditable.
+--
+-- profile_ref is deliberately an application-scoped stable identifier instead of
+-- an auth.users foreign key. CoOperative can receive governed work from linked
+-- products (for example CreatorHub) whose authenticated user IDs may originate
+-- in a different identity store.
 
 create table if not exists public.ai_profile_balances (
-  user_id uuid primary key references auth.users(id) on delete cascade,
+  profile_ref text primary key check (char_length(profile_ref) between 1 and 200),
   balance_microusd bigint not null default 0 check (balance_microusd >= 0),
   reserved_microusd bigint not null default 0 check (reserved_microusd >= 0),
   lifetime_spent_microusd bigint not null default 0 check (lifetime_spent_microusd >= 0),
@@ -14,7 +19,8 @@ create table if not exists public.ai_profile_balances (
 
 create table if not exists public.ai_profile_balance_reservations (
   id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
+  profile_ref text not null
+    references public.ai_profile_balances(profile_ref) on delete cascade,
   reserved_microusd bigint not null check (reserved_microusd > 0),
   actual_microusd bigint check (actual_microusd is null or actual_microusd >= 0),
   status text not null default 'reserved'
@@ -29,8 +35,10 @@ create table if not exists public.ai_profile_balance_reservations (
 
 create table if not exists public.ai_profile_balance_ledger (
   id bigint generated always as identity primary key,
-  user_id uuid not null references auth.users(id) on delete cascade,
-  reservation_id uuid references public.ai_profile_balance_reservations(id) on delete set null,
+  profile_ref text not null
+    references public.ai_profile_balances(profile_ref) on delete cascade,
+  reservation_id uuid
+    references public.ai_profile_balance_reservations(id) on delete set null,
   kind text not null check (kind in ('credit','debit','adjustment')),
   amount_microusd bigint not null,
   source text not null check (char_length(source) between 1 and 120),
@@ -39,11 +47,11 @@ create table if not exists public.ai_profile_balance_ledger (
   created_at timestamptz not null default now()
 );
 
-create index if not exists ai_profile_balance_reservations_user_status_idx
-  on public.ai_profile_balance_reservations(user_id, status, created_at desc);
+create index if not exists ai_profile_balance_reservations_profile_status_idx
+  on public.ai_profile_balance_reservations(profile_ref, status, created_at desc);
 
-create index if not exists ai_profile_balance_ledger_user_created_idx
-  on public.ai_profile_balance_ledger(user_id, created_at desc);
+create index if not exists ai_profile_balance_ledger_profile_created_idx
+  on public.ai_profile_balance_ledger(profile_ref, created_at desc);
 
 alter table public.ai_profile_balances enable row level security;
 alter table public.ai_profile_balance_reservations enable row level security;
@@ -59,7 +67,7 @@ grant all on table public.ai_profile_balance_ledger to service_role;
 grant usage, select on sequence public.ai_profile_balance_ledger_id_seq to service_role;
 
 create or replace function public.reserve_ai_profile_balance(
-  p_user_id uuid,
+  p_profile_ref text,
   p_amount_microusd bigint,
   p_source text,
   p_reference_id text default null,
@@ -75,18 +83,22 @@ declare
   v_balance bigint;
   v_reserved bigint;
 begin
+  if p_profile_ref is null or char_length(trim(p_profile_ref)) < 1
+     or char_length(p_profile_ref) > 200 then
+    raise exception 'Profile reference is invalid.';
+  end if;
   if p_amount_microusd is null or p_amount_microusd <= 0 then
     raise exception 'Reservation amount must be positive.';
   end if;
 
-  insert into public.ai_profile_balances(user_id)
-  values (p_user_id)
-  on conflict (user_id) do nothing;
+  insert into public.ai_profile_balances(profile_ref)
+  values (p_profile_ref)
+  on conflict (profile_ref) do nothing;
 
   select balance_microusd, reserved_microusd
     into v_balance, v_reserved
   from public.ai_profile_balances
-  where user_id = p_user_id
+  where profile_ref = p_profile_ref
   for update;
 
   if (v_balance - v_reserved) < p_amount_microusd then
@@ -94,14 +106,14 @@ begin
   end if;
 
   insert into public.ai_profile_balance_reservations(
-    user_id,
+    profile_ref,
     reserved_microusd,
     source,
     reference_id,
     metadata
   )
   values (
-    p_user_id,
+    p_profile_ref,
     p_amount_microusd,
     left(coalesce(p_source, 'paid-ai'), 120),
     p_reference_id,
@@ -112,7 +124,7 @@ begin
   update public.ai_profile_balances
   set reserved_microusd = reserved_microusd + p_amount_microusd,
       updated_at = now()
-  where user_id = p_user_id;
+  where profile_ref = p_profile_ref;
 
   return v_id;
 end;
@@ -148,10 +160,11 @@ begin
   if v_reservation.status <> 'reserved' then
     raise exception 'Reservation is not active.';
   end if;
+
   select balance_microusd, reserved_microusd
     into v_balance, v_reserved
   from public.ai_profile_balances
-  where user_id = v_reservation.user_id
+  where profile_ref = v_reservation.profile_ref
   for update;
 
   if v_balance is null then
@@ -169,7 +182,7 @@ begin
       reserved_microusd = reserved_microusd - v_reservation.reserved_microusd,
       lifetime_spent_microusd = lifetime_spent_microusd + p_actual_microusd,
       updated_at = now()
-  where user_id = v_reservation.user_id
+  where profile_ref = v_reservation.profile_ref
   returning balance_microusd - reserved_microusd into v_balance;
 
   update public.ai_profile_balance_reservations
@@ -181,7 +194,7 @@ begin
 
   if p_actual_microusd > 0 then
     insert into public.ai_profile_balance_ledger(
-      user_id,
+      profile_ref,
       reservation_id,
       kind,
       amount_microusd,
@@ -190,7 +203,7 @@ begin
       metadata
     )
     values (
-      v_reservation.user_id,
+      v_reservation.profile_ref,
       p_reservation_id,
       'debit',
       -p_actual_microusd,
@@ -229,14 +242,14 @@ begin
   if v_reservation.status <> 'reserved' then
     select balance_microusd - reserved_microusd into v_balance
     from public.ai_profile_balances
-    where user_id = v_reservation.user_id;
+    where profile_ref = v_reservation.profile_ref;
     return coalesce(v_balance, 0);
   end if;
 
   update public.ai_profile_balances
   set reserved_microusd = reserved_microusd - v_reservation.reserved_microusd,
       updated_at = now()
-  where user_id = v_reservation.user_id
+  where profile_ref = v_reservation.profile_ref
   returning balance_microusd - reserved_microusd into v_balance;
 
   update public.ai_profile_balance_reservations
@@ -250,7 +263,7 @@ end;
 $$;
 
 create or replace function public.credit_ai_profile_balance(
-  p_user_id uuid,
+  p_profile_ref text,
   p_amount_microusd bigint,
   p_source text,
   p_reference_id text default null,
@@ -264,19 +277,24 @@ as $$
 declare
   v_balance bigint;
 begin
+  if p_profile_ref is null or char_length(trim(p_profile_ref)) < 1
+     or char_length(p_profile_ref) > 200 then
+    raise exception 'Profile reference is invalid.';
+  end if;
   if p_amount_microusd is null or p_amount_microusd <= 0 then
     raise exception 'Credit amount must be positive.';
   end if;
 
-  insert into public.ai_profile_balances(user_id, balance_microusd)
-  values (p_user_id, p_amount_microusd)
-  on conflict (user_id) do update
-    set balance_microusd = public.ai_profile_balances.balance_microusd + excluded.balance_microusd,
+  insert into public.ai_profile_balances(profile_ref, balance_microusd)
+  values (p_profile_ref, p_amount_microusd)
+  on conflict (profile_ref) do update
+    set balance_microusd =
+          public.ai_profile_balances.balance_microusd + excluded.balance_microusd,
         updated_at = now()
   returning balance_microusd - reserved_microusd into v_balance;
 
   insert into public.ai_profile_balance_ledger(
-    user_id,
+    profile_ref,
     kind,
     amount_microusd,
     source,
@@ -284,7 +302,7 @@ begin
     metadata
   )
   values (
-    p_user_id,
+    p_profile_ref,
     'credit',
     p_amount_microusd,
     left(coalesce(p_source, 'funding'), 120),
@@ -296,20 +314,20 @@ begin
 end;
 $$;
 
-revoke all on function public.reserve_ai_profile_balance(uuid,bigint,text,text,jsonb)
+revoke all on function public.reserve_ai_profile_balance(text,bigint,text,text,jsonb)
   from public, anon, authenticated;
 revoke all on function public.settle_ai_profile_balance(uuid,bigint,jsonb)
   from public, anon, authenticated;
 revoke all on function public.release_ai_profile_balance(uuid,jsonb)
   from public, anon, authenticated;
-revoke all on function public.credit_ai_profile_balance(uuid,bigint,text,text,jsonb)
+revoke all on function public.credit_ai_profile_balance(text,bigint,text,text,jsonb)
   from public, anon, authenticated;
 
-grant execute on function public.reserve_ai_profile_balance(uuid,bigint,text,text,jsonb)
+grant execute on function public.reserve_ai_profile_balance(text,bigint,text,text,jsonb)
   to service_role;
 grant execute on function public.settle_ai_profile_balance(uuid,bigint,jsonb)
   to service_role;
 grant execute on function public.release_ai_profile_balance(uuid,jsonb)
   to service_role;
-grant execute on function public.credit_ai_profile_balance(uuid,bigint,text,text,jsonb)
+grant execute on function public.credit_ai_profile_balance(text,bigint,text,text,jsonb)
   to service_role;
