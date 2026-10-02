@@ -26,6 +26,11 @@ import {
   type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
+import {
+  looksLikeApiCredential,
+  planServiceConnectIntent,
+  serviceConnectAssistantMessage,
+} from "@/lib/runtime/service-connect-intent";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -96,6 +101,17 @@ export async function POST(request: Request) {
 
   try {
     const input = chatRequestSchema.parse(await request.json());
+    if (looksLikeApiCredential(input.message)) {
+      return NextResponse.json(
+        {
+          error:
+            "Don't paste API keys into normal chat. Ask me to connect the provider and I'll show a secure credential field.",
+          code: "SECURE_CREDENTIAL_REQUIRED",
+        },
+        { status: 400, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     const admin = createAdminSupabaseClient();
     const ownerRef = owner.ownerRef;
     const businessContext = await buildBusinessChatContext(
@@ -172,6 +188,70 @@ export async function POST(request: Request) {
       if (attachError) throw attachError;
     }
 
+
+    const { data: recentAssistantRows, error: recentAssistantError } = await admin
+      .from("local_ai_messages")
+      .select("content")
+      .eq("conversation_id", conversationId)
+      .eq("owner_ref", ownerRef)
+      .eq("role", "assistant")
+      .order("created_at", { ascending: false })
+      .limit(8);
+    if (recentAssistantError) throw recentAssistantError;
+
+    const serviceConnectIntent = planServiceConnectIntent(
+      input.message,
+      (recentAssistantRows || []).map((row) => row.content || ""),
+    );
+
+    if (serviceConnectIntent && input.attachmentIds.length === 0) {
+      const userText = input.message.trim();
+      const assistantText = serviceConnectAssistantMessage(serviceConnectIntent);
+
+      const { error: connectIntentError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: userText,
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: assistantText,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (connectIntentError) throw connectIntentError;
+
+      await admin
+        .from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "text",
+          conversationId,
+          conversationTitle,
+          text: assistantText,
+          provider: "code",
+          model: "service-connect-intent",
+          routeReason:
+            "CoOperative detected a provider setup request and opened a secure credential flow without sending the credential through chat.",
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
 
     const mediaPlan = planMediaRequest(input.message);
     if (mediaPlan) {

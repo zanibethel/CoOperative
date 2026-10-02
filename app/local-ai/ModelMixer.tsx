@@ -48,6 +48,7 @@ type ModelMixerProps = {
   open: boolean;
   settings: ModelMixerSettings;
   paidAiEligible: boolean;
+  refreshKey?: number;
   onChange: (settings: ModelMixerSettings) => void;
   onClose: () => void;
 };
@@ -252,6 +253,7 @@ export default function ModelMixer({
   open,
   settings,
   paidAiEligible,
+  refreshKey = 0,
   onChange,
   onClose,
 }: ModelMixerProps) {
@@ -259,7 +261,7 @@ export default function ModelMixer({
   const [mediaCatalogError, setMediaCatalogError] = useState(false);
 
   useEffect(() => {
-    if (!open || mediaCatalog) return;
+    if (!open) return;
 
     let cancelled = false;
     void fetch("/api/inference/media/models", { cache: "no-store" })
@@ -280,7 +282,7 @@ export default function ModelMixer({
     return () => {
       cancelled = true;
     };
-  }, [open, mediaCatalog]);
+  }, [open, refreshKey]);
 
   const liveMedia = useMemo(() => {
     if (!mediaCatalog) return null;

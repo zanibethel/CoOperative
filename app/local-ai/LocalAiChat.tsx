@@ -204,6 +204,173 @@ function generatedMedia(content: string) {
   };
 }
 
+
+function serviceConnectDirective(content: string) {
+  const match = content.match(/SECURE_SERVICE_CONNECT:([a-z0-9-]+)/i);
+  if (!match) return null;
+
+  return {
+    providerKey: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+function looksLikeCredentialText(value: string) {
+  const text = value.trim();
+  return (
+    /^sk-or-v1-[A-Za-z0-9_-]{20,}$/i.test(text) ||
+    /^sk-[A-Za-z0-9_-]{20,}$/i.test(text) ||
+    /^AIza[0-9A-Za-z_-]{20,}$/i.test(text)
+  );
+}
+
+type SecureServiceConnectCardProps = {
+  providerKey: string;
+  conversationId: string | null;
+  onConnected: () => Promise<void> | void;
+};
+
+function SecureServiceConnectCard({
+  providerKey,
+  conversationId,
+  onConnected,
+}: SecureServiceConnectCardProps) {
+  const providerName =
+    providerKey === "openrouter-api" ? "OpenRouter" : providerKey;
+  const [credential, setCredential] = useState("");
+  const [working, setWorking] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const [cardError, setCardError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetch(
+      `/api/local-ai/service-connect?providerKey=${encodeURIComponent(providerKey)}`,
+      { cache: "no-store" },
+    )
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          connected?: boolean;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Could not check connection.");
+        if (!cancelled) setConnected(Boolean(payload.connected));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setCardError(
+            err instanceof Error ? err.message : "Could not check connection.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [providerKey]);
+
+  async function connect() {
+    const secret = credential.trim();
+    if (!secret || working) return;
+
+    setWorking(true);
+    setCardError("");
+    try {
+      const response = await fetch("/api/local-ai/service-connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: conversationId || undefined,
+          providerKey,
+          credential: secret,
+        }),
+      });
+      const payload = (await response.json()) as {
+        connected?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.connected) {
+        throw new Error(payload.error || `Could not connect ${providerName}.`);
+      }
+
+      setCredential("");
+      setConnected(true);
+      await onConnected();
+    } catch (err) {
+      setCardError(
+        err instanceof Error ? err.message : `Could not connect ${providerName}.`,
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <div className="secure-service-card">
+      <div className="secure-service-head">
+        <span className="secure-service-lock" aria-hidden="true">⌾</span>
+        <div>
+          <strong>{providerName} secure connection</strong>
+          <small>
+            The key goes directly to encrypted server-side storage. It is not added to chat history.
+          </small>
+        </div>
+      </div>
+
+      {checking ? (
+        <div className="secure-service-status">Checking connection…</div>
+      ) : connected ? (
+        <div className="secure-service-connected">
+          <span>✓</span>
+          <div>
+            <strong>Connected</strong>
+            <small>Hermes can use this provider for approved jobs.</small>
+          </div>
+        </div>
+      ) : (
+        <>
+          <label className="secure-service-field">
+            <span>{providerName} API key</span>
+            <input
+              type="password"
+              autoComplete="off"
+              value={credential}
+              onChange={(event) => setCredential(event.target.value)}
+              placeholder="Paste key securely"
+              disabled={working}
+            />
+          </label>
+          <button
+            className="primary secure-service-button"
+            type="button"
+            onClick={() => void connect()}
+            disabled={working || credential.trim().length < 8}
+          >
+            {working ? "Verifying securely…" : `Connect ${providerName}`}
+          </button>
+          {providerKey === "openrouter-api" ? (
+            <a
+              className="secure-service-key-link"
+              href="https://openrouter.ai/settings/keys"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Create or manage OpenRouter keys
+            </a>
+          ) : null}
+        </>
+      )}
+
+      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+    </div>
+  );
+}
+
 function loadBrowserImage(file: File) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -292,6 +459,7 @@ export default function LocalAiChat() {
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [modelMixerOpen, setModelMixerOpen] = useState(false);
+  const [serviceConnectionRevision, setServiceConnectionRevision] = useState(0);
   const [modelMixer, setModelMixer] = useState<ModelMixerSettings>({
     ...DEFAULT_MODEL_MIXER_SETTINGS,
     agents: { ...DEFAULT_MODEL_MIXER_SETTINGS.agents },
@@ -762,6 +930,13 @@ export default function LocalAiChat() {
     const text = input.trim();
     if ((!text && attachments.length === 0) || busy || uploadingImages) return;
 
+    if (looksLikeCredentialText(text)) {
+      setError(
+        "For security, don't paste API keys into normal chat. Ask me to connect the provider and use the secure field I show you.",
+      );
+      return;
+    }
+
     const currentAttachments = [...attachments];
     const userMessage: ChatMessage = {
       role: "user",
@@ -1079,6 +1254,27 @@ export default function LocalAiChat() {
                   </div>
                 ) : null}
                 {message.content ? (() => {
+                  const serviceConnect = serviceConnectDirective(message.content);
+                  if (serviceConnect) {
+                    return (
+                      <>
+                        {serviceConnect.text ? <div>{serviceConnect.text}</div> : null}
+                        <SecureServiceConnectCard
+                          providerKey={serviceConnect.providerKey}
+                          conversationId={conversationId}
+                          onConnected={async () => {
+                            setServiceConnectionRevision((current) => current + 1);
+                            await refreshBusinesses();
+                            if (conversationId) {
+                              await loadConversation(conversationId);
+                              await refreshConversations();
+                            }
+                          }}
+                        />
+                      </>
+                    );
+                  }
+
                   const media = generatedMedia(message.content);
                   if (!media) return <div>{message.content}</div>;
                   return (
@@ -1226,6 +1422,7 @@ export default function LocalAiChat() {
         open={modelMixerOpen}
         settings={modelMixer}
         paidAiEligible={Boolean(aiBalance?.paidAiEligible)}
+        refreshKey={serviceConnectionRevision}
         onChange={setModelMixer}
         onClose={() => setModelMixerOpen(false)}
       />
