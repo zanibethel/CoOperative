@@ -119,7 +119,10 @@ function providerCreditBoundary(value: unknown) {
     text.includes("402") ||
     text.includes("insufficient credits") ||
     text.includes("purchase credits") ||
-    text.includes("billing issue")
+    text.includes("billing issue") ||
+    text.includes("billing") ||
+    text.includes("not entitled") ||
+    text.includes("subscription credit")
   );
 }
 
