@@ -81,6 +81,7 @@ try {
     Where-Object {
       $_.CommandLine -and (
         $_.CommandLine -like "*hf-image-worker.py*" -or
+      $_.CommandLine -like "*repo-agent-worker.py*" -or
         $_.CommandLine -like "*windows-text-worker.py*" -or
         $_.CommandLine -like "*windows-local-chat.py*" -or
         $_.CommandLine -like "*start-unison-windows.ps1*"
