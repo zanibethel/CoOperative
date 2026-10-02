@@ -105,8 +105,25 @@ export async function POST(request: Request) {
     }
 
     const session = event.data?.object;
-    if (!session?.id || !session.client_reference_id) {
+    if (!session?.id || !session.client_reference_id || !session.payment_link) {
       return NextResponse.json({ received: true, ignored: "unrelated session" });
+    }
+
+    const { data: configuredLink, error: linkError } = await admin
+      .from("ai_balance_topup_options")
+      .select("id")
+      .eq("provider_payment_link_id", session.payment_link)
+      .eq("provider", "stripe")
+      .eq("livemode", true)
+      .maybeSingle();
+
+    if (linkError) throw linkError;
+    if (!configuredLink) {
+      return NextResponse.json({ received: true, ignored: "unrelated payment link" });
+    }
+
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(session.client_reference_id)) {
+      return NextResponse.json({ received: true, ignored: "unrelated reference" });
     }
 
     if (event.type === "checkout.session.expired") {
