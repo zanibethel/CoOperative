@@ -114,6 +114,20 @@ function asksToRetryRecentMedia(message: string) {
   );
 }
 
+function looksLikeMediaFollowup(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\bas long as possible\b/.test(value) ||
+    /\bstay(?:ing)? within (?:the )?(?:budget|cap)\b/.test(value) ||
+    /\breduce (?:the )?(?:quality|resolution|duration)\b/.test(value) ||
+    /\b(?:use )?(?:my )?nous\b/.test(value) ||
+    /\b(?:without|no) audio\b/.test(value) ||
+    /\b(?:360p|480p|540p|720p|1080p|4k)\b/.test(value) ||
+    /\b(?:vertical|landscape|square|9:16|16:9|1:1)\b/.test(value) ||
+    /\b\d{1,2}\s*(?:-\s*)?(?:seconds?|secs?|s)\b/.test(value)
+  );
+}
+
 function conciseFailureDetail(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return null;
   return value
@@ -801,7 +815,38 @@ export async function POST(request: Request) {
       }
     }
 
-    const mediaPlan = planMediaRequest(input.message);
+    let effectiveMediaRequestText = input.message.trim();
+    let mediaPlan = planMediaRequest(effectiveMediaRequestText);
+
+    if (
+      !mediaPlan &&
+      input.attachmentIds.length === 0 &&
+      looksLikeMediaFollowup(input.message)
+    ) {
+      const { data: recentConversationRows, error: recentConversationError } =
+        await admin
+          .from("local_ai_messages")
+          .select("role,content")
+          .eq("conversation_id", conversationId)
+          .eq("owner_ref", ownerRef)
+          .order("created_at", { ascending: false })
+          .limit(12);
+      if (recentConversationError) throw recentConversationError;
+
+      for (const row of recentConversationRows || []) {
+        if (row.role !== "user" || typeof row.content !== "string") continue;
+        const priorMediaPlan = planMediaRequest(row.content);
+        if (!priorMediaPlan) continue;
+
+        effectiveMediaRequestText =
+          row.content.trim() +
+          "\nFollow-up preference: " +
+          input.message.trim();
+        mediaPlan = planMediaRequest(effectiveMediaRequestText);
+        if (mediaPlan) break;
+      }
+    }
+
     if (mediaPlan) {
       const visibleUserText = input.message.trim();
 
@@ -988,7 +1033,7 @@ export async function POST(request: Request) {
       if (!nousChoice && localImageAvailable) {
         const localJobId = crypto.randomUUID();
         const generationPrompt = mediaPromptWithResolvedControls(
-          visibleUserText,
+          effectiveMediaRequestText,
           mediaPlan,
         );
         const { error: localJobError } = await admin.from("inference_jobs").insert({
@@ -1297,7 +1342,7 @@ export async function POST(request: Request) {
 
       const jobId = crypto.randomUUID();
       let generationPrompt = mediaPromptWithResolvedControls(
-        visibleUserText,
+        effectiveMediaRequestText,
         mediaPlan,
       );
       if (
