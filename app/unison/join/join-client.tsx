@@ -84,8 +84,8 @@ export default function JoinClient({
     <div className="unison-stack">
       <section className="card unison-stack">
         <div>
-          <div className="eyebrow">Unison + Personal AI</div>
-          <h2>Install Unison + Personal AI</h2>
+          <div className="eyebrow">Unison + CoOperativeLocalAI</div>
+          <h2>Install Unison + CoOperativeLocalAI</h2>
           <p>
             Get a private local AI for chat, image creation, image understanding, documents, voice,
             web search, local history, and projects. When the whole PC is idle, it can also contribute
@@ -96,7 +96,7 @@ export default function JoinClient({
         <div>
           <div className="eyebrow">Included with setup</div>
           <div className="service-tags">
-            <span>Private Personal AI</span>
+            <span>Private CoOperativeLocalAI</span>
             <span>Automatic model choice</span>
             <span>Image creation + understanding</span>
             <span>PDF / Office / code files</span>
@@ -111,7 +111,7 @@ export default function JoinClient({
         </div>
 
         <p>
-          <strong>Personal AI stays local by default.</strong> Personal prompts, responses,
+          <strong>CoOperativeLocalAI stays local by default.</strong> Personal prompts, responses,
           project data, attached-file context, and local history do not enter the CoOperative
           community job queue. Web search is optional; when enabled, the search request can leave
           the PC while model inference still runs locally.
@@ -143,7 +143,7 @@ export default function JoinClient({
             <div className="eyebrow">Ready to install</div>
             <h2>Ready to install.</h2>
             <p>
-              Install the machine-wide Unison node and Personal AI with one setup. Windows will
+              Install the machine-wide Unison node and CoOperativeLocalAI with one setup. Windows will
               request one administrator approval.
             </p>
           </div>
@@ -176,7 +176,7 @@ export default function JoinClient({
               </li>
               <li>
                 Leave Setup open until it says <strong>Connected</strong>. Setup also installs
-                <strong> CoOperative Local AI</strong> on the desktop with image understanding and
+                <strong> CoOperativeLocalAI</strong> on the desktop with image understanding and
                 local image creation, documents, voice, optional web search, local history, project
                 workspaces, and automatic model choice. It is available while the PC is in use. After that, you can switch Windows
                 users normally.
@@ -189,12 +189,12 @@ export default function JoinClient({
               className="primary"
               href="https://github.com/zanibethel/CoOperative/releases/download/unison-windows-preview/CoOperative-Unison-Setup.exe"
             >
-              Install Unison + Personal AI
+              Install Unison + CoOperativeLocalAI
             </a>
           </div>
           <p>
             After setup, the dashboard should show <strong>Whole-PC idle</strong>. Community
-            compute remains idle-only, while <strong>CoOperative Local AI</strong> can be opened
+            compute remains idle-only, while <strong>CoOperativeLocalAI</strong> can be opened
             from the desktop or tray whenever someone is actively using this PC. Personal local
             chat stays on the computer and does not enter the CoOperative job queue.
           </p>
