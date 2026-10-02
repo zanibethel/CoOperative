@@ -1692,3 +1692,20 @@ b { color: var(--text); }
     border-top: 0;
   }
 }
+
+
+.generated-media-image,
+.generated-media-video {
+  display: block;
+  width: min(100%, 640px);
+  max-height: 70vh;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #05070b;
+  object-fit: contain;
+}
+
+.generated-media-video {
+  aspect-ratio: auto;
+}

@@ -11,9 +11,18 @@ import { buildBusinessChatContext } from "@/lib/ai/business-context";
 import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import { activeNodeIds } from "@/lib/unison/node-access";
+import {
+  hermesMediaConfiguration,
+  pollHermesMediaTask,
+  startHermesMediaTask,
+} from "@/lib/inference/hermes-media-cloud";
+import {
+  mediaPromptWithResolvedControls,
+  planMediaRequest,
+} from "@/lib/inference/media-request";
 
 export const runtime = "nodejs";
-export const maxDuration = 30;
+export const maxDuration = 300;
 
 const modelMixerLevelSchema = z.number().int().min(0).max(4);
 const modelMixerSchema = z.object({
@@ -142,6 +151,237 @@ export async function POST(request: Request) {
         .eq("owner_ref", ownerRef);
 
       if (attachError) throw attachError;
+    }
+
+
+    const mediaPlan = planMediaRequest(input.message);
+    if (mediaPlan) {
+      const visibleUserText = input.message.trim();
+
+      if (mediaPlan.clarification) {
+        const { error: clarificationError } = await admin
+          .from("local_ai_messages")
+          .insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: visibleUserText,
+              attachment_ids: input.attachmentIds,
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: mediaPlan.clarification,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+        if (clarificationError) throw clarificationError;
+
+        await admin
+          .from("local_ai_conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversationId)
+          .eq("owner_ref", ownerRef);
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: mediaPlan.clarification,
+            provider: "code",
+            model: "media-preflight",
+            routeReason:
+              "CoOperative requested missing media controls before any generation spend.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      if (input.attachmentIds.length > 0) {
+        const message =
+          "Text-to-media generation is ready. Image-to-video/reference-image generation is the next media slice, so remove the attachment for this first smoke test or describe the desired scene in text.";
+        const { error: unsupportedError } = await admin
+          .from("local_ai_messages")
+          .insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: visibleUserText,
+              attachment_ids: input.attachmentIds,
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: message,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+        if (unsupportedError) throw unsupportedError;
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-preflight",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      const mediaConfig = hermesMediaConfiguration(mediaPlan.kind);
+      if (!mediaConfig.freeRoute && process.env.HERMES_MEDIA_PAID_ENABLED !== "true") {
+        const message =
+          "This media route resolves to a paid generation model, but paid media is intentionally disabled until provider pricing and CoOperative margin rules are configured. The free smoke-test route is still available.";
+        const { error: paidGateError } = await admin
+          .from("local_ai_messages")
+          .insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: visibleUserText,
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: message,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+        if (paidGateError) throw paidGateError;
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-spend-gate",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      const jobId = crypto.randomUUID();
+      const generationPrompt = mediaPromptWithResolvedControls(
+        visibleUserText,
+        mediaPlan,
+      );
+      const requestMaxSpendMicrousd = input.modelMixer
+        ? Math.round(input.modelMixer.maxSpendUsd * 1_000_000)
+        : null;
+
+      const { error: mediaJobError } = await admin
+        .from("media_generation_jobs")
+        .insert({
+          id: jobId,
+          status: "queued",
+          owner_ref: ownerRef,
+          conversation_id: conversationId,
+          kind: mediaPlan.kind,
+          prompt: generationPrompt,
+          provider: mediaConfig.provider,
+          model: mediaConfig.model,
+          model_mixer: input.modelMixer || null,
+          request_max_spend_microusd: requestMaxSpendMicrousd,
+        });
+      if (mediaJobError) throw mediaJobError;
+
+      const { error: mediaUserMessageError } = await admin
+        .from("local_ai_messages")
+        .insert({
+          conversation_id: conversationId,
+          owner_ref: ownerRef,
+          role: "user",
+          content: visibleUserText,
+          attachment_ids: [],
+          job_id: null,
+        });
+      if (mediaUserMessageError) throw mediaUserMessageError;
+
+      try {
+        const started = await startHermesMediaTask({
+          jobId,
+          kind: mediaPlan.kind,
+          userRequest: generationPrompt,
+        });
+
+        const { error: mediaStartError } = await admin
+          .from("media_generation_jobs")
+          .update({
+            status: "running",
+            sandbox_name: started.sandboxName,
+            started_at: started.startedAt,
+            deadline_at: started.deadlineAt,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId)
+          .eq("owner_ref", ownerRef);
+        if (mediaStartError) throw mediaStartError;
+
+        await admin
+          .from("local_ai_conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversationId)
+          .eq("owner_ref", ownerRef);
+
+        return NextResponse.json(
+          {
+            jobId,
+            status: "running",
+            execution: "media",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            provider: started.provider,
+            model: started.model,
+            routeReason:
+              "CoOperative used a cheap/free Hermes orchestrator and one configured media-generation tool call.",
+            modelMixer: input.modelMixer || null,
+            requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
+          },
+          { status: 202, headers: { "Cache-Control": "no-store" } },
+        );
+      } catch (mediaStartFailure) {
+        const detail =
+          mediaStartFailure instanceof Error
+            ? mediaStartFailure.message
+            : "Hermes media generation could not start.";
+        await admin
+          .from("media_generation_jobs")
+          .update({
+            status: "failed",
+            error: detail.slice(0, 1200),
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId)
+          .eq("owner_ref", ownerRef);
+        throw mediaStartFailure;
+      }
     }
 
     const directResult = await handleBusinessIntake({
@@ -465,9 +705,165 @@ export async function GET(request: Request) {
 
     if (error) throw error;
     if (!job) {
-      return jobId
-        ? NextResponse.json({ error: "Job not found." }, { status: 404 })
-        : new Response(null, { status: 204 });
+      let mediaQuery = admin
+        .from("media_generation_jobs")
+        .select(
+          "id,status,conversation_id,kind,provider,model,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
+        )
+        .eq("owner_ref", ownerRef);
+
+      mediaQuery = jobId
+        ? mediaQuery.eq("id", jobId)
+        : mediaQuery
+            .in("status", ["queued", "running"])
+            .order("created_at", { ascending: false })
+            .limit(1);
+
+      const { data: mediaJob, error: mediaError } = await mediaQuery.maybeSingle();
+      if (mediaError) throw mediaError;
+
+      if (!mediaJob) {
+        return jobId
+          ? NextResponse.json({ error: "Job not found." }, { status: 404 })
+          : new Response(null, { status: 204 });
+      }
+
+      if (
+        mediaJob.status === "running" &&
+        mediaJob.sandbox_name &&
+        mediaJob.deadline_at
+      ) {
+        const polled = await pollHermesMediaTask({
+          sandboxName: mediaJob.sandbox_name,
+          deadlineAt: mediaJob.deadline_at,
+        });
+
+        if (polled.state === "running") {
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "media",
+              status: "running",
+              conversationId: mediaJob.conversation_id,
+              capability: mediaJob.kind,
+              provider: mediaJob.provider,
+              model: mediaJob.model,
+              routeReason: "Hermes media generation is still running in Vercel Sandbox.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        if (polled.state === "completed" && polled.mediaUrl) {
+          const marker =
+            mediaJob.kind === "video" ? "MEDIA_VIDEO:" : "MEDIA_IMAGE:";
+          const resultText =
+            `Generated ${mediaJob.kind} with ${mediaJob.model}.\n${marker}${polled.mediaUrl}`;
+          const completedAt = new Date().toISOString();
+
+          const { data: claimed, error: claimError } = await admin
+            .from("media_generation_jobs")
+            .update({
+              status: "completed",
+              result_url: polled.mediaUrl,
+              result_text: resultText,
+              usage: polled.usage,
+              error: null,
+              completed_at: completedAt,
+              updated_at: completedAt,
+            })
+            .eq("id", mediaJob.id)
+            .eq("owner_ref", ownerRef)
+            .eq("status", "running")
+            .select("id")
+            .maybeSingle();
+          if (claimError) throw claimError;
+
+          if (claimed && mediaJob.conversation_id) {
+            const { error: resultMessageError } = await admin
+              .from("local_ai_messages")
+              .insert({
+                conversation_id: mediaJob.conversation_id,
+                owner_ref: ownerRef,
+                role: "assistant",
+                content: resultText,
+                attachment_ids: [],
+                job_id: null,
+              });
+            if (resultMessageError) throw resultMessageError;
+
+            await admin
+              .from("local_ai_conversations")
+              .update({ updated_at: completedAt })
+              .eq("id", mediaJob.conversation_id)
+              .eq("owner_ref", ownerRef);
+          }
+
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "media",
+              status: "completed",
+              conversationId: mediaJob.conversation_id,
+              capability: mediaJob.kind,
+              provider: mediaJob.provider,
+              model: mediaJob.model,
+              text: resultText,
+              mediaUrl: polled.mediaUrl,
+              routeReason:
+                "Cheap/free Hermes orchestration completed one configured media generation call.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        const failure = polled.error || "Hermes media generation failed.";
+        const completedAt = new Date().toISOString();
+        await admin
+          .from("media_generation_jobs")
+          .update({
+            status: "failed",
+            usage: polled.usage,
+            error: failure.slice(0, 1200),
+            completed_at: completedAt,
+            updated_at: completedAt,
+          })
+          .eq("id", mediaJob.id)
+          .eq("owner_ref", ownerRef)
+          .eq("status", "running");
+
+        return NextResponse.json(
+          {
+            jobId: mediaJob.id,
+            execution: "media",
+            status: "failed",
+            conversationId: mediaJob.conversation_id,
+            capability: mediaJob.kind,
+            provider: mediaJob.provider,
+            model: mediaJob.model,
+            error: failure,
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          jobId: mediaJob.id,
+          execution: "media",
+          status: mediaJob.status,
+          conversationId: mediaJob.conversation_id,
+          capability: mediaJob.kind,
+          provider: mediaJob.provider,
+          model: mediaJob.model,
+          text: mediaJob.result_text,
+          mediaUrl: mediaJob.result_url,
+          error: mediaJob.error,
+          createdAt: mediaJob.created_at,
+          completedAt: mediaJob.completed_at,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     return NextResponse.json(

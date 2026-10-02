@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { createClient } from "@/lib/supabase/server";
+import { cancelHermesMediaTask } from "@/lib/inference/hermes-media-cloud";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -36,22 +37,54 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (jobError) throw jobError;
-    if (!job) {
+
+    if (job) {
+      if (job.status === "queued" || job.status === "running") {
+        const { error: updateError } = await admin
+          .from("text_inference_jobs")
+          .update({
+            status: "cancelled",
+            updated_at: new Date().toISOString(),
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", input.jobId)
+          .eq("client_owner_ref", ownerRef);
+
+        if (updateError) throw updateError;
+      }
+
+      return NextResponse.json({ ok: true, status: "cancelled" });
+    }
+
+    const { data: mediaJob, error: mediaJobError } = await admin
+      .from("media_generation_jobs")
+      .select("id,status,sandbox_name")
+      .eq("id", input.jobId)
+      .eq("owner_ref", ownerRef)
+      .maybeSingle();
+
+    if (mediaJobError) throw mediaJobError;
+    if (!mediaJob) {
       return NextResponse.json({ error: "Job not found." }, { status: 404 });
     }
 
-    if (job.status === "queued" || job.status === "running") {
-      const { error: updateError } = await admin
-        .from("text_inference_jobs")
+    if (mediaJob.status === "queued" || mediaJob.status === "running") {
+      if (mediaJob.sandbox_name) {
+        await cancelHermesMediaTask(mediaJob.sandbox_name);
+      }
+
+      const completedAt = new Date().toISOString();
+      const { error: mediaCancelError } = await admin
+        .from("media_generation_jobs")
         .update({
           status: "cancelled",
-          updated_at: new Date().toISOString(),
-          completed_at: new Date().toISOString(),
+          completed_at: completedAt,
+          updated_at: completedAt,
         })
         .eq("id", input.jobId)
-        .eq("client_owner_ref", ownerRef);
+        .eq("owner_ref", ownerRef);
 
-      if (updateError) throw updateError;
+      if (mediaCancelError) throw mediaCancelError;
     }
 
     return NextResponse.json({ ok: true, status: "cancelled" });
