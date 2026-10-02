@@ -379,6 +379,18 @@ export async function pollHermesMediaTask(args: {
   try {
     sandbox = await Sandbox.get({ name: args.sandboxName });
   } catch (error) {
+    const beforeDeadline = Date.now() <= Date.parse(args.deadlineAt);
+    if (beforeDeadline) {
+      return {
+        state: "running",
+        mediaUrl: null,
+        stdout: "",
+        stderr: "",
+        usage: null,
+        error: null,
+      };
+    }
+
     return {
       state: "failed",
       mediaUrl: null,
@@ -387,12 +399,39 @@ export async function pollHermesMediaTask(args: {
       usage: null,
       error:
         error instanceof Error
-          ? `Hermes media sandbox is unavailable: ${error.message}`
-          : "Hermes media sandbox is unavailable.",
+          ? `Hermes media sandbox remained unavailable through its deadline: ${error.message}`
+          : "Hermes media sandbox remained unavailable through its deadline.",
     };
   }
 
-  const state = await readText(sandbox, `${STATUS_DIR}/state`);
+  let state: string;
+  try {
+    state = await readText(sandbox, `${STATUS_DIR}/state`);
+  } catch (error) {
+    if (Date.now() <= Date.parse(args.deadlineAt)) {
+      return {
+        state: "running",
+        mediaUrl: null,
+        stdout: "",
+        stderr: "",
+        usage: null,
+        error: null,
+      };
+    }
+
+    await sandbox.stop().catch(() => undefined);
+    return {
+      state: "failed",
+      mediaUrl: null,
+      stdout: "",
+      stderr: "",
+      usage: null,
+      error:
+        error instanceof Error
+          ? `Hermes media status remained unreadable through its deadline: ${error.message}`
+          : "Hermes media status remained unreadable through its deadline.",
+    };
+  }
 
   if (!state || state === "running") {
     if (Date.now() <= Date.parse(args.deadlineAt)) {
