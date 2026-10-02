@@ -6,7 +6,7 @@ export const MICRO_USD_PER_USD = 1_000_000;
 const RESERVATION_BUFFER = 1.2;
 
 export type AiProfileBalance = {
-  userId: string;
+  profileRef: string;
   balanceMicrousd: number;
   reservedMicrousd: number;
   availableMicrousd: number;
@@ -25,15 +25,19 @@ function safeInteger(value: unknown) {
   return 0;
 }
 
-export function userIdFromAiOwnerRef(ownerRef: string) {
+export function cooperativeProfileRef(userId: string) {
+  return `coop-user:${userId}`;
+}
+
+export function profileRefFromAiOwnerRef(ownerRef: string) {
   const coop = /^coop-user:([0-9a-f-]{36})$/i.exec(ownerRef);
-  if (coop) return coop[1];
+  if (coop) return cooperativeProfileRef(coop[1]);
 
-  const creatorHub = /^creatorhub:([0-9a-f-]{36}):[0-9a-f-]{36}$/i.exec(ownerRef);
-  if (creatorHub) return creatorHub[1];
+  const creatorHub = /^creatorhub:([^:]{1,120}):[0-9a-f-]{36}$/i.exec(ownerRef);
+  if (creatorHub) return `creatorhub-user:${creatorHub[1]}`.slice(0, 200);
 
-  const profile = /^profile-user:([0-9a-f-]{36})$/i.exec(ownerRef);
-  if (profile) return profile[1];
+  const profile = /^profile-user:([^:]{1,180})$/i.exec(ownerRef);
+  if (profile) return `profile-user:${profile[1]}`.slice(0, 200);
 
   return null;
 }
@@ -47,23 +51,29 @@ export function microusdToUsd(value: number) {
   return safeInteger(value) / MICRO_USD_PER_USD;
 }
 
-export async function aiProfileBalanceForUser(
-  userId: string,
+export async function aiProfileBalanceForProfileRef(
+  profileRef: string,
 ): Promise<AiProfileBalance> {
+  const normalized = profileRef.trim().slice(0, 200);
+  if (!normalized) throw new Error("Profile reference is required.");
+
   const admin = createAdminSupabaseClient();
 
   const { error: ensureError } = await admin
     .from("ai_profile_balances")
-    .upsert({ user_id: userId }, { onConflict: "user_id", ignoreDuplicates: true });
+    .upsert(
+      { profile_ref: normalized },
+      { onConflict: "profile_ref", ignoreDuplicates: true },
+    );
 
   if (ensureError) throw ensureError;
 
   const { data, error } = await admin
     .from("ai_profile_balances")
     .select(
-      "user_id,balance_microusd,reserved_microusd,lifetime_spent_microusd",
+      "profile_ref,balance_microusd,reserved_microusd,lifetime_spent_microusd",
     )
-    .eq("user_id", userId)
+    .eq("profile_ref", normalized)
     .single();
 
   if (error) throw error;
@@ -74,7 +84,7 @@ export async function aiProfileBalanceForUser(
   const lifetimeSpentMicrousd = safeInteger(data.lifetime_spent_microusd);
 
   return {
-    userId,
+    profileRef: normalized,
     balanceMicrousd,
     reservedMicrousd,
     availableMicrousd,
@@ -84,13 +94,17 @@ export async function aiProfileBalanceForUser(
   };
 }
 
+export async function aiProfileBalanceForUser(userId: string) {
+  return aiProfileBalanceForProfileRef(cooperativeProfileRef(userId));
+}
+
 export async function aiProfileBalanceForOwnerRef(ownerRef: string) {
-  const userId = userIdFromAiOwnerRef(ownerRef);
-  return userId ? aiProfileBalanceForUser(userId) : null;
+  const profileRef = profileRefFromAiOwnerRef(ownerRef);
+  return profileRef ? aiProfileBalanceForProfileRef(profileRef) : null;
 }
 
 export async function reserveAiProfileFunds(input: {
-  userId: string;
+  profileRef: string;
   estimatedCostUsd: number;
   source: string;
   referenceId?: string | null;
@@ -108,7 +122,7 @@ export async function reserveAiProfileFunds(input: {
 
   const admin = createAdminSupabaseClient();
   const { data, error } = await admin.rpc("reserve_ai_profile_balance", {
-    p_user_id: input.userId,
+    p_profile_ref: input.profileRef,
     p_amount_microusd: reservedMicrousd,
     p_source: input.source,
     p_reference_id: input.referenceId || null,
@@ -120,7 +134,7 @@ export async function reserveAiProfileFunds(input: {
 
   return {
     id: data,
-    userId: input.userId,
+    profileRef: input.profileRef,
     estimatedMicrousd,
     reservedMicrousd,
     reservedUsd: microusdToUsd(reservedMicrousd),
