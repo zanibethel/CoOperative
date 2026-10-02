@@ -1371,6 +1371,8 @@ export async function refreshRecoveryIncident(
           model: typeof rawMeta.model === "string" ? rawMeta.model : undefined,
           executor:
             typeof rawMeta.executor === "string" ? rawMeta.executor : undefined,
+          provider:
+            typeof rawMeta.provider === "string" ? rawMeta.provider : undefined,
           checks: Array.isArray(rawMeta.checks) ? rawMeta.checks : undefined,
         },
         created_at: event.created_at,
