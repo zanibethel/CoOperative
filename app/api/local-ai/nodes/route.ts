@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { authenticatedUserId } from "@/lib/supabase/auth";
+import { activeNodeIds } from "@/lib/unison/node-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -13,10 +14,18 @@ export async function GET() {
 
   try {
     const admin = createAdminSupabaseClient();
+    const nodeIds = await activeNodeIds(admin, userId);
+    if (nodeIds.length === 0) {
+      return NextResponse.json(
+        { nodes: [] },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     const { data, error } = await admin
       .from("unison_nodes")
       .select("id,display_name,state,platform,capabilities,policy,worker_version,last_seen_at")
-      .eq("contributor_user_id", userId)
+      .in("id", nodeIds)
       .order("last_seen_at", { ascending: false });
 
     if (error) throw error;
@@ -57,7 +66,7 @@ export async function GET() {
     );
   } catch (error) {
     const detail =
-      error instanceof Error ? error.message : "Could not load owned Unison nodes.";
+      error instanceof Error ? error.message : "Could not load authorized Unison nodes.";
     return NextResponse.json(
       { error: "Could not load owned Unison nodes.", detail: detail.slice(0, 800) },
       { status: 502, headers: { "Cache-Control": "no-store" } },
