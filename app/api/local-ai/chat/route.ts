@@ -1562,7 +1562,7 @@ export async function GET(request: Request) {
       let mediaQuery = admin
         .from("media_generation_jobs")
         .select(
-          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_source,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
+          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_source,fallback_from_job_id,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
         )
         .eq("owner_ref", ownerRef);
 
@@ -1778,6 +1778,14 @@ export async function GET(request: Request) {
             typeof mediaJob.request_max_spend_microusd === "number"
               ? mediaJob.request_max_spend_microusd / 1_000_000
               : null;
+          const sourceEstimateUsd =
+            typeof mediaJob.estimated_provider_cost_microusd === "number"
+              ? mediaJob.estimated_provider_cost_microusd / 1_000_000
+              : 0;
+          const remainingCapUsd =
+            requestCapUsd === null
+              ? null
+              : Math.max(0, requestCapUsd - sourceEstimateUsd);
           const mediaLevel = Math.min(
             4,
             Math.max(0, Number(mediaJob.media_level || 0)),
@@ -1813,7 +1821,7 @@ export async function GET(request: Request) {
               const affordable =
                 backupModel &&
                 backupEstimate !== null &&
-                (requestCapUsd === null || backupEstimate <= requestCapUsd);
+                (remainingCapUsd === null || backupEstimate <= remainingCapUsd);
 
               if (affordable && backupModel) {
                 await admin
@@ -1843,17 +1851,18 @@ export async function GET(request: Request) {
                     model: backupModel.id,
                     model_mixer: mediaJob.model_mixer || null,
                     request_max_spend_microusd:
-                      mediaJob.request_max_spend_microusd ?? null,
+                      remainingCapUsd === null
+                        ? null
+                        : Math.round(remainingCapUsd * 1_000_000),
                     media_level: mediaLevel,
                     estimated_provider_cost_microusd: Math.round(
                       backupEstimate * 1_000_000,
                     ),
                     pricing_source: "openrouter-backup",
+                    fallback_from_job_id: mediaJob.id,
                   });
                 if (backupInsertError) throw backupInsertError;
 
-                const nousRuntimeAuth =
-                  await freshNousRuntimeAuthForOwner(ownerRef).catch(() => null);
                 const started = await startHermesMediaTask({
                   jobId: backupJobId,
                   kind: mediaJob.kind,
@@ -1861,7 +1870,8 @@ export async function GET(request: Request) {
                   provider: "openrouter",
                   model: backupModel.id,
                   providerCredential: openRouterCredential,
-                  nousAuthJson: nousRuntimeAuth?.sandboxAuthJson,
+                  orchestratorProvider: "openrouter",
+                  orchestratorModel: "openrouter/free",
                 });
 
                 const { error: backupStartError } = await admin
@@ -1887,7 +1897,9 @@ export async function GET(request: Request) {
                     provider: "openrouter",
                     model: backupModel.id,
                     routeReason:
-                      "Nous was tried first. Its managed media route failed, so CoOperative moved once to the connected OpenRouter backup without exceeding the same request spend cap.",
+                      remainingCapUsd === null
+                        ? "Nous was tried first. Its managed media route failed, so CoOperative moved once to the connected OpenRouter backup."
+                        : `Nous was tried first. CoOperative reserved ${sourceEstimateUsd.toFixed(3)} against the original ${requestCapUsd!.toFixed(2)} request cap and moved once to an OpenRouter backup estimated at ${backupEstimate.toFixed(3)}, within the remaining ${remainingCapUsd.toFixed(3)}.`,
                     estimatedProviderCostUsd: backupEstimate,
                   },
                   { headers: { "Cache-Control": "no-store" } },
