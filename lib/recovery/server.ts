@@ -31,6 +31,10 @@ type TextRecoveryJob = {
   routing_preference: string | null;
   model_mixer: unknown;
   request_max_spend_microusd: number | null;
+  personal_use: boolean;
+  personal_user_id: string | null;
+  personal_conversation_id: string | null;
+  target_node_id: string | null;
 };
 
 type MediaRecoveryJob = {
@@ -54,6 +58,7 @@ type RecoveryIncidentRow = {
   id: string;
   owner_ref: string;
   conversation_id: string | null;
+  personal_conversation_id: string | null;
   source_kind: "text" | "media" | "connector" | "runtime";
   source_job_id: string | null;
   status: string;
@@ -123,7 +128,7 @@ async function readFailedSource(
   const { data: textJob, error: textError } = await admin
     .from("text_inference_jobs")
     .select(
-      "id,status,client_owner_ref,conversation_id,error,messages,profile,max_tokens,temperature,routing_mode,task_class,allow_paid_fallback,human_approval_required,model_registry_revision,verification_status,attachment_ids,capability,routing_preference,model_mixer,request_max_spend_microusd",
+      "id,status,client_owner_ref,conversation_id,error,messages,profile,max_tokens,temperature,routing_mode,task_class,allow_paid_fallback,human_approval_required,model_registry_revision,verification_status,attachment_ids,capability,routing_preference,model_mixer,request_max_spend_microusd,personal_use,personal_user_id,personal_conversation_id,target_node_id",
     )
     .eq("id", sourceJobId)
     .eq("client_owner_ref", ownerRef)
@@ -242,12 +247,58 @@ async function retryTextJob(
   if (job.status !== "failed") return null;
 
   const retryJobId = crypto.randomUUID();
+
+  let retryMessages = job.messages;
+  if (job.personal_use) {
+    if (
+      !job.personal_user_id ||
+      !job.personal_conversation_id ||
+      !job.target_node_id
+    ) {
+      throw new Error(
+        "Personal AI recovery is missing its user, conversation, or local node.",
+      );
+    }
+
+    const { data: history, error: historyError } = await admin.rpc(
+      "personal_ai_read_messages",
+      {
+        p_user_id: job.personal_user_id,
+        p_conversation_id: job.personal_conversation_id,
+      },
+    );
+    if (historyError) throw historyError;
+
+    const recent = (history || [])
+      .slice(-24)
+      .filter(
+        (message: Record<string, unknown>) =>
+          (message.role === "user" || message.role === "assistant") &&
+          typeof message.content === "string",
+      )
+      .map((message: Record<string, unknown>) => ({
+        role: message.role,
+        content: message.content,
+      }));
+
+    retryMessages = [
+      {
+        role: "system",
+        content:
+          "You are CoOperative Personal AI running on the user's own Windows PC. " +
+          "Be useful, clear, practical, and honest. This is personal use, not contributed compute. " +
+          "Do not claim to have used cloud inference or paid APIs.",
+      },
+      ...recent,
+    ];
+  }
+
   const { error } = await admin.from("text_inference_jobs").insert({
     id: retryJobId,
     status: "queued",
     client_owner_ref: ownerRef,
-    conversation_id: job.conversation_id,
-    messages: job.messages,
+    conversation_id: job.personal_use ? null : job.conversation_id,
+    messages: retryMessages,
     attachment_ids: job.attachment_ids || [],
     capability: job.capability || "text",
     profile: job.profile || "fast",
@@ -255,20 +306,30 @@ async function retryTextJob(
     temperature: job.temperature ?? 0.2,
     routing_mode: job.routing_mode || "local-fast",
     task_class: job.task_class || "general",
-    route_reason:
-      "Recovery Agent retry for " +
-      job.id +
-      ". Previous route failed; node pinning cleared so the next eligible free/local route can claim it.",
-    allow_paid_fallback: job.allow_paid_fallback === true,
+    route_reason: job.personal_use
+      ? "Recovery Agent retry for " +
+        job.id +
+        ". Personal AI remains pinned to the same authorized local PC; no cloud or paid inference is allowed."
+      : "Recovery Agent retry for " +
+        job.id +
+        ". Previous route failed; node pinning cleared so the next eligible free/local route can claim it.",
+    allow_paid_fallback: job.personal_use ? false : job.allow_paid_fallback === true,
     human_approval_required: false,
     model_registry_revision:
       job.model_registry_revision || TEXT_MODEL_REGISTRY_REVISION,
     verification_status: "not_run",
-    routing_preference: "default",
+    routing_preference: job.personal_use ? "require-node" : "default",
     preferred_node_id: null,
-    target_node_id: null,
-    model_mixer: job.model_mixer || null,
-    request_max_spend_microusd: job.request_max_spend_microusd ?? null,
+    target_node_id: job.personal_use ? job.target_node_id : null,
+    personal_use: job.personal_use,
+    personal_user_id: job.personal_use ? job.personal_user_id : null,
+    personal_conversation_id: job.personal_use
+      ? job.personal_conversation_id
+      : null,
+    model_mixer: job.personal_use ? null : job.model_mixer || null,
+    request_max_spend_microusd: job.personal_use
+      ? null
+      : job.request_max_spend_microusd ?? null,
   });
   if (error) throw error;
 
@@ -292,8 +353,15 @@ async function retryTextJob(
     incidentId,
     ownerRef,
     "retry_started",
-    "Original text request was requeued with node pinning cleared.",
-    { retryJobId, spendChanged: false },
+    job.personal_use
+      ? "Original Personal AI request was requeued on the same authorized local PC."
+      : "Original text request was requeued with node pinning cleared.",
+    {
+      retryJobId,
+      spendChanged: false,
+      personalLocalOnly: job.personal_use,
+      targetNodeId: job.personal_use ? job.target_node_id : null,
+    },
   );
 
   return retryJobId;
