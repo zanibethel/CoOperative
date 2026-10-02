@@ -133,14 +133,23 @@ export async function POST(request: Request) {
 
     if (typeof body.error === "string" && body.error.trim()) {
       const completedAt = new Date().toISOString();
+      const failureUpdate: Record<string, unknown> = {
+        status: "failed",
+        error: body.error.slice(0, 1200),
+        completed_at: completedAt,
+        updated_at: completedAt,
+      };
+      if (job.personal_use) {
+        failureUpdate.messages = [
+          { role: "system", content: "Personal AI payload removed after local execution." },
+        ];
+        failureUpdate.partial_text = null;
+        failureUpdate.result_text = null;
+      }
+
       const { error: updateError } = await supabase
         .from("text_inference_jobs")
-        .update({
-          status: "failed",
-          error: body.error.slice(0, 1200),
-          completed_at: completedAt,
-          updated_at: completedAt,
-        })
+        .update(failureUpdate)
         .eq("id", jobId);
 
       if (updateError) throw updateError;
