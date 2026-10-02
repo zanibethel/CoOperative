@@ -2561,7 +2561,7 @@ b { color: var(--text); }
   cursor: pointer;
   list-style: none;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 14px;
   padding: 10px 12px;
@@ -2727,7 +2727,7 @@ b { color: var(--text); }
   }
 
   .media-recommendation-card > summary {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 9px;
   }
 
