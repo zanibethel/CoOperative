@@ -131,6 +131,7 @@ as $$
 declare
   v_reservation public.ai_profile_balance_reservations%rowtype;
   v_balance bigint;
+  v_reserved bigint;
 begin
   if p_actual_microusd is null or p_actual_microusd < 0 then
     raise exception 'Actual amount cannot be negative.';
@@ -147,8 +148,20 @@ begin
   if v_reservation.status <> 'reserved' then
     raise exception 'Reservation is not active.';
   end if;
-  if p_actual_microusd > v_reservation.reserved_microusd then
-    raise exception 'Actual cost exceeds reserved balance.';
+  select balance_microusd, reserved_microusd
+    into v_balance, v_reserved
+  from public.ai_profile_balances
+  where user_id = v_reservation.user_id
+  for update;
+
+  if v_balance is null then
+    raise exception 'Profile balance not found.';
+  end if;
+
+  if p_actual_microusd > v_reservation.reserved_microusd
+     and (v_balance - v_reserved) <
+       (p_actual_microusd - v_reservation.reserved_microusd) then
+    raise exception 'Actual cost exceeds the reserved and currently available balance.';
   end if;
 
   update public.ai_profile_balances
