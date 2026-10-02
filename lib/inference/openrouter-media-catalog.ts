@@ -178,7 +178,10 @@ async function buildCatalog(): Promise<MediaCatalog> {
         ? (row.architecture as Record<string, unknown>)
         : {};
       const pricing = await imageEndpointPricing(typeof row.endpoints === "string" ? row.endpoints : null);
-      const free = id.endsWith(":free") || (pricing.min === 0 && pricing.max === 0);
+      // OpenRouter currently requires funded credit for Image API requests even
+      // when an endpoint reports zero-looking catalog pricing. Do not classify
+      // image generation as free from a zero price field alone.
+      const free = id.endsWith(":free");
       return {
         id,
         name: String(row.name || id),
