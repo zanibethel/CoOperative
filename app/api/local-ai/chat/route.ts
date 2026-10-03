@@ -22,7 +22,6 @@ import {
 } from "@/lib/inference/hermes-media-cloud";
 import {
   adultMediaContentClass,
-  adultMediaOutputRequested,
   mediaPromptWithResolvedControls,
   planMediaRequest,
 } from "@/lib/inference/media-request";
