@@ -38,6 +38,8 @@ import {
   buildMediaRecommendationOptions,
   isApprovedPremiumReferenceSmokeRoute,
   requestedMediaRecommendationTier,
+  type MediaAdultCapabilityEvidence,
+  type MediaContentPreference,
 } from "@/lib/inference/media-recommendations";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
@@ -1220,6 +1222,101 @@ export async function POST(request: Request) {
         }
       }
 
+      const [
+        { data: mediaPreferenceRow, error: mediaPreferenceError },
+        { data: mediaCapabilityRows, error: mediaCapabilityError },
+        { data: adultCapabilityTests, error: adultCapabilityTestsError },
+      ] = await Promise.all([
+        admin
+          .from("personal_ai_settings")
+          .select("media_content_preference,adult_content_acknowledged_at")
+          .eq("user_id", owner.userId)
+          .maybeSingle(),
+        admin
+          .from("media_model_capabilities")
+          .select(
+            "provider,model,endpoint,adult_content_policy,adult_content_policy_source",
+          ),
+        admin
+          .from("media_model_capability_tests")
+          .select(
+            "provider,model,endpoint,outcome,tested_at",
+          )
+          .eq("owner_ref", ownerRef)
+          .eq("test_type", "adult_content")
+          .order("tested_at", { ascending: false })
+          .limit(250),
+      ]);
+
+      if (mediaPreferenceError) {
+        console.warn("Media content preference unavailable; using SFW output default.", {
+          ownerRef,
+          detail: mediaPreferenceError.message,
+        });
+      }
+      if (mediaCapabilityError) {
+        console.warn("Media capability metadata unavailable.", {
+          ownerRef,
+          detail: mediaCapabilityError.message,
+        });
+      }
+      if (adultCapabilityTestsError) {
+        console.warn("Media adult-capability tests unavailable.", {
+          ownerRef,
+          detail: adultCapabilityTestsError.message,
+        });
+      }
+
+      const storedContentPreference =
+        mediaPreferenceRow?.media_content_preference as
+          | MediaContentPreference
+          | null
+          | undefined;
+      const contentPreference: MediaContentPreference =
+        storedContentPreference &&
+        storedContentPreference !== "sfw_only" &&
+        mediaPreferenceRow?.adult_content_acknowledged_at
+          ? storedContentPreference
+          : "sfw_only";
+
+      const adultEvidenceByKey = new Map<string, MediaAdultCapabilityEvidence>();
+      for (const row of mediaCapabilityRows || []) {
+        const key = [row.provider, row.model, row.endpoint || ""].join("|");
+        adultEvidenceByKey.set(key, {
+          provider: row.provider,
+          model: row.model,
+          endpoint: row.endpoint || null,
+          policy:
+            row.adult_content_policy === "allowed" ||
+            row.adult_content_policy === "disallowed"
+              ? row.adult_content_policy
+              : "unknown",
+          policySource: row.adult_content_policy_source || null,
+          latestTestOutcome: null,
+          latestTestedAt: null,
+        });
+      }
+      for (const test of adultCapabilityTests || []) {
+        const key = [test.provider, test.model, test.endpoint || ""].join("|");
+        const existing = adultEvidenceByKey.get(key);
+        if (existing?.latestTestOutcome) continue;
+        adultEvidenceByKey.set(key, {
+          provider: test.provider,
+          model: test.model,
+          endpoint: test.endpoint || null,
+          policy: existing?.policy || "unknown",
+          policySource: existing?.policySource || null,
+          latestTestOutcome:
+            test.outcome === "supported" ||
+            test.outcome === "blocked" ||
+            test.outcome === "partial" ||
+            test.outcome === "inconclusive"
+              ? test.outcome
+              : null,
+          latestTestedAt: test.tested_at || null,
+        });
+      }
+
       const recommendationSet = await buildMediaRecommendationOptions({
         plan: mediaPlan,
         openRouterCatalog: liveCatalog,
@@ -1228,6 +1325,8 @@ export async function POST(request: Request) {
         requiresReferenceImage,
         referenceVerification,
         referenceModelVerifications,
+        contentPreference,
+        adultCapabilityEvidence: [...adultEvidenceByKey.values()],
       });
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const selectedRecommendation = recommendationTier
@@ -1248,6 +1347,11 @@ export async function POST(request: Request) {
 
       const recommendationText = () => {
         if (!recommendationSet.options.length) {
+          if (recommendationSet.requirementBlocked) {
+            return (
+              "Require adult-capable models is enabled, but none of the current exact-match routes has verified adult capability for this profile. I did not relax that requirement or start a generation. A model needs current provider-policy evidence or a successful controlled capability test before it can qualify."
+            );
+          }
           return (
             "I understand the media request, but I could not verify enough live exact-match pricing to offer the three choices safely. I did not start a generation."
           );
@@ -1306,7 +1410,7 @@ export async function POST(request: Request) {
             provider: "code",
             model: "media-three-tier-recommendations",
             routeReason:
-              "The media request is clear, so CoOperative priced three exact-request quality/cost choices before starting any generation.",
+              `The media request is clear, so CoOperative applied the saved ${contentPreference} output preference and ranked three exact-request execution recipes by output quality, configuration, and cost before starting any generation.`,
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
