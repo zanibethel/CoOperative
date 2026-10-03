@@ -192,15 +192,20 @@ Run and inspect one FLUX 2 Pro reference-image smoke test. If it succeeds and vi
 
 ### Media content compatibility preference and capability learning
 
-A profile-level media content compatibility preference now exists with four explicit modes:
+A profile-level media output preference now exists with four stored modes:
 - `sfw_only` (default);
 - `adult_allowed`;
 - `prefer_adult_capable`;
 - `require_adult_capable`.
 
-Non-SFW preferences require an explicit 18+ acknowledgment. The preference is stored in `personal_ai_settings` and surfaced in Model Mixer.
+Model Mixer presents this as an **NSFW** checkbox:
+- unchecked by default = keep generated output SFW;
+- unchecked does **not** exclude adult-capable models from SFW work;
+- checking NSFW expands three radio options and defaults to **Adult content allowed**;
+- the user can then select **Prefer adult-capable models** or **Require adult-capable models**;
+- NSFW modes require explicit 18+ acknowledgment.
 
-This update does **not** change model routing yet.
+The preference is stored in `personal_ai_settings`. This UI/semantics update still does **not** change recommendation routing yet.
 
 Two capability-learning tables now exist:
 - `media_model_capabilities` for provider/model/endpoint capability and published-policy metadata;
@@ -221,3 +226,22 @@ The authenticated read-only endpoint `/api/inference/media/capabilities` exposes
 ### Next content-compatibility implementation layer
 
 After the preference UI/metadata is verified, teach recommendation building to filter or prefer models according to the profile setting while still enforcing provider rules, model capability truthfulness, and hard safety boundaries. Adult-capability tests should be recorded as observed capability evidence, not treated as permission to bypass provider or platform restrictions.
+
+
+### Model Mixer execution-recipe semantics
+
+Model Mixer is now explicitly defined as an execution-recipe controller rather than a simple model selector.
+
+For media, future recommendation/routing decisions should jointly consider:
+- model/provider;
+- output type/workflow;
+- output quality and model-specific generation settings;
+- resolution/aspect ratio;
+- duration/audio where applicable;
+- reference fidelity/identity behavior where applicable;
+- cost and time;
+- user content constraints and other request requirements.
+
+Agent levels remain quality/cost ceilings. The best route is the best complete output configuration within those constraints, not automatically the most expensive or highest-tier model.
+
+The Model Mixer UI now states this execution-recipe behavior. Recommendation routing has not yet been changed by this step.
