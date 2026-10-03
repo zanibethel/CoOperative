@@ -1386,15 +1386,6 @@ class Handler(BaseHTTPRequestHandler):
                 if web_context:
                     system_parts.append(web_context)
 
-                ollama_messages = [{"role": "system", "content": "\\n\\n".join(system_parts)}]
-                ollama_messages.extend(messages)
-                if images:
-                    if ollama_messages[-1]["role"] != "user":
-                        ollama_messages.append(
-                            {"role": "user", "content": "Analyze the attached image(s)."}
-                        )
-                    ollama_messages[-1]["images"] = images
-
                 BUSY_MARKER.write_text(str(os.getpid()), encoding="utf-8")
                 try:
                     recovery_events = []
@@ -1425,12 +1416,45 @@ class Handler(BaseHTTPRequestHandler):
                     for attempt, (candidate_model, candidate_profile, candidate_reason) in enumerate(candidates, start=1):
                         try:
                             ensure_model(candidate_model)
+                            runtime_facts = (
+                                "Authoritative CoOperative runtime facts for this response:\\n"
+                                f"- Active model: {candidate_model}\\n"
+                                f"- Model profile: {candidate_profile}\\n"
+                                "- Runtime: Ollama on Windows\\n"
+                                "- Processing location: local on this PC\\n"
+                                "- Available CoOperativeLocalAI features include local text generation, "
+                                "local image generation, image analysis when a vision model is available, "
+                                "local file and project context, optional web search, voice input/output, "
+                                "conversation history, and Recovery Agent routing.\\n"
+                                "Use these runtime facts when the user asks what model you are, where you "
+                                "are running, or what this PC can do. Do not claim to be Claude, ChatGPT, "
+                                "Gemini, or another hosted model unless CoOperative explicitly supplies "
+                                "that provider as the active runtime. Do not invent capabilities that are "
+                                "not supplied by CoOperative or an active tool."
+                            )
+                            candidate_messages = [
+                                {
+                                    "role": "system",
+                                    "content": "\\n\\n".join(system_parts + [runtime_facts]),
+                                },
+                                *messages,
+                            ]
+                            if images:
+                                if candidate_messages[-1]["role"] != "user":
+                                    candidate_messages.append(
+                                        {"role": "user", "content": "Analyze the attached image(s)."}
+                                    )
+                                candidate_messages[-1] = {
+                                    **candidate_messages[-1],
+                                    "images": images,
+                                }
+
                             started = time.time()
                             response = httpx.post(
                                 f"{OLLAMA_URL}/api/chat",
                                 json={
                                     "model": candidate_model,
-                                    "messages": ollama_messages,
+                                    "messages": candidate_messages,
                                     "stream": False,
                                     "options": {
                                         "temperature": 0.3,
