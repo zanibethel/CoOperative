@@ -3,7 +3,7 @@ import LocalAiChat from "./LocalAiChat";
 
 export default function LocalAiPage() {
   return (
-    <main className="shell">
+    <main className="shell cooperative-chat-shell">
       <nav className="nav">
         <Link className="brand" href="/">CoOperative AI</Link>
         <div className="nav-links">
