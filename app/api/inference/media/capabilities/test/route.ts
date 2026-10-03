@@ -164,14 +164,28 @@ async function reconcileExpiredCapabilityTests(ownerRef: string) {
       }
     }
 
-    const timedOut = !polled || polled.state === "running";
     const completedAt = new Date().toISOString();
-    const status = timedOut ? "failed" : polled.state;
-    const mediaUrl = timedOut ? null : polled.mediaUrl;
-    const errorText = timedOut
-      ? "Capability test deadline elapsed before a final provider result was persisted."
-      : polled.error;
-    const usage = timedOut ? job.usage : polled.usage;
+    let status = "failed";
+    let mediaUrl: string | null = null;
+    let errorText =
+      "Capability test deadline elapsed before a final provider result was persisted.";
+    let usage = job.usage;
+    let outcome: MediaCapabilityTestOutcome = "inconclusive";
+
+    if (polled && polled.state !== "running") {
+      status = polled.state;
+      mediaUrl = polled.mediaUrl;
+      errorText = polled.error || "";
+      usage = polled.usage;
+      outcome =
+        polled.state === "completed" && polled.mediaUrl
+          ? "supported"
+          : failureOutcome(
+              [polled.error, polled.stderr, polled.stdout]
+                .filter(Boolean)
+                .join("\n"),
+            );
+    }
 
     const { error: updateError } = await admin
       .from("media_generation_jobs")
@@ -179,7 +193,7 @@ async function reconcileExpiredCapabilityTests(ownerRef: string) {
         status,
         result_url: mediaUrl,
         usage,
-        error: errorText,
+        error: errorText || null,
         completed_at: completedAt,
         updated_at: completedAt,
       })
@@ -187,17 +201,6 @@ async function reconcileExpiredCapabilityTests(ownerRef: string) {
       .eq("owner_ref", ownerRef)
       .in("status", ["queued", "running"]);
     if (updateError) throw updateError;
-
-    const outcome: MediaCapabilityTestOutcome =
-      status === "completed" && mediaUrl
-        ? "supported"
-        : timedOut
-          ? "inconclusive"
-          : failureOutcome(
-              [polled?.error, polled?.stderr, polled?.stdout]
-                .filter(Boolean)
-                .join("\n"),
-            );
 
     await recordJobOutcome({
       ownerRef,
