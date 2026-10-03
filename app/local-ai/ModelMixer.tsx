@@ -74,30 +74,28 @@ type ModelMixerProps = {
 };
 
 const LEVELS = ["Free", "Low", "Balanced", "High", "Premium"] as const;
-const MEDIA_CONTENT_OPTIONS: Array<{
-  value: MediaContentPreference;
+const ADULT_CONTENT_OPTIONS: Array<{
+  value: Exclude<MediaContentPreference, "sfw_only">;
   label: string;
   description: string;
 }> = [
   {
-    value: "sfw_only",
-    label: "SFW only",
-    description: "Keep media compatibility focused on models appropriate for general-audience content.",
-  },
-  {
     value: "adult_allowed",
     label: "Adult content allowed",
-    description: "Allow adult-capable models to be considered when a future request requires them.",
+    description:
+      "Allow adult output when requested while otherwise choosing the best execution recipe for the job.",
   },
   {
     value: "prefer_adult_capable",
     label: "Prefer adult-capable models",
-    description: "When otherwise comparable, future routing may prefer models that can support both SFW and adult workflows.",
+    description:
+      "When otherwise comparable, prefer verified adult-capable routes without sacrificing requested output quality.",
   },
   {
     value: "require_adult_capable",
     label: "Require adult-capable models",
-    description: "Future media routing may exclude models that are not verified for adult-capable workflows.",
+    description:
+      "For applicable media requests, require a route verified to support the requested adult workflow.",
   },
 ];
 
@@ -396,10 +394,11 @@ export default function ModelMixer({
 
   const estimate = estimateModelMixer(settings);
 
-  const selectedMediaContentOption =
-    MEDIA_CONTENT_OPTIONS.find(
+  const nsfwEnabled = mediaContentPreference !== "sfw_only";
+  const selectedAdultContentOption =
+    ADULT_CONTENT_OPTIONS.find(
       (option) => option.value === mediaContentPreference,
-    ) || MEDIA_CONTENT_OPTIONS[0];
+    ) || ADULT_CONTENT_OPTIONS[0];
 
   async function saveMediaContentPreference() {
     if (mediaPreferenceSaving) return;
@@ -630,55 +629,94 @@ export default function ModelMixer({
         <div className="model-mixer-content-preference">
           <div className="model-mixer-content-preference-head">
             <div>
-              <strong>Media content compatibility</strong>
+              <strong>Adult content (NSFW)</strong>
               <span>
-                Profile preference only for now. This update does not change routing yet.
+                Output preference. Adult-capable models remain eligible for SFW work when
+                they are otherwise the best fit.
               </span>
             </div>
-            <small>18+ options require acknowledgment</small>
-          </div>
-
-          <label className="model-mixer-content-select">
-            <span>Preference</span>
-            <select
-              value={mediaContentPreference}
-              disabled={!mediaPreferenceLoaded || mediaPreferenceSaving}
-              onChange={(event) => {
-                const next = event.target.value as MediaContentPreference;
-                setMediaContentPreference(next);
-                if (next === "sfw_only") {
-                  setAdultContentAcknowledged(false);
-                }
-                setMediaPreferenceError("");
-              }}
-            >
-              {MEDIA_CONTENT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <p>{selectedMediaContentOption.description}</p>
-
-          {mediaContentPreference !== "sfw_only" ? (
-            <label className="model-mixer-adult-ack">
+            <label className="model-mixer-nsfw-toggle">
               <input
                 type="checkbox"
-                checked={adultContentAcknowledged}
-                disabled={mediaPreferenceSaving}
+                checked={nsfwEnabled}
+                disabled={!mediaPreferenceLoaded || mediaPreferenceSaving}
                 onChange={(event) => {
-                  setAdultContentAcknowledged(event.target.checked);
+                  if (event.target.checked) {
+                    setMediaContentPreference("adult_allowed");
+                  } else {
+                    setMediaContentPreference("sfw_only");
+                    setAdultContentAcknowledged(false);
+                  }
                   setMediaPreferenceError("");
                 }}
+                aria-label="Allow NSFW output"
               />
-              <span>
-                I confirm I am 18+. This preference only affects future model
-                compatibility/routing; provider rules and safety boundaries still apply.
-              </span>
+              <span aria-hidden="true" />
             </label>
-          ) : null}
+          </div>
+
+          {!nsfwEnabled ? (
+            <div className="model-mixer-sfw-state">
+              <strong>Keep generated output SFW</strong>
+              <span>
+                CoOperative can still use any suitable model, including adult-capable
+                models. NSFW capability alone never disqualifies a model from SFW work.
+              </span>
+            </div>
+          ) : (
+            <div className="model-mixer-nsfw-expanded">
+              <div className="model-mixer-adult-warning">
+                <strong>18+ content setting</strong>
+                <span>
+                  This permits adult output when requested. It does not override provider
+                  policies, platform safety boundaries, or legal restrictions.
+                </span>
+              </div>
+
+              <label className="model-mixer-adult-ack">
+                <input
+                  type="checkbox"
+                  checked={adultContentAcknowledged}
+                  disabled={mediaPreferenceSaving}
+                  onChange={(event) => {
+                    setAdultContentAcknowledged(event.target.checked);
+                    setMediaPreferenceError("");
+                  }}
+                />
+                <span>I confirm I am 18+.</span>
+              </label>
+
+              <div className="model-mixer-adult-options" role="radiogroup" aria-label="Adult content model preference">
+                {ADULT_CONTENT_OPTIONS.map((option) => (
+                  <label
+                    className={`model-mixer-adult-option${mediaContentPreference === option.value ? " selected" : ""}`}
+                    key={option.value}
+                  >
+                    <input
+                      type="radio"
+                      name="adult-content-model-preference"
+                      value={option.value}
+                      checked={mediaContentPreference === option.value}
+                      disabled={mediaPreferenceSaving}
+                      onChange={() => {
+                        setMediaContentPreference(option.value);
+                        setMediaPreferenceError("");
+                      }}
+                    />
+                    <span>
+                      <strong>{option.label}</strong>
+                      <small>{option.description}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              <p className="model-mixer-adult-selection-note">
+                Current selection: <strong>{selectedAdultContentOption.label}</strong>.
+                Capability data will affect routing only after the separate routing update.
+              </p>
+            </div>
+          )}
 
           <div className="model-mixer-content-actions">
             <button
@@ -687,8 +725,7 @@ export default function ModelMixer({
               disabled={
                 !mediaPreferenceLoaded ||
                 mediaPreferenceSaving ||
-                (mediaContentPreference !== "sfw_only" &&
-                  !adultContentAcknowledged)
+                (nsfwEnabled && !adultContentAcknowledged)
               }
             >
               {mediaPreferenceSaving ? "Saving…" : "Save preference"}
@@ -744,9 +781,10 @@ export default function ModelMixer({
             <i />
           </span>
           <p>
-            CoOperative routes each subtask to the cheapest capable model within your selected cap.
-            The slider is a quality/cost ceiling for that agent, not a requirement to spend at that
-            level. For connected paid media, Nous subscription credits are preferred first,
+            CoOperative builds an execution recipe for each subtask within your selected cap.
+            The mixer considers model/provider plus the requested output type, quality, configuration,
+            cost, and time. The slider is a quality/cost ceiling for that agent, not a requirement to
+            spend at that level. For connected paid media, Nous subscription credits are preferred first,
             owned/local or free capacity is next, and paid OpenRouter is used only as a bounded
             backup. {mediaCatalog
               ? `Media prices are live from Nous/FAL and OpenRouter as of ${new Date(mediaCatalog.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
