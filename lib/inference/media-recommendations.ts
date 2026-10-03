@@ -163,10 +163,11 @@ function adultCapabilityFor(
 
 function contentConstraintFor(
   preference: MediaContentPreference,
+  adultOutputRequested: boolean,
 ): MediaExecutionRecipe["contentConstraint"] {
-  return preference === "sfw_only"
-    ? "sfw-output"
-    : "request-controlled-adult-output";
+  return adultOutputRequested && preference !== "sfw_only"
+    ? "request-controlled-adult-output"
+    : "sfw-output";
 }
 
 function workflowFor(
@@ -292,6 +293,7 @@ function asOption(
   currentCapUsd: number,
   plan: MediaRequestPlan,
   contentPreference: MediaContentPreference,
+  adultOutputRequested: boolean,
 ): MediaRecommendationOption {
   const qualityIntent: MediaExecutionRecipe["qualityIntent"] =
     tier === "high-end"
@@ -324,7 +326,10 @@ function asOption(
       resolution: candidate.resolution || plan.resolution,
       durationSeconds: plan.durationSeconds,
       audio: candidate.audio,
-      contentConstraint: contentConstraintFor(contentPreference),
+      contentConstraint: contentConstraintFor(
+        contentPreference,
+        adultOutputRequested,
+      ),
     },
     adultCapability: candidate.adultCapability || "unknown",
     adultCapabilityNote: candidate.adultCapabilityNote || null,
@@ -757,6 +762,7 @@ export async function buildMediaRecommendationOptions(input: {
       currentCapUsd,
       plan,
       contentPreference,
+      adultOutputRequested,
     ),
     asOption(
       "lowest-cost",
@@ -765,6 +771,7 @@ export async function buildMediaRecommendationOptions(input: {
       currentCapUsd,
       plan,
       contentPreference,
+      adultOutputRequested,
     ),
     asOption(
       "balanced",
@@ -773,6 +780,7 @@ export async function buildMediaRecommendationOptions(input: {
       currentCapUsd,
       plan,
       contentPreference,
+      adultOutputRequested,
     ),
   ];
 
