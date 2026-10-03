@@ -754,12 +754,7 @@ export default function ModelMixer({
         typeof payload.settings?.maxSpendPerPromptUsd === "number"
           ? payload.settings.maxSpendPerPromptUsd
           : normalized;
-      onChange({
-        ...settings,
-        preset: "custom",
-        maxSpendUsd: saved,
-      });
-      setMaxSpendMessage(`Saved $ ${saved.toFixed(2)} max per prompt.`.replace("$ ", "$"));
+      setMaxSpendMessage(`Saved ${saved.toFixed(2)} max per prompt.`);
     } catch (error) {
       setMaxSpendMessage(
         error instanceof Error
