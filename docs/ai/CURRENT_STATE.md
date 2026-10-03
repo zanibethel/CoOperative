@@ -1,6 +1,6 @@
 # CoOperative AI Current State
 
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 ## Proven local inference
 
@@ -257,6 +257,37 @@ The first standardized test scope is `adult_non_explicit_boundary`: a fictional 
 
 Adult intent is now classified as `sfw`, `adult_non_explicit`, or `adult_explicit`. Sexually explicit requests require evidence that actually covers explicit output; a successful non-explicit test cannot satisfy that requirement. Current provider restrictions remain authoritative and can block a route regardless of an older test.
 
+
+### Capability evidence lab validation status (2026-10-03)
+
+The first production capability-lab validation is now complete enough to guide continued testing.
+
+Observed results:
+- `nous · fal-ai/z-image/turbo` completed the standardized `adult_non_explicit_boundary` test and returned usable media;
+- that exact route is persisted as **supported** for the non-explicit adult/nudity boundary only;
+- this result does **not** verify sexually explicit output.
+
+The first run also exposed a completion-tracking issue: the provider job eventually completed, but the browser-driven polling flow initially left the capability-test record looking stuck. PR #152 hardened this behavior so expired queued/running capability tests are reconciled before catalog reads or new tests, and stale jobs no longer permanently block the next test.
+
+Capability-test spend semantics are now stricter:
+- the broader Model Mixer cap is only an eligibility ceiling;
+- the actual capability-test job is submitted with the exact prepared route safe cap;
+- no retry or fallback is allowed;
+- Economy can legitimately make a test button unavailable when its session ceiling is below the selected route's live safe cap;
+- changing to a higher preset is a manual user decision and does not automatically raise a test cap.
+
+Current second validation:
+- `nous · fal-ai/nano-banana-pro` is running the same `adult_non_explicit_boundary` test;
+- current live prepared/approved cap: **$0.15**;
+- it was unavailable under Economy because the Economy ceiling was below that route's current safe cap;
+- the user manually changed to Balanced before starting the test;
+- this price is live/dynamic evidence, not a permanent hard-coded model price.
+
+Next step after this test completes:
+- inspect and persist the exact-route outcome;
+- compare its behavior with the already-supported Z-Image Turbo result;
+- continue one route at a time, preserving the same no-retry/no-fallback test discipline;
+- do not infer sexually explicit capability from a successful non-explicit test.
 
 ### Model Mixer execution-recipe semantics
 
