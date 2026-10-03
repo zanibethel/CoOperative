@@ -2663,6 +2663,21 @@ b { color: var(--text); }
   font-size: .72rem;
 }
 
+.media-recommendation-meta > .media-recommendation-meta-wide {
+  grid-column: 1 / -1;
+}
+
+.media-recommendation-note {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 10px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+  font-size: .7rem;
+  line-height: 1.45;
+}
+
 .media-recommendation-use {
   width: 100%;
   border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
@@ -2678,6 +2693,14 @@ b { color: var(--text); }
 .media-recommendation-use:hover,
 .media-recommendation-use:focus-visible {
   background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+}
+
+.media-recommendation-use:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--panel-2) 88%, transparent);
+  color: var(--muted);
 }
 
 @media (max-width: 760px) {
