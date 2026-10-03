@@ -5,26 +5,14 @@ import { authenticatedIdentity } from "@/lib/supabase/auth";
 
 export async function canAccessMainCooperative(userId: string) {
   const admin = createAdminSupabaseClient();
+  const { data: platformOwner, error } = await admin
+    .from("unison_platform_owners")
+    .select("user_id")
+    .eq("user_id", userId)
+    .maybeSingle();
 
-  const [{ data: platformOwner, error: ownerError }, { data: organization, error: organizationError }] =
-    await Promise.all([
-      admin
-        .from("unison_platform_owners")
-        .select("user_id")
-        .eq("user_id", userId)
-        .maybeSingle(),
-      admin
-        .from("organizations")
-        .select("id")
-        .eq("owner_user_id", userId)
-        .limit(1)
-        .maybeSingle(),
-    ]);
-
-  if (ownerError) throw ownerError;
-  if (organizationError) throw organizationError;
-
-  return Boolean(platformOwner || organization);
+  if (error) throw error;
+  return Boolean(platformOwner);
 }
 
 export async function mainCooperativeIdentity() {
