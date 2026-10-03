@@ -25,6 +25,7 @@ import {
   mediaPromptWithResolvedControls,
   planMediaRequest,
 } from "@/lib/inference/media-request";
+import { evaluateMediaExecutionContentGate } from "@/lib/inference/media-model-capabilities";
 import {
   estimateOpenRouterMediaCostUsd,
   openRouterKeySpendStatus,
@@ -708,6 +709,55 @@ export async function POST(request: Request) {
           recentMedia.kind === "image" &&
           providerCreditBoundary(recentMedia.error)
         ) {
+          const localFallbackModel = "local-image-quality";
+          const localFallbackGate = await evaluateMediaExecutionContentGate({
+            userId: owner.userId,
+            ownerRef,
+            provider: "cooperative-local",
+            model: localFallbackModel,
+            adultOutputRequested: adultMediaOutputRequested(recentMedia.prompt),
+          });
+          if (!localFallbackGate.allowed) {
+            const assistantText =
+              localFallbackGate.note +
+              " CoOperative re-checked the current content preference and route capability before the automatic local reroute, so no replacement generation started.";
+
+            await admin.from("local_ai_messages").insert([
+              {
+                conversation_id: conversationId,
+                owner_ref: ownerRef,
+                role: "user",
+                content: input.message.trim(),
+                attachment_ids: [],
+                job_id: null,
+              },
+              {
+                conversation_id: conversationId,
+                owner_ref: ownerRef,
+                role: "assistant",
+                content: assistantText,
+                attachment_ids: [],
+                job_id: null,
+              },
+            ]);
+
+            return NextResponse.json(
+              {
+                status: "completed",
+                execution: "code",
+                capability: "image",
+                conversationId,
+                conversationTitle,
+                text: assistantText,
+                provider: "code",
+                model: "media-execution-content-gate",
+                routeReason:
+                  `Execution-time content gate blocked the automatic local reroute (${localFallbackGate.reason}).`,
+              },
+              { status: 200, headers: { "Cache-Control": "no-store" } },
+            );
+          }
+
           const localJobId = crypto.randomUUID();
           const { error: localJobError } = await admin
             .from("inference_jobs")
@@ -842,6 +892,54 @@ export async function POST(request: Request) {
         if (recentMedia.provider === "openrouter" && !providerCredential) {
           throw new Error(
             "OpenRouter credential is unavailable for the media retry.",
+          );
+        }
+
+        const retryContentGate = await evaluateMediaExecutionContentGate({
+          userId: owner.userId,
+          ownerRef,
+          provider: recentMedia.provider,
+          model: recentMedia.model,
+          adultOutputRequested: adultMediaOutputRequested(recentMedia.prompt),
+        });
+        if (!retryContentGate.allowed) {
+          const assistantText =
+            retryContentGate.note +
+            " CoOperative re-checked the current content preference and route capability immediately before retry submission, so the retry was not started.";
+
+          await admin.from("local_ai_messages").insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: input.message.trim(),
+              attachment_ids: [],
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: assistantText,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: recentMedia.kind,
+              conversationId,
+              conversationTitle,
+              text: assistantText,
+              provider: "code",
+              model: "media-execution-content-gate",
+              routeReason:
+                `Execution-time content gate blocked the media retry (${retryContentGate.reason}).`,
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
           );
         }
 
@@ -1572,6 +1670,55 @@ export async function POST(request: Request) {
           : null;
 
       if (selectedRecommendation.provider === "cooperative-local") {
+        const localExecutionGate = await evaluateMediaExecutionContentGate({
+          userId: owner.userId,
+          ownerRef,
+          provider: selectedRecommendation.provider,
+          model: selectedRecommendation.model,
+          endpoint: selectedRecommendation.editEndpoint,
+          adultOutputRequested,
+        });
+        if (!localExecutionGate.allowed) {
+          const message =
+            localExecutionGate.note +
+            " CoOperative re-checked the current setting and exact route immediately before local execution, so no generation started.";
+
+          await admin.from("local_ai_messages").insert([
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "user",
+              content: visibleUserText,
+              attachment_ids: effectiveMediaAttachmentIds,
+              job_id: null,
+            },
+            {
+              conversation_id: conversationId,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: message,
+              attachment_ids: [],
+              job_id: null,
+            },
+          ]);
+
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: mediaPlan.kind,
+              conversationId,
+              conversationTitle,
+              text: message,
+              provider: "code",
+              model: "media-execution-content-gate",
+              routeReason:
+                `Execution-time content gate blocked the selected local route (${localExecutionGate.reason}).`,
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
         const localJobId = crypto.randomUUID();
         const generationPrompt = mediaPromptWithResolvedControls(
           effectiveMediaRequestText,
@@ -1822,6 +1969,55 @@ export async function POST(request: Request) {
             text: message,
             provider: "code",
             model: "media-provider-setup",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      const cloudExecutionGate = await evaluateMediaExecutionContentGate({
+        userId: owner.userId,
+        ownerRef,
+        provider: selectedProvider,
+        model: selectedModel,
+        endpoint: selectedRecommendation.editEndpoint,
+        adultOutputRequested,
+      });
+      if (!cloudExecutionGate.allowed) {
+        const message =
+          cloudExecutionGate.note +
+          " CoOperative re-checked the current setting and exact provider/model route immediately before submission, so no generation started.";
+
+        await admin.from("local_ai_messages").insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: visibleUserText,
+            attachment_ids: effectiveMediaAttachmentIds,
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: message,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-execution-content-gate",
+            routeReason:
+              `Execution-time content gate blocked the selected cloud route (${cloudExecutionGate.reason}).`,
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
@@ -2736,6 +2932,52 @@ export async function GET(request: Request) {
               });
 
               if (localAvailable) {
+                const fallbackLocalModel =
+                  mediaLevel >= 2
+                    ? "local-image-quality"
+                    : "local-image-fast";
+                const fallbackLocalGate = await evaluateMediaExecutionContentGate({
+                  userId: owner.userId,
+                  ownerRef,
+                  provider: "cooperative-local",
+                  model: fallbackLocalModel,
+                  adultOutputRequested: adultMediaOutputRequested(
+                    String(mediaJob.prompt || ""),
+                  ),
+                });
+                if (!fallbackLocalGate.allowed) {
+                  const gateFailure =
+                    `${failure} Automatic local fallback was blocked at execution time: ${fallbackLocalGate.note}`;
+                  await admin
+                    .from("media_generation_jobs")
+                    .update({
+                      status: "failed",
+                      usage: polled.usage,
+                      error: gateFailure.slice(0, 1200),
+                      completed_at: completedAt,
+                      updated_at: completedAt,
+                    })
+                    .eq("id", mediaJob.id)
+                    .eq("owner_ref", ownerRef)
+                    .eq("status", "running");
+
+                  return NextResponse.json(
+                    {
+                      jobId: mediaJob.id,
+                      execution: "media",
+                      status: "failed",
+                      conversationId: mediaJob.conversation_id,
+                      capability: mediaJob.kind,
+                      provider: mediaJob.provider,
+                      model: mediaJob.model,
+                      error: gateFailure,
+                      routeReason:
+                        `Execution-time content gate blocked the owned/local fallback (${fallbackLocalGate.reason}).`,
+                    },
+                    { headers: { "Cache-Control": "no-store" } },
+                  );
+                }
+
                 await admin
                   .from("media_generation_jobs")
                   .update({
@@ -2875,6 +3117,48 @@ export async function GET(request: Request) {
                   .eq("id", mediaJob.id)
                   .eq("owner_ref", ownerRef)
                   .eq("status", "running");
+
+                const backupContentGate = await evaluateMediaExecutionContentGate({
+                  userId: owner.userId,
+                  ownerRef,
+                  provider: "openrouter",
+                  model: backupModel.id,
+                  adultOutputRequested: adultMediaOutputRequested(
+                    String(mediaJob.prompt || ""),
+                  ),
+                });
+                if (!backupContentGate.allowed) {
+                  const gateFailure =
+                    `${failure} OpenRouter fallback was blocked at execution time: ${backupContentGate.note}`;
+                  await admin
+                    .from("media_generation_jobs")
+                    .update({
+                      status: "failed",
+                      usage: polled.usage,
+                      error: gateFailure.slice(0, 1200),
+                      completed_at: completedAt,
+                      updated_at: completedAt,
+                    })
+                    .eq("id", mediaJob.id)
+                    .eq("owner_ref", ownerRef)
+                    .eq("status", "running");
+
+                  return NextResponse.json(
+                    {
+                      jobId: mediaJob.id,
+                      execution: "media",
+                      status: "failed",
+                      conversationId: mediaJob.conversation_id,
+                      capability: mediaJob.kind,
+                      provider: mediaJob.provider,
+                      model: mediaJob.model,
+                      error: gateFailure,
+                      routeReason:
+                        `Execution-time content gate blocked the OpenRouter fallback (${backupContentGate.reason}).`,
+                    },
+                    { headers: { "Cache-Control": "no-store" } },
+                  );
+                }
 
                 const backupJobId = crypto.randomUUID();
                 const { error: backupInsertError } = await admin
