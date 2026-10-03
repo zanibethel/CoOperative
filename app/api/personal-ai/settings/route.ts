@@ -7,11 +7,20 @@ import { nodeMembership } from "@/lib/unison/node-access";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
+const mediaContentPreferenceSchema = z.enum([
+  "sfw_only",
+  "adult_allowed",
+  "prefer_adult_capable",
+  "require_adult_capable",
+]);
+
 const patchSchema = z.object({
   hostedHistoryEnabled: z.boolean().optional(),
   improvementOptIn: z.boolean().optional(),
   remoteEnabled: z.boolean().optional(),
   preferredNodeId: z.string().min(1).max(160).nullable().optional(),
+  mediaContentPreference: mediaContentPreferenceSchema.optional(),
+  adultContentAcknowledged: z.boolean().optional(),
 });
 
 async function readSettings(userId: string) {
@@ -19,7 +28,7 @@ async function readSettings(userId: string) {
   const { data, error } = await admin
     .from("personal_ai_settings")
     .select(
-      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,created_at,updated_at",
+      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,created_at,updated_at",
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -31,7 +40,7 @@ async function readSettings(userId: string) {
     .from("personal_ai_settings")
     .insert({ user_id: userId })
     .select(
-      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,created_at,updated_at",
+      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,created_at,updated_at",
     )
     .single();
 
@@ -45,6 +54,8 @@ function serialize(row: Awaited<ReturnType<typeof readSettings>>) {
     improvementOptIn: row.improvement_opt_in,
     remoteEnabled: row.remote_enabled,
     preferredNodeId: row.preferred_node_id,
+    mediaContentPreference: row.media_content_preference,
+    adultContentAcknowledgedAt: row.adult_content_acknowledged_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -100,13 +111,36 @@ export async function PATCH(request: Request) {
     if (input.preferredNodeId !== undefined) {
       update.preferred_node_id = input.preferredNodeId;
     }
+    if (input.mediaContentPreference !== undefined) {
+      if (
+        input.mediaContentPreference !== "sfw_only" &&
+        input.adultContentAcknowledged !== true
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Adult-capable media preferences require an explicit 18+ acknowledgment.",
+          },
+          { status: 400 },
+        );
+      }
+
+      update.media_content_preference = input.mediaContentPreference;
+      if (input.mediaContentPreference === "sfw_only") {
+        update.adult_content_acknowledged_at = null;
+      } else {
+        update.adult_content_acknowledged_at = new Date().toISOString();
+      }
+    } else if (input.adultContentAcknowledged === true) {
+      update.adult_content_acknowledged_at = new Date().toISOString();
+    }
 
     const { data, error } = await admin
       .from("personal_ai_settings")
       .update(update)
       .eq("user_id", userId)
       .select(
-        "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,created_at,updated_at",
+        "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,created_at,updated_at",
       )
       .single();
 
