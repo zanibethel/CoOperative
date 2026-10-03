@@ -71,6 +71,18 @@ type CapabilityTestRoute = {
     prompt_classification: string | null;
     tested_at: string | null;
   } | null;
+  benchmarkScorecard?: {
+    dimensions: {
+      visualQuality: number | null;
+      promptAdherence: number | null;
+      anatomy: number | null;
+      referenceFidelity: number | null;
+      editStrength: number | null;
+      speed: number | null;
+    };
+    measuredDimensions: number;
+    latestMeasuredAt: string | null;
+  };
 };
 
 type CapabilityTestCatalog = {
@@ -292,6 +304,12 @@ function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return `${minutes}m ${remainder.toString().padStart(2, "0")}s`;
+}
+
+function formatBenchmarkScore(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${Math.round(value)}/100`
+    : "Not benchmarked";
 }
 
 function capabilityRouteKey(route: Pick<CapabilityTestRoute, "provider" | "model">) {
@@ -1113,6 +1131,60 @@ export default function ModelMixer({
                       <small>Latest boundary test</small>
                       <strong>
                         {selectedCapabilityRoute.latestTest?.outcome || "Not tested"}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Visual quality</small>
+                      <strong>
+                        {formatBenchmarkScore(
+                          selectedCapabilityRoute.benchmarkScorecard?.dimensions.visualQuality,
+                        )}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Prompt adherence</small>
+                      <strong>
+                        {formatBenchmarkScore(
+                          selectedCapabilityRoute.benchmarkScorecard?.dimensions.promptAdherence,
+                        )}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Anatomy</small>
+                      <strong>
+                        {formatBenchmarkScore(
+                          selectedCapabilityRoute.benchmarkScorecard?.dimensions.anatomy,
+                        )}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Reference fidelity</small>
+                      <strong>
+                        {formatBenchmarkScore(
+                          selectedCapabilityRoute.benchmarkScorecard?.dimensions.referenceFidelity,
+                        )}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Edit strength</small>
+                      <strong>
+                        {formatBenchmarkScore(
+                          selectedCapabilityRoute.benchmarkScorecard?.dimensions.editStrength,
+                        )}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Speed</small>
+                      <strong>
+                        {formatBenchmarkScore(
+                          selectedCapabilityRoute.benchmarkScorecard?.dimensions.speed,
+                        )}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Benchmark evidence</small>
+                      <strong>
+                        {selectedCapabilityRoute.benchmarkScorecard?.measuredDimensions || 0}/6 measured
                       </strong>
                     </span>
                   </div>
