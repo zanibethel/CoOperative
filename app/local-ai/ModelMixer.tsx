@@ -52,6 +52,11 @@ export type ModelMixerAgent =
 
 export type ModelMixerLevel = 0 | 1 | 2 | 3 | 4;
 export type ModelMixerPreset = "economy" | "balanced" | "premium" | "custom";
+type MediaContentPreference =
+  | "sfw_only"
+  | "adult_allowed"
+  | "prefer_adult_capable"
+  | "require_adult_capable";
 
 export type ModelMixerSettings = {
   preset: ModelMixerPreset;
@@ -69,6 +74,33 @@ type ModelMixerProps = {
 };
 
 const LEVELS = ["Free", "Low", "Balanced", "High", "Premium"] as const;
+const MEDIA_CONTENT_OPTIONS: Array<{
+  value: MediaContentPreference;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "sfw_only",
+    label: "SFW only",
+    description: "Keep media compatibility focused on models appropriate for general-audience content.",
+  },
+  {
+    value: "adult_allowed",
+    label: "Adult content allowed",
+    description: "Allow adult-capable models to be considered when a future request requires them.",
+  },
+  {
+    value: "prefer_adult_capable",
+    label: "Prefer adult-capable models",
+    description: "When otherwise comparable, future routing may prefer models that can support both SFW and adult workflows.",
+  },
+  {
+    value: "require_adult_capable",
+    label: "Require adult-capable models",
+    description: "Future media routing may exclude models that are not verified for adult-capable workflows.",
+  },
+];
+
 
 const AGENTS: Array<{
   key: ModelMixerAgent;
@@ -274,6 +306,56 @@ export default function ModelMixer({
 }: ModelMixerProps) {
   const [mediaCatalog, setMediaCatalog] = useState<LiveMediaCatalog | null>(null);
   const [mediaCatalogError, setMediaCatalogError] = useState(false);
+  const [mediaContentPreference, setMediaContentPreference] =
+    useState<MediaContentPreference>("sfw_only");
+  const [adultContentAcknowledged, setAdultContentAcknowledged] = useState(false);
+  const [mediaPreferenceLoaded, setMediaPreferenceLoaded] = useState(false);
+  const [mediaPreferenceSaving, setMediaPreferenceSaving] = useState(false);
+  const [mediaPreferenceError, setMediaPreferenceError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    setMediaPreferenceError("");
+    void fetch("/api/personal-ai/settings", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          settings?: {
+            mediaContentPreference?: MediaContentPreference;
+            adultContentAcknowledgedAt?: string | null;
+          };
+          error?: string;
+          detail?: string;
+        };
+        if (!response.ok) {
+          throw new Error(
+            payload.detail || payload.error || "Could not load media content preference.",
+          );
+        }
+        if (cancelled) return;
+        setMediaContentPreference(
+          payload.settings?.mediaContentPreference || "sfw_only",
+        );
+        setAdultContentAcknowledged(
+          Boolean(payload.settings?.adultContentAcknowledgedAt),
+        );
+        setMediaPreferenceLoaded(true);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setMediaPreferenceError(
+          error instanceof Error
+            ? error.message
+            : "Could not load media content preference.",
+        );
+        setMediaPreferenceLoaded(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -313,6 +395,67 @@ export default function ModelMixer({
   if (!open) return null;
 
   const estimate = estimateModelMixer(settings);
+
+  const selectedMediaContentOption =
+    MEDIA_CONTENT_OPTIONS.find(
+      (option) => option.value === mediaContentPreference,
+    ) || MEDIA_CONTENT_OPTIONS[0];
+
+  async function saveMediaContentPreference() {
+    if (mediaPreferenceSaving) return;
+    if (
+      mediaContentPreference !== "sfw_only" &&
+      !adultContentAcknowledged
+    ) {
+      setMediaPreferenceError(
+        "Confirm that you are 18+ before saving an adult-capable media preference.",
+      );
+      return;
+    }
+
+    setMediaPreferenceSaving(true);
+    setMediaPreferenceError("");
+    try {
+      const response = await fetch("/api/personal-ai/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mediaContentPreference,
+          adultContentAcknowledged:
+            mediaContentPreference === "sfw_only"
+              ? false
+              : adultContentAcknowledged,
+        }),
+      });
+      const payload = (await response.json()) as {
+        settings?: {
+          mediaContentPreference?: MediaContentPreference;
+          adultContentAcknowledgedAt?: string | null;
+        };
+        error?: string;
+        detail?: string;
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.detail || payload.error || "Could not save media content preference.",
+        );
+      }
+      setMediaContentPreference(
+        payload.settings?.mediaContentPreference || "sfw_only",
+      );
+      setAdultContentAcknowledged(
+        Boolean(payload.settings?.adultContentAcknowledgedAt),
+      );
+    } catch (error) {
+      setMediaPreferenceError(
+        error instanceof Error
+          ? error.message
+          : "Could not save media content preference.",
+      );
+    } finally {
+      setMediaPreferenceSaving(false);
+    }
+  }
 
   function setPreset(preset: Exclude<ModelMixerPreset, "custom">) {
     onChange(presetSettings(preset));
@@ -482,6 +625,84 @@ export default function ModelMixer({
               Use $0.05 test cap
             </button>
           </label>
+        </div>
+
+        <div className="model-mixer-content-preference">
+          <div className="model-mixer-content-preference-head">
+            <div>
+              <strong>Media content compatibility</strong>
+              <span>
+                Profile preference only for now. This update does not change routing yet.
+              </span>
+            </div>
+            <small>18+ options require acknowledgment</small>
+          </div>
+
+          <label className="model-mixer-content-select">
+            <span>Preference</span>
+            <select
+              value={mediaContentPreference}
+              disabled={!mediaPreferenceLoaded || mediaPreferenceSaving}
+              onChange={(event) => {
+                const next = event.target.value as MediaContentPreference;
+                setMediaContentPreference(next);
+                if (next === "sfw_only") {
+                  setAdultContentAcknowledged(false);
+                }
+                setMediaPreferenceError("");
+              }}
+            >
+              {MEDIA_CONTENT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <p>{selectedMediaContentOption.description}</p>
+
+          {mediaContentPreference !== "sfw_only" ? (
+            <label className="model-mixer-adult-ack">
+              <input
+                type="checkbox"
+                checked={adultContentAcknowledged}
+                disabled={mediaPreferenceSaving}
+                onChange={(event) => {
+                  setAdultContentAcknowledged(event.target.checked);
+                  setMediaPreferenceError("");
+                }}
+              />
+              <span>
+                I confirm I am 18+. This preference only affects future model
+                compatibility/routing; provider rules and safety boundaries still apply.
+              </span>
+            </label>
+          ) : null}
+
+          <div className="model-mixer-content-actions">
+            <button
+              type="button"
+              onClick={() => void saveMediaContentPreference()}
+              disabled={
+                !mediaPreferenceLoaded ||
+                mediaPreferenceSaving ||
+                (mediaContentPreference !== "sfw_only" &&
+                  !adultContentAcknowledged)
+              }
+            >
+              {mediaPreferenceSaving ? "Saving…" : "Save preference"}
+            </button>
+            <a href="/api/inference/media/capabilities" target="_blank" rel="noreferrer">
+              View capability data
+            </a>
+          </div>
+
+          {mediaPreferenceError ? (
+            <small className="model-mixer-content-error">
+              {mediaPreferenceError}
+            </small>
+          ) : null}
         </div>
 
         <div className="model-mixer-funding-note">
