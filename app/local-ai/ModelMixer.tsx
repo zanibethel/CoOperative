@@ -530,47 +530,58 @@ export default function ModelMixer({
     }
 
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void loadCapabilityTestState(capabilityTestJobId)
-        .then(async (payload) => {
-          if (cancelled) return;
-          setCapabilityTestStatus(payload.status);
-          if (payload.status === "running" || payload.status === "queued") {
-            setCapabilityTestMessage(
-              `Capability test is ${payload.status} on ${payload.model}.`,
-            );
-            return;
-          }
+    let checking = false;
 
-          if (payload.result) {
-            setCapabilityTestMessage(
-              `Capability test ${payload.result.outcome}: ${payload.result.notes || payload.model}`,
-            );
-          } else {
-            setCapabilityTestMessage(
-              payload.error ||
-                `Capability test finished with status ${payload.status}.`,
-            );
-          }
+    const poll = async () => {
+      if (cancelled || checking) return;
+      checking = true;
 
-          const catalog = await loadCapabilityTestCatalog();
-          if (cancelled) return;
-          setCapabilityCatalog(catalog);
-        })
-        .catch((error) => {
-          if (cancelled) return;
+      try {
+        const payload = await loadCapabilityTestState(capabilityTestJobId);
+        if (cancelled) return;
+
+        setCapabilityTestStatus(payload.status);
+        if (payload.status === "running" || payload.status === "queued") {
           setCapabilityTestMessage(
-            error instanceof Error
-              ? error.message
-              : "Could not refresh capability-test status.",
+            `Capability test is ${payload.status} on ${payload.model}.`,
           );
-          setCapabilityTestStatus("failed");
-        });
+          return;
+        }
+
+        if (payload.result) {
+          setCapabilityTestMessage(
+            `Capability test ${payload.result.outcome}: ${payload.result.notes || payload.model}`,
+          );
+        } else {
+          setCapabilityTestMessage(
+            payload.error ||
+              `Capability test finished with status ${payload.status}.`,
+          );
+        }
+
+        const catalog = await loadCapabilityTestCatalog();
+        if (cancelled) return;
+        setCapabilityCatalog(catalog);
+      } catch (error) {
+        if (cancelled) return;
+        setCapabilityTestMessage(
+          error instanceof Error
+            ? error.message
+            : "Could not refresh capability-test status.",
+        );
+      } finally {
+        checking = false;
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
     }, 3500);
 
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      window.clearInterval(timer);
     };
   }, [open, capabilityTestJobId, capabilityTestStatus]);
 
