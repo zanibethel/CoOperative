@@ -205,7 +205,18 @@ Model Mixer presents this as an **NSFW** checkbox:
 - the user can then select **Prefer adult-capable models** or **Require adult-capable models**;
 - NSFW modes require explicit 18+ acknowledgment.
 
-The preference is stored in `personal_ai_settings`. This UI/semantics update still does **not** change recommendation routing yet.
+The preference is stored in `personal_ai_settings`.
+
+Recommendation routing now consumes it with request-level scope:
+- explicit SFW requests and ordinary non-adult media requests are **not** filtered or preferred by adult capability, regardless of which NSFW-capable mode is saved;
+- an explicit adult-output request is blocked at recommendation time while NSFW is off;
+- with **Adult content allowed**, routes known to disallow/block adult output are excluded, while verified and still-unknown routes can remain candidates;
+- with **Prefer adult-capable models**, the same eligible pool is used and verified adult-capable routes receive a modest quality-ranking preference when otherwise competitive;
+- with **Require adult-capable models**, only routes with current verified adult capability remain;
+- provider/model policy marked `disallowed` always wins over older observed success;
+- the latest controlled blocked test prevents that exact route from being treated as adult-capable.
+
+This step changes recommendation building only. Provider submission/execution enforcement remains a separate gate.
 
 Two capability-learning tables now exist:
 - `media_model_capabilities` for provider/model/endpoint capability and published-policy metadata;
@@ -244,4 +255,16 @@ For media, future recommendation/routing decisions should jointly consider:
 
 Agent levels remain quality/cost ceilings. The best route is the best complete output configuration within those constraints, not automatically the most expensive or highest-tier model.
 
-The Model Mixer UI now states this execution-recipe behavior. Recommendation routing has not yet been changed by this step.
+The Model Mixer UI states this execution-recipe behavior, and recommendation ranking now uses it.
+
+High/Medium/Low are selected from complete candidate configurations:
+- **High** prioritizes the strongest configuration-quality score, including model quality plus output configuration such as resolution where applicable;
+- **Medium** balances configuration quality against the cost midpoint rather than simply choosing the middle-priced model;
+- **Low** remains the cheapest exact-request candidate, with configuration quality used as a tie-breaker.
+
+Recommendation cards now expose the workflow, quality goal, output configuration, content-output constraint, and adult-capability evidence when relevant.
+
+
+### Next content-aware execution layer
+
+Carry the selected recommendation's content-output constraint through the actual provider/local execution path. The execution gate must re-check the current saved preference and current provider/model capability immediately before submission, so a stale recommendation cannot bypass a later preference or policy change.
