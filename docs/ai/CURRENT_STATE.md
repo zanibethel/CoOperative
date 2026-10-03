@@ -248,6 +248,32 @@ Observed tests can record:
 
 The authenticated read-only endpoint `/api/inference/media/capabilities` exposes the current preference, model capability metadata, and the latest observed tests for the active owner/profile. It reports content-aware recommendation routing as active.
 
+### First quality benchmark prepared
+
+The first controlled SFW quality benchmark is prepared but not executed.
+
+Comparison:
+- Nous / `fal-ai/z-image/turbo`
+- Nous / `fal-ai/nano-banana-pro`
+
+The suite uses the same three prompts on both routes:
+1. composition + prompt adherence;
+2. hands + anatomy;
+3. premium photorealistic quality.
+
+The preparation endpoint refreshes live route pricing and calculates both estimated provider spend and a safe approval ceiling. Preparing/viewing the suite starts zero paid calls.
+
+Execution policy for the future run:
+- 6 total generations (3 prompts × 2 exact routes);
+- one exact call per prompt/model;
+- no retry;
+- no fallback;
+- no provider/model substitution;
+- SFW only;
+- benchmark speed from runtime timing and persist later reviewed quality/adherence/anatomy scores to `media_model_benchmarks`.
+
+A separate explicit approval must occur before any benchmark generation begins.
+
 ### Evidence-driven media routing
 
 Media recommendation routing now consumes exact-route benchmark evidence when it exists instead of treating model tier/price as the only quality signal.
