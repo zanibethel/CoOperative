@@ -262,31 +262,27 @@ Behavior:
 
 This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
 
-### First quality benchmark prepared
+### First quality benchmark executed
 
-The first controlled SFW quality benchmark is prepared but not executed.
+The first controlled SFW quality comparison between Nous / `fal-ai/z-image/turbo` and Nous / `fal-ai/nano-banana-pro` completed successfully.
 
-Comparison:
-- Nous / `fal-ai/z-image/turbo`
-- Nous / `fal-ai/nano-banana-pro`
+Run facts:
+- 6/6 exact-route generations completed;
+- 3 identical prompts were sent to each route;
+- cases: composition/prompt adherence, hands/anatomy, premium photorealistic quality;
+- benchmark mode passed the user-request benchmark prompt verbatim to the configured image tool;
+- no retry, fallback, or model/provider substitution was allowed;
+- live estimated provider cost totaled $0.465;
+- aggregate hard call ceilings totaled $0.48, matching the approved benchmark ceiling;
+- all result URLs and source jobs are persisted in `media_generation_jobs` with `pricing_dimensions.benchmarkSuite = "media_quality_v1"`.
 
-The suite uses the same three prompts on both routes:
-1. composition + prompt adherence;
-2. hands + anatomy;
-3. premium photorealistic quality.
+Scoring status:
+- output-quality, prompt-adherence, and anatomy scores are intentionally still unfilled until the generated images are visually reviewed;
+- no score should be inferred from price/model tier;
+- this run was polled in a batch after the generators had already finished, so the persisted `completed_at` timestamps are reconciliation times rather than exact generation-finish times. Do not use them as precise speed scores;
+- future benchmark execution should continuously capture terminal time or provider-reported generation latency before writing a measured speed score.
 
-The preparation endpoint refreshes live route pricing and calculates both estimated provider spend and a safe approval ceiling. Preparing/viewing the suite starts zero paid calls.
-
-Execution policy for the future run:
-- 6 total generations (3 prompts × 2 exact routes);
-- one exact call per prompt/model;
-- no retry;
-- no fallback;
-- no provider/model substitution;
-- SFW only;
-- benchmark speed from runtime timing and persist later reviewed quality/adherence/anatomy scores to `media_model_benchmarks`.
-
-A separate explicit approval must occur before any benchmark generation begins.
+The temporary internal runner used for this approved one-time execution has been removed. Exact-prompt benchmark mode remains available in the Hermes media worker for future benchmark infrastructure.
 
 ### Evidence-driven media routing
 
