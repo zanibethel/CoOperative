@@ -38,6 +38,32 @@ export function isApprovedPremiumReferenceSmokeRoute(
 }
 
 export type MediaRecommendationTier = "high-end" | "balanced" | "lowest-cost";
+export type MediaContentPreference =
+  | "sfw_only"
+  | "adult_allowed"
+  | "prefer_adult_capable"
+  | "require_adult_capable";
+export type AdultCapabilityState = "verified" | "blocked" | "unknown";
+
+export type MediaAdultCapabilityEvidence = {
+  provider: string;
+  model: string;
+  endpoint: string | null;
+  policy: "unknown" | "disallowed" | "allowed";
+  policySource: string | null;
+  latestTestOutcome: "supported" | "blocked" | "partial" | "inconclusive" | null;
+  latestTestedAt: string | null;
+};
+
+export type MediaExecutionRecipe = {
+  workflow: "text-to-image" | "reference-image-edit" | "text-to-video";
+  qualityIntent: "maximum-quality" | "balanced-quality-value" | "cost-efficient";
+  aspectRatio: string | null;
+  resolution: string | null;
+  durationSeconds: number | null;
+  audio: boolean | null;
+  contentConstraint: "sfw-output" | "request-controlled-adult-output";
+};
 
 export type MediaRecommendationOption = {
   tier: MediaRecommendationTier;
@@ -56,11 +82,134 @@ export type MediaRecommendationOption = {
   referenceBehavior: string | null;
   verificationNote: string | null;
   editEndpoint: string | null;
+  recipe: MediaExecutionRecipe;
+  adultCapability: AdultCapabilityState;
+  adultCapabilityNote: string | null;
 };
 
-type Candidate = Omit<MediaRecommendationOption, "tier" | "label" | "increaseNeededUsd" | "summary"> & {
+type Candidate = Omit<
+  MediaRecommendationOption,
+  "tier" | "label" | "increaseNeededUsd" | "summary" | "recipe"
+> & {
   qualityLevel: number;
 };
+
+function adultCapabilityFor(
+  candidate: Pick<Candidate, "provider" | "model" | "editEndpoint">,
+  evidence: MediaAdultCapabilityEvidence[] | undefined,
+): { state: AdultCapabilityState; note: string | null } {
+  const match = evidence?.find(
+    (item) =>
+      item.provider === candidate.provider &&
+      item.model === candidate.model &&
+      (item.endpoint || "") === (candidate.editEndpoint || ""),
+  );
+
+  if (!match) {
+    return {
+      state: "unknown",
+      note: "Adult capability has not been verified for this exact route.",
+    };
+  }
+
+  if (match.policy === "disallowed") {
+    return {
+      state: "blocked",
+      note: match.policySource
+        ? `Current provider/model policy marks adult output as disallowed (${match.policySource}).`
+        : "Current provider/model policy marks adult output as disallowed.",
+    };
+  }
+
+  if (match.latestTestOutcome === "blocked") {
+    return {
+      state: "blocked",
+      note: `The latest controlled adult-capability test was blocked${match.latestTestedAt ? ` on ${new Date(match.latestTestedAt).toLocaleDateString("en-US")}` : ""}.`,
+    };
+  }
+
+  if (match.latestTestOutcome === "supported") {
+    return {
+      state: "verified",
+      note: `A controlled test verified adult-capable behavior for this exact route${match.latestTestedAt ? ` on ${new Date(match.latestTestedAt).toLocaleDateString("en-US")}` : ""}.`,
+    };
+  }
+
+  if (match.policy === "allowed") {
+    return {
+      state: "verified",
+      note: match.policySource
+        ? `Current provider/model policy permits adult output (${match.policySource}).`
+        : "Current provider/model policy permits adult output.",
+    };
+  }
+
+  return {
+    state: "unknown",
+    note:
+      match.latestTestOutcome === "partial"
+        ? "The latest controlled adult-capability test was only partially successful, so this route is not treated as verified adult-capable."
+        : "Adult capability remains unverified for this exact route.",
+  };
+}
+
+function contentConstraintFor(
+  preference: MediaContentPreference,
+): MediaExecutionRecipe["contentConstraint"] {
+  return preference === "sfw_only"
+    ? "sfw-output"
+    : "request-controlled-adult-output";
+}
+
+function workflowFor(
+  plan: MediaRequestPlan,
+  requiresReferenceImage: boolean,
+): MediaExecutionRecipe["workflow"] {
+  if (plan.kind === "video") return "text-to-video";
+  return requiresReferenceImage ? "reference-image-edit" : "text-to-image";
+}
+
+function resolutionQuality(value: string | null) {
+  switch ((value || "").toLowerCase()) {
+    case "4k":
+      return 5;
+    case "1080p":
+      return 4;
+    case "720p":
+      return 3;
+    case "540p":
+      return 2;
+    case "480p":
+      return 1.5;
+    case "360p":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function configurationQualityScore(
+  candidate: Candidate,
+  preference: MediaContentPreference,
+) {
+  const adultPreferenceBonus =
+    preference === "prefer_adult_capable" && candidate.adultCapability === "verified"
+      ? 2
+      : 0;
+  return candidate.qualityLevel * 10 + resolutionQuality(candidate.resolution) + adultPreferenceBonus;
+}
+
+function withAdultCapability(
+  candidate: Candidate,
+  evidence: MediaAdultCapabilityEvidence[] | undefined,
+): Candidate {
+  const capability = adultCapabilityFor(candidate, evidence);
+  return {
+    ...candidate,
+    adultCapability: capability.state,
+    adultCapabilityNote: capability.note,
+  };
+}
 
 function nextCent(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -132,6 +281,13 @@ function asOption(
   currentCapUsd: number,
   plan: MediaRequestPlan,
 ): MediaRecommendationOption {
+  const qualityIntent: MediaExecutionRecipe["qualityIntent"] =
+    tier === "high-end"
+      ? "maximum-quality"
+      : tier === "balanced"
+        ? "balanced-quality-value"
+        : "cost-efficient";
+
   return {
     tier,
     label,
@@ -149,6 +305,17 @@ function asOption(
     referenceBehavior: candidate.referenceBehavior,
     verificationNote: candidate.verificationNote,
     editEndpoint: candidate.editEndpoint,
+    recipe: {
+      workflow: workflowFor(plan, Boolean(candidate.referenceBehavior)),
+      qualityIntent,
+      aspectRatio: plan.aspectRatio,
+      resolution: candidate.resolution || plan.resolution,
+      durationSeconds: plan.durationSeconds,
+      audio: candidate.audio,
+      contentConstraint: candidate.recipe.contentConstraint,
+    },
+    adultCapability: candidate.adultCapability,
+    adultCapabilityNote: candidate.adultCapabilityNote,
   };
 }
 
