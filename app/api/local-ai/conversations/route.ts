@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { authenticatedUserId } from "@/lib/supabase/auth";
+import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 async function currentOwnerRef() {
-  const userId = await authenticatedUserId();
+  const userId = await mainCooperativeUserId();
   return userId ? `coop-user:${userId}` : null;
 }
 

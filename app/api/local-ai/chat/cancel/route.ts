@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { createClient } from "@/lib/supabase/server";
+import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 import { cancelHermesMediaTask } from "@/lib/inference/hermes-media-cloud";
 
 export const runtime = "nodejs";
@@ -12,12 +12,8 @@ const cancelSchema = z.object({
 });
 
 async function currentOwnerRef() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user ? `coop-user:${user.id}` : null;
+  const userId = await mainCooperativeUserId();
+  return userId ? `coop-user:${userId}` : null;
 }
 
 export async function POST(request: Request) {

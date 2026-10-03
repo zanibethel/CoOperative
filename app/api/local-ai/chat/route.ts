@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { authenticatedUserId } from "@/lib/supabase/auth";
+import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
 import {
   COOPERATIVE_BUSINESS_CHAT_POLICY,
@@ -95,7 +95,7 @@ const chatRequestSchema = z
   );
 
 async function currentOwner() {
-  const userId = await authenticatedUserId();
+  const userId = await mainCooperativeUserId();
 
   return userId
     ? { userId, ownerRef: `coop-user:${userId}` }

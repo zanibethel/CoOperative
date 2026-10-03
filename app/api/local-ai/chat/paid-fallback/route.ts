@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { authenticatedUserId } from "@/lib/supabase/auth";
+import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import {
   evaluatePaidEscalation,
@@ -34,7 +34,7 @@ const requestSchema = z.object({
 const profileSchema = z.enum(["fast", "quality"]);
 
 export async function POST(request: Request) {
-  const userId = await authenticatedUserId();
+  const userId = await mainCooperativeUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

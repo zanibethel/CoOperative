@@ -1,15 +1,33 @@
 import Link from "next/link";
+import { authenticatedIdentity } from "@/lib/supabase/auth";
+import { canAccessMainCooperative } from "@/lib/ai/main-cooperative-access";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const identity = await authenticatedIdentity();
+  const mainAccess = identity
+    ? await canAccessMainCooperative(identity.userId)
+    : false;
+  const localOnly = Boolean(identity && !mainAccess);
+
   return (
     <main className="shell">
       <nav className="nav">
         <div className="brand">CoOperative AI</div>
         <div className="nav-links">
-          <Link href="/chat">Chat</Link>
-          <Link href="/agents">Agents</Link>
-          <Link href="/unison">Unison</Link>
-          <div className="badge">v0.1 · Intelligence Desk</div>
+          {localOnly ? (
+            <>
+              <Link href="/personal-ai">CoOperativeLocalAI</Link>
+              <Link href="/unison">Unison</Link>
+              <div className="badge">Personal AI</div>
+            </>
+          ) : (
+            <>
+              <Link href="/chat">Chat</Link>
+              <Link href="/agents">Agents</Link>
+              <Link href="/unison">Unison</Link>
+              <div className="badge">v0.1 · Intelligence Desk</div>
+            </>
+          )}
         </div>
       </nav>
 
@@ -22,9 +40,18 @@ export default function HomePage() {
           lower-cost missions without giving up human control.
         </p>
         <div className="cta-row">
-          <Link className="cta" href="/chat">Chat with CoOperative →</Link>
-          <Link className="secondary-cta" href="/intake">Begin mission briefing →</Link>
-          <Link className="secondary-cta" href="/services">Map current services →</Link>
+          {localOnly ? (
+            <>
+              <Link className="cta" href="/personal-ai">Open CoOperativeLocalAI →</Link>
+              <Link className="secondary-cta" href="/unison/dashboard">Open Unison dashboard →</Link>
+            </>
+          ) : (
+            <>
+              <Link className="cta" href="/chat">Chat with CoOperative →</Link>
+              <Link className="secondary-cta" href="/intake">Begin mission briefing →</Link>
+              <Link className="secondary-cta" href="/services">Map current services →</Link>
+            </>
+          )}
         </div>
       </section>
 
