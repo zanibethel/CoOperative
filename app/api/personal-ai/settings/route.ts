@@ -21,6 +21,7 @@ const patchSchema = z.object({
   preferredNodeId: z.string().min(1).max(160).nullable().optional(),
   mediaContentPreference: mediaContentPreferenceSchema.optional(),
   adultContentAcknowledged: z.boolean().optional(),
+  maxSpendPerPromptUsd: z.number().min(0).max(100).optional(),
 });
 
 async function readSettings(userId: string) {
@@ -28,7 +29,7 @@ async function readSettings(userId: string) {
   const { data, error } = await admin
     .from("personal_ai_settings")
     .select(
-      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,created_at,updated_at",
+      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,max_spend_per_prompt_usd,created_at,updated_at",
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -40,7 +41,7 @@ async function readSettings(userId: string) {
     .from("personal_ai_settings")
     .insert({ user_id: userId })
     .select(
-      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,created_at,updated_at",
+      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,max_spend_per_prompt_usd,created_at,updated_at",
     )
     .single();
 
@@ -56,6 +57,7 @@ function serialize(row: Awaited<ReturnType<typeof readSettings>>) {
     preferredNodeId: row.preferred_node_id,
     mediaContentPreference: row.media_content_preference,
     adultContentAcknowledgedAt: row.adult_content_acknowledged_at,
+    maxSpendPerPromptUsd: Number(row.max_spend_per_prompt_usd ?? 0.05),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -111,6 +113,9 @@ export async function PATCH(request: Request) {
     if (input.preferredNodeId !== undefined) {
       update.preferred_node_id = input.preferredNodeId;
     }
+    if (input.maxSpendPerPromptUsd !== undefined) {
+      update.max_spend_per_prompt_usd = Number(input.maxSpendPerPromptUsd.toFixed(4));
+    }
     if (input.mediaContentPreference !== undefined) {
       if (
         input.mediaContentPreference !== "sfw_only" &&
@@ -140,7 +145,7 @@ export async function PATCH(request: Request) {
       .update(update)
       .eq("user_id", userId)
       .select(
-        "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,created_at,updated_at",
+        "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,max_spend_per_prompt_usd,created_at,updated_at",
       )
       .single();
 
