@@ -21,6 +21,7 @@ import {
   startHermesMediaTask,
 } from "@/lib/inference/hermes-media-cloud";
 import {
+  adultMediaContentClass,
   adultMediaOutputRequested,
   mediaPromptWithResolvedControls,
   planMediaRequest,
@@ -715,7 +716,7 @@ export async function POST(request: Request) {
             ownerRef,
             provider: "cooperative-local",
             model: localFallbackModel,
-            adultOutputRequested: adultMediaOutputRequested(recentMedia.prompt),
+            adultContentClass: adultMediaContentClass(recentMedia.prompt),
           });
           if (!localFallbackGate.allowed) {
             const assistantText =
@@ -900,7 +901,7 @@ export async function POST(request: Request) {
           ownerRef,
           provider: recentMedia.provider,
           model: recentMedia.model,
-          adultOutputRequested: adultMediaOutputRequested(recentMedia.prompt),
+          adultContentClass: adultMediaContentClass(recentMedia.prompt),
         });
         if (!retryContentGate.allowed) {
           const assistantText =
@@ -1339,7 +1340,7 @@ export async function POST(request: Request) {
         admin
           .from("media_model_capability_tests")
           .select(
-            "provider,model,endpoint,outcome,tested_at",
+            "provider,model,endpoint,outcome,prompt_classification,tested_at",
           )
           .eq("owner_ref", ownerRef)
           .eq("test_type", "adult_content")
@@ -1392,6 +1393,7 @@ export async function POST(request: Request) {
               : "unknown",
           policySource: row.adult_content_policy_source || null,
           latestTestOutcome: null,
+          latestPromptClassification: null,
           latestTestedAt: null,
         });
       }
@@ -1412,11 +1414,16 @@ export async function POST(request: Request) {
             test.outcome === "inconclusive"
               ? test.outcome
               : null,
+          latestPromptClassification:
+            typeof test.prompt_classification === "string"
+              ? test.prompt_classification
+              : null,
           latestTestedAt: test.tested_at || null,
         });
       }
 
-      const adultOutputRequested = adultMediaOutputRequested(effectiveMediaRequestText);
+      const adultContentClass = adultMediaContentClass(effectiveMediaRequestText);
+      const adultOutputRequested = adultContentClass !== "sfw";
       const recommendationSet = await buildMediaRecommendationOptions({
         plan: mediaPlan,
         openRouterCatalog: liveCatalog,
@@ -1428,6 +1435,7 @@ export async function POST(request: Request) {
         contentPreference,
         adultCapabilityEvidence: [...adultEvidenceByKey.values()],
         adultOutputRequested,
+        adultContentClass,
       });
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const selectedRecommendation = recommendationTier
@@ -1453,9 +1461,14 @@ export async function POST(request: Request) {
               "This request asks for adult media output, but NSFW output is currently off in Model Mixer. I kept the SFW output constraint and did not start a generation. Enable NSFW if you want adult-output recommendations for this request."
             );
           }
+          if (recommendationSet.explicitVerificationBlocked) {
+            return (
+              "This request asks for sexually explicit media output, but none of the current exact-match routes has evidence that actually verifies that scope. A non-explicit adult/nudity capability test does not count as explicit-output verification, so I did not start a generation."
+            );
+          }
           if (recommendationSet.requirementBlocked) {
             return (
-              "Require adult-capable models is enabled, but none of the current exact-match routes has verified adult capability for this profile. I did not relax that requirement or start a generation. A model needs current provider-policy evidence or a successful controlled capability test before it can qualify."
+              "Require adult-capable models is enabled, but none of the current exact-match routes has verified capability for the requested adult-output scope. I did not relax that requirement or start a generation."
             );
           }
           return (
@@ -1516,7 +1529,7 @@ export async function POST(request: Request) {
             provider: "code",
             model: "media-three-tier-recommendations",
             routeReason:
-              `The media request is clear, so CoOperative applied the saved ${contentPreference} output preference to this ${adultOutputRequested ? "adult" : "SFW"} request and ranked three exact-request execution recipes by output quality, configuration, and cost before starting any generation.`,
+              `The media request is clear, so CoOperative applied the saved ${contentPreference} output preference to this ${adultContentClass} request and ranked three exact-request execution recipes by output quality, configuration, and cost before starting any generation.`,
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
@@ -1676,7 +1689,7 @@ export async function POST(request: Request) {
           provider: selectedRecommendation.provider,
           model: selectedRecommendation.model,
           endpoint: selectedRecommendation.editEndpoint,
-          adultOutputRequested,
+          adultContentClass,
         });
         if (!localExecutionGate.allowed) {
           const message =
@@ -1980,7 +1993,7 @@ export async function POST(request: Request) {
         provider: selectedProvider,
         model: selectedModel,
         endpoint: selectedRecommendation.editEndpoint,
-        adultOutputRequested,
+        adultContentClass,
       });
       if (!cloudExecutionGate.allowed) {
         const message =
@@ -2941,7 +2954,7 @@ export async function GET(request: Request) {
                   ownerRef,
                   provider: "cooperative-local",
                   model: fallbackLocalModel,
-                  adultOutputRequested: adultMediaOutputRequested(
+                  adultContentClass: adultMediaContentClass(
                     String(mediaJob.prompt || ""),
                   ),
                 });
@@ -3123,7 +3136,7 @@ export async function GET(request: Request) {
                   ownerRef,
                   provider: "openrouter",
                   model: backupModel.id,
-                  adultOutputRequested: adultMediaOutputRequested(
+                  adultContentClass: adultMediaContentClass(
                     String(mediaJob.prompt || ""),
                   ),
                 });
