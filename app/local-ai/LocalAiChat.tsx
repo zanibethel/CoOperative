@@ -123,6 +123,9 @@ type JobResult = {
   } | null;
   error?: string | null;
   detail?: string | null;
+  modelMixerUpdate?: {
+    maxSpendUsd?: number;
+  } | null;
 };
 
 type RecoveryEvent = {
@@ -1971,6 +1974,17 @@ export default function LocalAiChat() {
       const queued = (await queuedResponse.json()) as JobResult;
       if (!queuedResponse.ok) {
         throw new Error(queued.detail || queued.error || "Could not execute CoOperative request.");
+      }
+
+      if (
+        typeof queued.modelMixerUpdate?.maxSpendUsd === "number" &&
+        Number.isFinite(queued.modelMixerUpdate.maxSpendUsd)
+      ) {
+        setModelMixer((current) => ({
+          ...current,
+          preset: "custom",
+          maxSpendUsd: Math.max(0, queued.modelMixerUpdate!.maxSpendUsd!),
+        }));
       }
 
       setAttachments([]);

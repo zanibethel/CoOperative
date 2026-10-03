@@ -112,6 +112,41 @@ function titleFromMessage(message: string, hasImages: boolean) {
   return compact.length > 72 ? `${compact.slice(0, 69)}…` : compact;
 }
 
+function maxSpendPerPromptCommand(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  const settingIntent =
+    /\b(?:set|change|make|update|raise|lower|reduce|increase)\b/.test(value) &&
+    /\b(?:max(?:imum)? spend|spend (?:cap|limit)|prompt (?:budget|cap|limit)|per[- ]prompt (?:budget|cap|limit)|mixer cap)\b/.test(value);
+
+  if (!settingIntent) return null;
+
+  const cents = value.match(
+    /(?:to|at|=|of)?\s*([0-9]+(?:\.[0-9]+)?)\s*cents?\b/,
+  );
+  if (cents) {
+    const parsed = Number(cents[1]) / 100;
+    return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : null;
+  }
+
+  const dollars =
+    value.match(/\$\s*([0-9]+(?:\.[0-9]{1,4})?)/) ||
+    value.match(
+      /(?:to|at|=|of)\s*([0-9]+(?:\.[0-9]{1,4})?)\s*(?:usd|dollars?)?\b/,
+    );
+  if (!dollars) return null;
+
+  const parsed = Number(dollars[1]);
+  return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : null;
+}
+
+function asksMaxSpendPerPrompt(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\b(?:what(?:'s| is)|show|tell me)\b/.test(value) &&
+    /\b(?:max(?:imum)? spend|spend (?:cap|limit)|prompt (?:budget|cap|limit)|per[- ]prompt|mixer cap)\b/.test(value)
+  );
+}
+
 function asksAboutRecentFailure(message: string) {
   const value = message.toLowerCase().replace(/\s+/g, " ").trim();
   return (
@@ -388,6 +423,96 @@ export async function POST(request: Request) {
       if (attachError) throw attachError;
     }
 
+
+    const requestedMaxSpendPerPrompt = maxSpendPerPromptCommand(input.message);
+    const asksCurrentMaxSpendPerPrompt = asksMaxSpendPerPrompt(input.message);
+
+    if (
+      input.attachmentIds.length === 0 &&
+      (requestedMaxSpendPerPrompt !== null || asksCurrentMaxSpendPerPrompt)
+    ) {
+      let maxSpendPerPromptUsd = requestedMaxSpendPerPrompt;
+
+      if (requestedMaxSpendPerPrompt !== null) {
+        const rounded = Number(requestedMaxSpendPerPrompt.toFixed(4));
+        const { error: settingsError } = await admin
+          .from("personal_ai_settings")
+          .upsert(
+            {
+              user_id: owner.userId,
+              max_spend_per_prompt_usd: rounded,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id" },
+          );
+        if (settingsError) throw settingsError;
+        maxSpendPerPromptUsd = rounded;
+      } else {
+        const { data: settingsRow, error: settingsReadError } = await admin
+          .from("personal_ai_settings")
+          .select("max_spend_per_prompt_usd")
+          .eq("user_id", owner.userId)
+          .maybeSingle();
+        if (settingsReadError) throw settingsReadError;
+        maxSpendPerPromptUsd = Number(
+          settingsRow?.max_spend_per_prompt_usd ?? input.modelMixer?.maxSpendUsd ?? 0.05,
+        );
+      }
+
+      const assistantText =
+        requestedMaxSpendPerPrompt !== null
+          ? `Max spend per prompt is now ${Number(maxSpendPerPromptUsd).toFixed(2)}. I’ll treat that as the hard ceiling for each chat prompt unless you change it in conversation or with the Model Mixer slider.`
+          : `Your current max spend per prompt is ${Number(maxSpendPerPromptUsd).toFixed(2)}. You can change it here in chat or with the Model Mixer slider.`;
+
+      const { error: settingMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: assistantText,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (settingMessageError) throw settingMessageError;
+
+      await admin
+        .from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "text",
+          conversationId,
+          conversationTitle,
+          text: assistantText,
+          provider: "code",
+          model: "model-mixer-spend-setting",
+          modelMixerUpdate: {
+            maxSpendUsd: Number(maxSpendPerPromptUsd),
+          },
+          routeReason:
+            requestedMaxSpendPerPrompt !== null
+              ? "CoOperative updated the persistent per-prompt spend ceiling deterministically without calling an AI model."
+              : "CoOperative read the persistent per-prompt spend ceiling deterministically without calling an AI model.",
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
 
     const { data: recentAssistantRows, error: recentAssistantError } = await admin
       .from("local_ai_messages")

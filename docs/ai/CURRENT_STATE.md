@@ -248,6 +248,20 @@ Observed tests can record:
 
 The authenticated read-only endpoint `/api/inference/media/capabilities` exposes the current preference, model capability metadata, and the latest observed tests for the active owner/profile. It reports content-aware recommendation routing as active.
 
+### Per-prompt spend ceiling
+
+The Model Mixer now treats its request cap explicitly as **max spend per prompt**.
+
+Behavior:
+- the value is persisted per authenticated profile in `personal_ai_settings.max_spend_per_prompt_usd`;
+- the Model Mixer exposes both an exact numeric value and a $0–$5 slider, while still allowing typed values up to $100;
+- changing the slider/numeric cap saves the profile ceiling;
+- chat can change or read the value deterministically without calling an AI model, e.g. `set max spend per prompt to $0.25` or `what is my max spend per prompt?`;
+- a conversational update is returned to the client as a Model Mixer update so the visible slider/value changes immediately;
+- the cap remains a hard ceiling, not a spending target.
+
+This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
+
 ### First quality benchmark prepared
 
 The first controlled SFW quality benchmark is prepared but not executed.
