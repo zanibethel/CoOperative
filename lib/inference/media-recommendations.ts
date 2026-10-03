@@ -473,7 +473,7 @@ export async function buildMediaRecommendationOptions(input: {
     supportsExactRequest(model, plan),
   );
   const openRouterQualityByModel = new Map<string, number>();
-  for (const level of [4, 3, 2, 1, 0]) {
+  for (const level of [4, 3, 2, 1, 0] as const) {
     const recommended = exactOpenRouter.length
       ? recommendedForRequest(exactOpenRouter, level, requestShape)
       : null;
