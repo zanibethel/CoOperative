@@ -116,6 +116,26 @@ This step still does **not** submit a model job. Hermes' pinned managed-FAL inte
 
 Premium cards remain non-executable. Their verification note now distinguishes a transport-ready route from one blocked by account entitlement, gateway reachability, or attachment handoff.
 
+### Premium reference smoke-test route
+
+One premium reference-image route is now eligible for an explicitly selected, one-shot smoke test:
+
+- Hermes model: `openai/gpt-image-2.5/sunburst/text-to-image`
+- actual edit endpoint: `openai/gpt-image-2.5/sunburst/edit`
+
+The card becomes executable only when the same request's zero-generation Nous transport verification is ready. Selection remains explicit through the recommendation card and the quoted request cap is enforced before submission.
+
+Execution rules:
+- the current authenticated reference attachment is converted to a fresh short-lived server-side HTTPS URL only after selection;
+- Hermes is instructed to pass the first URL as `image_url` and any remaining URLs as `reference_image_urls`;
+- exactly one configured image-generation call is allowed;
+- no automatic retry, provider fallback, or Recovery Agent launch occurs for this smoke test;
+- the media job records `referenceSmokeTest` plus the exact edit endpoint in `pricing_dimensions`;
+- completion proves that exact endpoint accepted and completed the reference-image route;
+- failure is recorded against that exact endpoint and returned directly.
+
+All other discovered premium reference-image models remain display-only.
+
 ### Next media implementation layer
 
-Add one explicitly approved premium reference-image smoke-test path. It should submit only the selected model, preserve the current attachment, enforce the quoted cap immediately before submission, make no automatic retry, and use the first real gateway response to record whether that specific edit endpoint is executable. Do not broadly enable every premium reference card at once.
+After one explicitly selected smoke test has produced a real gateway result, consume that persisted result as model-verification state. A successful endpoint can become normally executable in future cards; a failed endpoint should remain blocked with its recorded reason. Do this one model at a time before broadening premium reference execution.
