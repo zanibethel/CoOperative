@@ -721,7 +721,7 @@ export default function ModelMixer({
         body: JSON.stringify({
           provider: route.provider,
           model: route.model,
-          maxSpendUsd: settings.maxSpendUsd,
+          maxSpendUsd: route.capUsd,
           confirm: true,
         }),
       });
