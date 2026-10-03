@@ -36,8 +36,7 @@ import {
 } from "@/lib/inference/nous-managed-media";
 import {
   buildMediaRecommendationOptions,
-  PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT,
-  PREMIUM_REFERENCE_SMOKE_MODEL,
+  isApprovedPremiumReferenceSmokeRoute,
   requestedMediaRecommendationTier,
 } from "@/lib/inference/media-recommendations";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
@@ -1328,9 +1327,10 @@ export async function POST(request: Request) {
       const premiumReferenceSmokeTest =
         requiresReferenceImage &&
         selectedRecommendation?.provider === "nous" &&
-        selectedRecommendation.model === PREMIUM_REFERENCE_SMOKE_MODEL &&
-        selectedRecommendation.editEndpoint ===
-          PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT &&
+        isApprovedPremiumReferenceSmokeRoute(
+          selectedRecommendation.model,
+          selectedRecommendation.editEndpoint,
+        ) &&
         selectedReferenceVerification === null &&
         referenceVerification?.readyForApprovedSmokeTest === true;
       const premiumReferenceRoute =
@@ -1838,7 +1838,7 @@ export async function POST(request: Request) {
             provider: started.provider,
             model: started.model,
             routeReason: premiumReferenceSmokeTest
-              ? `The user explicitly selected the single approved premium reference smoke-test route. CoOperative passed the current reference image through a short-lived server-side URL to ${PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT}, enforced the quoted cap before submission, and will not retry or fall back automatically.`
+              ? `The user explicitly selected an approved one-shot premium reference smoke-test route. CoOperative passed the current reference image through a short-lived server-side URL to ${selectedRecommendation.editEndpoint}, enforced the quoted cap before submission, and will not retry or fall back automatically.`
               : premiumReferenceVerified
                 ? `The selected premium reference route was already verified by a successful prior generation on this profile. CoOperative passed the current reference image through a fresh short-lived server-side URL to ${selectedRecommendation.editEndpoint}, enforced the quoted cap, and started the verified route normally.`
                 : `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} Free/cheap Hermes reasoning refines the prompt before the single media-generation call, and the request remains bounded by the Model Mixer spend cap.`,
