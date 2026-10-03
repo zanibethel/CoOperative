@@ -66,3 +66,19 @@ Customer savings and CoOperative profitability are simultaneous constraints. Do 
 Savings must remain separated into projected, verified, and realized. Do not recommend cancellation of a working legacy service until the replacement has been proven through appropriate side-by-side/shadow testing, reconciliation, and approval.
 
 The intended business experience is conversation-first: Chat is the main control surface, with Projects/Businesses, Connected Services, Tools/Capabilities, Budget & Savings, Approvals, and Activity/Evidence surrounding it.
+
+
+## Canonical media routing policy
+
+The owner-approved media-request, recommendation, budget, provider-routing, reference-image, retry, attachment, UI, and execution-truthfulness rules are defined in `docs/ai/MEDIA_ROUTING_POLICY.md`.
+
+This policy is durable product intent. New media work must preserve it unless a later explicit owner decision supersedes it.
+
+In particular:
+- once the ask is clear, show High / Medium / Low recommendations before generation;
+- preserve the exact requested task rather than silently degrading it to fit budget;
+- treat clear new media requests as new tasks instead of blending unresolved prior media context;
+- include verified premium Nous/Hermes reference-image routes when they truly support the attachment;
+- never present a model as reference-capable if it would ignore the attachment;
+- retry the newest unresolved relevant media request, not simply the newest historical media job;
+- never claim execution occurred unless runtime state confirms it.

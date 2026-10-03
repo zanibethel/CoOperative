@@ -1,6 +1,6 @@
 # CoOperative AI Current State
 
-Last updated: 2026-09-30
+Last updated: 2026-10-02
 
 ## Proven local inference
 
@@ -58,3 +58,23 @@ Agent runtime v1:
 - deterministic repo tools first;
 - Local AI used only when repo reasoning/generation is needed;
 - isolated branches and verification before any future push/deploy.
+
+
+## Media routing
+
+Current media behavior now includes:
+- deterministic parsing/preflight before generation;
+- a default $0.05 testing/request ceiling unless explicitly changed;
+- live-priced High / Medium / Low recommendation cards after a clear ask;
+- exact-request video pricing across duration/resolution/audio where supported;
+- Nous/Hermes preference before OpenRouter paid fallback when capability is verified;
+- owned/local image and reference-image routes;
+- new-task boundaries that prevent unresolved video/image requests from contaminating later media asks;
+- retry logic that targets the newest unresolved relevant media request before older completed jobs;
+- execution-truthfulness rules that prevent text models from claiming a generation started when runtime state did not confirm it.
+
+The canonical product requirements and acceptance tests are in `docs/ai/MEDIA_ROUTING_POLICY.md`.
+
+### Next media implementation layer
+
+Expand reference-image recommendation discovery so High and Medium can include higher-quality Hermes/Nous routes when those models are live-priced, attachment-aware, and genuinely reference-capable. Preserve local reference-image routes as valid Medium/Low or fallback choices. Do not expose premium text-to-image models as reference-capable merely because they are higher quality.
