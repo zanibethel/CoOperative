@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { authenticatedUserId } from "@/lib/supabase/auth";
+import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -10,7 +10,7 @@ const MAX_BYTES = 3 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 async function currentUserId() {
-  return authenticatedUserId();
+  return mainCooperativeUserId();
 }
 
 function extensionFor(mimeType: string) {
