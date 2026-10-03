@@ -509,3 +509,61 @@ The immediate goal is:
 - three-tier recommendations;
 - explicit budget control;
 - correct retry behavior.
+
+
+## 21. Adult-capable media preference and capability testing
+
+CoOperative may maintain a profile-level compatibility preference for adult-capable media models.
+
+Allowed preference modes:
+- **SFW only** — default; future routing should avoid adult-only compatibility requirements.
+- **Adult content allowed** — future routing may consider verified adult-capable models when the request requires them.
+- **Prefer adult-capable models** — when routes are otherwise comparable, future routing may prefer a model verified to support both SFW and adult workflows.
+- **Require adult-capable models** — future routing may exclude models not verified for the requested adult-capable workflow.
+
+Non-SFW preferences require an explicit 18+ acknowledgment.
+
+The preference does not override:
+- provider/model terms;
+- model-specific content restrictions;
+- platform safety boundaries;
+- legal restrictions;
+- request-level budget or capability requirements.
+
+Hard disallowed content remains disallowed regardless of preference, including sexual content involving minors and non-consensual sexual material.
+
+### Capability truthfulness
+
+Do not assume a model is adult-capable because it is uncensored, locally hosted, expensive, or historically permissive.
+
+Track adult capability separately from general image quality and reference-image capability.
+
+Model capability metadata should distinguish:
+- published/current provider policy;
+- current model/endpoint identity;
+- observed behavior from controlled tests;
+- whether a result was supported, blocked, partial, or inconclusive;
+- date/source of the observation.
+
+An observed successful test is evidence of behavior at that time, not a guarantee that a provider will continue to allow the same content later.
+
+### Controlled model tests
+
+When testing models for capability understanding:
+- use explicit user approval and the normal spend cap;
+- test one model/endpoint at a time when practical;
+- record the exact provider/model/endpoint;
+- classify the test type;
+- record outcome as supported, blocked, partial, or inconclusive;
+- link the source media job when applicable;
+- record concise notes about fidelity, policy response, or failure mode;
+- do not silently turn capability testing into broad routing changes.
+
+Useful test dimensions include:
+- adult-content support;
+- reference fidelity;
+- identity preservation;
+- edit strength;
+- provider/policy behavior.
+
+Capability test results should inform future recommendation quality, but routing must continue to respect current provider rules and safety boundaries.
