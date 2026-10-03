@@ -36,11 +36,16 @@ import {
 } from "@/lib/inference/nous-managed-media";
 import {
   buildMediaRecommendationOptions,
+  PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT,
+  PREMIUM_REFERENCE_SMOKE_MODEL,
   requestedMediaRecommendationTier,
 } from "@/lib/inference/media-recommendations";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
-import { verifyNousReferenceImageTransport } from "@/lib/inference/nous-reference-transport-verification";
+import {
+  createNousReferenceImageExecutionUrls,
+  verifyNousReferenceImageTransport,
+} from "@/lib/inference/nous-reference-transport-verification";
 import {
   looksLikeApiCredential,
   planServiceConnectIntent,
@@ -1274,6 +1279,14 @@ export async function POST(request: Request) {
         );
       }
 
+      const premiumReferenceSmokeTest =
+        requiresReferenceImage &&
+        selectedRecommendation?.provider === "nous" &&
+        selectedRecommendation.model === PREMIUM_REFERENCE_SMOKE_MODEL &&
+        selectedRecommendation.editEndpoint ===
+          PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT &&
+        referenceVerification?.readyForApprovedSmokeTest === true;
+
       if (!selectedRecommendation) {
         const message = recommendationText();
         return NextResponse.json(
@@ -1384,6 +1397,14 @@ export async function POST(request: Request) {
           : recommendationTier === "balanced"
             ? 2
             : 1;
+
+      const premiumReferenceExecution =
+        premiumReferenceSmokeTest
+          ? await createNousReferenceImageExecutionUrls({
+              ownerRef,
+              attachmentIds: effectiveMediaAttachmentIds,
+            })
+          : null;
 
       if (selectedRecommendation.provider === "cooperative-local") {
         const localJobId = crypto.randomUUID();
@@ -1694,6 +1715,13 @@ export async function POST(request: Request) {
             audio: selectedAudio,
             mediaLevel,
             freeRoute: selectedFree,
+            referenceSmokeTest: premiumReferenceSmokeTest,
+            referenceEditEndpoint: premiumReferenceSmokeTest
+              ? PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT
+              : null,
+            referenceAttachmentCount: premiumReferenceSmokeTest
+              ? effectiveMediaAttachmentIds.length
+              : 0,
           },
           pricing_source: pricingSource,
         });
@@ -1706,7 +1734,9 @@ export async function POST(request: Request) {
           owner_ref: ownerRef,
           role: "user",
           content: visibleUserText,
-          attachment_ids: [],
+          attachment_ids: premiumReferenceSmokeTest
+            ? effectiveMediaAttachmentIds
+            : [],
           job_id: null,
         });
       if (mediaUserMessageError) throw mediaUserMessageError;
@@ -1720,6 +1750,8 @@ export async function POST(request: Request) {
           model: selectedModel,
           providerCredential,
           nousAuthJson: nousRuntimeAuth?.sandboxAuthJson,
+          referenceImageUrls: premiumReferenceExecution?.urls,
+          referenceSmokeTest: premiumReferenceSmokeTest,
         });
 
         const { error: mediaStartError } = await admin
@@ -1751,8 +1783,9 @@ export async function POST(request: Request) {
             conversationTitle,
             provider: started.provider,
             model: started.model,
-            routeReason:
-              `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} Free/cheap Hermes reasoning refines the prompt before the single media-generation call, and the request remains bounded by the Model Mixer spend cap.`,
+            routeReason: premiumReferenceSmokeTest
+              ? `The user explicitly selected the single approved premium reference smoke-test route. CoOperative passed the current reference image through a short-lived server-side URL to ${PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT}, enforced the quoted cap before submission, and will not retry or fall back automatically.`
+              : `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} Free/cheap Hermes reasoning refines the prompt before the single media-generation call, and the request remains bounded by the Model Mixer spend cap.`,
             estimatedProviderCostUsd,
             modelMixer: input.modelMixer || null,
             requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
@@ -1774,6 +1807,24 @@ export async function POST(request: Request) {
           })
           .eq("id", jobId)
           .eq("owner_ref", ownerRef);
+
+        if (premiumReferenceSmokeTest) {
+          return NextResponse.json(
+            {
+              status: "failed",
+              execution: "media",
+              capability: mediaPlan.kind,
+              conversationId,
+              conversationTitle,
+              error: detail,
+              provider: "nous",
+              model: PREMIUM_REFERENCE_SMOKE_MODEL,
+              routeReason:
+                "The one-shot premium reference smoke test could not start. CoOperative recorded the failure and did not retry, fall back, or launch Recovery Agent.",
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
 
         try {
           const recovery = await startRecoveryForJob(ownerRef, jobId);
@@ -2141,7 +2192,7 @@ export async function GET(request: Request) {
       let mediaQuery = admin
         .from("media_generation_jobs")
         .select(
-          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_source,fallback_from_job_id,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
+          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_dimensions,pricing_source,fallback_from_job_id,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
         )
         .eq("owner_ref", ownerRef);
 
@@ -2334,7 +2385,17 @@ export async function GET(request: Request) {
               text: resultText,
               mediaUrl: polled.mediaUrl,
               routeReason:
-                "Cheap/free Hermes orchestration completed one configured media generation call.",
+                mediaJob.pricing_dimensions &&
+                typeof mediaJob.pricing_dimensions === "object" &&
+                !Array.isArray(mediaJob.pricing_dimensions) &&
+                (mediaJob.pricing_dimensions as { referenceSmokeTest?: unknown })
+                  .referenceSmokeTest === true
+                  ? `The explicitly approved one-shot reference smoke test succeeded. This recorded job verifies that ${String(
+                      (mediaJob.pricing_dimensions as { referenceEditEndpoint?: unknown })
+                        .referenceEditEndpoint ||
+                        mediaJob.model,
+                    )} accepted the reference-image request through the connected Nous/Hermes path.`
+                  : "Cheap/free Hermes orchestration completed one configured media generation call.",
             },
             { headers: { "Cache-Control": "no-store" } },
           );
@@ -2342,6 +2403,44 @@ export async function GET(request: Request) {
 
         const failure = polled.error || "Hermes media generation failed.";
         const completedAt = new Date().toISOString();
+
+        const referenceSmokeTest =
+          mediaJob.pricing_dimensions &&
+          typeof mediaJob.pricing_dimensions === "object" &&
+          !Array.isArray(mediaJob.pricing_dimensions) &&
+          (mediaJob.pricing_dimensions as { referenceSmokeTest?: unknown })
+            .referenceSmokeTest === true;
+
+        if (referenceSmokeTest) {
+          await admin
+            .from("media_generation_jobs")
+            .update({
+              status: "failed",
+              usage: polled.usage,
+              error: failure.slice(0, 1200),
+              completed_at: completedAt,
+              updated_at: completedAt,
+            })
+            .eq("id", mediaJob.id)
+            .eq("owner_ref", ownerRef)
+            .eq("status", "running");
+
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "media",
+              status: "failed",
+              conversationId: mediaJob.conversation_id,
+              capability: mediaJob.kind,
+              provider: mediaJob.provider,
+              model: mediaJob.model,
+              error: failure,
+              routeReason:
+                "The one-shot premium reference smoke test failed. The exact endpoint and failure are recorded on this job; CoOperative did not retry or fall back automatically.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
 
         if (mediaJob.provider === "nous") {
           const requestCapUsd =
