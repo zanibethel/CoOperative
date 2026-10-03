@@ -1763,6 +1763,145 @@ b { color: var(--text); }
   color: var(--text);
 }
 
+.model-mixer-capability-lab {
+  display: grid;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 12px;
+  padding: 11px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel));
+}
+
+.model-mixer-capability-lab-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.model-mixer-capability-lab-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.model-mixer-capability-lab-head strong {
+  font-size: .75rem;
+}
+
+.model-mixer-capability-lab-head span,
+.model-mixer-capability-scope,
+.model-mixer-capability-message {
+  color: var(--muted);
+  font-size: .67rem;
+  line-height: 1.45;
+}
+
+.model-mixer-capability-lab-head button,
+.model-mixer-capability-actions button,
+.model-mixer-capability-prepared button {
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: 9px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+  color: var(--text);
+  font: inherit;
+  font-size: .67rem;
+  font-weight: 800;
+}
+
+.model-mixer-capability-lab-head button:disabled,
+.model-mixer-capability-actions button:disabled,
+.model-mixer-capability-prepared button:disabled {
+  cursor: not-allowed;
+  opacity: .52;
+}
+
+.model-mixer-capability-select {
+  display: grid;
+  gap: 5px;
+}
+
+.model-mixer-capability-select > span {
+  color: var(--muted);
+  font-size: .67rem;
+  font-weight: 800;
+}
+
+.model-mixer-capability-select select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: .7rem;
+}
+
+.model-mixer-capability-route-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(90px, .65fr) minmax(95px, .75fr);
+  gap: 7px;
+}
+
+.model-mixer-capability-route-summary > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px 9px;
+  background: color-mix(in srgb, var(--panel-2) 88%, transparent);
+}
+
+.model-mixer-capability-route-summary small {
+  color: var(--muted);
+  font-size: .6rem;
+}
+
+.model-mixer-capability-route-summary strong {
+  min-width: 0;
+  font-size: .67rem;
+  overflow-wrap: anywhere;
+}
+
+.model-mixer-capability-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.model-mixer-capability-prepared {
+  display: grid;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel-2));
+}
+
+.model-mixer-capability-prepared > strong {
+  font-size: .72rem;
+}
+
+.model-mixer-capability-prepared > span,
+.model-mixer-capability-prepared > small {
+  color: var(--muted);
+  font-size: .66rem;
+  line-height: 1.45;
+}
+
+.model-mixer-capability-prepared button {
+  justify-self: start;
+  margin-top: 3px;
+}
+
+.model-mixer-capability-message {
+  margin: 0;
+}
+
 .model-mixer-content-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1915,6 +2054,19 @@ b { color: var(--text); }
 
   .model-mixer-summary > :first-child {
     border-top: 0;
+  }
+
+  .model-mixer-capability-lab-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .model-mixer-capability-lab-head button {
+    justify-self: start;
+  }
+
+  .model-mixer-capability-route-summary {
+    grid-template-columns: 1fr;
   }
 }
 

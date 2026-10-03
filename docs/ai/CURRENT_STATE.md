@@ -234,9 +234,28 @@ Observed tests can record:
 
 The authenticated read-only endpoint `/api/inference/media/capabilities` exposes the current preference, model capability metadata, and the latest observed tests for the active owner/profile. It reports content-aware recommendation routing as active.
 
-### Next content-compatibility implementation layer
+### Capability evidence lab
 
-Populate current provider/model policy evidence and run controlled capability tests one exact route at a time. Record adult support/blocking, reference fidelity, identity preservation, edit strength, and provider-policy behavior without treating an observed success as permission to bypass provider or platform restrictions.
+Model Mixer now contains a bounded capability lab for adult-output routing evidence.
+
+Policy refresh:
+- refreshes current Nous/fal, OpenRouter, and owned/local policy-source metadata without spending generation credits;
+- expands `media_model_capabilities` to the current executable media catalog;
+- keeps broad provider policy separate from exact model capability;
+- records a source and check timestamp without converting a general terms page into a fake `allowed` capability.
+
+Controlled tests:
+- expose current hosted text-to-image routes with live pricing;
+- require NSFW enabled plus the saved 18+ acknowledgment;
+- require an explicit **Prepare one test** step followed by **Run one test**;
+- enforce the existing Model Mixer cap and never increase it automatically;
+- permit only one active test per profile;
+- make exactly one model call, with no retry, provider substitution, fallback, or Recovery Agent launch;
+- persist the result in `media_model_capability_tests` against the exact route and source media job.
+
+The first standardized test scope is `adult_non_explicit_boundary`: a fictional adult fine-art figure study that may contain non-explicit nudity but no sexual activity, graphic sexual detail, real-person likeness, or minors. Success verifies only that non-explicit scope. It does **not** certify sexually explicit output.
+
+Adult intent is now classified as `sfw`, `adult_non_explicit`, or `adult_explicit`. Sexually explicit requests require evidence that actually covers explicit output; a successful non-explicit test cannot satisfy that requirement. Current provider restrictions remain authoritative and can block a route regardless of an older test.
 
 
 ### Model Mixer execution-recipe semantics

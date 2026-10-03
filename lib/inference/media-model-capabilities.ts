@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import type { MediaAdultContentClass } from "@/lib/inference/media-request";
 
 export type MediaContentPreference =
   | "sfw_only"
@@ -29,6 +30,7 @@ export type MediaExecutionContentGateReason =
   | "nsfw_disabled"
   | "adult_route_blocked"
   | "adult_route_unverified"
+  | "adult_explicit_unverified"
   | "adult_route_allowed"
   | "adult_preflight_unavailable";
 
@@ -61,10 +63,36 @@ function effectiveContentPreference(
 function adultCapabilityState(input: {
   policy: unknown;
   latestTestOutcome: unknown;
+  latestPromptClassification: unknown;
+  requestedClass: MediaAdultContentClass;
 }): AdultCapabilityState {
   if (input.policy === "disallowed") return "blocked";
-  if (input.latestTestOutcome === "blocked") return "blocked";
-  if (input.latestTestOutcome === "supported") return "verified";
+
+  const classification =
+    typeof input.latestPromptClassification === "string"
+      ? input.latestPromptClassification
+      : null;
+
+  if (input.latestTestOutcome === "blocked") {
+    if (
+      classification === "adult_non_explicit_boundary" ||
+      (classification === "adult_explicit_boundary" &&
+        input.requestedClass === "adult_explicit")
+    ) {
+      return "blocked";
+    }
+  }
+
+  if (input.latestTestOutcome === "supported") {
+    if (classification === "adult_explicit_boundary") return "verified";
+    if (
+      classification === "adult_non_explicit_boundary" &&
+      input.requestedClass === "adult_non_explicit"
+    ) {
+      return "verified";
+    }
+  }
+
   if (input.policy === "allowed") return "verified";
   return "unknown";
 }
@@ -75,11 +103,15 @@ export async function evaluateMediaExecutionContentGate(input: {
   provider: string;
   model: string;
   endpoint?: string | null;
-  adultOutputRequested: boolean;
+  adultContentClass?: MediaAdultContentClass;
+  adultOutputRequested?: boolean;
 }): Promise<MediaExecutionContentGateResult> {
   const admin = createAdminSupabaseClient();
+  const requestedClass: MediaAdultContentClass =
+    input.adultContentClass ||
+    (input.adultOutputRequested ? "adult_non_explicit" : "sfw");
 
-  if (!input.adultOutputRequested) {
+  if (requestedClass === "sfw") {
     return {
       allowed: true,
       preference: "sfw_only",
@@ -137,7 +169,7 @@ export async function evaluateMediaExecutionContentGate(input: {
     admin
       .from("media_model_capabilities")
       .select(
-        "adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at",
+        "adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at,adult_non_explicit_policy,adult_non_explicit_policy_source,adult_non_explicit_policy_checked_at,adult_explicit_policy,adult_explicit_policy_source,adult_explicit_policy_checked_at",
       )
       .eq("provider", input.provider)
       .eq("model", input.model)
@@ -145,7 +177,7 @@ export async function evaluateMediaExecutionContentGate(input: {
       .maybeSingle(),
     admin
       .from("media_model_capability_tests")
-      .select("outcome,tested_at")
+      .select("outcome,prompt_classification,tested_at")
       .eq("owner_ref", input.ownerRef)
       .eq("provider", input.provider)
       .eq("model", input.model)
@@ -176,11 +208,32 @@ export async function evaluateMediaExecutionContentGate(input: {
     latestTest?.outcome === "inconclusive"
       ? latestTest.outcome
       : null;
+  const scopedPolicy =
+    requestedClass === "adult_explicit"
+      ? capability?.adult_explicit_policy
+      : capability?.adult_non_explicit_policy;
+  const legacyPolicy = capability?.adult_content_policy;
+  const effectivePolicy =
+    scopedPolicy === "allowed" || scopedPolicy === "disallowed"
+      ? scopedPolicy
+      : legacyPolicy === "allowed" || legacyPolicy === "disallowed"
+        ? legacyPolicy
+        : "unknown";
+  const policySource =
+    requestedClass === "adult_explicit"
+      ? capability?.adult_explicit_policy_source ||
+        capability?.adult_content_policy_source ||
+        null
+      : capability?.adult_non_explicit_policy_source ||
+        capability?.adult_content_policy_source ||
+        null;
+
   const state = adultCapabilityState({
-    policy: capability?.adult_content_policy,
+    policy: effectivePolicy,
     latestTestOutcome,
+    latestPromptClassification: latestTest?.prompt_classification,
+    requestedClass,
   });
-  const policySource = capability?.adult_content_policy_source || null;
 
   if (state === "blocked") {
     return {
@@ -189,11 +242,24 @@ export async function evaluateMediaExecutionContentGate(input: {
       adultCapability: state,
       reason: "adult_route_blocked",
       note:
-        capability?.adult_content_policy === "disallowed"
+        effectivePolicy === "disallowed"
           ? policySource
             ? `Current provider/model policy disallows adult output (${policySource}).`
             : "Current provider/model policy disallows adult output."
           : "The latest controlled adult-capability test for this exact route was blocked.",
+      policySource,
+      latestTestOutcome,
+    };
+  }
+
+  if (requestedClass === "adult_explicit" && state !== "verified") {
+    return {
+      allowed: false,
+      preference,
+      adultCapability: state,
+      reason: "adult_explicit_unverified",
+      note:
+        "Sexually explicit output requires exact-route evidence that actually covers that scope. A non-explicit adult/nudity test is not enough.",
       policySource,
       latestTestOutcome,
     };
@@ -206,7 +272,7 @@ export async function evaluateMediaExecutionContentGate(input: {
       adultCapability: state,
       reason: "adult_route_unverified",
       note:
-        "Require adult-capable models is enabled, but this exact execution route is not currently verified for adult output.",
+        "Require adult-capable models is enabled, but this exact execution route is not currently verified for the requested adult-output scope.",
       policySource,
       latestTestOutcome,
     };

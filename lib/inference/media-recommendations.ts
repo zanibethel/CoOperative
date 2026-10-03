@@ -13,7 +13,10 @@ import {
   discoverNousReferenceImageModels,
   type NousReferenceImageModel,
 } from "@/lib/inference/nous-reference-image-discovery";
-import type { MediaRequestPlan } from "@/lib/inference/media-request";
+import type {
+  MediaAdultContentClass,
+  MediaRequestPlan,
+} from "@/lib/inference/media-request";
 import type { NousReferenceTransportVerification } from "@/lib/inference/nous-reference-transport-verification";
 import type { MediaReferenceModelVerification } from "@/lib/inference/media-reference-model-verification";
 
@@ -51,7 +54,12 @@ export type MediaAdultCapabilityEvidence = {
   endpoint: string | null;
   policy: "unknown" | "disallowed" | "allowed";
   policySource: string | null;
+  nonExplicitPolicy: "unknown" | "disallowed" | "allowed";
+  nonExplicitPolicySource: string | null;
+  explicitPolicy: "unknown" | "disallowed" | "allowed";
+  explicitPolicySource: string | null;
   latestTestOutcome: "supported" | "blocked" | "partial" | "inconclusive" | null;
+  latestPromptClassification: string | null;
   latestTestedAt: string | null;
 };
 
@@ -105,6 +113,7 @@ type Candidate = Omit<
 function adultCapabilityFor(
   candidate: Pick<Candidate, "provider" | "model" | "editEndpoint">,
   evidence: MediaAdultCapabilityEvidence[] | undefined,
+  requestedClass: MediaAdultContentClass,
 ): { state: AdultCapabilityState; note: string | null } {
   const match = evidence?.find(
     (item) =>
@@ -120,35 +129,66 @@ function adultCapabilityFor(
     };
   }
 
-  if (match.policy === "disallowed") {
+  const scopedPolicy =
+    requestedClass === "adult_explicit"
+      ? match.explicitPolicy
+      : match.nonExplicitPolicy;
+  const effectivePolicy =
+    scopedPolicy === "allowed" || scopedPolicy === "disallowed"
+      ? scopedPolicy
+      : match.policy;
+  const effectivePolicySource =
+    requestedClass === "adult_explicit"
+      ? match.explicitPolicySource || match.policySource
+      : match.nonExplicitPolicySource || match.policySource;
+
+  if (effectivePolicy === "disallowed") {
     return {
       state: "blocked",
-      note: match.policySource
-        ? `Current provider/model policy marks adult output as disallowed (${match.policySource}).`
-        : "Current provider/model policy marks adult output as disallowed.",
+      note: effectivePolicySource
+        ? `Current provider/model policy marks this adult-output scope as disallowed (${effectivePolicySource}).`
+        : "Current provider/model policy marks this adult-output scope as disallowed.",
     };
   }
 
-  if (match.latestTestOutcome === "blocked") {
+  const classification = match.latestPromptClassification;
+  const testApplies =
+    classification === "adult_explicit_boundary" ||
+    (classification === "adult_non_explicit_boundary" &&
+      requestedClass === "adult_non_explicit");
+
+  if (match.latestTestOutcome === "blocked" && testApplies) {
     return {
       state: "blocked",
-      note: `The latest controlled adult-capability test was blocked${match.latestTestedAt ? ` on ${new Date(match.latestTestedAt).toLocaleDateString("en-US")}` : ""}.`,
+      note: `The latest controlled adult-capability test that covers this scope was blocked${match.latestTestedAt ? ` on ${new Date(match.latestTestedAt).toLocaleDateString("en-US")}` : ""}.`,
     };
   }
 
-  if (match.latestTestOutcome === "supported") {
+  if (match.latestTestOutcome === "supported" && testApplies) {
     return {
       state: "verified",
-      note: `A controlled test verified adult-capable behavior for this exact route${match.latestTestedAt ? ` on ${new Date(match.latestTestedAt).toLocaleDateString("en-US")}` : ""}.`,
+      note: `A controlled test verified this exact route for ${classification === "adult_explicit_boundary" ? "explicit adult" : "non-explicit adult/nudity"} output${match.latestTestedAt ? ` on ${new Date(match.latestTestedAt).toLocaleDateString("en-US")}` : ""}.`,
     };
   }
 
-  if (match.policy === "allowed") {
+  if (effectivePolicy === "allowed") {
     return {
       state: "verified",
-      note: match.policySource
-        ? `Current provider/model policy permits adult output (${match.policySource}).`
-        : "Current provider/model policy permits adult output.",
+      note: effectivePolicySource
+        ? `Current exact-route provider/model policy permits this adult-output scope (${effectivePolicySource}).`
+        : "Current exact-route provider/model policy permits this adult-output scope.",
+    };
+  }
+
+  if (
+    requestedClass === "adult_explicit" &&
+    classification === "adult_non_explicit_boundary" &&
+    match.latestTestOutcome === "supported"
+  ) {
+    return {
+      state: "unknown",
+      note:
+        "This route passed a non-explicit adult/nudity test, but that evidence does not verify sexually explicit output.",
     };
   }
 
@@ -156,8 +196,8 @@ function adultCapabilityFor(
     state: "unknown",
     note:
       match.latestTestOutcome === "partial"
-        ? "The latest controlled adult-capability test was only partially successful, so this route is not treated as verified adult-capable."
-        : "Adult capability remains unverified for this exact route.",
+        ? "The latest controlled adult-capability test was only partially successful, so this route is not treated as verified."
+        : "Adult capability remains unverified for this exact route and requested scope.",
   };
 }
 
@@ -214,8 +254,9 @@ function configurationQualityScore(
 function withAdultCapability(
   candidate: Candidate,
   evidence: MediaAdultCapabilityEvidence[] | undefined,
+  requestedClass: MediaAdultContentClass,
 ): Candidate {
-  const capability = adultCapabilityFor(candidate, evidence);
+  const capability = adultCapabilityFor(candidate, evidence, requestedClass);
   return {
     ...candidate,
     adultCapability: capability.state,
@@ -451,10 +492,14 @@ export async function buildMediaRecommendationOptions(input: {
   contentPreference?: MediaContentPreference;
   adultCapabilityEvidence?: MediaAdultCapabilityEvidence[];
   adultOutputRequested?: boolean;
+  adultContentClass?: MediaAdultContentClass;
 }) {
   const { plan, openRouterCatalog, currentCapUsd } = input;
   const contentPreference = input.contentPreference || "sfw_only";
-  const adultOutputRequested = input.adultOutputRequested === true;
+  const adultContentClass: MediaAdultContentClass =
+    input.adultContentClass ||
+    (input.adultOutputRequested ? "adult_non_explicit" : "sfw");
+  const adultOutputRequested = adultContentClass !== "sfw";
   const candidates: Candidate[] = [];
   const requestShape = {
     durationSeconds: plan.durationSeconds,
@@ -651,7 +696,11 @@ export async function buildMediaRecommendationOptions(input: {
   }
 
   const enriched = candidates.map((candidate) =>
-    withAdultCapability(candidate, input.adultCapabilityEvidence),
+    withAdultCapability(
+      candidate,
+      input.adultCapabilityEvidence,
+      adultContentClass,
+    ),
   );
   if (adultOutputRequested && contentPreference === "sfw_only") {
     return {
@@ -659,13 +708,15 @@ export async function buildMediaRecommendationOptions(input: {
       fetchedAt: new Date().toISOString(),
       contentPreference,
       requirementBlocked: false,
+      explicitVerificationBlocked: false,
       sfwConflict: true,
     };
   }
 
   const preferenceEligible = !adultOutputRequested
     ? enriched
-    : contentPreference === "require_adult_capable"
+    : adultContentClass === "adult_explicit" ||
+        contentPreference === "require_adult_capable"
       ? enriched.filter((candidate) => candidate.adultCapability === "verified")
       : enriched.filter((candidate) => candidate.adultCapability !== "blocked");
 
@@ -688,6 +739,8 @@ export async function buildMediaRecommendationOptions(input: {
       contentPreference,
       requirementBlocked:
         adultOutputRequested && contentPreference === "require_adult_capable",
+      explicitVerificationBlocked:
+        adultContentClass === "adult_explicit",
       sfwConflict: false,
     };
   }
@@ -789,6 +842,7 @@ export async function buildMediaRecommendationOptions(input: {
     fetchedAt: new Date().toISOString(),
     contentPreference,
     requirementBlocked: false,
+    explicitVerificationBlocked: false,
     sfwConflict: false,
   };
 }

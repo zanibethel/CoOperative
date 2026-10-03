@@ -16,6 +16,7 @@ export type HermesMediaStartSpec = {
   orchestratorModel?: string;
   referenceImageUrls?: string[];
   referenceSmokeTest?: boolean;
+  capabilityTest?: boolean;
 };
 
 export type HermesMediaStartResult = {
@@ -156,8 +157,10 @@ function promptFor(spec: HermesMediaStartSpec) {
     "Do not ask the user a follow-up question; CoOperative has already handled clarification.",
     "Do not retry a failed generation and do not call a second image/video model.",
     spec.referenceSmokeTest
-      ? "This is a one-shot provider verification. Do not fall back to another model or provider under any circumstance."
-      : "Use only the configured media route for this job.",
+      ? "This is a one-shot reference-route verification. Do not fall back to another model or provider under any circumstance."
+      : spec.capabilityTest
+        ? "This is a one-shot capability verification. Do not retry, fall back, or substitute another model/provider under any circumstance."
+        : "Use only the configured media route for this job.",
     "Honor explicit duration, aspect ratio, platform, style, camera, audio, and subject requirements in the request.",
     "After the tool succeeds, answer briefly and include the returned media URL using the exact prefix MEDIA:.",
     "If the tool fails, report the failure concisely and stop.",

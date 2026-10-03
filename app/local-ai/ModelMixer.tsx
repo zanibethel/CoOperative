@@ -58,6 +58,49 @@ type MediaContentPreference =
   | "prefer_adult_capable"
   | "require_adult_capable";
 
+type CapabilityTestRoute = {
+  provider: "nous" | "openrouter";
+  model: string;
+  endpoint: string;
+  label: string;
+  estimatedCostUsd: number;
+  capUsd: number;
+  pricingSource: string;
+  latestTest: {
+    outcome: "supported" | "blocked" | "partial" | "inconclusive";
+    prompt_classification: string | null;
+    tested_at: string | null;
+  } | null;
+};
+
+type CapabilityTestCatalog = {
+  promptClassification: string;
+  testDescription: string;
+  routes: CapabilityTestRoute[];
+  activeJob: {
+    jobId: string;
+    provider: string;
+    model: string;
+    status: string;
+    estimatedProviderCostUsd: number | null;
+  } | null;
+};
+
+type CapabilityTestState = {
+  jobId: string;
+  status: string;
+  provider: string;
+  model: string;
+  mediaUrl?: string | null;
+  error?: string | null;
+  result?: {
+    outcome: "supported" | "blocked" | "partial" | "inconclusive";
+    promptClassification: string | null;
+    testedAt?: string | null;
+    notes?: string | null;
+  } | null;
+};
+
 export type ModelMixerSettings = {
   preset: ModelMixerPreset;
   maxSpendUsd: number;
@@ -251,6 +294,43 @@ function formatDuration(seconds: number) {
   return `${minutes}m ${remainder.toString().padStart(2, "0")}s`;
 }
 
+function capabilityRouteKey(route: Pick<CapabilityTestRoute, "provider" | "model">) {
+  return `${route.provider}|${route.model}`;
+}
+
+async function loadCapabilityTestCatalog() {
+  const response = await fetch("/api/inference/media/capabilities/test", {
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as CapabilityTestCatalog & {
+    error?: string;
+    detail?: string;
+  };
+  if (!response.ok) {
+    throw new Error(
+      payload.detail || payload.error || "Could not load capability-test routes.",
+    );
+  }
+  return payload;
+}
+
+async function loadCapabilityTestState(jobId: string) {
+  const response = await fetch(
+    `/api/inference/media/capabilities/test?jobId=${encodeURIComponent(jobId)}`,
+    { cache: "no-store" },
+  );
+  const payload = (await response.json()) as CapabilityTestState & {
+    error?: string;
+    detail?: string;
+  };
+  if (!response.ok) {
+    throw new Error(
+      payload.detail || payload.error || "Could not read capability-test status.",
+    );
+  }
+  return payload;
+}
+
 function presetSettings(preset: Exclude<ModelMixerPreset, "custom">): ModelMixerSettings {
   return {
     preset,
@@ -310,6 +390,16 @@ export default function ModelMixer({
   const [mediaPreferenceLoaded, setMediaPreferenceLoaded] = useState(false);
   const [mediaPreferenceSaving, setMediaPreferenceSaving] = useState(false);
   const [mediaPreferenceError, setMediaPreferenceError] = useState("");
+  const [capabilityCatalog, setCapabilityCatalog] =
+    useState<CapabilityTestCatalog | null>(null);
+  const [capabilityCatalogError, setCapabilityCatalogError] = useState("");
+  const [capabilityRouteSelection, setCapabilityRouteSelection] = useState("");
+  const [preparedCapabilityRoute, setPreparedCapabilityRoute] = useState("");
+  const [policyRefreshing, setPolicyRefreshing] = useState(false);
+  const [policyRefreshMessage, setPolicyRefreshMessage] = useState("");
+  const [capabilityTestJobId, setCapabilityTestJobId] = useState("");
+  const [capabilityTestStatus, setCapabilityTestStatus] = useState("");
+  const [capabilityTestMessage, setCapabilityTestMessage] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -379,6 +469,100 @@ export default function ModelMixer({
     };
   }, [open, refreshKey]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    void loadCapabilityTestCatalog()
+      .then((payload) => {
+        if (cancelled) return;
+        setCapabilityCatalog(payload);
+        setCapabilityCatalogError("");
+        setCapabilityRouteSelection((current) => {
+          if (
+            current &&
+            payload.routes.some((route) => capabilityRouteKey(route) === current)
+          ) {
+            return current;
+          }
+          return payload.routes[0] ? capabilityRouteKey(payload.routes[0]) : "";
+        });
+        if (payload.activeJob) {
+          setCapabilityTestJobId(payload.activeJob.jobId);
+          setCapabilityTestStatus(payload.activeJob.status);
+          setCapabilityTestMessage(
+            `Capability test is ${payload.activeJob.status} on ${payload.activeJob.model}.`,
+          );
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setCapabilityCatalogError(
+          error instanceof Error
+            ? error.message
+            : "Could not load capability-test routes.",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, refreshKey]);
+
+  useEffect(() => {
+    if (
+      !open ||
+      !capabilityTestJobId ||
+      (capabilityTestStatus !== "running" && capabilityTestStatus !== "queued")
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void loadCapabilityTestState(capabilityTestJobId)
+        .then(async (payload) => {
+          if (cancelled) return;
+          setCapabilityTestStatus(payload.status);
+          if (payload.status === "running" || payload.status === "queued") {
+            setCapabilityTestMessage(
+              `Capability test is ${payload.status} on ${payload.model}.`,
+            );
+            return;
+          }
+
+          if (payload.result) {
+            setCapabilityTestMessage(
+              `Capability test ${payload.result.outcome}: ${payload.result.notes || payload.model}`,
+            );
+          } else {
+            setCapabilityTestMessage(
+              payload.error ||
+                `Capability test finished with status ${payload.status}.`,
+            );
+          }
+
+          const catalog = await loadCapabilityTestCatalog();
+          if (cancelled) return;
+          setCapabilityCatalog(catalog);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setCapabilityTestMessage(
+            error instanceof Error
+              ? error.message
+              : "Could not refresh capability-test status.",
+          );
+          setCapabilityTestStatus("failed");
+        });
+    }, 3500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, capabilityTestJobId, capabilityTestStatus]);
+
   const liveMedia = useMemo(() => {
     if (!mediaCatalog) return null;
     const level = settings.agents.media;
@@ -399,6 +583,14 @@ export default function ModelMixer({
     ADULT_CONTENT_OPTIONS.find(
       (option) => option.value === mediaContentPreference,
     ) || ADULT_CONTENT_OPTIONS[0];
+  const selectedCapabilityRoute =
+    capabilityCatalog?.routes.find(
+      (route) => capabilityRouteKey(route) === capabilityRouteSelection,
+    ) || null;
+  const preparedCapability =
+    capabilityCatalog?.routes.find(
+      (route) => capabilityRouteKey(route) === preparedCapabilityRoute,
+    ) || null;
 
   async function saveMediaContentPreference() {
     if (mediaPreferenceSaving) return;
@@ -453,6 +645,110 @@ export default function ModelMixer({
       );
     } finally {
       setMediaPreferenceSaving(false);
+    }
+  }
+
+  async function refreshPolicyEvidence() {
+    if (policyRefreshing) return;
+    setPolicyRefreshing(true);
+    setPolicyRefreshMessage("");
+    try {
+      const response = await fetch("/api/inference/media/capabilities/refresh", {
+        method: "POST",
+      });
+      const payload = (await response.json()) as {
+        refreshed?: boolean;
+        sources?: Array<{ provider: string; ok: boolean; detail?: string | null }>;
+        error?: string;
+        detail?: string;
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.detail || payload.error || "Could not refresh policy evidence.",
+        );
+      }
+
+      const okCount = payload.sources?.filter((source) => source.ok).length || 0;
+      const total = payload.sources?.length || 0;
+      setPolicyRefreshMessage(
+        `Policy evidence refreshed from ${okCount}/${total} source groups. General provider policy is recorded as evidence, not treated as model capability.`,
+      );
+      const catalog = await loadCapabilityTestCatalog();
+      setCapabilityCatalog(catalog);
+      setCapabilityCatalogError("");
+    } catch (error) {
+      setPolicyRefreshMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not refresh policy evidence.",
+      );
+    } finally {
+      setPolicyRefreshing(false);
+    }
+  }
+
+  function prepareSelectedCapabilityTest() {
+    if (!capabilityRouteSelection) return;
+    setPreparedCapabilityRoute(capabilityRouteSelection);
+    setCapabilityTestMessage("");
+  }
+
+  async function runPreparedCapabilityTest() {
+    const route = capabilityCatalog?.routes.find(
+      (candidate) => capabilityRouteKey(candidate) === preparedCapabilityRoute,
+    );
+    if (!route) return;
+
+    if (!nsfwEnabled || !adultContentAcknowledged) {
+      setCapabilityTestMessage(
+        "Enable NSFW output, confirm 18+, and save the preference before running a capability test.",
+      );
+      return;
+    }
+
+    if (route.capUsd > settings.maxSpendUsd + 0.000001) {
+      setCapabilityTestMessage(
+        `Current Model Mixer cap is ${settings.maxSpendUsd.toFixed(2)}; this one-shot test requires at least ${route.capUsd.toFixed(2)}. CoOperative will not raise the cap automatically.`,
+      );
+      return;
+    }
+
+    setCapabilityTestMessage("Starting one exact-route capability test…");
+    try {
+      const response = await fetch("/api/inference/media/capabilities/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: route.provider,
+          model: route.model,
+          maxSpendUsd: settings.maxSpendUsd,
+          confirm: true,
+        }),
+      });
+      const payload = (await response.json()) as CapabilityTestState & {
+        error?: string;
+        detail?: string;
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.detail || payload.error || "Could not start capability test.",
+        );
+      }
+
+      setCapabilityTestJobId(payload.jobId);
+      setCapabilityTestStatus(payload.status);
+      setCapabilityTestMessage(
+        payload.status === "running"
+          ? `One-shot test started on ${route.label}. No retry or fallback is allowed.`
+          : payload.error || `Capability test finished with ${payload.status}.`,
+      );
+    } catch (error) {
+      setCapabilityTestStatus("failed");
+      setCapabilityTestMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not start capability test.",
+      );
     }
   }
 
@@ -713,8 +1009,153 @@ export default function ModelMixer({
 
               <p className="model-mixer-adult-selection-note">
                 Current selection: <strong>{selectedAdultContentOption.label}</strong>.
-                Capability data will affect routing only after the separate routing update.
+                Recommendation and execution routing already use scoped capability evidence.
               </p>
+
+              <div className="model-mixer-capability-lab">
+                <div className="model-mixer-capability-lab-head">
+                  <div>
+                    <strong>Capability lab</strong>
+                    <span>
+                      Source-backed policy evidence + one exact-route test at a time.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void refreshPolicyEvidence()}
+                    disabled={policyRefreshing}
+                  >
+                    {policyRefreshing ? "Refreshing…" : "Refresh evidence"}
+                  </button>
+                </div>
+
+                {policyRefreshMessage ? (
+                  <p className="model-mixer-capability-message">
+                    {policyRefreshMessage}
+                  </p>
+                ) : null}
+
+                <label className="model-mixer-capability-select">
+                  <span>Hosted image route to test</span>
+                  <select
+                    value={capabilityRouteSelection}
+                    onChange={(event) => {
+                      setCapabilityRouteSelection(event.target.value);
+                      setPreparedCapabilityRoute("");
+                      setCapabilityTestMessage("");
+                    }}
+                    disabled={
+                      !capabilityCatalog?.routes.length ||
+                      capabilityTestStatus === "running" ||
+                      capabilityTestStatus === "queued"
+                    }
+                  >
+                    {(capabilityCatalog?.routes || []).map((route) => (
+                      <option
+                        key={capabilityRouteKey(route)}
+                        value={capabilityRouteKey(route)}
+                      >
+                        {route.provider} · {route.label} · ~${route.estimatedCostUsd.toFixed(3)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {capabilityCatalogError ? (
+                  <p className="model-mixer-content-error">
+                    {capabilityCatalogError}
+                  </p>
+                ) : null}
+
+                {capabilityCatalog ? (
+                  <small className="model-mixer-capability-scope">
+                    {capabilityCatalog.testDescription}
+                  </small>
+                ) : null}
+
+                {selectedCapabilityRoute ? (
+                  <div className="model-mixer-capability-route-summary">
+                    <span>
+                      <small>Current route</small>
+                      <strong>
+                        {selectedCapabilityRoute.provider} · {selectedCapabilityRoute.label}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Live estimate</small>
+                      <strong>
+                        ~${selectedCapabilityRoute.estimatedCostUsd.toFixed(3)}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Latest boundary test</small>
+                      <strong>
+                        {selectedCapabilityRoute.latestTest?.outcome || "Not tested"}
+                      </strong>
+                    </span>
+                  </div>
+                ) : null}
+
+                {capabilityCatalog?.routes.length ? (
+                  <div className="model-mixer-capability-actions">
+                    <button
+                      type="button"
+                      onClick={prepareSelectedCapabilityTest}
+                      disabled={
+                        !capabilityRouteSelection ||
+                        capabilityTestStatus === "running" ||
+                        capabilityTestStatus === "queued"
+                      }
+                    >
+                      Prepare one test
+                    </button>
+                  </div>
+                ) : null}
+
+                {preparedCapability ? (
+                  <div className="model-mixer-capability-prepared">
+                    <strong>
+                      {preparedCapability.provider} · {preparedCapability.label}
+                    </strong>
+                    <span>
+                      Live estimate ~${preparedCapability.estimatedCostUsd.toFixed(3)} ·
+                      safe cap ${preparedCapability.capUsd.toFixed(2)}
+                    </span>
+                    <small>
+                      This test uses a fictional adult fine-art figure study with
+                      non-explicit nudity and no sexual activity. It does not certify
+                      sexually explicit output.
+                    </small>
+                    {preparedCapability.capUsd >
+                    settings.maxSpendUsd + 0.000001 ? (
+                      <small className="model-mixer-content-error">
+                        Current session cap is ${settings.maxSpendUsd.toFixed(2)}.
+                        Raise it manually to at least ${preparedCapability.capUsd.toFixed(2)}
+                        if you want to run this test.
+                      </small>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void runPreparedCapabilityTest()}
+                      disabled={
+                        preparedCapability.capUsd >
+                          settings.maxSpendUsd + 0.000001 ||
+                        !adultContentAcknowledged ||
+                        capabilityTestStatus === "running" ||
+                        capabilityTestStatus === "queued"
+                      }
+                    >
+                      Run one test · no retry/fallback
+                    </button>
+                  </div>
+                ) : null}
+
+                {capabilityTestMessage ? (
+                  <p className="model-mixer-capability-message">
+                    {capabilityTestMessage}
+                  </p>
+                ) : null}
+              </div>
             </div>
           )}
 

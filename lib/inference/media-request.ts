@@ -15,18 +15,37 @@ const DIRECT_MEDIA_REQUEST = /\b(i(?:'d| would) like|i want|give me)\b/i;
 const IMAGE_NOUNS = /\b(image|picture|photo|portrait|illustration|graphic|poster|thumbnail)\b/i;
 const VIDEO_NOUNS = /\b(video|clip|reel|animation|movie|film)\b|\b(?:youtube|instagram|tiktok)\s+short\b/i;
 const AMBIGUOUS_MEDIA_NOUNS = /\b(ad|advertisement|commercial)\b/i;
-const EXPLICIT_ADULT_OUTPUT =
+export type MediaAdultContentClass =
+  | "sfw"
+  | "adult_non_explicit"
+  | "adult_explicit";
+
+const ADULT_OUTPUT =
   /\b(nsfw|nudes?|nudity|naked|porn(?:ographic|ography)?|sexually explicit|explicit sexual|erotic|full[- ]?frontal|adult (?:content|image|photo|scene))\b/i;
+const SEXUALLY_EXPLICIT_OUTPUT =
+  /\b(porn(?:ographic|ography)?|sexually explicit|explicit sexual|sexual (?:activity|intercourse|act)|sex scene|graphic sexual)\b/i;
+const SFW_OUTPUT_CONSTRAINT =
+  /\b(sfw|safe for work|no nudity|without nudity|not nsfw)\b/i;
+const NON_EXPLICIT_CONSTRAINT =
+  /\b(no explicit content|non[- ]?explicit|not sexually explicit|without explicit sexual content)\b/i;
+
+export function adultMediaContentClass(
+  message: string,
+): MediaAdultContentClass {
+  if (SFW_OUTPUT_CONSTRAINT.test(message)) return "sfw";
+
+  if (SEXUALLY_EXPLICIT_OUTPUT.test(message)) {
+    if (NON_EXPLICIT_CONSTRAINT.test(message)) {
+      return ADULT_OUTPUT.test(message) ? "adult_non_explicit" : "sfw";
+    }
+    return "adult_explicit";
+  }
+
+  return ADULT_OUTPUT.test(message) ? "adult_non_explicit" : "sfw";
+}
 
 export function adultMediaOutputRequested(message: string) {
-  if (
-    /\b(sfw|safe for work|no nudity|without nudity|no explicit content|non[- ]?explicit|not nsfw)\b/i.test(
-      message,
-    )
-  ) {
-    return false;
-  }
-  return EXPLICIT_ADULT_OUTPUT.test(message);
+  return adultMediaContentClass(message) !== "sfw";
 }
 
 function durationFrom(message: string) {
