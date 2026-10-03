@@ -98,9 +98,9 @@ export async function GET() {
             settings?.adult_content_acknowledged_at || null,
         },
         models,
-        routingApplied: false,
+        routingApplied: true,
         note:
-          "Capability metadata and observed tests are informational in this update. Media routing does not use the adult-content preference yet.",
+          "Recommendation routing now uses this preference only when the media request explicitly asks for adult output. SFW requests remain eligible for the best-fit model regardless of adult capability. Execution/provider submission safety remains a separate gate.",
       },
       { headers: { "Cache-Control": "private, no-store" } },
     );

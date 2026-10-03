@@ -314,6 +314,17 @@ type MediaRecommendationOption = {
   referenceBehavior?: string | null;
   verificationNote?: string | null;
   editEndpoint?: string | null;
+  recipe?: {
+    workflow: "text-to-image" | "reference-image-edit" | "text-to-video";
+    qualityIntent: "maximum-quality" | "balanced-quality-value" | "cost-efficient";
+    aspectRatio: string | null;
+    resolution: string | null;
+    durationSeconds: number | null;
+    audio: boolean | null;
+    contentConstraint: "sfw-output" | "request-controlled-adult-output";
+  };
+  adultCapability?: "verified" | "blocked" | "unknown";
+  adultCapabilityNote?: string | null;
 };
 
 function mediaRecommendationsDirective(content: string) {
@@ -352,7 +363,14 @@ function mediaRecommendationsDirective(content: string) {
               typeof value.referenceBehavior === "string") &&
             (value.verificationNote === undefined ||
               value.verificationNote === null ||
-              typeof value.verificationNote === "string")
+              typeof value.verificationNote === "string") &&
+            (value.adultCapability === undefined ||
+              value.adultCapability === "verified" ||
+              value.adultCapability === "blocked" ||
+              value.adultCapability === "unknown") &&
+            (value.adultCapabilityNote === undefined ||
+              value.adultCapabilityNote === null ||
+              typeof value.adultCapabilityNote === "string")
           );
         })
       : [];
@@ -449,6 +467,69 @@ function MediaRecommendationChoices({
                     : "Fits current cap"}
                 </strong>
               </span>
+              {option.recipe ? (
+                <>
+                  <span>
+                    <small>Workflow</small>
+                    <strong>
+                      {option.recipe.workflow === "reference-image-edit"
+                        ? "Reference image edit"
+                        : option.recipe.workflow === "text-to-video"
+                          ? "Text to video"
+                          : "Text to image"}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Quality goal</small>
+                    <strong>
+                      {option.recipe.qualityIntent === "maximum-quality"
+                        ? "Maximum quality"
+                        : option.recipe.qualityIntent === "balanced-quality-value"
+                          ? "Balanced quality / value"
+                          : "Cost efficient"}
+                    </strong>
+                  </span>
+                  <span className="media-recommendation-meta-wide">
+                    <small>Output configuration</small>
+                    <strong>
+                      {[
+                        option.recipe.resolution,
+                        option.recipe.aspectRatio,
+                        option.recipe.durationSeconds
+                          ? `${option.recipe.durationSeconds}s`
+                          : null,
+                        option.recipe.audio === true
+                          ? "audio"
+                          : option.recipe.audio === false
+                            ? "no audio"
+                            : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") || "Model-optimized image settings"}
+                    </strong>
+                  </span>
+                  <span className="media-recommendation-meta-wide">
+                    <small>Content output</small>
+                    <strong>
+                      {option.recipe.contentConstraint === "sfw-output"
+                        ? "SFW output"
+                        : "Follow request · adult output permitted"}
+                    </strong>
+                  </span>
+                  {option.recipe.contentConstraint !== "sfw-output" ? (
+                    <span className="media-recommendation-meta-wide">
+                      <small>Adult capability</small>
+                      <strong>
+                        {option.adultCapability === "verified"
+                          ? "Verified"
+                          : option.adultCapability === "blocked"
+                            ? "Blocked"
+                            : "Not yet verified"}
+                      </strong>
+                    </span>
+                  ) : null}
+                </>
+              ) : null}
               {option.referenceBehavior ? (
                 <span className="media-recommendation-meta-wide">
                   <small>Reference behavior</small>
@@ -466,6 +547,10 @@ function MediaRecommendationChoices({
             </div>
             {option.verificationNote ? (
               <p className="media-recommendation-note">{option.verificationNote}</p>
+            ) : null}
+            {option.recipe?.contentConstraint !== "sfw-output" &&
+            option.adultCapabilityNote ? (
+              <p className="media-recommendation-note">{option.adultCapabilityNote}</p>
             ) : null}
             <button
               className="media-recommendation-use"

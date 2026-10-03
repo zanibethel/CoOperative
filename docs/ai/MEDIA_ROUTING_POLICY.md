@@ -607,3 +607,42 @@ The agent slider represents a **quality/cost ceiling**, not a command to use a p
 Recommendation quality should be judged on the resulting output recipe, not model price alone. A lower-cost model at stronger settings may be a better route than a premium model at constrained settings, and spending budget on resolution, duration, reference fidelity, or another output dimension may improve the requested result more than changing models.
 
 High/Medium/Low recommendations should therefore compare complete executable configurations while preserving explicit request requirements unless an alternative is clearly labeled.
+
+
+## 23. Content-aware recommendation routing
+
+Adult-capability preference applies only when adult output is actually requested.
+
+For SFW/non-adult media requests:
+- do not filter out adult-capable models;
+- do not prefer adult-capable models merely because NSFW is enabled;
+- do not require adult capability merely because the profile stores Prefer/Require;
+- choose the best execution recipe using the normal quality, capability, cost, time, and request constraints.
+
+For an explicit adult-output media request:
+- `sfw_only`: stop at recommendation preflight and direct the user to enable NSFW; do not generate;
+- `adult_allowed`: exclude routes with current disallowed policy or latest blocked adult-capability evidence; verified and unknown routes may remain visible;
+- `prefer_adult_capable`: use the Allowed pool, then modestly prefer verified adult-capable routes when otherwise competitive;
+- `require_adult_capable`: only verified adult-capable routes may be recommended.
+
+Adult-capability evidence precedence:
+1. current provider/model policy marked disallowed => blocked;
+2. latest controlled test blocked => blocked;
+3. latest controlled test supported => verified;
+4. current provider/model policy allowed => verified;
+5. partial/inconclusive/no evidence => unknown.
+
+Do not infer adult capability from price, local hosting, model branding, or historical reputation.
+
+### Execution-recipe recommendation scoring
+
+High/Medium/Low compare complete configurations, not model names alone.
+
+- **High** prioritizes configuration quality. Model-quality signal remains important, while concrete output settings such as resolution can improve the score.
+- **Medium** balances configuration quality and the cost midpoint.
+- **Low** remains the cheapest exact-request configuration; quality breaks equal-cost ties.
+- Explicit request controls remain hard constraints.
+- Adult-capability preference may influence scoring only for an adult-output request.
+- Recommendation metadata should expose workflow, quality intent, output configuration, content constraint, and relevant capability evidence.
+
+Recommendation-time classification is intentionally conservative: explicit adult-output terms activate adult routing, while explicit SFW/no-nudity constraints keep the request on SFW routing. Execution must independently re-check the final request and current policy before provider submission.

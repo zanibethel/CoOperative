@@ -38,6 +38,32 @@ export function isApprovedPremiumReferenceSmokeRoute(
 }
 
 export type MediaRecommendationTier = "high-end" | "balanced" | "lowest-cost";
+export type MediaContentPreference =
+  | "sfw_only"
+  | "adult_allowed"
+  | "prefer_adult_capable"
+  | "require_adult_capable";
+export type AdultCapabilityState = "verified" | "blocked" | "unknown";
+
+export type MediaAdultCapabilityEvidence = {
+  provider: string;
+  model: string;
+  endpoint: string | null;
+  policy: "unknown" | "disallowed" | "allowed";
+  policySource: string | null;
+  latestTestOutcome: "supported" | "blocked" | "partial" | "inconclusive" | null;
+  latestTestedAt: string | null;
+};
+
+export type MediaExecutionRecipe = {
+  workflow: "text-to-image" | "reference-image-edit" | "text-to-video";
+  qualityIntent: "maximum-quality" | "balanced-quality-value" | "cost-efficient";
+  aspectRatio: string | null;
+  resolution: string | null;
+  durationSeconds: number | null;
+  audio: boolean | null;
+  contentConstraint: "sfw-output" | "request-controlled-adult-output";
+};
 
 export type MediaRecommendationOption = {
   tier: MediaRecommendationTier;
@@ -56,11 +82,146 @@ export type MediaRecommendationOption = {
   referenceBehavior: string | null;
   verificationNote: string | null;
   editEndpoint: string | null;
+  recipe: MediaExecutionRecipe;
+  adultCapability: AdultCapabilityState;
+  adultCapabilityNote: string | null;
 };
 
-type Candidate = Omit<MediaRecommendationOption, "tier" | "label" | "increaseNeededUsd" | "summary"> & {
+type Candidate = Omit<
+  MediaRecommendationOption,
+  | "tier"
+  | "label"
+  | "increaseNeededUsd"
+  | "summary"
+  | "recipe"
+  | "adultCapability"
+  | "adultCapabilityNote"
+> & {
   qualityLevel: number;
+  adultCapability?: AdultCapabilityState;
+  adultCapabilityNote?: string | null;
 };
+
+function adultCapabilityFor(
+  candidate: Pick<Candidate, "provider" | "model" | "editEndpoint">,
+  evidence: MediaAdultCapabilityEvidence[] | undefined,
+): { state: AdultCapabilityState; note: string | null } {
+  const match = evidence?.find(
+    (item) =>
+      item.provider === candidate.provider &&
+      item.model === candidate.model &&
+      (item.endpoint || "") === (candidate.editEndpoint || ""),
+  );
+
+  if (!match) {
+    return {
+      state: "unknown",
+      note: "Adult capability has not been verified for this exact route.",
+    };
+  }
+
+  if (match.policy === "disallowed") {
+    return {
+      state: "blocked",
+      note: match.policySource
+        ? `Current provider/model policy marks adult output as disallowed (${match.policySource}).`
+        : "Current provider/model policy marks adult output as disallowed.",
+    };
+  }
+
+  if (match.latestTestOutcome === "blocked") {
+    return {
+      state: "blocked",
+      note: `The latest controlled adult-capability test was blocked${match.latestTestedAt ? ` on ${new Date(match.latestTestedAt).toLocaleDateString("en-US")}` : ""}.`,
+    };
+  }
+
+  if (match.latestTestOutcome === "supported") {
+    return {
+      state: "verified",
+      note: `A controlled test verified adult-capable behavior for this exact route${match.latestTestedAt ? ` on ${new Date(match.latestTestedAt).toLocaleDateString("en-US")}` : ""}.`,
+    };
+  }
+
+  if (match.policy === "allowed") {
+    return {
+      state: "verified",
+      note: match.policySource
+        ? `Current provider/model policy permits adult output (${match.policySource}).`
+        : "Current provider/model policy permits adult output.",
+    };
+  }
+
+  return {
+    state: "unknown",
+    note:
+      match.latestTestOutcome === "partial"
+        ? "The latest controlled adult-capability test was only partially successful, so this route is not treated as verified adult-capable."
+        : "Adult capability remains unverified for this exact route.",
+  };
+}
+
+function contentConstraintFor(
+  preference: MediaContentPreference,
+  adultOutputRequested: boolean,
+): MediaExecutionRecipe["contentConstraint"] {
+  return adultOutputRequested && preference !== "sfw_only"
+    ? "request-controlled-adult-output"
+    : "sfw-output";
+}
+
+function workflowFor(
+  plan: MediaRequestPlan,
+  requiresReferenceImage: boolean,
+): MediaExecutionRecipe["workflow"] {
+  if (plan.kind === "video") return "text-to-video";
+  return requiresReferenceImage ? "reference-image-edit" : "text-to-image";
+}
+
+function resolutionQuality(value: string | null) {
+  switch ((value || "").toLowerCase()) {
+    case "4k":
+      return 5;
+    case "1080p":
+      return 4;
+    case "720p":
+      return 3;
+    case "540p":
+      return 2;
+    case "480p":
+      return 1.5;
+    case "360p":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function configurationQualityScore(
+  candidate: Candidate,
+  preference: MediaContentPreference,
+  adultOutputRequested: boolean,
+) {
+  const adultPreferenceBonus =
+    adultOutputRequested &&
+    preference === "prefer_adult_capable" &&
+    candidate.adultCapability === "verified"
+      ? 2
+      : 0;
+  return candidate.qualityLevel * 10 + resolutionQuality(candidate.resolution) + adultPreferenceBonus;
+}
+
+function withAdultCapability(
+  candidate: Candidate,
+  evidence: MediaAdultCapabilityEvidence[] | undefined,
+): Candidate {
+  const capability = adultCapabilityFor(candidate, evidence);
+  return {
+    ...candidate,
+    adultCapability: capability.state,
+    adultCapabilityNote: capability.note,
+  };
+}
 
 function nextCent(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -131,7 +292,16 @@ function asOption(
   candidate: Candidate,
   currentCapUsd: number,
   plan: MediaRequestPlan,
+  contentPreference: MediaContentPreference,
+  adultOutputRequested: boolean,
 ): MediaRecommendationOption {
+  const qualityIntent: MediaExecutionRecipe["qualityIntent"] =
+    tier === "high-end"
+      ? "maximum-quality"
+      : tier === "balanced"
+        ? "balanced-quality-value"
+        : "cost-efficient";
+
   return {
     tier,
     label,
@@ -149,6 +319,20 @@ function asOption(
     referenceBehavior: candidate.referenceBehavior,
     verificationNote: candidate.verificationNote,
     editEndpoint: candidate.editEndpoint,
+    recipe: {
+      workflow: workflowFor(plan, Boolean(candidate.referenceBehavior)),
+      qualityIntent,
+      aspectRatio: plan.aspectRatio,
+      resolution: candidate.resolution || plan.resolution,
+      durationSeconds: plan.durationSeconds,
+      audio: candidate.audio,
+      contentConstraint: contentConstraintFor(
+        contentPreference,
+        adultOutputRequested,
+      ),
+    },
+    adultCapability: candidate.adultCapability || "unknown",
+    adultCapabilityNote: candidate.adultCapabilityNote || null,
   };
 }
 
@@ -264,8 +448,13 @@ export async function buildMediaRecommendationOptions(input: {
   requiresReferenceImage?: boolean;
   referenceVerification?: NousReferenceTransportVerification | null;
   referenceModelVerifications?: MediaReferenceModelVerification[];
+  contentPreference?: MediaContentPreference;
+  adultCapabilityEvidence?: MediaAdultCapabilityEvidence[];
+  adultOutputRequested?: boolean;
 }) {
   const { plan, openRouterCatalog, currentCapUsd } = input;
+  const contentPreference = input.contentPreference || "sfw_only";
+  const adultOutputRequested = input.adultOutputRequested === true;
   const candidates: Candidate[] = [];
   const requestShape = {
     durationSeconds: plan.durationSeconds,
@@ -283,6 +472,15 @@ export async function buildMediaRecommendationOptions(input: {
   const exactOpenRouter = openRouterPool.filter((model) =>
     supportsExactRequest(model, plan),
   );
+  const openRouterQualityByModel = new Map<string, number>();
+  for (const level of [4, 3, 2, 1, 0] as const) {
+    const recommended = exactOpenRouter.length
+      ? recommendedForRequest(exactOpenRouter, level, requestShape)
+      : null;
+    if (recommended && !openRouterQualityByModel.has(recommended.id)) {
+      openRouterQualityByModel.set(recommended.id, level);
+    }
+  }
 
   for (const model of exactOpenRouter) {
     const estimatedCostUsd = estimateOpenRouterMediaCostUsd(model, {
@@ -301,7 +499,7 @@ export async function buildMediaRecommendationOptions(input: {
       pricingSource: openRouterCatalog?.source || "openrouter-live",
       resolution: plan.resolution,
       audio: plan.kind === "video" ? plan.audio : null,
-      qualityLevel: model.free ? 0 : 2,
+      qualityLevel: openRouterQualityByModel.get(model.id) ?? (model.free ? 0 : 2),
       executionReady: true,
       referenceBehavior: null,
       verificationNote: null,
@@ -452,72 +650,146 @@ export async function buildMediaRecommendationOptions(input: {
     }
   }
 
-  const deduped = [...new Map(candidates.map((candidate) => [candidateKey(candidate), candidate])).values()]
-    .sort(
-      (a, b) =>
-        a.estimatedCostUsd - b.estimatedCostUsd ||
-        a.qualityLevel - b.qualityLevel ||
-        a.modelName.localeCompare(b.modelName),
-    );
+  const enriched = candidates.map((candidate) =>
+    withAdultCapability(candidate, input.adultCapabilityEvidence),
+  );
+  if (adultOutputRequested && contentPreference === "sfw_only") {
+    return {
+      options: [] as MediaRecommendationOption[],
+      fetchedAt: new Date().toISOString(),
+      contentPreference,
+      requirementBlocked: false,
+      sfwConflict: true,
+    };
+  }
+
+  const preferenceEligible = !adultOutputRequested
+    ? enriched
+    : contentPreference === "require_adult_capable"
+      ? enriched.filter((candidate) => candidate.adultCapability === "verified")
+      : enriched.filter((candidate) => candidate.adultCapability !== "blocked");
+
+  const deduped = [
+    ...new Map(
+      preferenceEligible.map((candidate) => [candidateKey(candidate), candidate]),
+    ).values(),
+  ].sort(
+    (a, b) =>
+      a.estimatedCostUsd - b.estimatedCostUsd ||
+      configurationQualityScore(b, contentPreference, adultOutputRequested) -
+        configurationQualityScore(a, contentPreference, adultOutputRequested) ||
+      a.modelName.localeCompare(b.modelName),
+  );
 
   if (!deduped.length) {
     return {
       options: [] as MediaRecommendationOption[],
       fetchedAt: new Date().toISOString(),
+      contentPreference,
+      requirementBlocked:
+        adultOutputRequested && contentPreference === "require_adult_capable",
+      sfwConflict: false,
     };
   }
 
   const low = deduped[0];
-
-  const premiumModel = exactOpenRouter.length
-    ? recommendedForRequest(exactOpenRouter, 4, requestShape)
-    : null;
-  let high =
-    (premiumModel &&
-      deduped.find(
-        (candidate) =>
-          candidate.provider === "openrouter" &&
-          candidate.model === premiumModel.id,
-      )) ||
-    [...deduped].sort(
-      (a, b) =>
-        b.qualityLevel - a.qualityLevel ||
-        b.estimatedCostUsd - a.estimatedCostUsd,
-    )[0];
+  let high = [...deduped].sort(
+    (a, b) =>
+      configurationQualityScore(b, contentPreference, adultOutputRequested) -
+        configurationQualityScore(a, contentPreference, adultOutputRequested) ||
+      b.estimatedCostUsd - a.estimatedCostUsd,
+  )[0];
 
   if (candidateKey(high) === candidateKey(low) && deduped.length > 1) {
-    high = deduped[deduped.length - 1];
+    high =
+      [...deduped]
+        .filter((candidate) => candidateKey(candidate) !== candidateKey(low))
+        .sort(
+          (a, b) =>
+            configurationQualityScore(b, contentPreference, adultOutputRequested) -
+              configurationQualityScore(a, contentPreference, adultOutputRequested) ||
+            b.estimatedCostUsd - a.estimatedCostUsd,
+        )[0] || high;
   }
 
   const excluded = new Set([candidateKey(low), candidateKey(high)]);
   const midpoint = (low.estimatedCostUsd + high.estimatedCostUsd) / 2;
+  const availableBalanced = deduped.filter(
+    (candidate) => !excluded.has(candidateKey(candidate)),
+  );
+  const qualityScores = availableBalanced.map((candidate) =>
+    configurationQualityScore(candidate, contentPreference, adultOutputRequested),
+  );
+  const qualityMin = qualityScores.length ? Math.min(...qualityScores) : 0;
+  const qualityMax = qualityScores.length ? Math.max(...qualityScores) : 0;
+  const costSpan = Math.max(
+    0.000001,
+    Math.abs(high.estimatedCostUsd - low.estimatedCostUsd),
+  );
 
-  const balancedModel = exactOpenRouter.length
-    ? recommendedForRequest(exactOpenRouter, 2, requestShape)
-    : null;
   let balanced =
-    (balancedModel &&
-      deduped.find(
-        (candidate) =>
-          !excluded.has(candidateKey(candidate)) &&
-          candidate.provider === "openrouter" &&
-          candidate.model === balancedModel.id,
-      )) ||
-    distinctCandidate(deduped, excluded, midpoint);
+    [...availableBalanced].sort((a, b) => {
+      const score = (candidate: Candidate) => {
+        const quality = configurationQualityScore(candidate, contentPreference, adultOutputRequested);
+        const normalizedQuality =
+          qualityMax > qualityMin
+            ? (quality - qualityMin) / (qualityMax - qualityMin)
+            : 1;
+        const midpointFit = Math.max(
+          0,
+          1 - Math.abs(candidate.estimatedCostUsd - midpoint) / costSpan,
+        );
+        return normalizedQuality * 0.6 + midpointFit * 0.4;
+      };
+      return (
+        score(b) - score(a) ||
+        Math.abs(a.estimatedCostUsd - midpoint) -
+          Math.abs(b.estimatedCostUsd - midpoint)
+      );
+    })[0] ||
+    distinctCandidate(deduped, new Set([candidateKey(low)]), midpoint) ||
+    high;
 
-  if (!balanced) {
-    balanced = distinctCandidate(deduped, new Set([candidateKey(low)]), midpoint) || high;
+  if (candidateKey(balanced) === candidateKey(low) && deduped.length > 1) {
+    balanced = high;
   }
 
   const options = [
-    asOption("high-end", "High-end", high, currentCapUsd, plan),
-    asOption("lowest-cost", "Lowest cost", low, currentCapUsd, plan),
-    asOption("balanced", "Balanced", balanced, currentCapUsd, plan),
+    asOption(
+      "high-end",
+      "High-end",
+      high,
+      currentCapUsd,
+      plan,
+      contentPreference,
+      adultOutputRequested,
+    ),
+    asOption(
+      "lowest-cost",
+      "Lowest cost",
+      low,
+      currentCapUsd,
+      plan,
+      contentPreference,
+      adultOutputRequested,
+    ),
+    asOption(
+      "balanced",
+      "Balanced",
+      balanced,
+      currentCapUsd,
+      plan,
+      contentPreference,
+      adultOutputRequested,
+    ),
   ];
 
   return {
     options,
     fetchedAt: new Date().toISOString(),
+    contentPreference,
+    requirementBlocked: false,
+    sfwConflict: false,
   };
 }
 
