@@ -16,6 +16,11 @@ import {
 import type { MediaRequestPlan } from "@/lib/inference/media-request";
 import type { NousReferenceTransportVerification } from "@/lib/inference/nous-reference-transport-verification";
 
+export const PREMIUM_REFERENCE_SMOKE_MODEL =
+  "openai/gpt-image-2.5/sunburst/text-to-image";
+export const PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT =
+  "openai/gpt-image-2.5/sunburst/edit";
+
 export type MediaRecommendationTier = "high-end" | "balanced" | "lowest-cost";
 
 export type MediaRecommendationOption = {
@@ -169,11 +174,17 @@ function discoveredReferenceCandidate(
     pricingSource: model.pricing.source,
     resolution: null,
     audio: null,
-    executionReady: false,
+    executionReady:
+      model.model === PREMIUM_REFERENCE_SMOKE_MODEL &&
+      model.editEndpoint === PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT &&
+      verification?.readyForApprovedSmokeTest === true,
     referenceBehavior: model.capabilitySummary,
     verificationNote: verification
       ? verification.readyForApprovedSmokeTest
-        ? "Hermes reference capability, live pricing, connected Nous managed-FAL entitlement, gateway reachability, and secure short-lived attachment handoff are verified. The gateway exposes no documented zero-spend per-model allowlist check, so the model meter remains pending until the first explicitly approved generation."
+        ? model.model === PREMIUM_REFERENCE_SMOKE_MODEL &&
+          model.editEndpoint === PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT
+          ? "Transport is verified. This is the single approved premium reference smoke-test route. Selecting it permits one capped generation attempt with no automatic retry or fallback; that first real gateway response will verify this exact edit endpoint."
+          : "Hermes reference capability, live pricing, connected Nous managed-FAL entitlement, gateway reachability, and secure short-lived attachment handoff are verified. This model remains display-only until it is separately approved for a one-model smoke test."
         : [
             "Hermes reference capability and live pricing are verified.",
             verification.account.detail,
