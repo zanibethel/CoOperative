@@ -646,3 +646,37 @@ High/Medium/Low compare complete configurations, not model names alone.
 - Recommendation metadata should expose workflow, quality intent, output configuration, content constraint, and relevant capability evidence.
 
 Recommendation-time classification is intentionally conservative: explicit adult-output terms activate adult routing, while explicit SFW/no-nudity constraints keep the request on SFW routing. Execution must independently re-check the final request and current policy before provider submission.
+
+
+## 24. Execution-time content enforcement
+
+Recommendation-time eligibility is not sufficient authority to submit a media job.
+
+Immediately before an adult-output execution, CoOperative must re-read:
+- the profile's current NSFW/content preference and 18+ acknowledgment;
+- the exact provider/model/endpoint adult-content policy metadata;
+- the latest controlled adult-capability test for that exact route.
+
+Execution uses the same evidence precedence as recommendation routing:
+1. current provider/model policy marked disallowed => block;
+2. latest controlled test blocked => block;
+3. latest controlled test supported => verified;
+4. current provider/model policy allowed => verified;
+5. partial/inconclusive/no evidence => unknown.
+
+Execution rules:
+- SFW/non-adult requests remain eligible regardless of adult-capability preference;
+- `sfw_only` blocks an adult-output submission;
+- `adult_allowed` and `prefer_adult_capable` may submit verified or still-unknown routes, but never a route currently known to block/disallow adult output;
+- `require_adult_capable` submits only a currently verified route;
+- if current preference/capability evidence cannot be re-checked, adult output fails closed;
+- changing the saved preference or capability evidence after recommendation generation takes effect before submission.
+
+The gate applies to:
+- a user-selected owned/local recommendation;
+- a user-selected Nous/OpenRouter recommendation;
+- retrying a prior media job;
+- automatic owned/local fallback;
+- automatic OpenRouter fallback.
+
+Fallback economics never override the content gate. A cheaper or free route is not an acceptable fallback if its current content eligibility fails.
