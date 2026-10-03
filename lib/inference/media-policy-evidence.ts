@@ -17,11 +17,15 @@ const LOCAL_MODELS = [
   "local-image-quality-identity",
 ] as const;
 
+type ScopedAdultPolicy = "unknown" | "disallowed" | "allowed";
+
 type PolicySourceCheck = {
   provider: "nous" | "openrouter" | "cooperative-local";
   ok: boolean;
   checkedAt: string;
   source: string;
+  nonExplicitPolicy: ScopedAdultPolicy;
+  explicitPolicy: ScopedAdultPolicy;
   note: string;
   detail?: string | null;
 };
@@ -64,6 +68,8 @@ async function checkNousPolicy(): Promise<PolicySourceCheck> {
       ok: true,
       checkedAt,
       source,
+      nonExplicitPolicy: "unknown",
+      explicitPolicy: "disallowed",
       note:
         "Nous managed-FAL routes are subject to Nous terms, fal acceptable-use rules, and applicable third-party model terms. The current fal policy explicitly restricts sexually explicit and non-consensual intimate content. It does not establish whether a specific model supports non-explicit adult/nudity output, so broad adult capability remains unknown until exact-route evidence exists.",
     };
@@ -73,6 +79,8 @@ async function checkNousPolicy(): Promise<PolicySourceCheck> {
       ok: false,
       checkedAt,
       source,
+      nonExplicitPolicy: "unknown",
+      explicitPolicy: "unknown",
       note:
         "Current Nous/fal policy evidence could not be verified, so existing capability state was left unchanged.",
       detail: error instanceof Error ? error.message : "Policy check failed.",
@@ -96,6 +104,8 @@ async function checkOpenRouterPolicy(): Promise<PolicySourceCheck> {
       ok: true,
       checkedAt,
       source,
+      nonExplicitPolicy: "unknown",
+      explicitPolicy: "unknown",
       note:
         "OpenRouter requires compliance with the selected model/provider terms and does not provide one universal adult-content permission for every route. Exact adult capability therefore remains unknown until provider/model-specific evidence or a controlled exact-route test establishes it.",
     };
@@ -105,6 +115,8 @@ async function checkOpenRouterPolicy(): Promise<PolicySourceCheck> {
       ok: false,
       checkedAt,
       source,
+      nonExplicitPolicy: "unknown",
+      explicitPolicy: "unknown",
       note:
         "Current OpenRouter policy evidence could not be verified, so existing capability state was left unchanged.",
       detail: error instanceof Error ? error.message : "Policy check failed.",
@@ -118,6 +130,8 @@ function localPolicyCheck(): PolicySourceCheck {
     ok: true,
     checkedAt: new Date().toISOString(),
     source: "cooperative://docs/ai/MEDIA_ROUTING_POLICY.md",
+    nonExplicitPolicy: "unknown",
+    explicitPolicy: "unknown",
     note:
       "Owned/local execution has no third-party provider policy boundary, but CoOperative safety and legal restrictions still apply. Model support for non-explicit adult output remains a separate capability question that requires an exact-route controlled test.",
   };
@@ -131,7 +145,7 @@ export async function ensureMediaCapabilityRouteCatalog() {
     admin
       .from("media_model_capabilities")
       .select(
-        "provider,model,endpoint,adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at,reference_capability,reference_capability_source,notes",
+        "provider,model,endpoint,adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at,adult_non_explicit_policy,adult_non_explicit_policy_source,adult_non_explicit_policy_checked_at,adult_explicit_policy,adult_explicit_policy_source,adult_explicit_policy_checked_at,reference_capability,reference_capability_source,notes",
       ),
   ]);
 
@@ -205,6 +219,18 @@ export async function ensureMediaCapabilityRouteCatalog() {
       adult_content_policy_source: current?.adult_content_policy_source || null,
       adult_content_policy_checked_at:
         current?.adult_content_policy_checked_at || null,
+      adult_non_explicit_policy:
+        current?.adult_non_explicit_policy || "unknown",
+      adult_non_explicit_policy_source:
+        current?.adult_non_explicit_policy_source || null,
+      adult_non_explicit_policy_checked_at:
+        current?.adult_non_explicit_policy_checked_at || null,
+      adult_explicit_policy:
+        current?.adult_explicit_policy || "unknown",
+      adult_explicit_policy_source:
+        current?.adult_explicit_policy_source || null,
+      adult_explicit_policy_checked_at:
+        current?.adult_explicit_policy_checked_at || null,
       reference_capability:
         current?.reference_capability || route.referenceCapability,
       reference_capability_source:
@@ -245,22 +271,62 @@ export async function refreshMediaPolicyEvidence() {
 
     const { data: rows, error: readError } = await admin
       .from("media_model_capabilities")
-      .select("provider,model,endpoint,adult_content_policy,notes")
+      .select(
+        "provider,model,endpoint,adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at,adult_non_explicit_policy,adult_non_explicit_policy_source,adult_non_explicit_policy_checked_at,adult_explicit_policy,adult_explicit_policy_source,adult_explicit_policy_checked_at,notes",
+      )
       .eq("provider", check.provider);
     if (readError) throw readError;
 
     if (!rows?.length) continue;
 
-    const updates = rows.map((row) => ({
-      provider: row.provider,
-      model: row.model,
-      endpoint: row.endpoint || "",
-      adult_content_policy: row.adult_content_policy || "unknown",
-      adult_content_policy_source: check.source,
-      adult_content_policy_checked_at: check.checkedAt,
-      notes: check.note,
-      updated_at: check.checkedAt,
-    }));
+    const updates = rows.map((row) => {
+      const hasSpecificNonExplicit =
+        row.adult_non_explicit_policy !== "unknown" &&
+        Boolean(row.adult_non_explicit_policy_source);
+      const hasSpecificExplicit =
+        row.adult_explicit_policy !== "unknown" &&
+        Boolean(row.adult_explicit_policy_source);
+
+      return {
+        provider: row.provider,
+        model: row.model,
+        endpoint: row.endpoint || "",
+        adult_content_policy: row.adult_content_policy || "unknown",
+        adult_content_policy_source:
+          row.adult_content_policy_source || check.source,
+        adult_content_policy_checked_at:
+          row.adult_content_policy_checked_at || check.checkedAt,
+        adult_non_explicit_policy: hasSpecificNonExplicit
+          ? row.adult_non_explicit_policy
+          : check.nonExplicitPolicy,
+        adult_non_explicit_policy_source: hasSpecificNonExplicit
+          ? row.adult_non_explicit_policy_source
+          : check.source,
+        adult_non_explicit_policy_checked_at: hasSpecificNonExplicit
+          ? row.adult_non_explicit_policy_checked_at || check.checkedAt
+          : check.checkedAt,
+        adult_explicit_policy:
+          check.explicitPolicy === "disallowed"
+            ? "disallowed"
+            : hasSpecificExplicit
+              ? row.adult_explicit_policy
+              : check.explicitPolicy,
+        adult_explicit_policy_source:
+          check.explicitPolicy === "disallowed"
+            ? check.source
+            : hasSpecificExplicit
+              ? row.adult_explicit_policy_source
+              : check.source,
+        adult_explicit_policy_checked_at:
+          check.explicitPolicy === "disallowed"
+            ? check.checkedAt
+            : hasSpecificExplicit
+              ? row.adult_explicit_policy_checked_at || check.checkedAt
+              : check.checkedAt,
+        notes: row.notes,
+        updated_at: check.checkedAt,
+      };
+    });
 
     const { error: updateError } = await admin
       .from("media_model_capabilities")
