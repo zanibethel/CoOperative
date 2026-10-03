@@ -199,9 +199,12 @@ function resolutionQuality(value: string | null) {
 function configurationQualityScore(
   candidate: Candidate,
   preference: MediaContentPreference,
+  adultOutputRequested: boolean,
 ) {
   const adultPreferenceBonus =
-    preference === "prefer_adult_capable" && candidate.adultCapability === "verified"
+    adultOutputRequested &&
+    preference === "prefer_adult_capable" &&
+    candidate.adultCapability === "verified"
       ? 2
       : 0;
   return candidate.qualityLevel * 10 + resolutionQuality(candidate.resolution) + adultPreferenceBonus;
@@ -442,9 +445,11 @@ export async function buildMediaRecommendationOptions(input: {
   referenceModelVerifications?: MediaReferenceModelVerification[];
   contentPreference?: MediaContentPreference;
   adultCapabilityEvidence?: MediaAdultCapabilityEvidence[];
+  adultOutputRequested?: boolean;
 }) {
   const { plan, openRouterCatalog, currentCapUsd } = input;
   const contentPreference = input.contentPreference || "sfw_only";
+  const adultOutputRequested = input.adultOutputRequested === true;
   const candidates: Candidate[] = [];
   const requestShape = {
     durationSeconds: plan.durationSeconds,
@@ -643,10 +648,21 @@ export async function buildMediaRecommendationOptions(input: {
   const enriched = candidates.map((candidate) =>
     withAdultCapability(candidate, input.adultCapabilityEvidence),
   );
-  const preferenceEligible =
-    contentPreference === "require_adult_capable"
+  if (adultOutputRequested && contentPreference === "sfw_only") {
+    return {
+      options: [] as MediaRecommendationOption[],
+      fetchedAt: new Date().toISOString(),
+      contentPreference,
+      requirementBlocked: false,
+      sfwConflict: true,
+    };
+  }
+
+  const preferenceEligible = !adultOutputRequested
+    ? enriched
+    : contentPreference === "require_adult_capable"
       ? enriched.filter((candidate) => candidate.adultCapability === "verified")
-      : enriched;
+      : enriched.filter((candidate) => candidate.adultCapability !== "blocked");
 
   const deduped = [
     ...new Map(
@@ -655,8 +671,8 @@ export async function buildMediaRecommendationOptions(input: {
   ].sort(
     (a, b) =>
       a.estimatedCostUsd - b.estimatedCostUsd ||
-      configurationQualityScore(b, contentPreference) -
-        configurationQualityScore(a, contentPreference) ||
+      configurationQualityScore(b, contentPreference, adultOutputRequested) -
+        configurationQualityScore(a, contentPreference, adultOutputRequested) ||
       a.modelName.localeCompare(b.modelName),
   );
 
@@ -665,15 +681,17 @@ export async function buildMediaRecommendationOptions(input: {
       options: [] as MediaRecommendationOption[],
       fetchedAt: new Date().toISOString(),
       contentPreference,
-      requirementBlocked: contentPreference === "require_adult_capable",
+      requirementBlocked:
+        adultOutputRequested && contentPreference === "require_adult_capable",
+      sfwConflict: false,
     };
   }
 
   const low = deduped[0];
   let high = [...deduped].sort(
     (a, b) =>
-      configurationQualityScore(b, contentPreference) -
-        configurationQualityScore(a, contentPreference) ||
+      configurationQualityScore(b, contentPreference, adultOutputRequested) -
+        configurationQualityScore(a, contentPreference, adultOutputRequested) ||
       b.estimatedCostUsd - a.estimatedCostUsd,
   )[0];
 
@@ -683,8 +701,8 @@ export async function buildMediaRecommendationOptions(input: {
         .filter((candidate) => candidateKey(candidate) !== candidateKey(low))
         .sort(
           (a, b) =>
-            configurationQualityScore(b, contentPreference) -
-              configurationQualityScore(a, contentPreference) ||
+            configurationQualityScore(b, contentPreference, adultOutputRequested) -
+              configurationQualityScore(a, contentPreference, adultOutputRequested) ||
             b.estimatedCostUsd - a.estimatedCostUsd,
         )[0] || high;
   }
@@ -695,7 +713,7 @@ export async function buildMediaRecommendationOptions(input: {
     (candidate) => !excluded.has(candidateKey(candidate)),
   );
   const qualityScores = availableBalanced.map((candidate) =>
-    configurationQualityScore(candidate, contentPreference),
+    configurationQualityScore(candidate, contentPreference, adultOutputRequested),
   );
   const qualityMin = qualityScores.length ? Math.min(...qualityScores) : 0;
   const qualityMax = qualityScores.length ? Math.max(...qualityScores) : 0;
@@ -707,7 +725,7 @@ export async function buildMediaRecommendationOptions(input: {
   let balanced =
     [...availableBalanced].sort((a, b) => {
       const score = (candidate: Candidate) => {
-        const quality = configurationQualityScore(candidate, contentPreference);
+        const quality = configurationQualityScore(candidate, contentPreference, adultOutputRequested);
         const normalizedQuality =
           qualityMax > qualityMin
             ? (quality - qualityMin) / (qualityMax - qualityMin)
@@ -763,6 +781,7 @@ export async function buildMediaRecommendationOptions(input: {
     fetchedAt: new Date().toISOString(),
     contentPreference,
     requirementBlocked: false,
+    sfwConflict: false,
   };
 }
 
