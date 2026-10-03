@@ -1,7 +1,7 @@
 # CoOperative Media Routing Policy
 
 Status: Canonical owner-approved product policy  
-Last updated: 2026-10-02
+Last updated: 2026-10-03
 
 This document is the durable source of truth for CoOperative media-request interpretation, recommendation, budget, provider-routing, reference-image, retry, and UI behavior.
 
@@ -698,10 +698,14 @@ A controlled capability test must:
 - show a current live estimate and safe cap before execution;
 - require explicit user confirmation after route preparation;
 - remain within the existing user-approved Model Mixer cap;
+- submit the test job using the exact prepared route safe cap rather than the broader Model Mixer session ceiling;
 - allow only one active capability test per profile;
+- reconcile expired queued/running tests before allowing a new test so stale browser polling cannot permanently block the lab;
 - make one generation call only;
 - never retry, substitute another route, invoke fallback, or launch Recovery Agent;
 - persist supported / blocked / partial / inconclusive with a source media job and prompt classification.
+
+A preset may make the Run button unavailable when its session ceiling is below the selected route's current live safe cap. Raising the preset or session ceiling is always a manual user choice. The lab must not silently raise it.
 
 The initial standardized prompt classification is `adult_non_explicit_boundary`. It uses a clearly adult fictional subject and may test non-explicit artistic nudity, but it excludes sexual activity, graphic sexual detail, real-person sexualization, and minors.
 
