@@ -19,6 +19,13 @@ const EXPLICIT_ADULT_OUTPUT =
   /\b(nsfw|nudes?|nudity|naked|porn(?:ographic|ography)?|sexually explicit|explicit sexual|erotic|full[- ]?frontal|adult (?:content|image|photo|scene))\b/i;
 
 export function adultMediaOutputRequested(message: string) {
+  if (
+    /\b(sfw|safe for work|no nudity|without nudity|no explicit content|non[- ]?explicit|not nsfw)\b/i.test(
+      message,
+    )
+  ) {
+    return false;
+  }
   return EXPLICIT_ADULT_OUTPUT.test(message);
 }
 
