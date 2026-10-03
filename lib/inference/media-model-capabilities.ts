@@ -169,7 +169,7 @@ export async function evaluateMediaExecutionContentGate(input: {
     admin
       .from("media_model_capabilities")
       .select(
-        "adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at",
+        "adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at,adult_non_explicit_policy,adult_non_explicit_policy_source,adult_non_explicit_policy_checked_at,adult_explicit_policy,adult_explicit_policy_source,adult_explicit_policy_checked_at",
       )
       .eq("provider", input.provider)
       .eq("model", input.model)
@@ -208,13 +208,32 @@ export async function evaluateMediaExecutionContentGate(input: {
     latestTest?.outcome === "inconclusive"
       ? latestTest.outcome
       : null;
+  const scopedPolicy =
+    requestedClass === "adult_explicit"
+      ? capability?.adult_explicit_policy
+      : capability?.adult_non_explicit_policy;
+  const legacyPolicy = capability?.adult_content_policy;
+  const effectivePolicy =
+    scopedPolicy === "allowed" || scopedPolicy === "disallowed"
+      ? scopedPolicy
+      : legacyPolicy === "allowed" || legacyPolicy === "disallowed"
+        ? legacyPolicy
+        : "unknown";
+  const policySource =
+    requestedClass === "adult_explicit"
+      ? capability?.adult_explicit_policy_source ||
+        capability?.adult_content_policy_source ||
+        null
+      : capability?.adult_non_explicit_policy_source ||
+        capability?.adult_content_policy_source ||
+        null;
+
   const state = adultCapabilityState({
-    policy: capability?.adult_content_policy,
+    policy: effectivePolicy,
     latestTestOutcome,
     latestPromptClassification: latestTest?.prompt_classification,
     requestedClass,
   });
-  const policySource = capability?.adult_content_policy_source || null;
 
   if (state === "blocked") {
     return {
@@ -223,7 +242,7 @@ export async function evaluateMediaExecutionContentGate(input: {
       adultCapability: state,
       reason: "adult_route_blocked",
       note:
-        capability?.adult_content_policy === "disallowed"
+        effectivePolicy === "disallowed"
           ? policySource
             ? `Current provider/model policy disallows adult output (${policySource}).`
             : "Current provider/model policy disallows adult output."
