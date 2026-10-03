@@ -248,6 +248,23 @@ Observed tests can record:
 
 The authenticated read-only endpoint `/api/inference/media/capabilities` exposes the current preference, model capability metadata, and the latest observed tests for the active owner/profile. It reports content-aware recommendation routing as active.
 
+### Evidence-driven media routing
+
+Media recommendation routing now consumes exact-route benchmark evidence when it exists instead of treating model tier/price as the only quality signal.
+
+Current behavior:
+- benchmark observations are stored in `media_model_benchmarks` by exact provider/model/endpoint and dimension;
+- route scorecards expose visual quality, prompt adherence, anatomy, reference fidelity, edit strength, speed, benchmark coverage, and the selection basis;
+- measured benchmark evidence replaces the corresponding portion of the catalog/model-tier heuristic as coverage grows;
+- missing dimensions remain visibly unbenchmarked rather than being invented;
+- SFW routing ignores adult-capability status;
+- non-explicit adult Allowed keeps verified and unknown eligible while excluding blocked routes;
+- Prefer gives verified exact routes a modest ranking advantage when otherwise competitive;
+- Require keeps only verified exact routes;
+- the two existing non-explicit adult tests for Z-Image Turbo and Nano Banana Pro are now directly usable by that routing logic, but they do not count as quality benchmarks.
+
+Canonical benchmark/scoring plan: `docs/ai/MEDIA_BENCHMARK_FRAMEWORK.md`.
+
 ### Capability test polling recovery
 
 The Capability Lab client now keeps polling an active one-shot test until it reaches a terminal state. The previous implementation used a one-shot timeout whose effect depended on the job status; when a poll returned the same `running` value, React had no state change to trigger another timeout, so a successful provider result could remain stranded as `running` in the database until a later catalog refresh.
