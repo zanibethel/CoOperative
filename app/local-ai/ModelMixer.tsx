@@ -479,6 +479,17 @@ export default function ModelMixer({
         setCapabilityCatalog(payload);
         setCapabilityCatalogError("");
         setCapabilityRouteSelection((current) => {
+          const activeRouteKey = payload.activeJob
+            ? capabilityRouteKey(payload.activeJob)
+            : "";
+          if (
+            activeRouteKey &&
+            payload.routes.some(
+              (route) => capabilityRouteKey(route) === activeRouteKey,
+            )
+          ) {
+            return activeRouteKey;
+          }
           if (
             current &&
             payload.routes.some((route) => capabilityRouteKey(route) === current)
@@ -1128,11 +1139,26 @@ export default function ModelMixer({
                     </small>
                     {preparedCapability.capUsd >
                     settings.maxSpendUsd + 0.000001 ? (
-                      <small className="model-mixer-content-error">
-                        Current session cap is ${settings.maxSpendUsd.toFixed(2)}.
-                        Raise it manually to at least ${preparedCapability.capUsd.toFixed(2)}
-                        if you want to run this test.
-                      </small>
+                      <>
+                        <small className="model-mixer-content-error">
+                          Current session cap is ${settings.maxSpendUsd.toFixed(2)}.
+                          Raise it manually to at least ${preparedCapability.capUsd.toFixed(2)}
+                          if you want to run this test.
+                        </small>
+                        <button
+                          className="model-mixer-test-cap"
+                          type="button"
+                          onClick={() =>
+                            onChange({
+                              ...settings,
+                              preset: "custom",
+                              maxSpendUsd: preparedCapability.capUsd,
+                            })
+                          }
+                        >
+                          Set test cap to ${preparedCapability.capUsd.toFixed(2)}
+                        </button>
+                      </>
                     ) : null}
                     <button
                       type="button"
