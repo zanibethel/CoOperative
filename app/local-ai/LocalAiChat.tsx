@@ -310,6 +310,10 @@ type MediaRecommendationOption = {
   capUsd: number;
   increaseNeededUsd: number;
   summary: string;
+  executionReady?: boolean;
+  referenceBehavior?: string | null;
+  verificationNote?: string | null;
+  editEndpoint?: string | null;
 };
 
 function mediaRecommendationsDirective(content: string) {
@@ -340,7 +344,15 @@ function mediaRecommendationsDirective(content: string) {
             Number.isFinite(value.capUsd) &&
             typeof value.increaseNeededUsd === "number" &&
             Number.isFinite(value.increaseNeededUsd) &&
-            typeof value.summary === "string"
+            typeof value.summary === "string" &&
+            (value.executionReady === undefined ||
+              typeof value.executionReady === "boolean") &&
+            (value.referenceBehavior === undefined ||
+              value.referenceBehavior === null ||
+              typeof value.referenceBehavior === "string") &&
+            (value.verificationNote === undefined ||
+              value.verificationNote === null ||
+              typeof value.verificationNote === "string")
           );
         })
       : [];
@@ -437,13 +449,38 @@ function MediaRecommendationChoices({
                     : "Fits current cap"}
                 </strong>
               </span>
+              {option.referenceBehavior ? (
+                <span className="media-recommendation-meta-wide">
+                  <small>Reference behavior</small>
+                  <strong>{option.referenceBehavior}</strong>
+                </span>
+              ) : null}
+              <span>
+                <small>Status</small>
+                <strong>
+                  {option.executionReady === false
+                    ? "Verified recommendation · execution not enabled yet"
+                    : "Ready to use"}
+                </strong>
+              </span>
             </div>
+            {option.verificationNote ? (
+              <p className="media-recommendation-note">{option.verificationNote}</p>
+            ) : null}
             <button
               className="media-recommendation-use"
               type="button"
               onClick={() => onChoose(option)}
+              disabled={option.executionReady === false}
+              title={
+                option.executionReady === false
+                  ? "This premium reference route is display-only until the Nous gateway and attachment handoff are verified."
+                  : undefined
+              }
             >
-              Use {option.label}
+              {option.executionReady === false
+                ? "Execution verification next"
+                : `Use ${option.label}`}
             </button>
           </div>
         </details>
