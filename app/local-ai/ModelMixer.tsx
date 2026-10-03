@@ -480,7 +480,7 @@ export default function ModelMixer({
         setCapabilityCatalogError("");
         setCapabilityRouteSelection((current) => {
           const activeRouteKey = payload.activeJob
-            ? capabilityRouteKey(payload.activeJob)
+            ? `${payload.activeJob.provider}|${payload.activeJob.model}`
             : "";
           if (
             activeRouteKey &&
