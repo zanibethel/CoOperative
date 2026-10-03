@@ -469,6 +469,100 @@ export default function ModelMixer({
     };
   }, [open, refreshKey]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    void loadCapabilityTestCatalog()
+      .then((payload) => {
+        if (cancelled) return;
+        setCapabilityCatalog(payload);
+        setCapabilityCatalogError("");
+        setCapabilityRouteSelection((current) => {
+          if (
+            current &&
+            payload.routes.some((route) => capabilityRouteKey(route) === current)
+          ) {
+            return current;
+          }
+          return payload.routes[0] ? capabilityRouteKey(payload.routes[0]) : "";
+        });
+        if (payload.activeJob) {
+          setCapabilityTestJobId(payload.activeJob.jobId);
+          setCapabilityTestStatus(payload.activeJob.status);
+          setCapabilityTestMessage(
+            `Capability test is ${payload.activeJob.status} on ${payload.activeJob.model}.`,
+          );
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setCapabilityCatalogError(
+          error instanceof Error
+            ? error.message
+            : "Could not load capability-test routes.",
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, refreshKey]);
+
+  useEffect(() => {
+    if (
+      !open ||
+      !capabilityTestJobId ||
+      (capabilityTestStatus !== "running" && capabilityTestStatus !== "queued")
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void loadCapabilityTestState(capabilityTestJobId)
+        .then(async (payload) => {
+          if (cancelled) return;
+          setCapabilityTestStatus(payload.status);
+          if (payload.status === "running" || payload.status === "queued") {
+            setCapabilityTestMessage(
+              `Capability test is ${payload.status} on ${payload.model}.`,
+            );
+            return;
+          }
+
+          if (payload.result) {
+            setCapabilityTestMessage(
+              `Capability test ${payload.result.outcome}: ${payload.result.notes || payload.model}`,
+            );
+          } else {
+            setCapabilityTestMessage(
+              payload.error ||
+                `Capability test finished with status ${payload.status}.`,
+            );
+          }
+
+          const catalog = await loadCapabilityTestCatalog();
+          if (cancelled) return;
+          setCapabilityCatalog(catalog);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setCapabilityTestMessage(
+            error instanceof Error
+              ? error.message
+              : "Could not refresh capability-test status.",
+          );
+          setCapabilityTestStatus("failed");
+        });
+    }, 3500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, capabilityTestJobId, capabilityTestStatus]);
+
   const liveMedia = useMemo(() => {
     if (!mediaCatalog) return null;
     const level = settings.agents.media;
