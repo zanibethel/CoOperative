@@ -26,7 +26,7 @@ export async function GET() {
         admin
           .from("media_model_capabilities")
           .select(
-            "provider,model,endpoint,adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at,reference_capability,reference_capability_source,notes,updated_at",
+            "provider,model,endpoint,adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at,adult_non_explicit_policy,adult_non_explicit_policy_source,adult_non_explicit_policy_checked_at,adult_explicit_policy,adult_explicit_policy_source,adult_explicit_policy_checked_at,reference_capability,reference_capability_source,notes,updated_at",
           )
           .order("provider")
           .order("model"),
@@ -73,6 +73,13 @@ export async function GET() {
         adultContentPolicy: model.adult_content_policy,
         adultContentPolicySource: model.adult_content_policy_source,
         adultContentPolicyCheckedAt: model.adult_content_policy_checked_at,
+        adultNonExplicitPolicy: model.adult_non_explicit_policy,
+        adultNonExplicitPolicySource: model.adult_non_explicit_policy_source,
+        adultNonExplicitPolicyCheckedAt:
+          model.adult_non_explicit_policy_checked_at,
+        adultExplicitPolicy: model.adult_explicit_policy,
+        adultExplicitPolicySource: model.adult_explicit_policy_source,
+        adultExplicitPolicyCheckedAt: model.adult_explicit_policy_checked_at,
         referenceCapability: model.reference_capability,
         referenceCapabilitySource: model.reference_capability_source,
         notes: model.notes,
