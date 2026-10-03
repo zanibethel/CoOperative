@@ -88,6 +88,19 @@ It:
 
 Initial curated discovery covers GPT Image 2.5 Sunburst/Flare Edit, Nano Banana Pro/2 Edit, FLUX 2 Pro/Klein reference editing, and Qwen Image 2 Pro Edit.
 
+### Reference-image recommendation cards
+
+The verified discovery output is now wired into reference-image High / Medium / Low recommendation building.
+
+Current boundary:
+- live-priced Hermes/Nous reference-capable models may appear in the cards;
+- High prefers the strongest precision/reference capability available;
+- Medium finds a distinct quality/cost compromise;
+- Low remains the cheapest valid route, often owned/local;
+- premium discovery-only cards show reference behavior and verification status;
+- those premium cards are intentionally non-executable in this step;
+- existing owned/local reference-image execution remains unchanged.
+
 ### Next media implementation layer
 
-Wire only the verified discovery output into reference-image High / Medium / Low recommendation building. Preserve local reference-image routes as valid Medium/Low or fallback choices. Do not change execution until recommendation behavior is independently verified.
+Verify the connected Nous managed-gateway allowlist and attachment handoff for the discovered premium reference routes without broadening any other media behavior. Only after that passes should premium reference cards become executable.
