@@ -274,7 +274,9 @@ Capability-test spend semantics are now stricter:
 - the actual capability-test job is submitted with the exact prepared route safe cap;
 - no retry or fallback is allowed;
 - Economy can legitimately make a test button unavailable when its session ceiling is below the selected route's live safe cap;
-- changing to a higher preset is a manual user decision and does not automatically raise a test cap.
+- changing to a higher preset is a manual user decision and does not automatically raise a test cap;
+- when a prepared route's safe cap is above the current session cap, the Capability Lab now offers a manual **Set test cap to $X** action that changes only the session cap to that exact safe cap; it never auto-runs the test or raises the cap without a click;
+- when an active capability test is recovered after reopening the Model Mixer, the route selector follows that active exact route so the visible route and running-status message stay aligned.
 
 Current second validation:
 - `nous · fal-ai/nano-banana-pro` is running the same `adult_non_explicit_boundary` test;
