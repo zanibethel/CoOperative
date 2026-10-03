@@ -119,7 +119,7 @@ export async function PATCH(request: Request) {
         return NextResponse.json(
           {
             error:
-              "Adult-capable media preferences require an explicit 18+ acknowledgment.",
+              "NSFW output preferences require an explicit 18+ acknowledgment.",
           },
           { status: 400 },
         );

@@ -515,13 +515,26 @@ The immediate goal is:
 
 CoOperative may maintain a profile-level compatibility preference for adult-capable media models.
 
-Allowed preference modes:
-- **SFW only** — default; future routing should avoid adult-only compatibility requirements.
-- **Adult content allowed** — future routing may consider verified adult-capable models when the request requires them.
-- **Prefer adult-capable models** — when routes are otherwise comparable, future routing may prefer a model verified to support both SFW and adult workflows.
-- **Require adult-capable models** — future routing may exclude models not verified for the requested adult-capable workflow.
+The Model Mixer presents this as an **NSFW output** checkbox, not as an SFW-model filter.
 
-Non-SFW preferences require an explicit 18+ acknowledgment.
+Default state:
+- **NSFW unchecked** maps to stored mode `sfw_only`.
+- This means generated output must remain SFW.
+- It does **not** exclude a model merely because that model is also capable of adult content.
+- Adult-capable models remain fully eligible for SFW requests when they are otherwise the best execution route.
+
+When NSFW is checked:
+- the UI expands the adult-output options;
+- **Adult content allowed** is selected by default;
+- the user may manually select **Prefer adult-capable models** or **Require adult-capable models**;
+- an explicit 18+ acknowledgment is required before saving.
+
+Expanded preference modes:
+- **Adult content allowed** — adult output is permitted when requested; otherwise choose the best execution recipe normally.
+- **Prefer adult-capable models** — when routes are otherwise comparable, prefer a model verified to support the requested adult workflow without unnecessarily sacrificing output quality.
+- **Require adult-capable models** — for applicable adult media requests, exclude routes not verified to support the requested adult workflow.
+
+SFW/NSFW is therefore primarily an **output constraint**. Adult-content support is a separate **model capability** used only when relevant to fulfilling the requested output.
 
 The preference does not override:
 - provider/model terms;
@@ -567,3 +580,30 @@ Useful test dimensions include:
 - provider/policy behavior.
 
 Capability test results should inform future recommendation quality, but routing must continue to respect current provider rules and safety boundaries.
+
+
+## 22. Model Mixer execution-recipe principle
+
+The Model Mixer is not merely a model picker.
+
+For each task or subtask, it should determine the best **execution recipe** within the user's selected quality/cost ceiling and explicit constraints.
+
+A media execution recipe may include:
+- provider and model;
+- generation mode such as text-to-image, reference edit, image-to-video, or other supported workflow;
+- requested output type;
+- resolution and aspect ratio;
+- duration and audio for video;
+- quality/detail settings;
+- reference-image behavior, reference strength, and fidelity goals where supported;
+- number of outputs when relevant;
+- estimated provider/infrastructure/user cost;
+- expected completion time;
+- content-output constraints such as SFW or permitted adult output;
+- other capability-specific controls exposed by the chosen route.
+
+The agent slider represents a **quality/cost ceiling**, not a command to use a particular model or to spend the full amount.
+
+Recommendation quality should be judged on the resulting output recipe, not model price alone. A lower-cost model at stronger settings may be a better route than a premium model at constrained settings, and spending budget on resolution, duration, reference fidelity, or another output dimension may improve the requested result more than changing models.
+
+High/Medium/Low recommendations should therefore compare complete executable configurations while preserving explicit request requirements unless an alternative is clearly labeled.
