@@ -1334,7 +1334,7 @@ export async function POST(request: Request) {
         admin
           .from("media_model_capabilities")
           .select(
-            "provider,model,endpoint,adult_content_policy,adult_content_policy_source",
+            "provider,model,endpoint,adult_content_policy,adult_content_policy_source,adult_non_explicit_policy,adult_non_explicit_policy_source,adult_explicit_policy,adult_explicit_policy_source",
           ),
         admin
           .from("media_model_capability_tests")
@@ -1391,6 +1391,19 @@ export async function POST(request: Request) {
               ? row.adult_content_policy
               : "unknown",
           policySource: row.adult_content_policy_source || null,
+          nonExplicitPolicy:
+            row.adult_non_explicit_policy === "allowed" ||
+            row.adult_non_explicit_policy === "disallowed"
+              ? row.adult_non_explicit_policy
+              : "unknown",
+          nonExplicitPolicySource:
+            row.adult_non_explicit_policy_source || null,
+          explicitPolicy:
+            row.adult_explicit_policy === "allowed" ||
+            row.adult_explicit_policy === "disallowed"
+              ? row.adult_explicit_policy
+              : "unknown",
+          explicitPolicySource: row.adult_explicit_policy_source || null,
           latestTestOutcome: null,
           latestPromptClassification: null,
           latestTestedAt: null,
@@ -1406,6 +1419,10 @@ export async function POST(request: Request) {
           endpoint: test.endpoint || null,
           policy: existing?.policy || "unknown",
           policySource: existing?.policySource || null,
+          nonExplicitPolicy: existing?.nonExplicitPolicy || "unknown",
+          nonExplicitPolicySource: existing?.nonExplicitPolicySource || null,
+          explicitPolicy: existing?.explicitPolicy || "unknown",
+          explicitPolicySource: existing?.explicitPolicySource || null,
           latestTestOutcome:
             test.outcome === "supported" ||
             test.outcome === "blocked" ||
