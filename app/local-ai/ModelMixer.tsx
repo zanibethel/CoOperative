@@ -461,6 +461,8 @@ export default function ModelMixer({
   const [mediaPreferenceLoaded, setMediaPreferenceLoaded] = useState(false);
   const [mediaPreferenceSaving, setMediaPreferenceSaving] = useState(false);
   const [mediaPreferenceError, setMediaPreferenceError] = useState("");
+  const [maxSpendSaving, setMaxSpendSaving] = useState(false);
+  const [maxSpendMessage, setMaxSpendMessage] = useState("");
   const [capabilityCatalog, setCapabilityCatalog] =
     useState<CapabilityTestCatalog | null>(null);
   const [capabilityCatalogError, setCapabilityCatalogError] = useState("");
@@ -485,6 +487,7 @@ export default function ModelMixer({
           settings?: {
             mediaContentPreference?: MediaContentPreference;
             adultContentAcknowledgedAt?: string | null;
+            maxSpendPerPromptUsd?: number;
           };
           error?: string;
           detail?: string;
@@ -502,6 +505,19 @@ export default function ModelMixer({
         setAdultContentAcknowledged(
           Boolean(payload.settings?.adultContentAcknowledgedAt),
         );
+        if (
+          typeof payload.settings?.maxSpendPerPromptUsd === "number" &&
+          Number.isFinite(payload.settings.maxSpendPerPromptUsd)
+        ) {
+          const savedCap = Math.max(0, payload.settings.maxSpendPerPromptUsd);
+          if (Math.abs(savedCap - settings.maxSpendUsd) > 0.000001) {
+            onChange({
+              ...settings,
+              preset: "custom",
+              maxSpendUsd: savedCap,
+            });
+          }
+        }
         setMediaPreferenceLoaded(true);
       })
       .catch((error) => {
@@ -713,6 +729,60 @@ export default function ModelMixer({
       (route) => capabilityRouteKey(route) === preparedCapabilityRoute,
     ) || null;
 
+  async function saveMaxSpendPerPrompt(value: number) {
+    if (maxSpendSaving) return;
+    const normalized = Number(Math.min(100, Math.max(0, value)).toFixed(4));
+    setMaxSpendSaving(true);
+    setMaxSpendMessage("");
+    try {
+      const response = await fetch("/api/personal-ai/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxSpendPerPromptUsd: normalized }),
+      });
+      const payload = (await response.json()) as {
+        settings?: { maxSpendPerPromptUsd?: number };
+        error?: string;
+        detail?: string;
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.detail || payload.error || "Could not save max spend per prompt.",
+        );
+      }
+      const saved =
+        typeof payload.settings?.maxSpendPerPromptUsd === "number"
+          ? payload.settings.maxSpendPerPromptUsd
+          : normalized;
+      onChange({
+        ...settings,
+        preset: "custom",
+        maxSpendUsd: saved,
+      });
+      setMaxSpendMessage(`Saved $ ${saved.toFixed(2)} max per prompt.`.replace("$ ", "$"));
+    } catch (error) {
+      setMaxSpendMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not save max spend per prompt.",
+      );
+    } finally {
+      setMaxSpendSaving(false);
+    }
+  }
+
+  function changeMaxSpendPerPrompt(value: number) {
+    const normalized = Number.isFinite(value)
+      ? Number(Math.min(100, Math.max(0, value)).toFixed(4))
+      : 0;
+    onChange({
+      ...settings,
+      preset: "custom",
+      maxSpendUsd: normalized,
+    });
+    setMaxSpendMessage("");
+  }
+
   async function saveMediaContentPreference() {
     if (mediaPreferenceSaving) return;
     if (
@@ -874,7 +944,9 @@ export default function ModelMixer({
   }
 
   function setPreset(preset: Exclude<ModelMixerPreset, "custom">) {
-    onChange(presetSettings(preset));
+    const next = presetSettings(preset);
+    onChange(next);
+    void saveMaxSpendPerPrompt(next.maxSpendUsd);
   }
 
   function setLevel(agent: ModelMixerAgent, value: ModelMixerLevel) {
@@ -999,7 +1071,7 @@ export default function ModelMixer({
 
         <div className="model-mixer-summary">
           <span>
-            <small>Estimated Session Cost</small>
+            <small>Estimated prompt cost</small>
             <strong>~${estimate.estimatedUsd.toFixed(2)}</strong>
           </span>
           <span>
@@ -1007,39 +1079,67 @@ export default function ModelMixer({
             <strong>{formatDuration(estimate.seconds)}</strong>
           </span>
           <label>
-            <small>Max spend cap</small>
+            <small>Max spend per prompt</small>
             <span className="model-mixer-cap-input">
               <b>$</b>
               <input
                 type="number"
                 min="0"
                 max="100"
-                step="0.05"
+                step="0.01"
                 value={settings.maxSpendUsd}
-                onChange={(event) => {
-                  const next = Number(event.target.value);
-                  onChange({
-                    ...settings,
-                    preset: "custom",
-                    maxSpendUsd: Number.isFinite(next) ? Math.max(0, next) : 0,
-                  });
-                }}
-                aria-label="Maximum spend cap"
+                onChange={(event) =>
+                  changeMaxSpendPerPrompt(Number(event.target.value))
+                }
+                onBlur={() => void saveMaxSpendPerPrompt(settings.maxSpendUsd)}
+                aria-label="Maximum spend per prompt"
               />
             </span>
+            <div className="model-mixer-slider-wrap">
+              <input
+                className="model-mixer-slider"
+                type="range"
+                min="0"
+                max="5"
+                step="0.01"
+                value={Math.min(5, settings.maxSpendUsd)}
+                onChange={(event) =>
+                  changeMaxSpendPerPrompt(Number(event.target.value))
+                }
+                onPointerUp={(event) =>
+                  void saveMaxSpendPerPrompt(Number(event.currentTarget.value))
+                }
+                onKeyUp={(event) =>
+                  void saveMaxSpendPerPrompt(Number(event.currentTarget.value))
+                }
+                aria-label="Max spend per prompt slider"
+              />
+              <div className="model-mixer-level-labels" aria-hidden="true">
+                <span>$0</span>
+                <span>$1</span>
+                <span>$2</span>
+                <span>$3</span>
+                <span>$5</span>
+              </div>
+            </div>
+            <small>
+              Hard ceiling for one chat prompt. The slider covers $0–$5; type an exact
+              value above $5 if needed.
+            </small>
             <button
               className="model-mixer-test-cap"
               type="button"
-              onClick={() =>
-                onChange({
-                  ...settings,
-                  preset: "custom",
-                  maxSpendUsd: 0.05,
-                })
-              }
+              onClick={() => {
+                changeMaxSpendPerPrompt(0.05);
+                void saveMaxSpendPerPrompt(0.05);
+              }}
+              disabled={maxSpendSaving}
             >
               Use $0.05 test cap
             </button>
+            {maxSpendMessage ? (
+              <small className="model-mixer-capability-message">{maxSpendMessage}</small>
+            ) : null}
           </label>
         </div>
 
@@ -1460,7 +1560,7 @@ export default function ModelMixer({
             {" → "}
             {mediaCatalog?.configured.openRouter
               ? "paid OpenRouter backup"
-              : "paid OpenRouter backup not connected"}. The request cap is a hard ceiling;
+              : "paid OpenRouter backup not connected"}. The per-prompt cap is a hard ceiling;
             CoOperative does not raise it automatically.
           </span>
           <small>
@@ -1489,7 +1589,7 @@ export default function ModelMixer({
             <i />
           </span>
           <p>
-            CoOperative builds an execution recipe for each subtask within your selected cap.
+            CoOperative builds an execution recipe for each subtask within your per-prompt spend ceiling.
             The mixer considers model/provider plus the requested output type, quality, configuration,
             cost, and time. The slider is a quality/cost ceiling for that agent, not a requirement to
             spend at that level. For connected paid media, Nous subscription credits are preferred first,
