@@ -133,7 +133,7 @@ function asOption(
 function referenceQualityLevel(model: NousReferenceImageModel) {
   switch (model.capabilityClass) {
     case "precision-edit":
-      return 4;
+      return 5;
     case "identity-reference":
       return 4;
     case "semantic-multi-reference":
