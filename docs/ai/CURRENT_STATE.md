@@ -164,6 +164,27 @@ Execution behavior now:
 - a later transient failure does not erase an already verified endpoint;
 - failed reference routes do not auto-fallback to a path that may ignore the reference image.
 
+### Second premium reference smoke-test route
+
+FLUX 2 Pro Edit is now the second isolated premium reference model eligible for a one-shot verification:
+
+- Hermes model: `fal-ai/flux-2-pro`
+- actual edit endpoint: `fal-ai/flux-2-pro/edit`
+
+Sunburst remains the only persistently verified premium reference route on the current profile. FLUX 2 Pro becomes selectable only when current Nous transport checks pass and there is no existing verification record for that endpoint.
+
+The same smoke-test rules apply:
+- explicit card selection;
+- quoted cap enforced before submission;
+- current authenticated reference image preserved;
+- one generation attempt;
+- no automatic retry;
+- no provider fallback;
+- no Recovery Agent launch;
+- result persisted against the exact edit endpoint.
+
+No other premium reference model is newly enabled.
+
 ### Next media implementation layer
 
-Keep the one-model-at-a-time rollout. The next premium reference model should receive its own isolated smoke test only after the Sunburst persisted-verification behavior is observed in the UI. Do not unlock the remaining models together.
+Run and inspect one FLUX 2 Pro reference-image smoke test. If it succeeds and visibly honors the reference image, its existing verification persistence path will promote it to normal executable use. If it fails, keep it blocked with the recorded endpoint failure. Do not unlock a third model until that result is reviewed.
