@@ -188,3 +188,36 @@ No other premium reference model is newly enabled.
 ### Next media implementation layer
 
 Run and inspect one FLUX 2 Pro reference-image smoke test. If it succeeds and visibly honors the reference image, its existing verification persistence path will promote it to normal executable use. If it fails, keep it blocked with the recorded endpoint failure. Do not unlock a third model until that result is reviewed.
+
+
+### Media content compatibility preference and capability learning
+
+A profile-level media content compatibility preference now exists with four explicit modes:
+- `sfw_only` (default);
+- `adult_allowed`;
+- `prefer_adult_capable`;
+- `require_adult_capable`.
+
+Non-SFW preferences require an explicit 18+ acknowledgment. The preference is stored in `personal_ai_settings` and surfaced in Model Mixer.
+
+This update does **not** change model routing yet.
+
+Two capability-learning tables now exist:
+- `media_model_capabilities` for provider/model/endpoint capability and published-policy metadata;
+- `media_model_capability_tests` for owner/profile-specific observed test outcomes.
+
+Initial premium reference models are seeded with their known reference capability from Hermes, while adult-content policy remains `unknown` until a current policy source or controlled test establishes more.
+
+Observed tests can record:
+- adult-content support or blocking;
+- reference fidelity;
+- identity preservation;
+- edit strength;
+- provider/policy behavior;
+- other model-specific observations.
+
+The authenticated read-only endpoint `/api/inference/media/capabilities` exposes the current preference, model capability metadata, and the latest observed tests for the active owner/profile. It explicitly reports that routing is not yet using the preference.
+
+### Next content-compatibility implementation layer
+
+After the preference UI/metadata is verified, teach recommendation building to filter or prefer models according to the profile setting while still enforcing provider rules, model capability truthfulness, and hard safety boundaries. Adult-capability tests should be recorded as observed capability evidence, not treated as permission to bypass provider or platform restrictions.
