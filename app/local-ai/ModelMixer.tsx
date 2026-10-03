@@ -113,6 +113,41 @@ type CapabilityTestState = {
   } | null;
 };
 
+type MediaQualityBenchmarkPreparation = {
+  suite: string;
+  preparedAt: string;
+  imageCount: number;
+  callsPerRoute: number;
+  estimatedTotalCostUsd: number;
+  safeTotalCapUsd: number;
+  cases: Array<{
+    id: string;
+    label: string;
+    primaryDimensions: string[];
+    prompt: string;
+    evaluation: string[];
+  }>;
+  routes: Array<{
+    provider: "nous";
+    model: string;
+    available: boolean;
+    estimatedCostPerImageUsd: number | null;
+    safeCapPerImageUsd: number | null;
+    estimatedSuiteCostUsd: number | null;
+    safeSuiteCapUsd: number | null;
+    pricingSource: string | null;
+  }>;
+  executionPolicy: {
+    paidCallsStartOnPrepare: boolean;
+    exactRouteOnly: boolean;
+    retries: boolean;
+    fallbacks: boolean;
+    parallelRouteSubstitution: boolean;
+    identicalPromptsAcrossRoutes: boolean;
+    contentClass: string;
+  };
+};
+
 export type ModelMixerSettings = {
   preset: ModelMixerPreset;
   maxSpendUsd: number;
@@ -349,6 +384,24 @@ async function loadCapabilityTestState(jobId: string) {
   return payload;
 }
 
+async function loadMediaQualityBenchmarkPreparation() {
+  const response = await fetch("/api/inference/media/benchmarks/prepare", {
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as MediaQualityBenchmarkPreparation & {
+    error?: string;
+    detail?: string;
+  };
+  if (!response.ok) {
+    throw new Error(
+      payload.detail ||
+        payload.error ||
+        "Could not prepare the media quality benchmark.",
+    );
+  }
+  return payload;
+}
+
 function presetSettings(preset: Exclude<ModelMixerPreset, "custom">): ModelMixerSettings {
   return {
     preset,
@@ -418,6 +471,9 @@ export default function ModelMixer({
   const [capabilityTestJobId, setCapabilityTestJobId] = useState("");
   const [capabilityTestStatus, setCapabilityTestStatus] = useState("");
   const [capabilityTestMessage, setCapabilityTestMessage] = useState("");
+  const [benchmarkPreparation, setBenchmarkPreparation] =
+    useState<MediaQualityBenchmarkPreparation | null>(null);
+  const [benchmarkPreparationError, setBenchmarkPreparationError] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -480,6 +536,31 @@ export default function ModelMixer({
       })
       .catch(() => {
         if (!cancelled) setMediaCatalogError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, refreshKey]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    void loadMediaQualityBenchmarkPreparation()
+      .then((payload) => {
+        if (cancelled) return;
+        setBenchmarkPreparation(payload);
+        setBenchmarkPreparationError("");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setBenchmarkPreparation(null);
+        setBenchmarkPreparationError(
+          error instanceof Error
+            ? error.message
+            : "Could not prepare the media quality benchmark.",
+        );
       });
 
     return () => {
@@ -1267,6 +1348,83 @@ export default function ModelMixer({
               </div>
             </div>
           )}
+
+          <div className="model-mixer-capability-lab">
+            <div className="model-mixer-capability-lab-head">
+              <div>
+                <strong>Quality benchmark showdown</strong>
+                <span>
+                  Z-Image Turbo vs Nano Banana Pro · identical SFW prompts · prepared only.
+                </span>
+              </div>
+            </div>
+
+            {benchmarkPreparationError ? (
+              <p className="model-mixer-content-error">
+                {benchmarkPreparationError}
+              </p>
+            ) : null}
+
+            {benchmarkPreparation ? (
+              <>
+                <div className="model-mixer-capability-route-summary">
+                  {benchmarkPreparation.routes.map((route) => (
+                    <span key={route.model}>
+                      <small>{route.model.replace(/^fal-ai\//, "")}</small>
+                      <strong>
+                        {route.available &&
+                        route.estimatedCostPerImageUsd !== null &&
+                        route.estimatedSuiteCostUsd !== null
+                          ? `${route.estimatedCostPerImageUsd.toFixed(3)} / image · ${route.estimatedSuiteCostUsd.toFixed(3)} suite`
+                          : "Live price unavailable"}
+                      </strong>
+                    </span>
+                  ))}
+                  <span>
+                    <small>Planned generations</small>
+                    <strong>{benchmarkPreparation.imageCount} total</strong>
+                  </span>
+                  <span>
+                    <small>Estimated provider total</small>
+                    <strong>
+                      ${benchmarkPreparation.estimatedTotalCostUsd.toFixed(3)}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Safe maximum approval</small>
+                    <strong>${benchmarkPreparation.safeTotalCapUsd.toFixed(2)}</strong>
+                  </span>
+                </div>
+
+                <small className="model-mixer-capability-scope">
+                  Preparing this benchmark makes no paid generation calls. The planned run is
+                  three exact prompts per route with no retry, fallback, or model substitution.
+                </small>
+
+                <div className="model-mixer-capability-prepared">
+                  <strong>Benchmark cases</strong>
+                  {benchmarkPreparation.cases.map((testCase, index) => (
+                    <details key={testCase.id}>
+                      <summary>
+                        {index + 1}. {testCase.label}
+                      </summary>
+                      <small>{testCase.prompt}</small>
+                    </details>
+                  ))}
+                </div>
+
+                <p className="model-mixer-capability-message">
+                  No benchmark run has started. Execution should require a separate explicit
+                  approval for the ${benchmarkPreparation.safeTotalCapUsd.toFixed(2)} safe
+                  maximum.
+                </p>
+              </>
+            ) : (
+              <small className="model-mixer-capability-scope">
+                Loading current benchmark pricing…
+              </small>
+            )}
+          </div>
 
           <div className="model-mixer-content-actions">
             <button
