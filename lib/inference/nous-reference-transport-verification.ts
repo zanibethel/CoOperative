@@ -7,6 +7,7 @@ const PORTAL_ACCOUNT_URL = "https://portal.nousresearch.com/api/oauth/account";
 const FAL_QUEUE_ORIGIN = "https://fal-queue-gateway.nousresearch.com";
 const ATTACHMENT_BUCKET = "local-ai-attachments";
 const SIGNED_URL_TTL_SECONDS = 10 * 60;
+const EXECUTION_SIGNED_URL_TTL_SECONDS = 20 * 60;
 const VERIFY_TIMEOUT_MS = 8_000;
 
 export type NousReferenceTransportVerification = {
@@ -237,6 +238,57 @@ async function verifyAttachments(
     detail: handoffReady
       ? null
       : `Verified ${verifiedCount} of ${uniqueIds.length} short-lived HTTPS reference URLs.`,
+  };
+}
+
+export async function createNousReferenceImageExecutionUrls(input: {
+  ownerRef: string;
+  attachmentIds: string[];
+}) {
+  if (!input.attachmentIds.length) {
+    throw new Error("A reference-image attachment is required.");
+  }
+
+  const admin = createAdminSupabaseClient();
+  const uniqueIds = [...new Set(input.attachmentIds)].slice(0, 16);
+  const { data: rows, error } = await admin
+    .from("local_ai_attachments")
+    .select("id,storage_path")
+    .eq("owner_ref", input.ownerRef)
+    .in("id", uniqueIds);
+
+  if (error) throw error;
+  if (!rows || rows.length !== uniqueIds.length) {
+    throw new Error("One or more reference-image attachments are unavailable.");
+  }
+
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const urls: string[] = [];
+
+  for (const id of uniqueIds) {
+    const row = byId.get(id);
+    if (!row) throw new Error("Reference-image attachment metadata is missing.");
+
+    const { data: signed, error: signError } = await admin.storage
+      .from(ATTACHMENT_BUCKET)
+      .createSignedUrl(
+        row.storage_path,
+        EXECUTION_SIGNED_URL_TTL_SECONDS,
+      );
+    if (signError || !signed?.signedUrl) {
+      throw signError || new Error("Could not create a reference-image URL.");
+    }
+
+    const parsed = new URL(signed.signedUrl);
+    if (parsed.protocol !== "https:") {
+      throw new Error("Reference-image handoff requires HTTPS.");
+    }
+    urls.push(signed.signedUrl);
+  }
+
+  return {
+    urls,
+    ttlSeconds: EXECUTION_SIGNED_URL_TTL_SECONDS,
   };
 }
 
