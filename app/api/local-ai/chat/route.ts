@@ -40,6 +40,7 @@ import {
 } from "@/lib/inference/media-recommendations";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
+import { verifyNousReferenceImageTransport } from "@/lib/inference/nous-reference-transport-verification";
 import {
   looksLikeApiCredential,
   planServiceConnectIntent,
@@ -1135,6 +1136,22 @@ export async function POST(request: Request) {
 
       const requiresReferenceImage =
         mediaPlan.kind === "image" && effectiveMediaAttachmentIds.length > 0;
+      const referenceVerification = requiresReferenceImage
+        ? await verifyNousReferenceImageTransport({
+            ownerRef,
+            attachmentIds: effectiveMediaAttachmentIds,
+            runtimeAuth: nousRuntimeAuth,
+          }).catch((error) => {
+            console.warn("Nous reference transport verification failed", {
+              ownerRef,
+              detail:
+                error instanceof Error
+                  ? error.message.slice(0, 500)
+                  : "unknown verification failure",
+            });
+            return null;
+          })
+        : null;
       let localImageAvailable = false;
       if (mediaPlan.kind === "image") {
         const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
@@ -1172,6 +1189,7 @@ export async function POST(request: Request) {
         currentCapUsd: requestCapUsd,
         localImageAvailable,
         requiresReferenceImage,
+        referenceVerification,
       });
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const selectedRecommendation = recommendationTier
