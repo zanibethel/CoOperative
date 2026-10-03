@@ -15,6 +15,7 @@ import {
 } from "@/lib/inference/nous-reference-image-discovery";
 import type { MediaRequestPlan } from "@/lib/inference/media-request";
 import type { NousReferenceTransportVerification } from "@/lib/inference/nous-reference-transport-verification";
+import type { MediaReferenceModelVerification } from "@/lib/inference/media-reference-model-verification";
 
 export const PREMIUM_REFERENCE_SMOKE_MODEL =
   "openai/gpt-image-2.5/sunburst/text-to-image";
@@ -156,6 +157,7 @@ function referenceQualityLevel(model: NousReferenceImageModel) {
 function discoveredReferenceCandidate(
   model: NousReferenceImageModel,
   verification: NousReferenceTransportVerification | null | undefined,
+  modelVerifications: MediaReferenceModelVerification[] | undefined,
 ): Candidate | null {
   if (
     model.pricing.status !== "verified-live" ||
@@ -164,6 +166,18 @@ function discoveredReferenceCandidate(
   ) {
     return null;
   }
+
+  const persisted = modelVerifications?.find(
+    (item) =>
+      item.provider === "nous" &&
+      item.model === model.model &&
+      item.editEndpoint === model.editEndpoint,
+  );
+  const persistedVerified = persisted?.status === "verified";
+  const persistedFailed = persisted?.status === "failed";
+  const isSmokeCandidate =
+    model.model === PREMIUM_REFERENCE_SMOKE_MODEL &&
+    model.editEndpoint === PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT;
 
   return {
     provider: "nous",
@@ -175,27 +189,32 @@ function discoveredReferenceCandidate(
     resolution: null,
     audio: null,
     executionReady:
-      model.model === PREMIUM_REFERENCE_SMOKE_MODEL &&
-      model.editEndpoint === PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT &&
-      verification?.readyForApprovedSmokeTest === true,
+      verification?.readyForApprovedSmokeTest === true &&
+      !persistedFailed &&
+      (persistedVerified || isSmokeCandidate),
     referenceBehavior: model.capabilitySummary,
-    verificationNote: verification
-      ? verification.readyForApprovedSmokeTest
-        ? model.model === PREMIUM_REFERENCE_SMOKE_MODEL &&
-          model.editEndpoint === PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT
-          ? "Transport is verified. This is the single approved premium reference smoke-test route. Selecting it permits one capped generation attempt with no automatic retry or fallback; that first real gateway response will verify this exact edit endpoint."
-          : "Hermes reference capability, live pricing, connected Nous managed-FAL entitlement, gateway reachability, and secure short-lived attachment handoff are verified. This model remains display-only until it is separately approved for a one-model smoke test."
-        : [
-            "Hermes reference capability and live pricing are verified.",
-            verification.account.detail,
-            verification.attachment.detail,
-            verification.gateway.reachable
-              ? null
-              : "The managed FAL gateway host was not reachable during verification.",
-          ]
-            .filter(Boolean)
-            .join(" ")
-      : "Hermes reference capability and live pricing are verified. Connected Nous transport verification has not run for this request.",
+    verificationNote: persistedVerified
+      ? verification?.readyForApprovedSmokeTest
+        ? `Verified by successful reference-image generation on this profile${persisted.verifiedAt ? ` on ${new Date(persisted.verifiedAt).toLocaleDateString("en-US")}` : ""}. Current Nous transport checks also passed, so this route is ready for normal use.`
+        : "This model was previously verified by a successful reference-image generation, but the current Nous transport or attachment checks are not ready."
+      : persistedFailed
+        ? `A previous verification attempt for this exact edit endpoint failed, so it remains blocked.${persisted.failureReason ? ` Last failure: ${persisted.failureReason}` : ""}`
+        : verification
+          ? verification.readyForApprovedSmokeTest
+            ? isSmokeCandidate
+              ? "Transport is verified. This is the single approved premium reference smoke-test route. Selecting it permits one capped generation attempt with no automatic retry or fallback; that first real gateway response will verify this exact edit endpoint."
+              : "Hermes reference capability, live pricing, connected Nous managed-FAL entitlement, gateway reachability, and secure short-lived attachment handoff are verified. This model remains display-only until it is separately approved for a one-model smoke test."
+            : [
+                "Hermes reference capability and live pricing are verified.",
+                verification.account.detail,
+                verification.attachment.detail,
+                verification.gateway.reachable
+                  ? null
+                  : "The managed FAL gateway host was not reachable during verification.",
+              ]
+                .filter(Boolean)
+                .join(" ")
+          : "Hermes reference capability and live pricing are verified. Connected Nous transport verification has not run for this request.",
     editEndpoint: model.editEndpoint,
     qualityLevel: referenceQualityLevel(model),
   };
@@ -228,6 +247,7 @@ export async function buildMediaRecommendationOptions(input: {
   localImageAvailable?: boolean;
   requiresReferenceImage?: boolean;
   referenceVerification?: NousReferenceTransportVerification | null;
+  referenceModelVerifications?: MediaReferenceModelVerification[];
 }) {
   const { plan, openRouterCatalog, currentCapUsd } = input;
   const candidates: Candidate[] = [];
@@ -315,6 +335,7 @@ export async function buildMediaRecommendationOptions(input: {
         const candidate = discoveredReferenceCandidate(
           model,
           input.referenceVerification,
+          input.referenceModelVerifications,
         );
         if (candidate) candidates.push(candidate);
       }

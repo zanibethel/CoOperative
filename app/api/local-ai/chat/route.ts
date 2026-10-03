@@ -47,6 +47,10 @@ import {
   verifyNousReferenceImageTransport,
 } from "@/lib/inference/nous-reference-transport-verification";
 import {
+  mediaReferenceModelVerificationsForOwner,
+  recordMediaReferenceModelVerification,
+} from "@/lib/inference/media-reference-model-verification";
+import {
   looksLikeApiCredential,
   planServiceConnectIntent,
   serviceConnectAssistantMessage,
@@ -1183,6 +1187,9 @@ export async function POST(request: Request) {
             return null;
           })
         : null;
+      const referenceModelVerifications = requiresReferenceImage
+        ? await mediaReferenceModelVerificationsForOwner(ownerRef)
+        : [];
       let localImageAvailable = false;
       if (mediaPlan.kind === "image") {
         const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
@@ -1221,6 +1228,7 @@ export async function POST(request: Request) {
         localImageAvailable,
         requiresReferenceImage,
         referenceVerification,
+        referenceModelVerifications,
       });
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const selectedRecommendation = recommendationTier
@@ -1305,12 +1313,31 @@ export async function POST(request: Request) {
         );
       }
 
+      const selectedReferenceVerification =
+        selectedRecommendation?.provider === "nous" &&
+        selectedRecommendation.editEndpoint
+          ? referenceModelVerifications.find(
+              (item) =>
+                item.provider === "nous" &&
+                item.model === selectedRecommendation.model &&
+                item.editEndpoint === selectedRecommendation.editEndpoint,
+            ) || null
+          : null;
+      const premiumReferenceVerified =
+        selectedReferenceVerification?.status === "verified";
       const premiumReferenceSmokeTest =
         requiresReferenceImage &&
         selectedRecommendation?.provider === "nous" &&
         selectedRecommendation.model === PREMIUM_REFERENCE_SMOKE_MODEL &&
         selectedRecommendation.editEndpoint ===
           PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT &&
+        selectedReferenceVerification === null &&
+        referenceVerification?.readyForApprovedSmokeTest === true;
+      const premiumReferenceRoute =
+        requiresReferenceImage &&
+        selectedRecommendation?.provider === "nous" &&
+        Boolean(selectedRecommendation.editEndpoint) &&
+        selectedRecommendation.executionReady === true &&
         referenceVerification?.readyForApprovedSmokeTest === true;
 
       if (!selectedRecommendation) {
@@ -1425,7 +1452,7 @@ export async function POST(request: Request) {
             : 1;
 
       const premiumReferenceExecution =
-        premiumReferenceSmokeTest
+        premiumReferenceRoute
           ? await createNousReferenceImageExecutionUrls({
               ownerRef,
               attachmentIds: effectiveMediaAttachmentIds,
@@ -1742,10 +1769,11 @@ export async function POST(request: Request) {
             mediaLevel,
             freeRoute: selectedFree,
             referenceSmokeTest: premiumReferenceSmokeTest,
-            referenceEditEndpoint: premiumReferenceSmokeTest
-              ? PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT
+            referenceVerifiedRoute: premiumReferenceVerified,
+            referenceEditEndpoint: premiumReferenceRoute
+              ? selectedRecommendation.editEndpoint
               : null,
-            referenceAttachmentCount: premiumReferenceSmokeTest
+            referenceAttachmentCount: premiumReferenceRoute
               ? effectiveMediaAttachmentIds.length
               : 0,
           },
@@ -1760,7 +1788,7 @@ export async function POST(request: Request) {
           owner_ref: ownerRef,
           role: "user",
           content: visibleUserText,
-          attachment_ids: premiumReferenceSmokeTest
+          attachment_ids: premiumReferenceRoute
             ? effectiveMediaAttachmentIds
             : [],
           job_id: null,
@@ -1811,7 +1839,9 @@ export async function POST(request: Request) {
             model: started.model,
             routeReason: premiumReferenceSmokeTest
               ? `The user explicitly selected the single approved premium reference smoke-test route. CoOperative passed the current reference image through a short-lived server-side URL to ${PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT}, enforced the quoted cap before submission, and will not retry or fall back automatically.`
-              : `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} Free/cheap Hermes reasoning refines the prompt before the single media-generation call, and the request remains bounded by the Model Mixer spend cap.`,
+              : premiumReferenceVerified
+                ? `The selected premium reference route was already verified by a successful prior generation on this profile. CoOperative passed the current reference image through a fresh short-lived server-side URL to ${selectedRecommendation.editEndpoint}, enforced the quoted cap, and started the verified route normally.`
+                : `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} Free/cheap Hermes reasoning refines the prompt before the single media-generation call, and the request remains bounded by the Model Mixer spend cap.`,
             estimatedProviderCostUsd,
             modelMixer: input.modelMixer || null,
             requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
@@ -1834,7 +1864,22 @@ export async function POST(request: Request) {
           .eq("id", jobId)
           .eq("owner_ref", ownerRef);
 
-        if (premiumReferenceSmokeTest) {
+        if (premiumReferenceRoute) {
+          if (
+            premiumReferenceSmokeTest &&
+            selectedRecommendation.editEndpoint
+          ) {
+            await recordMediaReferenceModelVerification({
+              ownerRef,
+              provider: "nous",
+              model: selectedRecommendation.model,
+              editEndpoint: selectedRecommendation.editEndpoint,
+              sourceJobId: jobId,
+              success: false,
+              failureReason: detail,
+            });
+          }
+
           return NextResponse.json(
             {
               status: "failed",
@@ -1844,9 +1889,10 @@ export async function POST(request: Request) {
               conversationTitle,
               error: detail,
               provider: "nous",
-              model: PREMIUM_REFERENCE_SMOKE_MODEL,
-              routeReason:
-                "The one-shot premium reference smoke test could not start. CoOperative recorded the failure and did not retry, fall back, or launch Recovery Agent.",
+              model: selectedRecommendation.model,
+              routeReason: premiumReferenceSmokeTest
+                ? "The one-shot premium reference smoke test could not start. CoOperative recorded the failure and did not retry, fall back, or launch Recovery Agent."
+                : "The verified premium reference route could not start. CoOperative preserved the reference-image boundary and did not retry or fall back to a route that might ignore the attachment.",
             },
             { status: 200, headers: { "Cache-Control": "no-store" } },
           );
@@ -2379,6 +2425,30 @@ export async function GET(request: Request) {
             .maybeSingle();
           if (claimError) throw claimError;
 
+          const referenceEditEndpoint =
+            mediaJob.pricing_dimensions &&
+            typeof mediaJob.pricing_dimensions === "object" &&
+            !Array.isArray(mediaJob.pricing_dimensions)
+              ? (mediaJob.pricing_dimensions as {
+                  referenceEditEndpoint?: unknown;
+                }).referenceEditEndpoint
+              : null;
+          if (
+            claimed &&
+            mediaJob.provider === "nous" &&
+            typeof referenceEditEndpoint === "string" &&
+            referenceEditEndpoint
+          ) {
+            await recordMediaReferenceModelVerification({
+              ownerRef,
+              provider: "nous",
+              model: mediaJob.model,
+              editEndpoint: referenceEditEndpoint,
+              sourceJobId: mediaJob.id,
+              success: true,
+            });
+          }
+
           if (claimed && mediaJob.conversation_id) {
             const { error: resultMessageError } = await admin
               .from("local_ai_messages")
@@ -2430,14 +2500,41 @@ export async function GET(request: Request) {
         const failure = polled.error || "Hermes media generation failed.";
         const completedAt = new Date().toISOString();
 
-        const referenceSmokeTest =
+        const referencePricingDimensions =
           mediaJob.pricing_dimensions &&
           typeof mediaJob.pricing_dimensions === "object" &&
-          !Array.isArray(mediaJob.pricing_dimensions) &&
-          (mediaJob.pricing_dimensions as { referenceSmokeTest?: unknown })
-            .referenceSmokeTest === true;
+          !Array.isArray(mediaJob.pricing_dimensions)
+            ? (mediaJob.pricing_dimensions as {
+                referenceSmokeTest?: unknown;
+                referenceVerifiedRoute?: unknown;
+                referenceEditEndpoint?: unknown;
+              })
+            : null;
+        const referenceSmokeTest =
+          referencePricingDimensions?.referenceSmokeTest === true;
+        const referenceVerifiedRoute =
+          referencePricingDimensions?.referenceVerifiedRoute === true;
+        const referenceRoute = referenceSmokeTest || referenceVerifiedRoute;
 
-        if (referenceSmokeTest) {
+        if (referenceRoute) {
+          const referenceEditEndpoint =
+            referencePricingDimensions?.referenceEditEndpoint;
+          if (
+            mediaJob.provider === "nous" &&
+            typeof referenceEditEndpoint === "string" &&
+            referenceEditEndpoint
+          ) {
+            await recordMediaReferenceModelVerification({
+              ownerRef,
+              provider: "nous",
+              model: mediaJob.model,
+              editEndpoint: referenceEditEndpoint,
+              sourceJobId: mediaJob.id,
+              success: false,
+              failureReason: failure,
+            });
+          }
+
           await admin
             .from("media_generation_jobs")
             .update({
@@ -2461,8 +2558,9 @@ export async function GET(request: Request) {
               provider: mediaJob.provider,
               model: mediaJob.model,
               error: failure,
-              routeReason:
-                "The one-shot premium reference smoke test failed. The exact endpoint and failure are recorded on this job; CoOperative did not retry or fall back automatically.",
+              routeReason: referenceSmokeTest
+                ? "The one-shot premium reference smoke test failed. The exact endpoint and failure are recorded on this job; CoOperative did not retry or fall back automatically."
+                : "The verified premium reference route failed. CoOperative recorded the attempt but kept the previously verified endpoint status and did not fall back to a route that might ignore the reference image.",
             },
             { headers: { "Cache-Control": "no-store" } },
           );

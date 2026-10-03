@@ -136,6 +136,34 @@ Execution rules:
 
 All other discovered premium reference-image models remain display-only.
 
+### Persisted premium reference verification
+
+Premium reference endpoint verification is now durable per CoOperative owner/profile.
+
+A new `media_reference_model_verifications` table records:
+- provider;
+- model;
+- exact edit endpoint;
+- verified/failed state;
+- source media job;
+- verification timestamp;
+- last attempt;
+- failure detail.
+
+The successful GPT Image 2.5 Sunburst smoke test was backfilled as verified from its completed media job.
+
+Recommendation behavior now:
+- a previously verified endpoint becomes normally executable when the current Nous auth/gateway/attachment transport checks pass;
+- a previously failed unverified endpoint remains blocked;
+- the single first-time Sunburst smoke path still exists for profiles that have not verified it yet;
+- all other premium reference models remain display-only until separately tested.
+
+Execution behavior now:
+- verified premium reference jobs still receive fresh short-lived reference URLs;
+- successful reference jobs refresh durable verification state;
+- a later transient failure does not erase an already verified endpoint;
+- failed reference routes do not auto-fallback to a path that may ignore the reference image.
+
 ### Next media implementation layer
 
-After one explicitly selected smoke test has produced a real gateway result, consume that persisted result as model-verification state. A successful endpoint can become normally executable in future cards; a failed endpoint should remain blocked with its recorded reason. Do this one model at a time before broadening premium reference execution.
+Keep the one-model-at-a-time rollout. The next premium reference model should receive its own isolated smoke test only after the Sunburst persisted-verification behavior is observed in the UI. Do not unlock the remaining models together.
