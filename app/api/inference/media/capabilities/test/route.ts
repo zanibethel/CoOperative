@@ -374,18 +374,30 @@ export async function POST(request: Request) {
 
     const { data: capability, error: capabilityError } = await admin
       .from("media_model_capabilities")
-      .select("adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at")
+      .select("adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at,adult_non_explicit_policy,adult_non_explicit_policy_source,adult_non_explicit_policy_checked_at")
       .eq("provider", input.provider)
       .eq("model", input.model)
       .eq("endpoint", "")
       .maybeSingle();
     if (capabilityError) throw capabilityError;
-    if (capability?.adult_content_policy === "disallowed") {
+    const nonExplicitPolicy =
+      capability?.adult_non_explicit_policy === "allowed" ||
+      capability?.adult_non_explicit_policy === "disallowed"
+        ? capability.adult_non_explicit_policy
+        : capability?.adult_content_policy === "allowed" ||
+            capability?.adult_content_policy === "disallowed"
+          ? capability.adult_content_policy
+          : "unknown";
+    const nonExplicitPolicySource =
+      capability?.adult_non_explicit_policy_source ||
+      capability?.adult_content_policy_source ||
+      null;
+    if (nonExplicitPolicy === "disallowed") {
       return NextResponse.json(
         {
           error:
-            "Current exact-route policy evidence marks adult output as disallowed, so CoOperative will not probe it.",
-          policySource: capability.adult_content_policy_source,
+            "Current exact-route policy evidence marks non-explicit adult output as disallowed, so CoOperative will not probe it.",
+          policySource: nonExplicitPolicySource,
         },
         { status: 400 },
       );
@@ -483,7 +495,10 @@ export async function POST(request: Request) {
           promptClassification: TEST_PROMPT_CLASSIFICATION,
           noRetry: true,
           noFallback: true,
-          policyCheckedAt: capability?.adult_content_policy_checked_at || null,
+          policyCheckedAt:
+            capability?.adult_non_explicit_policy_checked_at ||
+            capability?.adult_content_policy_checked_at ||
+            null,
         },
         pricing_source: route.pricingSource,
         created_at: now,
