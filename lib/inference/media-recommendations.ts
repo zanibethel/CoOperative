@@ -54,6 +54,10 @@ export type MediaAdultCapabilityEvidence = {
   endpoint: string | null;
   policy: "unknown" | "disallowed" | "allowed";
   policySource: string | null;
+  nonExplicitPolicy: "unknown" | "disallowed" | "allowed";
+  nonExplicitPolicySource: string | null;
+  explicitPolicy: "unknown" | "disallowed" | "allowed";
+  explicitPolicySource: string | null;
   latestTestOutcome: "supported" | "blocked" | "partial" | "inconclusive" | null;
   latestPromptClassification: string | null;
   latestTestedAt: string | null;
@@ -125,12 +129,25 @@ function adultCapabilityFor(
     };
   }
 
-  if (match.policy === "disallowed") {
+  const scopedPolicy =
+    requestedClass === "adult_explicit"
+      ? match.explicitPolicy
+      : match.nonExplicitPolicy;
+  const effectivePolicy =
+    scopedPolicy === "allowed" || scopedPolicy === "disallowed"
+      ? scopedPolicy
+      : match.policy;
+  const effectivePolicySource =
+    requestedClass === "adult_explicit"
+      ? match.explicitPolicySource || match.policySource
+      : match.nonExplicitPolicySource || match.policySource;
+
+  if (effectivePolicy === "disallowed") {
     return {
       state: "blocked",
-      note: match.policySource
-        ? `Current provider/model policy marks adult output as disallowed (${match.policySource}).`
-        : "Current provider/model policy marks adult output as disallowed.",
+      note: effectivePolicySource
+        ? `Current provider/model policy marks this adult-output scope as disallowed (${effectivePolicySource}).`
+        : "Current provider/model policy marks this adult-output scope as disallowed.",
     };
   }
 
@@ -154,12 +171,12 @@ function adultCapabilityFor(
     };
   }
 
-  if (match.policy === "allowed") {
+  if (effectivePolicy === "allowed") {
     return {
       state: "verified",
-      note: match.policySource
-        ? `Current exact-route provider/model policy permits adult output (${match.policySource}).`
-        : "Current exact-route provider/model policy permits adult output.",
+      note: effectivePolicySource
+        ? `Current exact-route provider/model policy permits this adult-output scope (${effectivePolicySource}).`
+        : "Current exact-route provider/model policy permits this adult-output scope.",
     };
   }
 
