@@ -92,10 +92,15 @@ async function checkOpenRouterPolicy(): Promise<PolicySourceCheck> {
   const checkedAt = new Date().toISOString();
   const source = `${OPENROUTER_TERMS} ; ${OPENROUTER_PROVIDERS}`;
   try {
-    const terms = await fetchPolicyText(OPENROUTER_TERMS);
+    const [terms, providers] = await Promise.all([
+      fetchPolicyText(OPENROUTER_TERMS),
+      fetchPolicyText(OPENROUTER_PROVIDERS),
+    ]);
     const modelTermsMarker = /Model Terms/i.test(terms);
     const providerMarker = /Model Provider/i.test(terms);
-    if (!modelTermsMarker || !providerMarker) {
+    const providerDirectoryMarker =
+      /provider/i.test(providers) && /terms/i.test(providers);
+    if (!modelTermsMarker || !providerMarker || !providerDirectoryMarker) {
       throw new Error("Expected OpenRouter provider/model-terms markers were not found.");
     }
 
