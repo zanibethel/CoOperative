@@ -1387,12 +1387,12 @@ export default function ModelMixer({
                   <span>
                     <small>Estimated provider total</small>
                     <strong>
-                      {benchmarkPreparation.estimatedTotalCostUsd.toFixed(3)}
+                      ${benchmarkPreparation.estimatedTotalCostUsd.toFixed(3)}
                     </strong>
                   </span>
                   <span>
                     <small>Safe maximum approval</small>
-                    <strong>{benchmarkPreparation.safeTotalCapUsd.toFixed(2)}</strong>
+                    <strong>${benchmarkPreparation.safeTotalCapUsd.toFixed(2)}</strong>
                   </span>
                 </div>
 
@@ -1415,7 +1415,7 @@ export default function ModelMixer({
 
                 <p className="model-mixer-capability-message">
                   No benchmark run has started. Execution should require a separate explicit
-                  approval for the {benchmarkPreparation.safeTotalCapUsd.toFixed(2)} safe
+                  approval for the ${benchmarkPreparation.safeTotalCapUsd.toFixed(2)} safe
                   maximum.
                 </p>
               </>
