@@ -51,11 +51,14 @@ Local AI currently supports:
 Authenticated accounts are not automatically granted the main CoOperative business/operator chat.
 
 Current rule:
-- platform owners and users who own a CoOperative organization may use the hosted main CoOperative chat and its business/operator tools;
+- the hosted main CoOperative chat and business/operator tools are temporarily owner-only and require membership in `unison_platform_owners`;
+- the current database has exactly one platform owner, so this gates the main experience to the owner's login only;
+- owning a CoOperative organization does not currently grant main-chat access;
 - contributor/local-only accounts are redirected from `/chat`, `/local-ai`, `/agents`, `/services`, and `/intake` to `/personal-ai`;
 - the main hosted chat APIs under `/api/local-ai/*` enforce the same boundary, except `/api/local-ai/nodes`, which remains available because Personal AI uses it to discover only the authenticated user's authorized Unison nodes;
 - local-only users see CoOperativeLocalAI + Unison navigation on the home page instead of the main Chat/Agents entry points;
 - Personal AI remains scoped to the authenticated user's authorized PC/node access and is separate from the main business/operator chat.
+- Future main-chat multi-user access should use an explicit per-user entitlement plus that user's own AI balance/spend ceiling. Do not re-open access merely because a user owns an organization; the entitlement and budget boundary should be implemented together.
 
 ## Routing
 CoOperative has a local model registry and deterministic local-first routing metadata. Jobs record routing reason, task class, paid-fallback permission, human-approval requirement, registry revision, and verification status.
