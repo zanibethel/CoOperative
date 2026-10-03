@@ -640,6 +640,110 @@ export default function ModelMixer({
     }
   }
 
+  async function refreshPolicyEvidence() {
+    if (policyRefreshing) return;
+    setPolicyRefreshing(true);
+    setPolicyRefreshMessage("");
+    try {
+      const response = await fetch("/api/inference/media/capabilities/refresh", {
+        method: "POST",
+      });
+      const payload = (await response.json()) as {
+        refreshed?: boolean;
+        sources?: Array<{ provider: string; ok: boolean; detail?: string | null }>;
+        error?: string;
+        detail?: string;
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.detail || payload.error || "Could not refresh policy evidence.",
+        );
+      }
+
+      const okCount = payload.sources?.filter((source) => source.ok).length || 0;
+      const total = payload.sources?.length || 0;
+      setPolicyRefreshMessage(
+        `Policy evidence refreshed from ${okCount}/${total} source groups. General provider policy is recorded as evidence, not treated as model capability.`,
+      );
+      const catalog = await loadCapabilityTestCatalog();
+      setCapabilityCatalog(catalog);
+      setCapabilityCatalogError("");
+    } catch (error) {
+      setPolicyRefreshMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not refresh policy evidence.",
+      );
+    } finally {
+      setPolicyRefreshing(false);
+    }
+  }
+
+  function prepareSelectedCapabilityTest() {
+    if (!capabilityRouteSelection) return;
+    setPreparedCapabilityRoute(capabilityRouteSelection);
+    setCapabilityTestMessage("");
+  }
+
+  async function runPreparedCapabilityTest() {
+    const route = capabilityCatalog?.routes.find(
+      (candidate) => capabilityRouteKey(candidate) === preparedCapabilityRoute,
+    );
+    if (!route) return;
+
+    if (!nsfwEnabled || !adultContentAcknowledged) {
+      setCapabilityTestMessage(
+        "Enable NSFW output, confirm 18+, and save the preference before running a capability test.",
+      );
+      return;
+    }
+
+    if (route.capUsd > settings.maxSpendUsd + 0.000001) {
+      setCapabilityTestMessage(
+        `Current Model Mixer cap is ${settings.maxSpendUsd.toFixed(2)}; this one-shot test requires at least ${route.capUsd.toFixed(2)}. CoOperative will not raise the cap automatically.`,
+      );
+      return;
+    }
+
+    setCapabilityTestMessage("Starting one exact-route capability test…");
+    try {
+      const response = await fetch("/api/inference/media/capabilities/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: route.provider,
+          model: route.model,
+          maxSpendUsd: settings.maxSpendUsd,
+          confirm: true,
+        }),
+      });
+      const payload = (await response.json()) as CapabilityTestState & {
+        error?: string;
+        detail?: string;
+      };
+      if (!response.ok) {
+        throw new Error(
+          payload.detail || payload.error || "Could not start capability test.",
+        );
+      }
+
+      setCapabilityTestJobId(payload.jobId);
+      setCapabilityTestStatus(payload.status);
+      setCapabilityTestMessage(
+        payload.status === "running"
+          ? `One-shot test started on ${route.label}. No retry or fallback is allowed.`
+          : payload.error || `Capability test finished with ${payload.status}.`,
+      );
+    } catch (error) {
+      setCapabilityTestStatus("failed");
+      setCapabilityTestMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not start capability test.",
+      );
+    }
+  }
+
   function setPreset(preset: Exclude<ModelMixerPreset, "custom">) {
     onChange(presetSettings(preset));
   }
