@@ -21,6 +21,7 @@ import {
   startHermesMediaTask,
 } from "@/lib/inference/hermes-media-cloud";
 import {
+  adultMediaOutputRequested,
   mediaPromptWithResolvedControls,
   planMediaRequest,
 } from "@/lib/inference/media-request";
@@ -1317,6 +1318,7 @@ export async function POST(request: Request) {
         });
       }
 
+      const adultOutputRequested = adultMediaOutputRequested(effectiveMediaPrompt);
       const recommendationSet = await buildMediaRecommendationOptions({
         plan: mediaPlan,
         openRouterCatalog: liveCatalog,
@@ -1327,6 +1329,7 @@ export async function POST(request: Request) {
         referenceModelVerifications,
         contentPreference,
         adultCapabilityEvidence: [...adultEvidenceByKey.values()],
+        adultOutputRequested,
       });
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const selectedRecommendation = recommendationTier
@@ -1347,6 +1350,11 @@ export async function POST(request: Request) {
 
       const recommendationText = () => {
         if (!recommendationSet.options.length) {
+          if (recommendationSet.sfwConflict) {
+            return (
+              "This request asks for adult media output, but NSFW output is currently off in Model Mixer. I kept the SFW output constraint and did not start a generation. Enable NSFW if you want adult-output recommendations for this request."
+            );
+          }
           if (recommendationSet.requirementBlocked) {
             return (
               "Require adult-capable models is enabled, but none of the current exact-match routes has verified adult capability for this profile. I did not relax that requirement or start a generation. A model needs current provider-policy evidence or a successful controlled capability test before it can qualify."
@@ -1410,7 +1418,7 @@ export async function POST(request: Request) {
             provider: "code",
             model: "media-three-tier-recommendations",
             routeReason:
-              `The media request is clear, so CoOperative applied the saved ${contentPreference} output preference and ranked three exact-request execution recipes by output quality, configuration, and cost before starting any generation.`,
+              `The media request is clear, so CoOperative applied the saved ${contentPreference} output preference to this ${adultOutputRequested ? "adult" : "SFW"} request and ranked three exact-request execution recipes by output quality, configuration, and cost before starting any generation.`,
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
