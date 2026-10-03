@@ -440,8 +440,11 @@ export async function buildMediaRecommendationOptions(input: {
   requiresReferenceImage?: boolean;
   referenceVerification?: NousReferenceTransportVerification | null;
   referenceModelVerifications?: MediaReferenceModelVerification[];
+  contentPreference?: MediaContentPreference;
+  adultCapabilityEvidence?: MediaAdultCapabilityEvidence[];
 }) {
   const { plan, openRouterCatalog, currentCapUsd } = input;
+  const contentPreference = input.contentPreference || "sfw_only";
   const candidates: Candidate[] = [];
   const requestShape = {
     durationSeconds: plan.durationSeconds,
@@ -459,6 +462,15 @@ export async function buildMediaRecommendationOptions(input: {
   const exactOpenRouter = openRouterPool.filter((model) =>
     supportsExactRequest(model, plan),
   );
+  const openRouterQualityByModel = new Map<string, number>();
+  for (const level of [4, 3, 2, 1, 0]) {
+    const recommended = exactOpenRouter.length
+      ? recommendedForRequest(exactOpenRouter, level, requestShape)
+      : null;
+    if (recommended && !openRouterQualityByModel.has(recommended.id)) {
+      openRouterQualityByModel.set(recommended.id, level);
+    }
+  }
 
   for (const model of exactOpenRouter) {
     const estimatedCostUsd = estimateOpenRouterMediaCostUsd(model, {
@@ -477,7 +489,7 @@ export async function buildMediaRecommendationOptions(input: {
       pricingSource: openRouterCatalog?.source || "openrouter-live",
       resolution: plan.resolution,
       audio: plan.kind === "video" ? plan.audio : null,
-      qualityLevel: model.free ? 0 : 2,
+      qualityLevel: openRouterQualityByModel.get(model.id) ?? (model.free ? 0 : 2),
       executionReady: true,
       referenceBehavior: null,
       verificationNote: null,
@@ -628,72 +640,129 @@ export async function buildMediaRecommendationOptions(input: {
     }
   }
 
-  const deduped = [...new Map(candidates.map((candidate) => [candidateKey(candidate), candidate])).values()]
-    .sort(
-      (a, b) =>
-        a.estimatedCostUsd - b.estimatedCostUsd ||
-        a.qualityLevel - b.qualityLevel ||
-        a.modelName.localeCompare(b.modelName),
-    );
+  const enriched = candidates.map((candidate) =>
+    withAdultCapability(candidate, input.adultCapabilityEvidence),
+  );
+  const preferenceEligible =
+    contentPreference === "require_adult_capable"
+      ? enriched.filter((candidate) => candidate.adultCapability === "verified")
+      : enriched;
+
+  const deduped = [
+    ...new Map(
+      preferenceEligible.map((candidate) => [candidateKey(candidate), candidate]),
+    ).values(),
+  ].sort(
+    (a, b) =>
+      a.estimatedCostUsd - b.estimatedCostUsd ||
+      configurationQualityScore(b, contentPreference) -
+        configurationQualityScore(a, contentPreference) ||
+      a.modelName.localeCompare(b.modelName),
+  );
 
   if (!deduped.length) {
     return {
       options: [] as MediaRecommendationOption[],
       fetchedAt: new Date().toISOString(),
+      contentPreference,
+      requirementBlocked: contentPreference === "require_adult_capable",
     };
   }
 
   const low = deduped[0];
-
-  const premiumModel = exactOpenRouter.length
-    ? recommendedForRequest(exactOpenRouter, 4, requestShape)
-    : null;
-  let high =
-    (premiumModel &&
-      deduped.find(
-        (candidate) =>
-          candidate.provider === "openrouter" &&
-          candidate.model === premiumModel.id,
-      )) ||
-    [...deduped].sort(
-      (a, b) =>
-        b.qualityLevel - a.qualityLevel ||
-        b.estimatedCostUsd - a.estimatedCostUsd,
-    )[0];
+  let high = [...deduped].sort(
+    (a, b) =>
+      configurationQualityScore(b, contentPreference) -
+        configurationQualityScore(a, contentPreference) ||
+      b.estimatedCostUsd - a.estimatedCostUsd,
+  )[0];
 
   if (candidateKey(high) === candidateKey(low) && deduped.length > 1) {
-    high = deduped[deduped.length - 1];
+    high =
+      [...deduped]
+        .filter((candidate) => candidateKey(candidate) !== candidateKey(low))
+        .sort(
+          (a, b) =>
+            configurationQualityScore(b, contentPreference) -
+              configurationQualityScore(a, contentPreference) ||
+            b.estimatedCostUsd - a.estimatedCostUsd,
+        )[0] || high;
   }
 
   const excluded = new Set([candidateKey(low), candidateKey(high)]);
   const midpoint = (low.estimatedCostUsd + high.estimatedCostUsd) / 2;
+  const availableBalanced = deduped.filter(
+    (candidate) => !excluded.has(candidateKey(candidate)),
+  );
+  const qualityScores = availableBalanced.map((candidate) =>
+    configurationQualityScore(candidate, contentPreference),
+  );
+  const qualityMin = qualityScores.length ? Math.min(...qualityScores) : 0;
+  const qualityMax = qualityScores.length ? Math.max(...qualityScores) : 0;
+  const costSpan = Math.max(
+    0.000001,
+    Math.abs(high.estimatedCostUsd - low.estimatedCostUsd),
+  );
 
-  const balancedModel = exactOpenRouter.length
-    ? recommendedForRequest(exactOpenRouter, 2, requestShape)
-    : null;
   let balanced =
-    (balancedModel &&
-      deduped.find(
-        (candidate) =>
-          !excluded.has(candidateKey(candidate)) &&
-          candidate.provider === "openrouter" &&
-          candidate.model === balancedModel.id,
-      )) ||
-    distinctCandidate(deduped, excluded, midpoint);
+    [...availableBalanced].sort((a, b) => {
+      const score = (candidate: Candidate) => {
+        const quality = configurationQualityScore(candidate, contentPreference);
+        const normalizedQuality =
+          qualityMax > qualityMin
+            ? (quality - qualityMin) / (qualityMax - qualityMin)
+            : 1;
+        const midpointFit = Math.max(
+          0,
+          1 - Math.abs(candidate.estimatedCostUsd - midpoint) / costSpan,
+        );
+        return normalizedQuality * 0.6 + midpointFit * 0.4;
+      };
+      return (
+        score(b) - score(a) ||
+        Math.abs(a.estimatedCostUsd - midpoint) -
+          Math.abs(b.estimatedCostUsd - midpoint)
+      );
+    })[0] ||
+    distinctCandidate(deduped, new Set([candidateKey(low)]), midpoint) ||
+    high;
 
-  if (!balanced) {
-    balanced = distinctCandidate(deduped, new Set([candidateKey(low)]), midpoint) || high;
+  if (candidateKey(balanced) === candidateKey(low) && deduped.length > 1) {
+    balanced = high;
   }
 
   const options = [
-    asOption("high-end", "High-end", high, currentCapUsd, plan),
-    asOption("lowest-cost", "Lowest cost", low, currentCapUsd, plan),
-    asOption("balanced", "Balanced", balanced, currentCapUsd, plan),
+    asOption(
+      "high-end",
+      "High-end",
+      high,
+      currentCapUsd,
+      plan,
+      contentPreference,
+    ),
+    asOption(
+      "lowest-cost",
+      "Lowest cost",
+      low,
+      currentCapUsd,
+      plan,
+      contentPreference,
+    ),
+    asOption(
+      "balanced",
+      "Balanced",
+      balanced,
+      currentCapUsd,
+      plan,
+      contentPreference,
+    ),
   ];
 
   return {
     options,
     fetchedAt: new Date().toISOString(),
+    contentPreference,
+    requirementBlocked: false,
   };
 }
 
