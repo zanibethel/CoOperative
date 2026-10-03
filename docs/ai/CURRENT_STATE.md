@@ -46,6 +46,17 @@ Local AI currently supports:
 - model, latency, token, and time-to-first-token metadata;
 - no paid fallback from manual Local mode.
 
+## Access boundary
+
+Authenticated accounts are not automatically granted the main CoOperative business/operator chat.
+
+Current rule:
+- platform owners and users who own a CoOperative organization may use the hosted main CoOperative chat and its business/operator tools;
+- contributor/local-only accounts are redirected from `/chat`, `/local-ai`, `/agents`, `/services`, and `/intake` to `/personal-ai`;
+- the main hosted chat APIs under `/api/local-ai/*` enforce the same boundary, except `/api/local-ai/nodes`, which remains available because Personal AI uses it to discover only the authenticated user's authorized Unison nodes;
+- local-only users see CoOperativeLocalAI + Unison navigation on the home page instead of the main Chat/Agents entry points;
+- Personal AI remains scoped to the authenticated user's authorized PC/node access and is separate from the main business/operator chat.
+
 ## Routing
 CoOperative has a local model registry and deterministic local-first routing metadata. Jobs record routing reason, task class, paid-fallback permission, human-approval requirement, registry revision, and verification status.
 
