@@ -14,7 +14,7 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const KEY = "run-bench-44b302f34d694619b2d9630d";
+const KEY_SHA256 = "0de29d4023bb71cff026830e8d76d6e370dffa7f84c760a71a04c27a0f7cc9c9";
 const APPROVED_TOTAL_CAP_USD = 0.48;
 const ALLOWED_MODELS = new Set([
   "fal-ai/z-image/turbo",
@@ -32,9 +32,21 @@ async function ownerRef() {
   return `coop-user:${data.user_id}`;
 }
 
+async function validKey(value: string | null) {
+  if (!value) return false;
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  const hex = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return hex === KEY_SHA256;
+}
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  if (url.searchParams.get("key") !== KEY) {
+  if (!(await validKey(url.searchParams.get("key")))) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
