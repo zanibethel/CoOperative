@@ -9,6 +9,10 @@ import {
 import {
   nousManagedMediaCatalog,
 } from "@/lib/inference/nous-managed-media";
+import {
+  discoverNousReferenceImageModels,
+  type NousReferenceImageModel,
+} from "@/lib/inference/nous-reference-image-discovery";
 import type { MediaRequestPlan } from "@/lib/inference/media-request";
 
 export type MediaRecommendationTier = "high-end" | "balanced" | "lowest-cost";
@@ -26,6 +30,10 @@ export type MediaRecommendationOption = {
   pricingSource: string;
   resolution: string | null;
   audio: boolean | null;
+  executionReady: boolean;
+  referenceBehavior: string | null;
+  verificationNote: string | null;
+  editEndpoint: string | null;
 };
 
 type Candidate = Omit<MediaRecommendationOption, "tier" | "label" | "increaseNeededUsd" | "summary"> & {
@@ -115,6 +123,56 @@ function asOption(
     pricingSource: candidate.pricingSource,
     resolution: candidate.resolution,
     audio: candidate.audio,
+    executionReady: candidate.executionReady,
+    referenceBehavior: candidate.referenceBehavior,
+    verificationNote: candidate.verificationNote,
+    editEndpoint: candidate.editEndpoint,
+  };
+}
+
+function referenceQualityLevel(model: NousReferenceImageModel) {
+  switch (model.capabilityClass) {
+    case "precision-edit":
+      return 4;
+    case "identity-reference":
+      return 4;
+    case "semantic-multi-reference":
+      return 3;
+    case "multi-reference-edit":
+      return 3;
+    case "fast-reference-edit":
+      return 1;
+    default:
+      return 2;
+  }
+}
+
+function discoveredReferenceCandidate(
+  model: NousReferenceImageModel,
+): Candidate | null {
+  if (
+    model.pricing.status !== "verified-live" ||
+    model.pricing.estimatedCostUsd === null ||
+    !Number.isFinite(model.pricing.estimatedCostUsd)
+  ) {
+    return null;
+  }
+
+  return {
+    provider: "nous",
+    model: model.model,
+    modelName: model.displayName,
+    estimatedCostUsd: model.pricing.estimatedCostUsd,
+    capUsd: nextCent(model.pricing.estimatedCostUsd),
+    pricingSource: model.pricing.source,
+    resolution: null,
+    audio: null,
+    executionReady: false,
+    referenceBehavior: model.capabilitySummary,
+    verificationNote:
+      "Hermes reference capability and live pricing are verified. Connected Nous managed-gateway allowlisting and attachment execution are intentionally not enabled in this update.",
+    editEndpoint: model.editEndpoint,
+    qualityLevel: referenceQualityLevel(model),
   };
 }
 
@@ -182,6 +240,10 @@ export async function buildMediaRecommendationOptions(input: {
       resolution: plan.resolution,
       audio: plan.kind === "video" ? plan.audio : null,
       qualityLevel: model.free ? 0 : 2,
+      executionReady: true,
+      referenceBehavior: null,
+      verificationNote: null,
+      editEndpoint: null,
     });
   }
 
@@ -212,11 +274,23 @@ export async function buildMediaRecommendationOptions(input: {
           resolution === "1080p" ? 4 :
           resolution === "720p" ? 3 :
           resolution === "540p" ? 2 : 1,
+        executionReady: true,
+        referenceBehavior: null,
+        verificationNote: null,
+        editEndpoint: null,
       });
     }
   }
 
   if (plan.kind === "image") {
+    if (input.requiresReferenceImage) {
+      const referenceCatalog = await discoverNousReferenceImageModels();
+      for (const model of referenceCatalog.models) {
+        const candidate = discoveredReferenceCandidate(model);
+        if (candidate) candidates.push(candidate);
+      }
+    }
+
     if (!input.requiresReferenceImage) {
       for (const model of nousCatalog.image) {
         candidates.push({
@@ -229,6 +303,10 @@ export async function buildMediaRecommendationOptions(input: {
           resolution: null,
           audio: null,
           qualityLevel: model.minLevel,
+          executionReady: true,
+          referenceBehavior: null,
+          verificationNote: null,
+          editEndpoint: null,
         });
       }
     }
@@ -246,6 +324,12 @@ export async function buildMediaRecommendationOptions(input: {
             resolution: null,
             audio: null,
             qualityLevel: 4,
+            executionReady: true,
+            referenceBehavior:
+              "Uses the attached reference image through the owned local identity/reference pipeline.",
+            verificationNote:
+              "Owned local reference-image execution is already wired.",
+            editEndpoint: null,
           },
           {
             provider: "cooperative-local",
@@ -257,6 +341,12 @@ export async function buildMediaRecommendationOptions(input: {
             resolution: null,
             audio: null,
             qualityLevel: 2,
+            executionReady: true,
+            referenceBehavior:
+              "Uses the attached reference image through the owned local quality/reference pipeline.",
+            verificationNote:
+              "Owned local reference-image execution is already wired.",
+            editEndpoint: null,
           },
           {
             provider: "cooperative-local",
@@ -268,6 +358,12 @@ export async function buildMediaRecommendationOptions(input: {
             resolution: null,
             audio: null,
             qualityLevel: 1,
+            executionReady: true,
+            referenceBehavior:
+              "Uses the attached reference image through the owned local fast/reference pipeline.",
+            verificationNote:
+              "Owned local reference-image execution is already wired.",
+            editEndpoint: null,
           },
         );
       } else {
@@ -281,6 +377,10 @@ export async function buildMediaRecommendationOptions(input: {
           resolution: null,
           audio: null,
           qualityLevel: 1,
+          executionReady: true,
+          referenceBehavior: null,
+          verificationNote: null,
+          editEndpoint: null,
         });
       }
     }
