@@ -14,6 +14,8 @@ export type HermesMediaStartSpec = {
   nousAuthJson?: string;
   orchestratorProvider?: string;
   orchestratorModel?: string;
+  referenceImageUrls?: string[];
+  referenceSmokeTest?: boolean;
 };
 
 export type HermesMediaStartResult = {
@@ -127,6 +129,25 @@ export function hermesMediaProviderStatus() {
 
 function promptFor(spec: HermesMediaStartSpec) {
   const tool = spec.kind === "image" ? "image_generate" : "video_generate";
+  const referenceUrls =
+    spec.kind === "image"
+      ? (spec.referenceImageUrls || []).filter(Boolean)
+      : [];
+  const referenceInstructions =
+    referenceUrls.length > 0
+      ? [
+          "",
+          "REFERENCE IMAGE REQUIREMENT:",
+          "This is an image edit/reference generation, not text-to-image.",
+          "You MUST pass the first URL below as image_url to image_generate.",
+          referenceUrls.length > 1
+            ? "Pass every remaining URL below as reference_image_urls, preserving order."
+            : "There are no additional reference_image_urls.",
+          "Do not omit the reference image and do not replace it with a textual description.",
+          "Do not include the signed reference URLs in your final answer.",
+          ...referenceUrls.map((url, index) => `${index + 1}. ${url}`),
+        ]
+      : [];
 
   return [
     "You are CoOperative's media production worker.",
@@ -134,9 +155,13 @@ function promptFor(spec: HermesMediaStartSpec) {
     `You MUST call the ${tool} tool exactly once.`,
     "Do not ask the user a follow-up question; CoOperative has already handled clarification.",
     "Do not retry a failed generation and do not call a second image/video model.",
+    spec.referenceSmokeTest
+      ? "This is a one-shot provider verification. Do not fall back to another model or provider under any circumstance."
+      : "Use only the configured media route for this job.",
     "Honor explicit duration, aspect ratio, platform, style, camera, audio, and subject requirements in the request.",
     "After the tool succeeds, answer briefly and include the returned media URL using the exact prefix MEDIA:.",
     "If the tool fails, report the failure concisely and stop.",
+    ...referenceInstructions,
     "",
     "USER REQUEST:",
     spec.userRequest.trim(),
