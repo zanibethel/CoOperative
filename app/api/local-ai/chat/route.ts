@@ -1318,7 +1318,7 @@ export async function POST(request: Request) {
         });
       }
 
-      const adultOutputRequested = adultMediaOutputRequested(effectiveMediaPrompt);
+      const adultOutputRequested = adultMediaOutputRequested(effectiveMediaRequestText);
       const recommendationSet = await buildMediaRecommendationOptions({
         plan: mediaPlan,
         openRouterCatalog: liveCatalog,
