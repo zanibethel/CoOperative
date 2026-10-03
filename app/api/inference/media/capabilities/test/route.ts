@@ -147,16 +147,32 @@ export async function GET(request: Request) {
   try {
     if (!jobId) {
       const routes = await liveImageRoutes();
-      const { data: tests, error: testsError } = await admin
-        .from("media_model_capability_tests")
-        .select(
-          "provider,model,endpoint,outcome,prompt_classification,tested_at",
-        )
-        .eq("owner_ref", ownerRef)
-        .eq("test_type", "adult_content")
-        .order("tested_at", { ascending: false })
-        .limit(300);
+      const [
+        { data: tests, error: testsError },
+        { data: activeJobs, error: activeJobsError },
+      ] = await Promise.all([
+        admin
+          .from("media_model_capability_tests")
+          .select(
+            "provider,model,endpoint,outcome,prompt_classification,tested_at",
+          )
+          .eq("owner_ref", ownerRef)
+          .eq("test_type", "adult_content")
+          .order("tested_at", { ascending: false })
+          .limit(300),
+        admin
+          .from("media_generation_jobs")
+          .select(
+            "id,provider,model,status,estimated_provider_cost_microusd,created_at,pricing_dimensions",
+          )
+          .eq("owner_ref", ownerRef)
+          .in("status", ["queued", "running"])
+          .contains("pricing_dimensions", { capabilityTest: true })
+          .order("created_at", { ascending: false })
+          .limit(1),
+      ]);
       if (testsError) throw testsError;
+      if (activeJobsError) throw activeJobsError;
 
       const latest = new Map<string, NonNullable<typeof tests>[number]>();
       for (const test of tests || []) {
@@ -174,6 +190,19 @@ export async function GET(request: Request) {
             latestTest:
               latest.get([route.provider, route.model, ""].join("|")) || null,
           })),
+          activeJob: activeJobs?.[0]
+            ? {
+                jobId: activeJobs[0].id,
+                provider: activeJobs[0].provider,
+                model: activeJobs[0].model,
+                status: activeJobs[0].status,
+                estimatedProviderCostUsd:
+                  activeJobs[0].estimated_provider_cost_microusd === null
+                    ? null
+                    : Number(activeJobs[0].estimated_provider_cost_microusd) /
+                      1_000_000,
+              }
+            : null,
         },
         { headers: { "Cache-Control": "private, no-store" } },
       );
