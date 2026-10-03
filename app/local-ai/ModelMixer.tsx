@@ -317,7 +317,6 @@ export default function ModelMixer({
     if (!open) return;
 
     let cancelled = false;
-    setMediaPreferenceError("");
     void fetch("/api/personal-ai/settings", { cache: "no-store" })
       .then(async (response) => {
         const payload = (await response.json()) as {
@@ -334,6 +333,7 @@ export default function ModelMixer({
           );
         }
         if (cancelled) return;
+        setMediaPreferenceError("");
         setMediaContentPreference(
           payload.settings?.mediaContentPreference || "sfw_only",
         );
