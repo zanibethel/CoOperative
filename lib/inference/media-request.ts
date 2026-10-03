@@ -15,6 +15,12 @@ const DIRECT_MEDIA_REQUEST = /\b(i(?:'d| would) like|i want|give me)\b/i;
 const IMAGE_NOUNS = /\b(image|picture|photo|portrait|illustration|graphic|poster|thumbnail)\b/i;
 const VIDEO_NOUNS = /\b(video|clip|reel|animation|movie|film)\b|\b(?:youtube|instagram|tiktok)\s+short\b/i;
 const AMBIGUOUS_MEDIA_NOUNS = /\b(ad|advertisement|commercial)\b/i;
+const EXPLICIT_ADULT_OUTPUT =
+  /\b(nsfw|nudes?|nudity|naked|porn(?:ographic|ography)?|sexually explicit|explicit sexual|erotic|full[- ]?frontal|adult (?:content|image|photo|scene))\b/i;
+
+export function adultMediaOutputRequested(message: string) {
+  return EXPLICIT_ADULT_OUTPUT.test(message);
+}
 
 function durationFrom(message: string) {
   const match = message.match(/\b(\d{1,2})\s*(?:-\s*)?(?:seconds?|secs?|s)\b/i);
