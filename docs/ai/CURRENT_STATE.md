@@ -248,6 +248,19 @@ Observed tests can record:
 
 The authenticated read-only endpoint `/api/inference/media/capabilities` exposes the current preference, model capability metadata, and the latest observed tests for the active owner/profile. It reports content-aware recommendation routing as active.
 
+### Capability test polling recovery
+
+The Capability Lab client now keeps polling an active one-shot test until it reaches a terminal state. The previous implementation used a one-shot timeout whose effect depended on the job status; when a poll returned the same `running` value, React had no state change to trigger another timeout, so a successful provider result could remain stranded as `running` in the database until a later catalog refresh.
+
+The polling loop now:
+- checks immediately when an active test is known;
+- continues every 3.5 seconds while the job remains queued/running;
+- prevents overlapping checks in the same tab;
+- leaves transient polling errors non-terminal so a later check can recover;
+- still relies on the existing server reconciliation path after the hard execution deadline.
+
+The previously stranded Nano Banana Pro test (`fal-ai/nano-banana-pro`) was recovered from its original completed Vercel sandbox without starting another model call. The sandbox output contained a successful media result, so the existing job is now persisted as `completed` and the exact Nous route is recorded as `supported` for `adult_non_explicit_boundary` only. This does not establish sexually explicit capability.
+
 ### Capability evidence lab
 
 Model Mixer now contains a bounded capability lab for adult-output routing evidence.
