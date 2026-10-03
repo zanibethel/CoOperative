@@ -619,18 +619,21 @@ For SFW/non-adult media requests:
 - do not require adult capability merely because the profile stores Prefer/Require;
 - choose the best execution recipe using the normal quality, capability, cost, time, and request constraints.
 
-For an explicit adult-output media request:
+For an adult-output media request:
 - `sfw_only`: stop at recommendation preflight and direct the user to enable NSFW; do not generate;
-- `adult_allowed`: exclude routes with current disallowed policy or latest blocked adult-capability evidence; verified and unknown routes may remain visible;
-- `prefer_adult_capable`: use the Allowed pool, then modestly prefer verified adult-capable routes when otherwise competitive;
-- `require_adult_capable`: only verified adult-capable routes may be recommended.
+- `adult_allowed`: for **non-explicit** adult output, exclude currently blocked/disallowed routes while verified and still-unknown routes may remain visible;
+- `prefer_adult_capable`: for **non-explicit** adult output, use the eligible pool and modestly prefer verified routes when otherwise competitive;
+- `require_adult_capable`: only routes verified for the requested adult-output scope may be recommended;
+- sexually explicit output requires exact-route evidence that actually covers sexually explicit output even when the saved preference is Allowed or Prefer.
 
-Adult-capability evidence precedence:
-1. current provider/model policy marked disallowed => blocked;
-2. latest controlled test blocked => blocked;
-3. latest controlled test supported => verified;
-4. current provider/model policy allowed => verified;
-5. partial/inconclusive/no evidence => unknown.
+Capability evidence is scope-aware:
+1. current exact-route policy marked disallowed => blocked;
+2. a controlled blocked test affects only the scope that test actually covered, with conservative blocking where the tested boundary is broader than the request;
+3. a controlled supported test verifies only the scope it actually tested;
+4. exact-route provider/model policy that explicitly allows the requested scope may verify it;
+5. partial/inconclusive/no applicable evidence => unknown.
+
+A successful `adult_non_explicit_boundary` test does not verify `adult_explicit` output.
 
 Do not infer adult capability from price, local hosting, model branding, or historical reputation.
 
@@ -657,18 +660,14 @@ Immediately before an adult-output execution, CoOperative must re-read:
 - the exact provider/model/endpoint adult-content policy metadata;
 - the latest controlled adult-capability test for that exact route.
 
-Execution uses the same evidence precedence as recommendation routing:
-1. current provider/model policy marked disallowed => block;
-2. latest controlled test blocked => block;
-3. latest controlled test supported => verified;
-4. current provider/model policy allowed => verified;
-5. partial/inconclusive/no evidence => unknown.
+Execution uses the same scope-aware evidence rules as recommendation routing. A test result is applied only when its prompt classification covers the requested adult-output scope.
 
 Execution rules:
 - SFW/non-adult requests remain eligible regardless of adult-capability preference;
 - `sfw_only` blocks an adult-output submission;
-- `adult_allowed` and `prefer_adult_capable` may submit verified or still-unknown routes, but never a route currently known to block/disallow adult output;
-- `require_adult_capable` submits only a currently verified route;
+- for `adult_non_explicit`, `adult_allowed` and `prefer_adult_capable` may submit verified or still-unknown routes, but never a route currently known to block/disallow that scope;
+- `require_adult_capable` submits only a route verified for the requested scope;
+- `adult_explicit` submits only with exact-route evidence that actually covers explicit output;
 - if current preference/capability evidence cannot be re-checked, adult output fails closed;
 - changing the saved preference or capability evidence after recommendation generation takes effect before submission.
 
@@ -680,3 +679,30 @@ The gate applies to:
 - automatic OpenRouter fallback.
 
 Fallback economics never override the content gate. A cheaper or free route is not an acceptable fallback if its current content eligibility fails.
+
+
+## 25. Capability evidence refresh and controlled testing
+
+Capability learning is intentionally separated into **policy evidence** and **observed route behavior**.
+
+### Policy refresh
+
+Refreshing evidence may fetch current provider terms/policy pages and current executable media catalogs. This action must not submit a media generation or incur generation spend.
+
+A general provider policy source may establish a provider-level restriction, but it must not be treated as proof that an individual model supports a particular requested output. Store the source/check timestamp and leave exact-route capability unknown unless the source is actually specific enough to establish it.
+
+### Controlled capability test
+
+A controlled capability test must:
+- target one exact provider/model/endpoint at a time;
+- show a current live estimate and safe cap before execution;
+- require explicit user confirmation after route preparation;
+- remain within the existing user-approved Model Mixer cap;
+- allow only one active capability test per profile;
+- make one generation call only;
+- never retry, substitute another route, invoke fallback, or launch Recovery Agent;
+- persist supported / blocked / partial / inconclusive with a source media job and prompt classification.
+
+The initial standardized prompt classification is `adult_non_explicit_boundary`. It uses a clearly adult fictional subject and may test non-explicit artistic nudity, but it excludes sexual activity, graphic sexual detail, real-person sexualization, and minors.
+
+A successful test is evidence of behavior for that exact route and tested scope at that time. It is not permission to exceed current provider rules and is not a guarantee of future provider behavior.
