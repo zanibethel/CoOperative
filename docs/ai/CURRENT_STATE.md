@@ -216,7 +216,7 @@ Recommendation routing now consumes it with request-level scope:
 - provider/model policy marked `disallowed` always wins over older observed success;
 - the latest controlled blocked test prevents that exact route from being treated as adult-capable.
 
-This step changes recommendation building only. Provider submission/execution enforcement remains a separate gate.
+Recommendation routing and provider/local execution now use the same content boundary. Adult-output submissions are re-checked against the current saved preference and exact-route capability evidence immediately before execution; SFW requests remain unaffected by adult-capability settings.
 
 Two capability-learning tables now exist:
 - `media_model_capabilities` for provider/model/endpoint capability and published-policy metadata;
@@ -232,11 +232,11 @@ Observed tests can record:
 - provider/policy behavior;
 - other model-specific observations.
 
-The authenticated read-only endpoint `/api/inference/media/capabilities` exposes the current preference, model capability metadata, and the latest observed tests for the active owner/profile. It explicitly reports that routing is not yet using the preference.
+The authenticated read-only endpoint `/api/inference/media/capabilities` exposes the current preference, model capability metadata, and the latest observed tests for the active owner/profile. It reports content-aware recommendation routing as active.
 
 ### Next content-compatibility implementation layer
 
-After the preference UI/metadata is verified, teach recommendation building to filter or prefer models according to the profile setting while still enforcing provider rules, model capability truthfulness, and hard safety boundaries. Adult-capability tests should be recorded as observed capability evidence, not treated as permission to bypass provider or platform restrictions.
+Populate current provider/model policy evidence and run controlled capability tests one exact route at a time. Record adult support/blocking, reference fidelity, identity preservation, edit strength, and provider-policy behavior without treating an observed success as permission to bypass provider or platform restrictions.
 
 
 ### Model Mixer execution-recipe semantics
@@ -265,6 +265,8 @@ High/Medium/Low are selected from complete candidate configurations:
 Recommendation cards now expose the workflow, quality goal, output configuration, content-output constraint, and adult-capability evidence when relevant.
 
 
-### Next content-aware execution layer
+### Content-aware execution gate
 
-Carry the selected recommendation's content-output constraint through the actual provider/local execution path. The execution gate must re-check the current saved preference and current provider/model capability immediately before submission, so a stale recommendation cannot bypass a later preference or policy change.
+The selected recommendation's content-output constraint now reaches actual execution. Immediately before owned/local, Nous, or OpenRouter submission, CoOperative re-checks the current saved preference and exact provider/model/endpoint capability evidence for adult-output requests. The same gate also applies to manual retries and automatic local/OpenRouter fallback routes, preventing stale recommendation state from bypassing a later preference or policy change. SFW requests do not become restricted merely because an adult-capable preference is saved.
+
+If current adult-policy evidence cannot be checked at execution time, adult output fails closed rather than relying on stale metadata. `require_adult_capable` requires verified capability; `adult_allowed` and `prefer_adult_capable` may still execute an unknown route only when it is not currently known to be blocked.
