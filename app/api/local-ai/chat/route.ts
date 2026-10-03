@@ -962,6 +962,32 @@ export async function POST(request: Request) {
     let effectiveMediaAttachmentIds = retryMediaContext
       ? [...retryMediaContext.attachmentIds]
       : [...input.attachmentIds];
+
+    if (
+      !retryMediaContext &&
+      effectiveMediaAttachmentIds.length === 0 &&
+      explicitlyReusesRecentImage(input.message)
+    ) {
+      const { data: recentImageRows, error: recentImageError } = await admin
+        .from("local_ai_messages")
+        .select("attachment_ids")
+        .eq("conversation_id", conversationId)
+        .eq("owner_ref", ownerRef)
+        .eq("role", "user")
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (recentImageError) throw recentImageError;
+
+      const referencedImageMessage = (recentImageRows || []).find(
+        (row) =>
+          Array.isArray(row.attachment_ids) && row.attachment_ids.length > 0,
+      );
+      if (referencedImageMessage) {
+        effectiveMediaAttachmentIds =
+          referencedImageMessage.attachment_ids.slice(0, 4);
+      }
+    }
+
     let mediaPlan = planMediaRequest(effectiveMediaRequestText);
 
     if (
