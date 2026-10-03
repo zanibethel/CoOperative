@@ -54,13 +54,16 @@ async function checkNousPolicy(): Promise<PolicySourceCheck> {
       fetchPolicyText(FAL_AUP),
     ]);
     const nousMarker = /Nous Research Services/i.test(nousTerms);
+    const falPolicyMarker =
+      /fal Acceptable Use Policy/i.test(falAup) ||
+      /generative media platform/i.test(falAup);
     const explicitMarker = /sexually explicit content/i.test(falAup);
     const nciiMarker =
       /non-consensual intimate/i.test(falAup) ||
       /sexual or pornographic manner without their consent/i.test(falAup);
 
-    if (!nousMarker || !explicitMarker || !nciiMarker) {
-      throw new Error("Expected current policy markers were not found.");
+    if (!nousMarker || !falPolicyMarker) {
+      throw new Error("Expected current policy-page identity markers were not found.");
     }
 
     return {
@@ -69,9 +72,10 @@ async function checkNousPolicy(): Promise<PolicySourceCheck> {
       checkedAt,
       source,
       nonExplicitPolicy: "unknown",
-      explicitPolicy: "disallowed",
-      note:
-        "Nous managed-FAL routes are subject to Nous terms, fal acceptable-use rules, and applicable third-party model terms. The current fal policy explicitly restricts sexually explicit and non-consensual intimate content. It does not establish whether a specific model supports non-explicit adult/nudity output, so broad adult capability remains unknown until exact-route evidence exists.",
+      explicitPolicy: explicitMarker ? "disallowed" : "unknown",
+      note: explicitMarker
+        ? `Nous managed-FAL routes are subject to Nous terms, fal acceptable-use rules, and applicable third-party model terms. The current fal policy restricts sexually explicit content${nciiMarker ? " and non-consensual intimate content" : ""}. It does not establish whether a specific model supports non-explicit adult/nudity output.`
+        : "Nous managed-FAL routes are subject to Nous terms, fal acceptable-use rules, and applicable third-party model terms. The current policy source did not establish a broad sexually-explicit allowance or prohibition, so exact-route capability remains unknown.",
     };
   } catch (error) {
     return {
@@ -287,10 +291,12 @@ export async function refreshMediaPolicyEvidence() {
     const updates = rows.map((row) => {
       const hasSpecificNonExplicit =
         row.adult_non_explicit_policy !== "unknown" &&
-        Boolean(row.adult_non_explicit_policy_source);
+        Boolean(row.adult_non_explicit_policy_source) &&
+        row.adult_non_explicit_policy_source !== check.source;
       const hasSpecificExplicit =
         row.adult_explicit_policy !== "unknown" &&
-        Boolean(row.adult_explicit_policy_source);
+        Boolean(row.adult_explicit_policy_source) &&
+        row.adult_explicit_policy_source !== check.source;
 
       return {
         provider: row.provider,
