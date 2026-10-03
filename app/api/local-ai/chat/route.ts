@@ -1197,8 +1197,14 @@ export async function POST(request: Request) {
           );
         }
 
+        const hasDiscoveryOnlyOption = recommendationSet.options.some(
+          (option) => option.executionReady === false,
+        );
         return (
           "I understand the request. I found three live-priced exact-match options without changing the requested duration, resolution, format, or audio. Expand High, Medium, or Low to compare the details. No generation has started." +
+          (hasDiscoveryOnlyOption
+            ? " Premium Hermes/Nous reference options marked as verification-only are visible for comparison but cannot be executed yet."
+            : "") +
           (recommendationMarker ? `\n\n${recommendationMarker}` : "")
         );
       };
@@ -1264,6 +1270,47 @@ export async function POST(request: Request) {
             model: "media-three-tier-recommendations",
             routeReason:
               "The requested recommendation tier was not available from the current live catalog, so no generation started.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      if (selectedRecommendation.executionReady === false) {
+        const message =
+          `The ${selectedRecommendation.label} reference-image option is verified for Hermes capability and live pricing, but this update intentionally does not enable its Nous gateway/attachment execution yet. I did not start a generation.\n\n` +
+          recommendationText();
+
+        await admin.from("local_ai_messages").insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: visibleUserText,
+            attachment_ids: effectiveMediaAttachmentIds,
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: message,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-reference-recommendation-verification-gate",
+            routeReason:
+              "The premium reference-image model is recommendation-only until the managed Nous gateway and attachment handoff are verified.",
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
