@@ -44,7 +44,10 @@ export async function GET() {
     if (capabilitiesError) throw capabilitiesError;
     if (testsError) throw testsError;
 
-    const latestByModelAndTest = new Map<string, (typeof tests)[number]>();
+    const latestByModelAndTest = new Map<
+      string,
+      NonNullable<typeof tests>[number]
+    >();
     for (const test of tests || []) {
       const key = [
         test.provider,
