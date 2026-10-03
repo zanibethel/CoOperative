@@ -6,7 +6,7 @@ import {
   validateBusinessAiCredential,
 } from "@/lib/integrations/business-ai-providers";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
-import { authenticatedUserId } from "@/lib/supabase/auth";
+import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -26,7 +26,7 @@ function providerDisplayName(providerKey: string) {
 }
 
 export async function GET(request: Request) {
-  const userId = await authenticatedUserId();
+  const userId = await mainCooperativeUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -80,7 +80,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const userId = await authenticatedUserId();
+  const userId = await mainCooperativeUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
