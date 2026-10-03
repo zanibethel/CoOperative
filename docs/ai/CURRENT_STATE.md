@@ -75,6 +75,19 @@ Current media behavior now includes:
 
 The canonical product requirements and acceptance tests are in `docs/ai/MEDIA_ROUTING_POLICY.md`.
 
+### Reference-image premium discovery
+
+A read-only backend discovery layer now exists at `/api/inference/media/reference-models`.
+
+It:
+- uses Hermes `v2026.9.24` edit-endpoint metadata as the capability boundary;
+- checks current fal pricing pages live and refuses to substitute stale prices when parsing fails;
+- distinguishes model/reference capability from connected Nous authorization;
+- explicitly reports the Nous managed-gateway allowlist as **not probed** because Step 1 performs no generation/provider spend;
+- does not alter recommendation cards or execution routing yet.
+
+Initial curated discovery covers GPT Image 2.5 Sunburst/Flare Edit, Nano Banana Pro/2 Edit, FLUX 2 Pro/Klein reference editing, and Qwen Image 2 Pro Edit.
+
 ### Next media implementation layer
 
-Expand reference-image recommendation discovery so High and Medium can include higher-quality Hermes/Nous routes when those models are live-priced, attachment-aware, and genuinely reference-capable. Preserve local reference-image routes as valid Medium/Low or fallback choices. Do not expose premium text-to-image models as reference-capable merely because they are higher quality.
+Wire only the verified discovery output into reference-image High / Medium / Low recommendation building. Preserve local reference-image routes as valid Medium/Low or fallback choices. Do not change execution until recommendation behavior is independently verified.
