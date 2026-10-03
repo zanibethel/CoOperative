@@ -21,6 +21,21 @@ export const PREMIUM_REFERENCE_SMOKE_MODEL =
   "openai/gpt-image-2.5/sunburst/text-to-image";
 export const PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT =
   "openai/gpt-image-2.5/sunburst/edit";
+export const FLUX2_PRO_REFERENCE_SMOKE_MODEL = "fal-ai/flux-2-pro";
+export const FLUX2_PRO_REFERENCE_SMOKE_EDIT_ENDPOINT =
+  "fal-ai/flux-2-pro/edit";
+
+export function isApprovedPremiumReferenceSmokeRoute(
+  model: string,
+  editEndpoint: string | null,
+) {
+  return (
+    (model === PREMIUM_REFERENCE_SMOKE_MODEL &&
+      editEndpoint === PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT) ||
+    (model === FLUX2_PRO_REFERENCE_SMOKE_MODEL &&
+      editEndpoint === FLUX2_PRO_REFERENCE_SMOKE_EDIT_ENDPOINT)
+  );
+}
 
 export type MediaRecommendationTier = "high-end" | "balanced" | "lowest-cost";
 
@@ -175,9 +190,10 @@ function discoveredReferenceCandidate(
   );
   const persistedVerified = persisted?.status === "verified";
   const persistedFailed = persisted?.status === "failed";
-  const isSmokeCandidate =
-    model.model === PREMIUM_REFERENCE_SMOKE_MODEL &&
-    model.editEndpoint === PREMIUM_REFERENCE_SMOKE_EDIT_ENDPOINT;
+  const isSmokeCandidate = isApprovedPremiumReferenceSmokeRoute(
+    model.model,
+    model.editEndpoint,
+  );
 
   return {
     provider: "nous",
@@ -202,7 +218,7 @@ function discoveredReferenceCandidate(
         : verification
           ? verification.readyForApprovedSmokeTest
             ? isSmokeCandidate
-              ? "Transport is verified. This is the single approved premium reference smoke-test route. Selecting it permits one capped generation attempt with no automatic retry or fallback; that first real gateway response will verify this exact edit endpoint."
+              ? "Transport is verified. This model is currently approved for a one-shot premium reference smoke test. Selecting it permits one capped generation attempt with no automatic retry or fallback; that first real gateway response will verify this exact edit endpoint."
               : "Hermes reference capability, live pricing, connected Nous managed-FAL entitlement, gateway reachability, and secure short-lived attachment handoff are verified. This model remains display-only until it is separately approved for a one-model smoke test."
             : [
                 "Hermes reference capability and live pricing are verified.",
