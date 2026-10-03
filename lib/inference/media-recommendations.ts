@@ -89,9 +89,17 @@ export type MediaRecommendationOption = {
 
 type Candidate = Omit<
   MediaRecommendationOption,
-  "tier" | "label" | "increaseNeededUsd" | "summary" | "recipe"
+  | "tier"
+  | "label"
+  | "increaseNeededUsd"
+  | "summary"
+  | "recipe"
+  | "adultCapability"
+  | "adultCapabilityNote"
 > & {
   qualityLevel: number;
+  adultCapability?: AdultCapabilityState;
+  adultCapabilityNote?: string | null;
 };
 
 function adultCapabilityFor(
@@ -280,6 +288,7 @@ function asOption(
   candidate: Candidate,
   currentCapUsd: number,
   plan: MediaRequestPlan,
+  contentPreference: MediaContentPreference,
 ): MediaRecommendationOption {
   const qualityIntent: MediaExecutionRecipe["qualityIntent"] =
     tier === "high-end"
@@ -312,10 +321,10 @@ function asOption(
       resolution: candidate.resolution || plan.resolution,
       durationSeconds: plan.durationSeconds,
       audio: candidate.audio,
-      contentConstraint: candidate.recipe.contentConstraint,
+      contentConstraint: contentConstraintFor(contentPreference),
     },
-    adultCapability: candidate.adultCapability,
-    adultCapabilityNote: candidate.adultCapabilityNote,
+    adultCapability: candidate.adultCapability || "unknown",
+    adultCapabilityNote: candidate.adultCapabilityNote || null,
   };
 }
 
