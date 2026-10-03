@@ -583,6 +583,14 @@ export default function ModelMixer({
     ADULT_CONTENT_OPTIONS.find(
       (option) => option.value === mediaContentPreference,
     ) || ADULT_CONTENT_OPTIONS[0];
+  const selectedCapabilityRoute =
+    capabilityCatalog?.routes.find(
+      (route) => capabilityRouteKey(route) === capabilityRouteSelection,
+    ) || null;
+  const preparedCapability =
+    capabilityCatalog?.routes.find(
+      (route) => capabilityRouteKey(route) === preparedCapabilityRoute,
+    ) || null;
 
   async function saveMediaContentPreference() {
     if (mediaPreferenceSaving) return;
@@ -1001,7 +1009,7 @@ export default function ModelMixer({
 
               <p className="model-mixer-adult-selection-note">
                 Current selection: <strong>{selectedAdultContentOption.label}</strong>.
-                Capability data will affect routing only after the separate routing update.
+                Recommendation and execution routing already use scoped capability evidence.
               </p>
             </div>
           )}
