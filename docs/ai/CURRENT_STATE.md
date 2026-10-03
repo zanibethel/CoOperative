@@ -101,6 +101,21 @@ Current boundary:
 - those premium cards are intentionally non-executable in this step;
 - existing owned/local reference-image execution remains unchanged.
 
+### Nous reference transport verification
+
+Reference-image recommendation preflight now performs a zero-generation verification pass for the connected Nous path.
+
+It verifies:
+- the refreshed Nous OAuth authorization is usable;
+- the live Nous Portal account snapshot currently grants managed FAL access through paid access or covered tool-pool entitlement;
+- the managed FAL gateway host is reachable;
+- every current reference attachment belongs to the authenticated owner;
+- each attachment can be represented by a short-lived HTTPS signed URL and fetched successfully without exposing that URL to the client.
+
+This step still does **not** submit a model job. Hermes' pinned managed-FAL integration does not expose a documented zero-spend per-model allowlist/billing-meter preflight, so per-model gateway acceptance remains explicitly unproven until a user approves the first real generation.
+
+Premium cards remain non-executable. Their verification note now distinguishes a transport-ready route from one blocked by account entitlement, gateway reachability, or attachment handoff.
+
 ### Next media implementation layer
 
-Verify the connected Nous managed-gateway allowlist and attachment handoff for the discovered premium reference routes without broadening any other media behavior. Only after that passes should premium reference cards become executable.
+Add one explicitly approved premium reference-image smoke-test path. It should submit only the selected model, preserve the current attachment, enforce the quoted cap immediately before submission, make no automatic retry, and use the first real gateway response to record whether that specific edit endpoint is executable. Do not broadly enable every premium reference card at once.

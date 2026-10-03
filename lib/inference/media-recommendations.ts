@@ -14,6 +14,7 @@ import {
   type NousReferenceImageModel,
 } from "@/lib/inference/nous-reference-image-discovery";
 import type { MediaRequestPlan } from "@/lib/inference/media-request";
+import type { NousReferenceTransportVerification } from "@/lib/inference/nous-reference-transport-verification";
 
 export type MediaRecommendationTier = "high-end" | "balanced" | "lowest-cost";
 
@@ -149,6 +150,7 @@ function referenceQualityLevel(model: NousReferenceImageModel) {
 
 function discoveredReferenceCandidate(
   model: NousReferenceImageModel,
+  verification: NousReferenceTransportVerification | null | undefined,
 ): Candidate | null {
   if (
     model.pricing.status !== "verified-live" ||
@@ -169,8 +171,20 @@ function discoveredReferenceCandidate(
     audio: null,
     executionReady: false,
     referenceBehavior: model.capabilitySummary,
-    verificationNote:
-      "Hermes reference capability and live pricing are verified. Connected Nous managed-gateway allowlisting and attachment execution are intentionally not enabled in this update.",
+    verificationNote: verification
+      ? verification.readyForApprovedSmokeTest
+        ? "Hermes reference capability, live pricing, connected Nous managed-FAL entitlement, gateway reachability, and secure short-lived attachment handoff are verified. The gateway exposes no documented zero-spend per-model allowlist check, so the model meter remains pending until the first explicitly approved generation."
+        : [
+            "Hermes reference capability and live pricing are verified.",
+            verification.account.detail,
+            verification.attachment.detail,
+            verification.gateway.reachable
+              ? null
+              : "The managed FAL gateway host was not reachable during verification.",
+          ]
+            .filter(Boolean)
+            .join(" ")
+      : "Hermes reference capability and live pricing are verified. Connected Nous transport verification has not run for this request.",
     editEndpoint: model.editEndpoint,
     qualityLevel: referenceQualityLevel(model),
   };
@@ -202,6 +216,7 @@ export async function buildMediaRecommendationOptions(input: {
   currentCapUsd: number;
   localImageAvailable?: boolean;
   requiresReferenceImage?: boolean;
+  referenceVerification?: NousReferenceTransportVerification | null;
 }) {
   const { plan, openRouterCatalog, currentCapUsd } = input;
   const candidates: Candidate[] = [];
@@ -286,7 +301,10 @@ export async function buildMediaRecommendationOptions(input: {
     if (input.requiresReferenceImage) {
       const referenceCatalog = await discoverNousReferenceImageModels();
       for (const model of referenceCatalog.models) {
-        const candidate = discoveredReferenceCandidate(model);
+        const candidate = discoveredReferenceCandidate(
+          model,
+          input.referenceVerification,
+        );
         if (candidate) candidates.push(candidate);
       }
     }
