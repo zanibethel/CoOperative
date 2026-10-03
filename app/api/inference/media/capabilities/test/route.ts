@@ -23,6 +23,10 @@ import {
 } from "@/lib/inference/openrouter-media-catalog";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
+import {
+  mediaBenchmarkEvidenceForOwner,
+  mediaBenchmarkSummaryForRoute,
+} from "@/lib/inference/media-model-benchmarks";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -233,7 +237,10 @@ export async function GET(request: Request) {
     await reconcileExpiredCapabilityTests(ownerRef);
 
     if (!jobId) {
-      const routes = await liveImageRoutes();
+      const [routes, benchmarkEvidence] = await Promise.all([
+        liveImageRoutes(),
+        mediaBenchmarkEvidenceForOwner(ownerRef).catch(() => []),
+      ]);
       const [
         { data: tests, error: testsError },
         { data: activeJobs, error: activeJobsError },
@@ -276,6 +283,14 @@ export async function GET(request: Request) {
             ...route,
             latestTest:
               latest.get([route.provider, route.model, ""].join("|")) || null,
+            benchmarkScorecard: mediaBenchmarkSummaryForRoute(
+              benchmarkEvidence,
+              {
+                provider: route.provider,
+                model: route.model,
+                endpoint: "",
+              },
+            ),
           })),
           activeJob: activeJobs?.[0]
             ? {

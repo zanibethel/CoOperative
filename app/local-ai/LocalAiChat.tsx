@@ -325,7 +325,29 @@ type MediaRecommendationOption = {
   };
   adultCapability?: "verified" | "blocked" | "unknown";
   adultCapabilityNote?: string | null;
+  scorecard?: {
+    qualityScore: number;
+    qualitySource: "benchmark" | "mixed" | "heuristic";
+    benchmarkCoverage: number;
+    measuredDimensions: number;
+    latestMeasuredAt: string | null;
+    dimensions: {
+      visualQuality: number | null;
+      promptAdherence: number | null;
+      anatomy: number | null;
+      referenceFidelity: number | null;
+      editStrength: number | null;
+      speed: number | null;
+    };
+    selectionBasis: string;
+  };
 };
+
+function mediaBenchmarkLabel(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${Math.round(value)}/100`
+    : "Not benchmarked";
+}
 
 function mediaRecommendationsDirective(content: string) {
   const marker = /(?:^|\n)MEDIA_RECOMMENDATIONS:([^\s]+)\s*$/im;
@@ -528,6 +550,63 @@ function MediaRecommendationChoices({
                       </strong>
                     </span>
                   ) : null}
+                </>
+              ) : null}
+              {option.scorecard ? (
+                <>
+                  <span>
+                    <small>Routing quality</small>
+                    <strong>
+                      {option.scorecard.qualityScore}/100 ·{" "}
+                      {option.scorecard.qualitySource === "benchmark"
+                        ? "measured"
+                        : option.scorecard.qualitySource === "mixed"
+                          ? "mixed evidence"
+                          : "heuristic"}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Visual quality</small>
+                    <strong>
+                      {mediaBenchmarkLabel(option.scorecard.dimensions.visualQuality)}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Prompt adherence</small>
+                    <strong>
+                      {mediaBenchmarkLabel(option.scorecard.dimensions.promptAdherence)}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Anatomy</small>
+                    <strong>
+                      {mediaBenchmarkLabel(option.scorecard.dimensions.anatomy)}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Reference fidelity</small>
+                    <strong>
+                      {mediaBenchmarkLabel(option.scorecard.dimensions.referenceFidelity)}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Edit strength</small>
+                    <strong>
+                      {mediaBenchmarkLabel(option.scorecard.dimensions.editStrength)}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>Speed</small>
+                    <strong>{mediaBenchmarkLabel(option.scorecard.dimensions.speed)}</strong>
+                  </span>
+                  <span>
+                    <small>Benchmark evidence</small>
+                    <strong>{option.scorecard.measuredDimensions}/6 measured</strong>
+                  </span>
+                  <span className="media-recommendation-meta-wide">
+                    <small>Selection basis</small>
+                    <strong>{option.scorecard.selectionBasis}</strong>
+                  </span>
                 </>
               ) : null}
               {option.referenceBehavior ? (

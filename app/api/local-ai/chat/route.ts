@@ -27,6 +27,10 @@ import {
 } from "@/lib/inference/media-request";
 import { evaluateMediaExecutionContentGate } from "@/lib/inference/media-model-capabilities";
 import {
+  mediaBenchmarkEvidenceForOwner,
+  type MediaBenchmarkEvidence,
+} from "@/lib/inference/media-model-benchmarks";
+import {
   estimateOpenRouterMediaCostUsd,
   openRouterKeySpendStatus,
   openRouterMediaCatalog,
@@ -1366,6 +1370,19 @@ export async function POST(request: Request) {
         });
       }
 
+      let benchmarkEvidence: MediaBenchmarkEvidence[] = [];
+      try {
+        benchmarkEvidence = await mediaBenchmarkEvidenceForOwner(ownerRef);
+      } catch (benchmarkError) {
+        console.warn("Media benchmark evidence unavailable; using catalog heuristics.", {
+          ownerRef,
+          detail:
+            benchmarkError instanceof Error
+              ? benchmarkError.message
+              : "Unknown benchmark evidence error.",
+        });
+      }
+
       const storedContentPreference =
         mediaPreferenceRow?.media_content_preference as
           | MediaContentPreference
@@ -1450,6 +1467,7 @@ export async function POST(request: Request) {
         referenceModelVerifications,
         contentPreference,
         adultCapabilityEvidence: [...adultEvidenceByKey.values()],
+        benchmarkEvidence,
         adultOutputRequested,
         adultContentClass,
       });
@@ -1545,7 +1563,7 @@ export async function POST(request: Request) {
             provider: "code",
             model: "media-three-tier-recommendations",
             routeReason:
-              `The media request is clear, so CoOperative applied the saved ${contentPreference} output preference to this ${adultContentClass} request and ranked three exact-request execution recipes by output quality, configuration, and cost before starting any generation.`,
+              `The media request is clear, so CoOperative applied the saved ${contentPreference} output preference to this ${adultContentClass} request and ranked three exact-request execution recipes using benchmark evidence when available, then configuration quality and cost. No generation started.`,
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );

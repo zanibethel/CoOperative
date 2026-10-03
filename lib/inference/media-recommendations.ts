@@ -19,6 +19,12 @@ import type {
 } from "@/lib/inference/media-request";
 import type { NousReferenceTransportVerification } from "@/lib/inference/nous-reference-transport-verification";
 import type { MediaReferenceModelVerification } from "@/lib/inference/media-reference-model-verification";
+import {
+  mediaBenchmarkQualityComposite,
+  mediaBenchmarkSummaryForRoute,
+  type MediaBenchmarkDimensionScores,
+  type MediaBenchmarkEvidence,
+} from "@/lib/inference/media-model-benchmarks";
 
 export const PREMIUM_REFERENCE_SMOKE_MODEL =
   "openai/gpt-image-2.5/sunburst/text-to-image";
@@ -73,6 +79,16 @@ export type MediaExecutionRecipe = {
   contentConstraint: "sfw-output" | "request-controlled-adult-output";
 };
 
+export type MediaRouteScorecard = {
+  qualityScore: number;
+  qualitySource: "benchmark" | "mixed" | "heuristic";
+  benchmarkCoverage: number;
+  measuredDimensions: number;
+  latestMeasuredAt: string | null;
+  dimensions: MediaBenchmarkDimensionScores;
+  selectionBasis: string;
+};
+
 export type MediaRecommendationOption = {
   tier: MediaRecommendationTier;
   label: string;
@@ -93,6 +109,7 @@ export type MediaRecommendationOption = {
   recipe: MediaExecutionRecipe;
   adultCapability: AdultCapabilityState;
   adultCapabilityNote: string | null;
+  scorecard: MediaRouteScorecard;
 };
 
 type Candidate = Omit<
@@ -104,10 +121,12 @@ type Candidate = Omit<
   | "recipe"
   | "adultCapability"
   | "adultCapabilityNote"
+  | "scorecard"
 > & {
   qualityLevel: number;
   adultCapability?: AdultCapabilityState;
   adultCapabilityNote?: string | null;
+  scorecard?: MediaRouteScorecard;
 };
 
 function adultCapabilityFor(
@@ -237,6 +256,43 @@ function resolutionQuality(value: string | null) {
   }
 }
 
+function routeScorecardFor(
+  candidate: Candidate,
+  evidence: MediaBenchmarkEvidence[] | undefined,
+  requiresReferenceImage: boolean,
+): MediaRouteScorecard {
+  const summary = mediaBenchmarkSummaryForRoute(evidence, {
+    provider: candidate.provider,
+    model: candidate.model,
+    endpoint: candidate.editEndpoint || "",
+  });
+  const heuristicScore = Math.max(
+    0,
+    Math.min(100, candidate.qualityLevel * 20),
+  );
+  const composite = mediaBenchmarkQualityComposite({
+    summary,
+    heuristicScore,
+    referenceWorkflow: requiresReferenceImage,
+  });
+  const selectionBasis =
+    composite.qualitySource === "benchmark"
+      ? "Quality ranking is based on measured benchmark evidence for the weighted request dimensions."
+      : composite.qualitySource === "mixed"
+        ? `${Math.round(composite.benchmarkCoverage * 100)}% of the weighted quality signal is measured; the remainder uses current catalog/model-tier evidence.`
+        : "This exact route has not been quality-benchmarked yet, so ranking currently uses catalog/model-tier evidence.";
+
+  return {
+    qualityScore: composite.qualityScore,
+    qualitySource: composite.qualitySource,
+    benchmarkCoverage: composite.benchmarkCoverage,
+    measuredDimensions: summary.measuredDimensions,
+    latestMeasuredAt: summary.latestMeasuredAt,
+    dimensions: summary.dimensions,
+    selectionBasis,
+  };
+}
+
 function configurationQualityScore(
   candidate: Candidate,
   preference: MediaContentPreference,
@@ -246,9 +302,10 @@ function configurationQualityScore(
     adultOutputRequested &&
     preference === "prefer_adult_capable" &&
     candidate.adultCapability === "verified"
-      ? 2
+      ? 4
       : 0;
-  return candidate.qualityLevel * 10 + resolutionQuality(candidate.resolution) + adultPreferenceBonus;
+  const baseQuality = candidate.scorecard?.qualityScore ?? candidate.qualityLevel * 20;
+  return baseQuality + resolutionQuality(candidate.resolution) * 2 + adultPreferenceBonus;
 }
 
 function withAdultCapability(
@@ -374,6 +431,9 @@ function asOption(
     },
     adultCapability: candidate.adultCapability || "unknown",
     adultCapabilityNote: candidate.adultCapabilityNote || null,
+    scorecard:
+      candidate.scorecard ||
+      routeScorecardFor(candidate, undefined, Boolean(candidate.referenceBehavior)),
   };
 }
 
@@ -491,6 +551,7 @@ export async function buildMediaRecommendationOptions(input: {
   referenceModelVerifications?: MediaReferenceModelVerification[];
   contentPreference?: MediaContentPreference;
   adultCapabilityEvidence?: MediaAdultCapabilityEvidence[];
+  benchmarkEvidence?: MediaBenchmarkEvidence[];
   adultOutputRequested?: boolean;
   adultContentClass?: MediaAdultContentClass;
 }) {
@@ -695,13 +756,21 @@ export async function buildMediaRecommendationOptions(input: {
     }
   }
 
-  const enriched = candidates.map((candidate) =>
-    withAdultCapability(
+  const enriched = candidates.map((candidate) => {
+    const adultEnriched = withAdultCapability(
       candidate,
       input.adultCapabilityEvidence,
       adultContentClass,
-    ),
-  );
+    );
+    return {
+      ...adultEnriched,
+      scorecard: routeScorecardFor(
+        adultEnriched,
+        input.benchmarkEvidence,
+        Boolean(input.requiresReferenceImage),
+      ),
+    };
+  });
   if (adultOutputRequested && contentPreference === "sfw_only") {
     return {
       options: [] as MediaRecommendationOption[],
