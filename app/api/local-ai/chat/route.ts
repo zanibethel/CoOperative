@@ -1864,7 +1864,22 @@ export async function POST(request: Request) {
           .eq("id", jobId)
           .eq("owner_ref", ownerRef);
 
-        if (premiumReferenceSmokeTest) {
+        if (premiumReferenceRoute) {
+          if (
+            premiumReferenceSmokeTest &&
+            selectedRecommendation.editEndpoint
+          ) {
+            await recordMediaReferenceModelVerification({
+              ownerRef,
+              provider: "nous",
+              model: selectedRecommendation.model,
+              editEndpoint: selectedRecommendation.editEndpoint,
+              sourceJobId: jobId,
+              success: false,
+              failureReason: detail,
+            });
+          }
+
           return NextResponse.json(
             {
               status: "failed",
@@ -1874,9 +1889,10 @@ export async function POST(request: Request) {
               conversationTitle,
               error: detail,
               provider: "nous",
-              model: PREMIUM_REFERENCE_SMOKE_MODEL,
-              routeReason:
-                "The one-shot premium reference smoke test could not start. CoOperative recorded the failure and did not retry, fall back, or launch Recovery Agent.",
+              model: selectedRecommendation.model,
+              routeReason: premiumReferenceSmokeTest
+                ? "The one-shot premium reference smoke test could not start. CoOperative recorded the failure and did not retry, fall back, or launch Recovery Agent."
+                : "The verified premium reference route could not start. CoOperative preserved the reference-image boundary and did not retry or fall back to a route that might ignore the attachment.",
             },
             { status: 200, headers: { "Cache-Control": "no-store" } },
           );
@@ -2484,22 +2500,25 @@ export async function GET(request: Request) {
         const failure = polled.error || "Hermes media generation failed.";
         const completedAt = new Date().toISOString();
 
-        const referenceSmokeTest =
+        const referencePricingDimensions =
           mediaJob.pricing_dimensions &&
           typeof mediaJob.pricing_dimensions === "object" &&
-          !Array.isArray(mediaJob.pricing_dimensions) &&
-          (mediaJob.pricing_dimensions as { referenceSmokeTest?: unknown })
-            .referenceSmokeTest === true;
+          !Array.isArray(mediaJob.pricing_dimensions)
+            ? (mediaJob.pricing_dimensions as {
+                referenceSmokeTest?: unknown;
+                referenceVerifiedRoute?: unknown;
+                referenceEditEndpoint?: unknown;
+              })
+            : null;
+        const referenceSmokeTest =
+          referencePricingDimensions?.referenceSmokeTest === true;
+        const referenceVerifiedRoute =
+          referencePricingDimensions?.referenceVerifiedRoute === true;
+        const referenceRoute = referenceSmokeTest || referenceVerifiedRoute;
 
-        if (referenceSmokeTest) {
+        if (referenceRoute) {
           const referenceEditEndpoint =
-            mediaJob.pricing_dimensions &&
-            typeof mediaJob.pricing_dimensions === "object" &&
-            !Array.isArray(mediaJob.pricing_dimensions)
-              ? (mediaJob.pricing_dimensions as {
-                  referenceEditEndpoint?: unknown;
-                }).referenceEditEndpoint
-              : null;
+            referencePricingDimensions?.referenceEditEndpoint;
           if (
             mediaJob.provider === "nous" &&
             typeof referenceEditEndpoint === "string" &&
@@ -2539,8 +2558,9 @@ export async function GET(request: Request) {
               provider: mediaJob.provider,
               model: mediaJob.model,
               error: failure,
-              routeReason:
-                "The one-shot premium reference smoke test failed. The exact endpoint and failure are recorded on this job; CoOperative did not retry or fall back automatically.",
+              routeReason: referenceSmokeTest
+                ? "The one-shot premium reference smoke test failed. The exact endpoint and failure are recorded on this job; CoOperative did not retry or fall back automatically."
+                : "The verified premium reference route failed. CoOperative recorded the attempt but kept the previously verified endpoint status and did not fall back to a route that might ignore the reference image.",
             },
             { headers: { "Cache-Control": "no-store" } },
           );
