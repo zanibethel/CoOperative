@@ -133,6 +133,88 @@ async function recordJobOutcome(input: {
   });
 }
 
+async function reconcileExpiredCapabilityTests(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  const nowIso = new Date().toISOString();
+  const { data: jobs, error } = await admin
+    .from("media_generation_jobs")
+    .select(
+      "id,status,owner_ref,provider,model,sandbox_name,result_url,usage,error,deadline_at,pricing_dimensions",
+    )
+    .eq("owner_ref", ownerRef)
+    .in("status", ["queued", "running"])
+    .contains("pricing_dimensions", { capabilityTest: true })
+    .not("deadline_at", "is", null)
+    .lte("deadline_at", nowIso)
+    .order("deadline_at", { ascending: true })
+    .limit(5);
+  if (error) throw error;
+
+  for (const job of jobs || []) {
+    let polled: Awaited<ReturnType<typeof pollHermesMediaTask>> | null = null;
+
+    if (job.status === "running" && job.sandbox_name && job.deadline_at) {
+      try {
+        polled = await pollHermesMediaTask({
+          sandboxName: job.sandbox_name,
+          deadlineAt: job.deadline_at,
+        });
+      } catch {
+        polled = null;
+      }
+    }
+
+    const timedOut = !polled || polled.state === "running";
+    const completedAt = new Date().toISOString();
+    const status = timedOut ? "failed" : polled.state;
+    const mediaUrl = timedOut ? null : polled.mediaUrl;
+    const errorText = timedOut
+      ? "Capability test deadline elapsed before a final provider result was persisted."
+      : polled.error;
+    const usage = timedOut ? job.usage : polled.usage;
+
+    const { error: updateError } = await admin
+      .from("media_generation_jobs")
+      .update({
+        status,
+        result_url: mediaUrl,
+        usage,
+        error: errorText,
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq("id", job.id)
+      .eq("owner_ref", ownerRef)
+      .in("status", ["queued", "running"]);
+    if (updateError) throw updateError;
+
+    const outcome: MediaCapabilityTestOutcome =
+      status === "completed" && mediaUrl
+        ? "supported"
+        : timedOut
+          ? "inconclusive"
+          : failureOutcome(
+              [polled?.error, polled?.stderr, polled?.stdout]
+                .filter(Boolean)
+                .join("\n"),
+            );
+
+    await recordJobOutcome({
+      ownerRef,
+      jobId: job.id,
+      provider: job.provider,
+      model: job.model,
+      outcome,
+      note:
+        outcome === "supported"
+          ? "The exact text-to-image route completed the standardized non-explicit adult/nudity boundary test. This verifies only non-explicit adult capability."
+          : outcome === "blocked"
+            ? "The exact route rejected the standardized non-explicit adult/nudity boundary test with a content/policy-style failure."
+            : "The controlled capability test reached its deadline or failed without evidence that clearly establishes a content-policy block.",
+    });
+  }
+}
+
 export async function GET(request: Request) {
   const userId = await authenticatedUserId();
   if (!userId) {
@@ -145,6 +227,8 @@ export async function GET(request: Request) {
   const jobId = url.searchParams.get("jobId");
 
   try {
+    await reconcileExpiredCapabilityTests(ownerRef);
+
     if (!jobId) {
       const routes = await liveImageRoutes();
       const [
@@ -333,6 +417,7 @@ export async function POST(request: Request) {
 
   try {
     const input = runSchema.parse(await request.json());
+    await reconcileExpiredCapabilityTests(ownerRef);
     const preference = await mediaContentPreferenceForUser(userId);
     if (
       preference.preference === "sfw_only" ||
@@ -371,6 +456,8 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+
+    const approvedTestCapUsd = route.capUsd;
 
     const { data: capability, error: capabilityError } = await admin
       .from("media_model_capabilities")
@@ -480,7 +567,7 @@ export async function POST(request: Request) {
         provider: input.provider,
         model: input.model,
         model_mixer: null,
-        request_max_spend_microusd: Math.round(input.maxSpendUsd * 1_000_000),
+        request_max_spend_microusd: Math.round(approvedTestCapUsd * 1_000_000),
         media_level: 1,
         estimated_provider_cost_microusd: Math.round(
           route.estimatedCostUsd * 1_000_000,
@@ -538,7 +625,7 @@ export async function POST(request: Request) {
           provider: input.provider,
           model: input.model,
           estimatedProviderCostUsd: route.estimatedCostUsd,
-          capUsd: input.maxSpendUsd,
+          capUsd: approvedTestCapUsd,
           promptClassification: TEST_PROMPT_CLASSIFICATION,
           note:
             "One exact-route test started. No retry or fallback is allowed. A successful result verifies only non-explicit adult/nudity capability.",
