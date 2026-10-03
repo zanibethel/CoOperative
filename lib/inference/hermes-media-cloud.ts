@@ -17,6 +17,7 @@ export type HermesMediaStartSpec = {
   referenceImageUrls?: string[];
   referenceSmokeTest?: boolean;
   capabilityTest?: boolean;
+  benchmarkTest?: boolean;
 };
 
 export type HermesMediaStartResult = {
@@ -160,7 +161,9 @@ function promptFor(spec: HermesMediaStartSpec) {
       ? "This is a one-shot reference-route verification. Do not fall back to another model or provider under any circumstance."
       : spec.capabilityTest
         ? "This is a one-shot capability verification. Do not retry, fall back, or substitute another model/provider under any circumstance."
-        : "Use only the configured media route for this job.",
+        : spec.benchmarkTest
+          ? "This is a controlled benchmark. Use the USER REQUEST verbatim as the image-generation prompt. Do not rewrite, embellish, retry, fall back, or substitute another model/provider."
+          : "Use only the configured media route for this job.",
     "Honor explicit duration, aspect ratio, platform, style, camera, audio, and subject requirements in the request.",
     "After the tool succeeds, answer briefly and include the returned media URL using the exact prefix MEDIA:.",
     "If the tool fails, report the failure concisely and stop.",
