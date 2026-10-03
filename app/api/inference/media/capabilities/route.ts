@@ -99,8 +99,11 @@ export async function GET() {
         },
         models,
         routingApplied: true,
+        executionGateApplied: true,
+        evidenceRefreshEndpoint: "/api/inference/media/capabilities/refresh",
+        capabilityTestEndpoint: "/api/inference/media/capabilities/test",
         note:
-          "Recommendation routing now uses this preference only when the media request explicitly asks for adult output. SFW requests remain eligible for the best-fit model regardless of adult capability. Execution/provider submission safety remains a separate gate.",
+          "Recommendation routing and execution-time gating use scoped capability evidence. SFW requests remain eligible for the best-fit model regardless of adult capability. General provider policy evidence is source metadata, not proof that an exact model supports a particular adult-output scope.",
       },
       { headers: { "Cache-Control": "private, no-store" } },
     );
