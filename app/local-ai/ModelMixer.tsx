@@ -1011,6 +1011,151 @@ export default function ModelMixer({
                 Current selection: <strong>{selectedAdultContentOption.label}</strong>.
                 Recommendation and execution routing already use scoped capability evidence.
               </p>
+
+              <div className="model-mixer-capability-lab">
+                <div className="model-mixer-capability-lab-head">
+                  <div>
+                    <strong>Capability lab</strong>
+                    <span>
+                      Source-backed policy evidence + one exact-route test at a time.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void refreshPolicyEvidence()}
+                    disabled={policyRefreshing}
+                  >
+                    {policyRefreshing ? "Refreshing…" : "Refresh evidence"}
+                  </button>
+                </div>
+
+                {policyRefreshMessage ? (
+                  <p className="model-mixer-capability-message">
+                    {policyRefreshMessage}
+                  </p>
+                ) : null}
+
+                <label className="model-mixer-capability-select">
+                  <span>Hosted image route to test</span>
+                  <select
+                    value={capabilityRouteSelection}
+                    onChange={(event) => {
+                      setCapabilityRouteSelection(event.target.value);
+                      setPreparedCapabilityRoute("");
+                      setCapabilityTestMessage("");
+                    }}
+                    disabled={
+                      !capabilityCatalog?.routes.length ||
+                      capabilityTestStatus === "running" ||
+                      capabilityTestStatus === "queued"
+                    }
+                  >
+                    {(capabilityCatalog?.routes || []).map((route) => (
+                      <option
+                        key={capabilityRouteKey(route)}
+                        value={capabilityRouteKey(route)}
+                      >
+                        {route.provider} · {route.label} · ~${route.estimatedCostUsd.toFixed(3)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {capabilityCatalogError ? (
+                  <p className="model-mixer-content-error">
+                    {capabilityCatalogError}
+                  </p>
+                ) : null}
+
+                {capabilityCatalog ? (
+                  <small className="model-mixer-capability-scope">
+                    {capabilityCatalog.testDescription}
+                  </small>
+                ) : null}
+
+                {selectedCapabilityRoute ? (
+                  <div className="model-mixer-capability-route-summary">
+                    <span>
+                      <small>Current route</small>
+                      <strong>
+                        {selectedCapabilityRoute.provider} · {selectedCapabilityRoute.label}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Live estimate</small>
+                      <strong>
+                        ~${selectedCapabilityRoute.estimatedCostUsd.toFixed(3)}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Latest boundary test</small>
+                      <strong>
+                        {selectedCapabilityRoute.latestTest?.outcome || "Not tested"}
+                      </strong>
+                    </span>
+                  </div>
+                ) : null}
+
+                {capabilityCatalog?.routes.length ? (
+                  <div className="model-mixer-capability-actions">
+                    <button
+                      type="button"
+                      onClick={prepareSelectedCapabilityTest}
+                      disabled={
+                        !capabilityRouteSelection ||
+                        capabilityTestStatus === "running" ||
+                        capabilityTestStatus === "queued"
+                      }
+                    >
+                      Prepare one test
+                    </button>
+                  </div>
+                ) : null}
+
+                {preparedCapability ? (
+                  <div className="model-mixer-capability-prepared">
+                    <strong>
+                      {preparedCapability.provider} · {preparedCapability.label}
+                    </strong>
+                    <span>
+                      Live estimate ~${preparedCapability.estimatedCostUsd.toFixed(3)} ·
+                      safe cap ${preparedCapability.capUsd.toFixed(2)}
+                    </span>
+                    <small>
+                      This test uses a fictional adult fine-art figure study with
+                      non-explicit nudity and no sexual activity. It does not certify
+                      sexually explicit output.
+                    </small>
+                    {preparedCapability.capUsd >
+                    settings.maxSpendUsd + 0.000001 ? (
+                      <small className="model-mixer-content-error">
+                        Current session cap is ${settings.maxSpendUsd.toFixed(2)}.
+                        Raise it manually to at least ${preparedCapability.capUsd.toFixed(2)}
+                        if you want to run this test.
+                      </small>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void runPreparedCapabilityTest()}
+                      disabled={
+                        preparedCapability.capUsd >
+                          settings.maxSpendUsd + 0.000001 ||
+                        !adultContentAcknowledged ||
+                        capabilityTestStatus === "running" ||
+                        capabilityTestStatus === "queued"
+                      }
+                    >
+                      Run one test · no retry/fallback
+                    </button>
+                  </div>
+                ) : null}
+
+                {capabilityTestMessage ? (
+                  <p className="model-mixer-capability-message">
+                    {capabilityTestMessage}
+                  </p>
+                ) : null}
+              </div>
             </div>
           )}
 
