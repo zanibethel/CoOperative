@@ -58,6 +58,49 @@ type MediaContentPreference =
   | "prefer_adult_capable"
   | "require_adult_capable";
 
+type CapabilityTestRoute = {
+  provider: "nous" | "openrouter";
+  model: string;
+  endpoint: string;
+  label: string;
+  estimatedCostUsd: number;
+  capUsd: number;
+  pricingSource: string;
+  latestTest: {
+    outcome: "supported" | "blocked" | "partial" | "inconclusive";
+    prompt_classification: string | null;
+    tested_at: string | null;
+  } | null;
+};
+
+type CapabilityTestCatalog = {
+  promptClassification: string;
+  testDescription: string;
+  routes: CapabilityTestRoute[];
+  activeJob: {
+    jobId: string;
+    provider: string;
+    model: string;
+    status: string;
+    estimatedProviderCostUsd: number | null;
+  } | null;
+};
+
+type CapabilityTestState = {
+  jobId: string;
+  status: string;
+  provider: string;
+  model: string;
+  mediaUrl?: string | null;
+  error?: string | null;
+  result?: {
+    outcome: "supported" | "blocked" | "partial" | "inconclusive";
+    promptClassification: string | null;
+    testedAt?: string | null;
+    notes?: string | null;
+  } | null;
+};
+
 export type ModelMixerSettings = {
   preset: ModelMixerPreset;
   maxSpendUsd: number;
@@ -251,6 +294,43 @@ function formatDuration(seconds: number) {
   return `${minutes}m ${remainder.toString().padStart(2, "0")}s`;
 }
 
+function capabilityRouteKey(route: Pick<CapabilityTestRoute, "provider" | "model">) {
+  return `${route.provider}|${route.model}`;
+}
+
+async function loadCapabilityTestCatalog() {
+  const response = await fetch("/api/inference/media/capabilities/test", {
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as CapabilityTestCatalog & {
+    error?: string;
+    detail?: string;
+  };
+  if (!response.ok) {
+    throw new Error(
+      payload.detail || payload.error || "Could not load capability-test routes.",
+    );
+  }
+  return payload;
+}
+
+async function loadCapabilityTestState(jobId: string) {
+  const response = await fetch(
+    `/api/inference/media/capabilities/test?jobId=${encodeURIComponent(jobId)}`,
+    { cache: "no-store" },
+  );
+  const payload = (await response.json()) as CapabilityTestState & {
+    error?: string;
+    detail?: string;
+  };
+  if (!response.ok) {
+    throw new Error(
+      payload.detail || payload.error || "Could not read capability-test status.",
+    );
+  }
+  return payload;
+}
+
 function presetSettings(preset: Exclude<ModelMixerPreset, "custom">): ModelMixerSettings {
   return {
     preset,
@@ -310,6 +390,16 @@ export default function ModelMixer({
   const [mediaPreferenceLoaded, setMediaPreferenceLoaded] = useState(false);
   const [mediaPreferenceSaving, setMediaPreferenceSaving] = useState(false);
   const [mediaPreferenceError, setMediaPreferenceError] = useState("");
+  const [capabilityCatalog, setCapabilityCatalog] =
+    useState<CapabilityTestCatalog | null>(null);
+  const [capabilityCatalogError, setCapabilityCatalogError] = useState("");
+  const [capabilityRouteSelection, setCapabilityRouteSelection] = useState("");
+  const [preparedCapabilityRoute, setPreparedCapabilityRoute] = useState("");
+  const [policyRefreshing, setPolicyRefreshing] = useState(false);
+  const [policyRefreshMessage, setPolicyRefreshMessage] = useState("");
+  const [capabilityTestJobId, setCapabilityTestJobId] = useState("");
+  const [capabilityTestStatus, setCapabilityTestStatus] = useState("");
+  const [capabilityTestMessage, setCapabilityTestMessage] = useState("");
 
   useEffect(() => {
     if (!open) return;
