@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 
 import { businessSummariesForUser } from "@/lib/ai/business-context";
-import { authenticatedUserId } from "@/lib/supabase/auth";
+import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 import { aiProfileBalanceForUser } from "@/lib/billing/ai-profile-balance";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
 export async function GET() {
-  const userId = await authenticatedUserId();
+  const userId = await mainCooperativeUserId();
 
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
