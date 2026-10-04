@@ -78,10 +78,14 @@ type ConversationResult = {
 };
 
 type OnboardingState = {
-  status: "not_started" | "in_progress" | "completed" | "dismissed";
+  status: "not_started" | "in_progress" | "completed" | "dismissed" | "paused";
   currentBatch: number;
   conversationId: string | null;
   totalBatches: number;
+  mode?: "choose" | "personal" | "business";
+  phase?: string;
+  businessId?: string | null;
+  pausedReason?: string | null;
   fields?: Array<{
     field_key: string;
     category: string;
@@ -94,6 +98,7 @@ type OnboardingState = {
 
 type OnboardingResult = {
   state?: OnboardingState;
+  handled?: boolean;
   assistantText?: string;
   error?: string;
   detail?: string;
