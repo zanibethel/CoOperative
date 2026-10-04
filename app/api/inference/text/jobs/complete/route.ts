@@ -175,6 +175,7 @@ export async function POST(request: Request) {
             conversationId: job.conversation_id,
             requestType: `${job.capability || "text"} / local failure`,
             allowExternalReview: job.routing_preference !== "require-node",
+            businessId: job.business_id || null,
           });
         } catch (contextError) {
           console.error("Could not archive local failure context", {
@@ -328,6 +329,7 @@ export async function POST(request: Request) {
           conversationId: job.conversation_id,
           requestType: `${job.capability || "text"} / local success`,
           allowExternalReview: job.routing_preference !== "require-node",
+          businessId: job.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not refresh local runtime context", {
