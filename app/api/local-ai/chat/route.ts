@@ -2731,10 +2731,11 @@ export async function POST(request: Request) {
       (currentAttachmentIds.length > 0
         ? "Describe and analyze the attached image."
         : "");
-    const memoryContext =
-      requestedCapability === "text"
-        ? await relevantMemorySystemContext(ownerRef, modelUserText, conversationId)
-        : null;
+    const memoryContext = await relevantMemorySystemContext(
+      ownerRef,
+      modelUserText,
+      conversationId,
+    );
     const systemMessages = [
       {
         role: "system" as const,
