@@ -77,6 +77,28 @@ type ConversationResult = {
   detail?: string;
 };
 
+type OnboardingState = {
+  status: "not_started" | "in_progress" | "completed" | "dismissed";
+  currentBatch: number;
+  conversationId: string | null;
+  totalBatches: number;
+  fields?: Array<{
+    field_key: string;
+    category: string;
+    label: string;
+    value_text: string | null;
+    status: "known" | "unknown" | "deferred";
+    updated_at: string;
+  }>;
+};
+
+type OnboardingResult = {
+  state?: OnboardingState;
+  assistantText?: string;
+  error?: string;
+  detail?: string;
+};
+
 type AiBalanceSummary = {
   availableMicrousd: number;
   availableUsd: number;
