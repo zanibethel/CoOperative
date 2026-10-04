@@ -78,10 +78,14 @@ type ConversationResult = {
 };
 
 type OnboardingState = {
-  status: "not_started" | "in_progress" | "completed" | "dismissed";
+  status: "not_started" | "in_progress" | "paused" | "completed" | "dismissed";
   currentBatch: number;
   conversationId: string | null;
   totalBatches: number;
+  mode?: "choose" | "personal" | "business";
+  phase?: "choose_mode" | "personal" | "business_select" | "business_setup" | "business_intake";
+  businessId?: string | null;
+  pausedReason?: string | null;
   fields?: Array<{
     field_key: string;
     category: string;
@@ -95,6 +99,8 @@ type OnboardingState = {
 type OnboardingResult = {
   state?: OnboardingState;
   assistantText?: string;
+  passThrough?: boolean;
+  selectedBusinessId?: string | null;
   error?: string;
   detail?: string;
 };
@@ -159,6 +165,8 @@ type JobResult = {
   modelMixerUpdate?: {
     maxSpendUsd?: number;
   } | null;
+  selectedBusinessId?: string | null;
+  onboardingState?: OnboardingState | null;
 };
 
 type RecoveryEvent = {
@@ -1492,7 +1500,7 @@ export default function LocalAiChat() {
 
     const saved = window.localStorage.getItem(ACTIVE_BUSINESS_KEY) || "";
     const selected =
-      items.find((item) => item.id === saved)?.id || items[0]?.id || "";
+      items.find((item) => item.id === saved)?.id || "";
     setSelectedBusinessId(selected);
 
     if (selected) {
@@ -1919,11 +1927,7 @@ export default function LocalAiChat() {
           return;
         }
 
-        if (
-          !cancelled &&
-          threads.length === 0 &&
-          onboarding.status === "not_started"
-        ) {
+        if (!cancelled && onboarding.status === "not_started") {
           const startedOnboarding = await startOrResumeOnboarding();
           if (startedOnboarding) return;
         }
@@ -2224,42 +2228,6 @@ export default function LocalAiChat() {
     setStatus("Preparing context…");
 
     try {
-      if (
-        onboardingState?.status === "in_progress" &&
-        onboardingState.conversationId &&
-        onboardingState.conversationId === conversationId &&
-        currentAttachments.length === 0
-      ) {
-        setStatus("Saving your profile answers…");
-        const onboardingResponse = await fetch("/api/local-ai/onboarding", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "answer",
-            conversationId,
-            message: text,
-          }),
-        });
-        const onboarding = (await onboardingResponse.json()) as OnboardingResult;
-
-        if (!onboardingResponse.ok || !onboarding.state) {
-          throw new Error(
-            onboarding.detail ||
-              onboarding.error ||
-              "Could not save get-to-know-you answers.",
-          );
-        }
-
-        setOnboardingState(onboarding.state);
-        await loadConversation(conversationId);
-        await refreshConversations();
-        setAttachments([]);
-        setMeta("");
-        setStatus("Ready");
-        setBusy(false);
-        return;
-      }
-
       setStatus("Selecting an execution path…");
       const queuedResponse = await fetch("/api/local-ai/chat", {
         method: "POST",
@@ -2311,6 +2279,23 @@ export default function LocalAiChat() {
         queued.status === "completed" &&
         queued.conversationId
       ) {
+        if (queued.selectedBusinessId) {
+          window.localStorage.setItem(
+            ACTIVE_BUSINESS_KEY,
+            queued.selectedBusinessId,
+          );
+          setSelectedBusinessId(queued.selectedBusinessId);
+          await refreshBusinesses();
+        }
+        if (queued.onboardingState) {
+          setOnboardingState(queued.onboardingState);
+        } else {
+          try {
+            await refreshOnboarding();
+          } catch {
+            // The chat response remains usable even if onboarding metadata refresh is delayed.
+          }
+        }
         await loadConversation(queued.conversationId);
         await refreshConversations();
         setMeta(resultMeta(queued));
@@ -2375,13 +2360,19 @@ export default function LocalAiChat() {
             onChange={(event) => {
               const id = event.target.value;
               setSelectedBusinessId(id);
-              if (id) window.localStorage.setItem(ACTIVE_BUSINESS_KEY, id);
+              if (id) {
+                window.localStorage.setItem(ACTIVE_BUSINESS_KEY, id);
+              } else {
+                window.localStorage.removeItem(ACTIVE_BUSINESS_KEY);
+              }
             }}
-            disabled={busy || businesses.length === 0}
+            disabled={busy}
           >
-            {businesses.length === 0 ? (
-              <option value="">No business profile yet</option>
-            ) : null}
+            <option value="">
+              {businesses.length === 0
+                ? "Personal / no business profile yet"
+                : "Personal / ask me when business context is unclear"}
+            </option>
             {businesses.map((business) => (
               <option value={business.id} key={business.id}>
                 {business.name}
