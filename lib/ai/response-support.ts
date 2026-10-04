@@ -254,8 +254,8 @@ export async function persistResponseSupport(input: {
 
     const status =
       !candidate.sensitive &&
-      candidate.confidence >= 0.82 &&
-      (candidate.explicitOwnerStatement || candidate.confidence >= 0.92)
+      candidate.explicitOwnerStatement &&
+      candidate.confidence >= 0.82
         ? "active"
         : "candidate";
     const scopeRef =
