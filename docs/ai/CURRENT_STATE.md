@@ -262,6 +262,33 @@ Behavior:
 
 This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
 
+### Chat media handling and CoOperative Cloud
+
+Generated media in main CoOperative chat now has a dedicated handling flow.
+
+Viewer behavior:
+- tapping a generated image or video opens a true viewport-filling media viewer;
+- the media itself fills the screen with `object-fit: contain`;
+- a tap toggles the control overlay so the media can be viewed with no UI over it;
+- overlay actions are Save to Photos, Share, Save to CoOp Cloud, and Close;
+- Share prepares an authenticated temporary file and uses the device Web Share sheet when supported;
+- mobile web apps cannot silently write directly into the iOS/Android photo library, so Save to Photos prepares the file and uses the native save/share surface where the phone exposes Save Image/Save Video; non-share-capable browsers fall back to a normal file download.
+
+Persistent cloud behavior:
+- `cooperative_media_library` stores private per-owner media metadata;
+- binary media is copied from the provider result into the private `cooperative-media-library` Supabase Storage bucket, so future recall does not depend on the provider URL remaining alive;
+- the first save is idempotent per source media job;
+- the chat `+ Image` action now offers Photo Library / Files or CoOp Cloud;
+- CoOp Cloud opens a saved-media picker in any later conversation;
+- saved images can be copied back into a fresh chat attachment and used as reference/vision input;
+- saved videos remain browsable in CoOp Cloud but are not yet supported as chat attachments.
+
+Security and durability:
+- generated media export/share is proxied through an authenticated endpoint that verifies the source job belongs to the current owner;
+- cloud library objects are private and streamed through an authenticated endpoint;
+- completed assistant media messages are linked to their source job IDs for reliable later export/save;
+- already-existing media messages can still be matched to their owned completed job by result URL.
+
 ### Automatic evidence-ranked media execution
 
 Clear media requests now execute automatically when at least one exact, execution-ready route fits the current per-prompt spend ceiling.
