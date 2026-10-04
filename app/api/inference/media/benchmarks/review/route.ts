@@ -9,7 +9,6 @@ import {
 import {
   mediaBenchmarkEvidenceForOwner,
   mediaBenchmarkSummaryForRoute,
-  type MediaBenchmarkDimension,
 } from "@/lib/inference/media-model-benchmarks";
 
 export const runtime = "nodejs";
@@ -20,13 +19,18 @@ const reviewDimensionSchema = z.enum([
   "prompt_adherence",
   "anatomy",
 ]);
+type ReviewDimension = z.infer<typeof reviewDimensionSchema>;
 
 const reviewSchema = z.object({
   reviews: z
     .array(
       z.object({
         sourceJobId: z.string().uuid(),
-        scores: z.record(reviewDimensionSchema, z.number().min(0).max(100)).default({}),
+        scores: z.object({
+          visual_quality: z.number().min(0).max(100).optional(),
+          prompt_adherence: z.number().min(0).max(100).optional(),
+          anatomy: z.number().min(0).max(100).optional(),
+        }),
       }),
     )
     .min(1)
@@ -37,15 +41,12 @@ function ownerRef(userId: string) {
   return `coop-user:${userId}`;
 }
 
-function reviewableDimensions(caseId: string): MediaBenchmarkDimension[] {
+function reviewableDimensions(caseId: string): ReviewDimension[] {
   const testCase = MEDIA_QUALITY_BENCHMARK_CASES.find((item) => item.id === caseId);
   if (!testCase) return [];
   return testCase.primaryDimensions.filter(
-    (dimension): dimension is MediaBenchmarkDimension =>
-      dimension === "visual_quality" ||
-      dimension === "prompt_adherence" ||
-      dimension === "anatomy",
-  );
+    (dimension) => dimension !== "speed",
+  ) as ReviewDimension[];
 }
 
 async function scorecardsForOwner(owner: string) {
@@ -210,7 +211,7 @@ export async function POST(request: Request) {
 
     const allowed = new Set(reviewableDimensions(caseId));
     for (const [dimension, score] of Object.entries(review.scores)) {
-      if (!allowed.has(dimension as MediaBenchmarkDimension)) {
+      if (!allowed.has(dimension as ReviewDimension)) {
         return NextResponse.json(
           { error: `${dimension} is not reviewable for benchmark case ${caseId}.` },
           { status: 400 },
