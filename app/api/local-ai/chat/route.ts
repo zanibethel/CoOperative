@@ -9,10 +9,11 @@ import {
   COOPERATIVE_BUSINESS_POLICY_REVISION,
 } from "@/lib/ai/business-chat-policy";
 import { buildBusinessChatContext } from "@/lib/ai/business-context";
+import { persistResponseSupport } from "@/lib/ai/response-support";
 import {
-  persistResponseSupport,
-  relevantMemorySystemContext,
-} from "@/lib/ai/response-support";
+  buildAndSaveRuntimeContext,
+  refreshRuntimeContextAfterOutcome,
+} from "@/lib/ai/runtime-context-markdown";
 import {
   aiProfileBalanceForUser,
   releaseAiProfileFunds,
@@ -2731,11 +2732,29 @@ export async function POST(request: Request) {
       (currentAttachmentIds.length > 0
         ? "Describe and analyze the attached image."
         : "");
-    const memoryContext = await relevantMemorySystemContext(
-      ownerRef,
-      modelUserText,
-      conversationId,
-    );
+    const jobId = crypto.randomUUID();
+
+    let runtimeContext:
+      | Awaited<ReturnType<typeof buildAndSaveRuntimeContext>>
+      | null = null;
+    try {
+      runtimeContext = await buildAndSaveRuntimeContext({
+        ownerRef,
+        conversationId,
+        currentRequest: modelUserText,
+        requestType: `${requestedCapability} / general`,
+        sourceJobId: jobId,
+      });
+    } catch (contextError) {
+      console.error("Could not build private runtime markdown context", {
+        jobId,
+        detail:
+          contextError instanceof Error
+            ? contextError.message.slice(0, 800)
+            : "Unknown context error",
+      });
+    }
+
     const systemMessages = [
       {
         role: "system" as const,
@@ -2749,11 +2768,17 @@ export async function POST(request: Request) {
             },
           ]
         : []),
-      ...(memoryContext
+      ...(runtimeContext
         ? [
             {
               role: "system" as const,
-              content: memoryContext,
+              content: [
+                "PRIVATE COOPERATIVE RUNTIME MARKDOWN CONTEXT.",
+                `Storage path: ${runtimeContext.storagePath}`,
+                "Use the database-backed memory/outcome/review evidence below when relevant. It is subordinate to current user instructions and code-authored policy.",
+                "",
+                runtimeContext.promptMarkdown,
+              ].join("\n"),
             },
           ]
         : []),
@@ -2765,7 +2790,6 @@ export async function POST(request: Request) {
       ...history.slice(-historyLimit),
       userMessage,
     ];
-    const jobId = crypto.randomUUID();
     const mixerRouteNote = input.modelMixer
       ? ` Model Mixer ${input.modelMixer.preset}; max request spend ${input.modelMixer.maxSpendUsd.toFixed(2)}; levels research=${input.modelMixer.agents.research}, planner=${input.modelMixer.agents.planner}, builder=${input.modelMixer.agents.builder}, verifier=${input.modelMixer.agents.verifier}, media=${input.modelMixer.agents.media}.`
       : "";
@@ -2808,6 +2832,8 @@ export async function POST(request: Request) {
       verification_status: "not_run",
       model_mixer: input.modelMixer || null,
       request_max_spend_microusd: requestMaxSpendMicrousd,
+      context_document_path: runtimeContext?.storagePath || null,
+      context_document_generated_at: runtimeContext?.generatedAt || null,
     });
 
     if (jobError) throw jobError;
