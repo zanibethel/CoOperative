@@ -429,7 +429,7 @@ export async function POST(request: Request) {
       temperature:
         typeof sourceJob.temperature === "number" ? sourceJob.temperature : 0.2,
       routing_mode: "auto",
-      task_class: parsedTaskClass.data,
+      task_class: parsedTaskClass,
       route_reason: suggestedMode
         ? "The user explicitly chose the stronger-model suggestion prepared by lower-cost reasoning; deterministic policy selected a qualified funded executor within the saved cap."
         : typeof sourceJob.paid_prompt_draft === "string" &&
