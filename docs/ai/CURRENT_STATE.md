@@ -262,6 +262,40 @@ Behavior:
 
 This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
 
+### Private per-user runtime context Markdown
+
+Main CoOperative chat now renders a fresh private Markdown context document from database evidence before local/owned or strict-free reasoning is queued.
+
+Per-user files are stored privately in the `cooperative-ai-context` Supabase Storage bucket, never committed to GitHub. The current file is:
+
+`owners/<owner>/current/runtime-context.md`
+
+It contains:
+- current code-authored model/business policy and revision;
+- current request type and generation timestamp;
+- the latest active structured memories, grouped by memory class and confirmation time;
+- recent successful, failed, and cancelled text/vision executions, including execution tier, provider/model, request class, latency, fallback/error evidence, and paid text cost when recorded;
+- recent media model outcomes, including provider cost/user charge evidence when recorded;
+- the latest periodic reasoning review.
+
+The bounded Markdown is injected as subordinate system context into the same persisted inference job, so owned/local workers, strict-free Hermes fallback, and any later qualified paid handoff share the same evidence. The job records `context_document_path` and `context_document_generated_at` for provenance.
+
+Terminal text/vision outcomes also create dated snapshots at:
+
+`owners/<owner>/outcomes/YYYY-MM-DD/<timestamp>_<job-id>.md`
+
+Periodic evidence review uses `openrouter/free` only after enough new terminal outcomes accumulate: first after five outcomes, then after ten new outcomes, or after three new outcomes when at least 24 hours have passed. Reviews consider text, vision, and media execution evidence and write `owners/<owner>/reviews/current.md` plus a structured `cooperative_reasoning_reviews` row.
+
+Review output is advisory. It may supply reasoning/routing guidance and code/playbook improvement candidates for future prompts, but it cannot silently rewrite repository code or override current user instructions, code-authored policy, privacy boundaries, safety rules, spend ceilings, or approval gates. Hard required-node local routes skip the external free review pass.
+
+Schema/support:
+- private storage bucket `cooperative-ai-context`;
+- `cooperative_context_documents` for file provenance;
+- `cooperative_reasoning_reviews` for structured review evidence;
+- `text_inference_jobs.context_document_path` and `context_document_generated_at`.
+
+See `docs/AI-RUNTIME-CONTEXT.md`.
+
 ### Local/free response memory + paid handoff support
 
 Completed owned/local and strict-free cloud text responses now feed a zero-model-cost support pass through `openrouter/free`.
