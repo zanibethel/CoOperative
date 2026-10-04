@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Sandbox } from "@vercel/sandbox";
+import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 export type HermesVisionImage = {
   bytes: Uint8Array;
@@ -15,7 +16,8 @@ export type HermesVisionContextMessage = {
 
 export type HermesVisionStartSpec = {
   jobId: string;
-  messages: HermesVisionContextMessage[];
+  question?: string;
+  messages?: HermesVisionContextMessage[];
   images: HermesVisionImage[];
   openRouterCredential: string;
 };
@@ -139,6 +141,50 @@ function promptFor(
   ].join("\n");
 }
 
+async function persistedContextFor(
+  spec: HermesVisionStartSpec,
+): Promise<HermesVisionContextMessage[]> {
+  if (spec.messages?.length) return spec.messages;
+
+  try {
+    const admin = createAdminSupabaseClient();
+    const { data, error } = await admin
+      .from("text_inference_jobs")
+      .select("messages")
+      .eq("id", spec.jobId)
+      .maybeSingle();
+
+    if (!error && Array.isArray(data?.messages)) {
+      const parsed = data.messages.flatMap(
+        (row: unknown): HermesVisionContextMessage[] => {
+          if (!row || typeof row !== "object") return [];
+          const role = (row as { role?: unknown }).role;
+          const content = (row as { content?: unknown }).content;
+          if (
+            (role !== "system" && role !== "user" && role !== "assistant") ||
+            typeof content !== "string" ||
+            !content.trim()
+          ) {
+            return [];
+          }
+          return [{ role, content: content.trim() }];
+        },
+      );
+      if (parsed.length) return parsed;
+    }
+  } catch {
+    // The caller's explicit question remains a safe fallback if persisted
+    // context is unavailable for any reason.
+  }
+
+  return [
+    {
+      role: "user",
+      content: spec.question?.trim() || "Describe and analyze the attached image.",
+    },
+  ];
+}
+
 function runnerScript() {
   return `#!/usr/bin/env bash
 set +e
@@ -232,6 +278,8 @@ export async function startHermesVisionTask(
     );
   }
 
+  const contextMessages = await persistedContextFor(spec);
+
   const imagePaths = spec.images.map(
     (image, index) =>
       `/tmp/cooperative-vision-input-${index}.${extensionFor(image.mimeType)}`,
@@ -244,7 +292,7 @@ export async function startHermesVisionTask(
     })),
     {
       path: "/tmp/cooperative-vision-prompt.md",
-      content: Buffer.from(promptFor(spec.messages, imagePaths), "utf8"),
+      content: Buffer.from(promptFor(contextMessages, imagePaths), "utf8"),
     },
     {
       path: "/tmp/cooperative-vision-run.sh",
