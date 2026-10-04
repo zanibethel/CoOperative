@@ -1575,7 +1575,11 @@ export default function LocalAiChat() {
       setOnboardingState(state);
     }
 
-    if (state.status === "in_progress" && state.conversationId) {
+    if (
+      state.status === "in_progress" &&
+      state.conversationId &&
+      state.phase !== "paused"
+    ) {
       await loadConversation(state.conversationId);
       await refreshConversations();
       return true;
@@ -1918,7 +1922,8 @@ export default function LocalAiChat() {
         if (
           !cancelled &&
           onboarding.status === "in_progress" &&
-          onboarding.conversationId
+          onboarding.conversationId &&
+          onboarding.phase !== "paused"
         ) {
           await loadConversation(onboarding.conversationId);
           return;
