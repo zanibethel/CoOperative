@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     if (conversationId) {
       const { data: conversation, error: conversationError } = await admin
         .from("local_ai_conversations")
-        .select("id,title,profile,created_at,updated_at")
+        .select("id,title,profile,business_id,created_at,updated_at")
         .eq("id", conversationId)
         .eq("owner_ref", ownerRef)
         .maybeSingle();
@@ -83,6 +83,7 @@ export async function GET(request: Request) {
             id: conversation.id,
             title: conversation.title,
             profile: conversation.profile,
+            businessId: conversation.business_id || null,
             createdAt: conversation.created_at,
             updatedAt: conversation.updated_at,
           },
