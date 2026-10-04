@@ -1965,6 +1965,79 @@ export default function LocalAiChat() {
     }
   }
 
+  async function recoverInterruptedSend(
+    err: unknown,
+    text: string,
+    currentAttachments: ImageAttachment[],
+    fallbackMessages: ChatMessage[],
+  ) {
+    const transportFailure =
+      err instanceof TypeError ||
+      (err instanceof Error &&
+        /load failed|failed to fetch|network|connection/i.test(err.message));
+
+    if (!transportFailure) return false;
+
+    setError("");
+    setStatus("Connection interrupted — checking whether the request arrived…");
+
+    try {
+      await wait(650);
+      const activeResponse = await fetch("/api/local-ai/chat", {
+        cache: "no-store",
+      });
+
+      if (activeResponse.status !== 204) {
+        const active = (await activeResponse.json()) as JobResult;
+        if (
+          activeResponse.ok &&
+          active.jobId &&
+          (active.status === "queued" || active.status === "running")
+        ) {
+          if (active.conversationId) {
+            setConversationId(active.conversationId);
+          }
+          window.localStorage.setItem(ACTIVE_JOB_KEY, active.jobId);
+          await refreshConversations();
+          await pollJob(active.jobId, fallbackMessages);
+          return true;
+        }
+      }
+
+      if (conversationId) {
+        const reloaded = await loadConversation(conversationId);
+        await refreshConversations();
+        const persisted = (reloaded.messages || []).some(
+          (message) =>
+            message.role === "user" && message.content.trim() === text,
+        );
+
+        setStatus("Ready");
+        setBusy(false);
+
+        if (persisted) {
+          setError(
+            "The connection dropped after sending, but your request reached CoOperative. No active execution job is currently confirmed, so it was not submitted a second time.",
+          );
+          setAttachments([]);
+          return true;
+        }
+      }
+    } catch {
+      // The original draft is restored below if recovery checks also lose connection.
+    }
+
+    setMessages(messages);
+    setInput(text);
+    setAttachments(currentAttachments);
+    setError(
+      "Connection interrupted before CoOperative could confirm the request. Your draft was restored so you can retry safely.",
+    );
+    setStatus("Ready");
+    setBusy(false);
+    return true;
+  }
+
   async function send() {
     const text = input.trim();
     if ((!text && attachments.length === 0) || busy || uploadingImages) return;
