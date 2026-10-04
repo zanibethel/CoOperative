@@ -1476,6 +1476,7 @@ export default function LocalAiChat() {
     setAttachments([]);
     setMeta("");
     setError("");
+    return result;
   }, []);
 
   const startBackgroundRecovery = useCallback(
@@ -1600,9 +1601,13 @@ export default function LocalAiChat() {
 
           if (result.status === "queued") {
             setStatus(
-              result.execution === "paid-ai"
-                ? "Using funded high-quality AI…"
-                : "Waiting for local capacity…",
+              result.execution === "media"
+                ? result.capability === "video"
+                  ? "Preparing video generation…"
+                  : "Preparing image generation…"
+                : result.execution === "paid-ai"
+                  ? "Using funded high-quality AI…"
+                  : "Waiting for local capacity…",
             );
             await wait(1000);
             continue;
@@ -1964,6 +1969,79 @@ export default function LocalAiChat() {
     }
   }
 
+  async function recoverInterruptedSend(
+    err: unknown,
+    text: string,
+    currentAttachments: ImageAttachment[],
+    fallbackMessages: ChatMessage[],
+  ) {
+    const transportFailure =
+      err instanceof TypeError ||
+      (err instanceof Error &&
+        /load failed|failed to fetch|network|connection/i.test(err.message));
+
+    if (!transportFailure) return false;
+
+    setError("");
+    setStatus("Connection interrupted — checking whether the request arrived…");
+
+    try {
+      await wait(650);
+      const activeResponse = await fetch("/api/local-ai/chat", {
+        cache: "no-store",
+      });
+
+      if (activeResponse.status !== 204) {
+        const active = (await activeResponse.json()) as JobResult;
+        if (
+          activeResponse.ok &&
+          active.jobId &&
+          (active.status === "queued" || active.status === "running")
+        ) {
+          if (active.conversationId) {
+            setConversationId(active.conversationId);
+          }
+          window.localStorage.setItem(ACTIVE_JOB_KEY, active.jobId);
+          await refreshConversations();
+          await pollJob(active.jobId, fallbackMessages);
+          return true;
+        }
+      }
+
+      if (conversationId) {
+        const reloaded = await loadConversation(conversationId);
+        await refreshConversations();
+        const persisted = (reloaded.messages || []).some(
+          (message) =>
+            message.role === "user" && message.content.trim() === text,
+        );
+
+        setStatus("Ready");
+        setBusy(false);
+
+        if (persisted) {
+          setError(
+            "The connection dropped after sending, but your request reached CoOperative. No active execution job is currently confirmed, so it was not submitted a second time.",
+          );
+          setAttachments([]);
+          return true;
+        }
+      }
+    } catch {
+      // The original draft is restored below if recovery checks also lose connection.
+    }
+
+    setMessages(messages);
+    setInput(text);
+    setAttachments(currentAttachments);
+    setError(
+      "Connection interrupted before CoOperative could confirm the request. Your draft was restored so you can retry safely.",
+    );
+    setStatus("Ready");
+    setBusy(false);
+    return true;
+  }
+
   async function send() {
     const text = input.trim();
     if ((!text && attachments.length === 0) || busy || uploadingImages) return;
@@ -2059,6 +2137,17 @@ export default function LocalAiChat() {
       window.localStorage.setItem(ACTIVE_JOB_KEY, queued.jobId);
       await pollJob(queued.jobId, fallbackMessages);
     } catch (err) {
+      if (
+        await recoverInterruptedSend(
+          err,
+          text,
+          currentAttachments,
+          fallbackMessages,
+        )
+      ) {
+        return;
+      }
+
       setError(err instanceof Error ? err.message : "Local AI request failed.");
       setStatus("Ready");
       setBusy(false);

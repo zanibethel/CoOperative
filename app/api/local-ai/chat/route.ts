@@ -2291,7 +2291,7 @@ export async function POST(request: Request) {
           attachment_ids: premiumReferenceRoute
             ? effectiveMediaAttachmentIds
             : [],
-          job_id: null,
+          job_id: jobId,
         });
       if (mediaUserMessageError) throw mediaUserMessageError;
 
