@@ -654,48 +654,83 @@ async function maybeRunReasoningReview(ownerRef: string) {
   let jobsQuery = admin
     .from("text_inference_jobs")
     .select(
-      "id,status,capability,task_class,created_at,completed_at,worker_id,result_provider,result_model,latency_ms,error,route_reason,fallback_provider,fallback_model,fallback_attempted_at",
+      "id,status,conversation_id,capability,task_class,created_at,claimed_at,completed_at,worker_id,result_provider,result_model,latency_ms,prompt_tokens,output_tokens,error,route_reason,fallback_provider,fallback_model,fallback_attempted_at",
     )
     .eq("client_owner_ref", ownerRef)
     .in("status", ["completed", "failed", "cancelled"])
     .order("created_at", { ascending: false })
     .limit(60);
 
+  let mediaQuery = admin
+    .from("media_generation_jobs")
+    .select(
+      "id,status,conversation_id,kind,provider,model,billing_mode,provider_cost_bearer,estimated_provider_cost_microusd,actual_provider_cost_microusd,actual_user_charge_microusd,actual_margin_microusd,error,started_at,completed_at,created_at",
+    )
+    .eq("owner_ref", ownerRef)
+    .in("status", ["completed", "failed", "cancelled"])
+    .order("created_at", { ascending: false })
+    .limit(40);
+
   if (latest?.created_at) {
     jobsQuery = jobsQuery.gt("created_at", latest.created_at);
+    mediaQuery = mediaQuery.gt("created_at", latest.created_at);
   }
 
-  const { data: newJobs, error: jobsError } = await jobsQuery;
-  if (jobsError) throw jobsError;
-  const evidenceJobs = (newJobs || []) as JobRow[];
+  const [jobsResult, mediaResult] = await Promise.all([jobsQuery, mediaQuery]);
+  if (jobsResult.error) throw jobsResult.error;
+  if (mediaResult.error) throw mediaResult.error;
+  const evidenceJobs = (jobsResult.data || []) as JobRow[];
+  const evidenceMediaJobs = (mediaResult.data || []) as MediaJobRow[];
+  const evidenceCount = evidenceJobs.length + evidenceMediaJobs.length;
 
   const latestAgeMs = latest?.created_at
     ? Date.now() - Date.parse(latest.created_at)
     : Number.POSITIVE_INFINITY;
   const enoughEvidence = latest
-    ? evidenceJobs.length >= 10 || (evidenceJobs.length >= 3 && latestAgeMs >= 24 * 60 * 60 * 1000)
-    : evidenceJobs.length >= 5;
+    ? evidenceCount >= 10 || (evidenceCount >= 3 && latestAgeMs >= 24 * 60 * 60 * 1000)
+    : evidenceCount >= 5;
 
   if (!enoughEvidence) return null;
 
   const apiKey = await reviewOpenRouterCredential(ownerRef);
   if (!apiKey) return null;
 
-  const lines = evidenceJobs.slice(0, 40).map((job) =>
-    [
-      iso(job.completed_at || job.created_at),
-      outcomeLabel(job),
-      `tier=${executionTier(job)}`,
-      `request=${requestCategory(job)}`,
-      `provider=${job.result_provider || job.fallback_provider || "unknown"}`,
-      `model=${job.result_model || job.fallback_model || "unknown"}`,
-      `latency=${job.latency_ms ?? "unknown"}`,
-      job.error ? `error=${oneLine(job.error, 220)}` : "",
-      job.route_reason ? `route=${oneLine(job.route_reason, 300)}` : "",
-    ]
-      .filter(Boolean)
-      .join(" | "),
-  );
+  const lines = [
+    ...evidenceJobs.slice(0, 40).map((job) =>
+      [
+        iso(job.completed_at || job.created_at),
+        outcomeLabel(job),
+        `tier=${executionTier(job)}`,
+        `request=${requestCategory(job)}`,
+        `provider=${job.result_provider || job.fallback_provider || "unknown"}`,
+        `model=${job.result_model || job.fallback_model || "unknown"}`,
+        `latency=${job.latency_ms ?? "unknown"}`,
+        job.error ? `error=${oneLine(job.error, 220)}` : "",
+        job.route_reason ? `route=${oneLine(job.route_reason, 300)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | "),
+    ),
+    ...evidenceMediaJobs.slice(0, 24).map((job) =>
+      [
+        iso(job.completed_at || job.created_at),
+        job.status === "completed" ? "SUCCESS" : job.status.toUpperCase(),
+        "tier=media",
+        `request=media / ${job.kind}`,
+        `provider=${job.provider || "unknown"}`,
+        `model=${job.model || "unknown"}`,
+        `actual_provider_cost=${usdFromMicrousd(
+          job.actual_provider_cost_microusd,
+        ).toFixed(6)}`,
+        `actual_user_charge=${usdFromMicrousd(
+          job.actual_user_charge_microusd,
+        ).toFixed(6)}`,
+        job.error ? `error=${oneLine(job.error, 220)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | "),
+    ),
+  ];
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20_000);
@@ -794,8 +829,12 @@ async function maybeRunReasoningReview(ownerRef: string) {
     if (!validated.success) return null;
     const packet: ReviewPacket = validated.data;
     const now = new Date().toISOString();
+    const evidenceStarts = [
+      evidenceJobs[evidenceJobs.length - 1]?.created_at,
+      evidenceMediaJobs[evidenceMediaJobs.length - 1]?.created_at,
+    ].filter((value): value is string => Boolean(value));
     const periodStart =
-      evidenceJobs[evidenceJobs.length - 1]?.created_at || latest?.created_at || null;
+      evidenceStarts.sort()[0] || latest?.created_at || null;
     const ownerKey = safeOwnerKey(ownerRef);
     const reviewPath = `owners/${ownerKey}/reviews/current.md`;
     const reviewMarkdown = [
@@ -803,7 +842,7 @@ async function maybeRunReasoningReview(ownerRef: string) {
       "",
       `Generated: ${now}`,
       `Evidence period: ${periodStart || "unknown"} -> ${now}`,
-      `Evidence jobs: ${evidenceJobs.length}`,
+      `Evidence jobs: ${evidenceCount} (${evidenceJobs.length} text/vision + ${evidenceMediaJobs.length} media)`,
       `Model: ${REVIEW_MODEL}`,
       "",
       "> Advisory evidence review. This file cannot override code policy, user instructions, privacy, safety, spending limits, or approval gates.",
@@ -840,7 +879,7 @@ async function maybeRunReasoningReview(ownerRef: string) {
         owner_ref: ownerRef,
         period_start: periodStart,
         period_end: now,
-        evidence_job_count: evidenceJobs.length,
+        evidence_job_count: evidenceCount,
         status: "advisory",
         summary: packet.summary,
         reasoning_guidance: packet.reasoningGuidance,
@@ -860,7 +899,7 @@ async function maybeRunReasoningReview(ownerRef: string) {
       storagePath: reviewPath,
       metadata: {
         reviewId: inserted.id,
-        evidenceJobCount: evidenceJobs.length,
+        evidenceJobCount: evidenceCount,
         periodStart,
         periodEnd: now,
       },
