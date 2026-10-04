@@ -488,6 +488,10 @@ export async function POST(request: Request) {
       owner.userId,
       input.businessId,
     );
+    const scopeContext = await businessScopePromptContext(
+      ownerRef,
+      input.businessId || null,
+    );
     const profileBalance =
       businessContext?.aiBalance ?? (await aiProfileBalanceForUser(owner.userId));
 
@@ -558,6 +562,44 @@ export async function POST(request: Request) {
       if (attachError) throw attachError;
     }
 
+
+    if (
+      input.attachmentIds.length === 0 &&
+      /\b(?:continue|resume|restart|return to|start)\b.{0,24}\b(?:intake|onboarding|get[- ]to[- ]know[- ]you|profile setup)\b/i.test(
+        input.message,
+      )
+    ) {
+      const resumed = await resumeOnboarding(ownerRef);
+      if (resumed.conversationId) {
+        const { data: lastAssistant } = await admin
+          .from("local_ai_messages")
+          .select("content")
+          .eq("conversation_id", resumed.conversationId)
+          .eq("owner_ref", ownerRef)
+          .eq("role", "assistant")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: "text",
+            conversationId: resumed.conversationId,
+            conversationTitle: "Getting to know you",
+            text:
+              lastAssistant?.content ||
+              "Intake is ready to continue in the setup conversation.",
+            provider: "code",
+            model: "adaptive-intake-router",
+            routeReason:
+              "CoOperative resumed the saved personal/business intake state without invoking an AI model.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    }
 
     const requestedMaxSpendPerPrompt = maxSpendPerPromptCommand(input.message);
     const asksCurrentMaxSpendPerPrompt = asksMaxSpendPerPrompt(input.message);
@@ -2747,6 +2789,7 @@ export async function POST(request: Request) {
         conversationId,
         currentRequest: modelUserText,
         requestType: `${requestedCapability} / general`,
+        businessId: input.businessId || null,
       });
     } catch (contextError) {
       console.error("Could not build private runtime markdown context", {
@@ -2771,6 +2814,10 @@ export async function POST(request: Request) {
             },
           ]
         : []),
+      {
+        role: "system" as const,
+        content: scopeContext,
+      },
       ...(runtimeContext
         ? [
             {
@@ -2835,6 +2882,7 @@ export async function POST(request: Request) {
       verification_status: "not_run",
       model_mixer: input.modelMixer || null,
       request_max_spend_microusd: requestMaxSpendMicrousd,
+      business_id: input.businessId || null,
       context_document_path: runtimeContext?.storagePath || null,
       context_document_generated_at: runtimeContext?.generatedAt || null,
     });
