@@ -180,6 +180,8 @@ function looksLikeMediaFollowup(message: string) {
     /\b(?:360p|480p|540p|720p|1080p|4k)\b/.test(value) ||
     /\b(?:vertical|landscape|square|9:16|16:9|1:1)\b/.test(value) ||
     /\b\d{1,2}\s*(?:-\s*)?(?:seconds?|secs?|s)\b/.test(value) ||
+    /\b(?:compare|show|list|review)\b(?:\s+(?:the|my|those|these|media))?\s+(?:options|choices|recommendations|routes|models)\b/.test(value) ||
+    /\bwhat (?:are|were) (?:the|my) (?:options|choices|recommendations|routes|models)\b/.test(value) ||
     /\b(?:high[- ]?end|premium|balanced|middle|medium|lowest[- ]?cost|cheapest|low[- ]?cost)\b.*\b(?:media )?(?:option|recommendation)\b/.test(value)
   );
 }
