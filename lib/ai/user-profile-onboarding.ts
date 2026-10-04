@@ -381,6 +381,23 @@ async function updateSession(
   if (error) throw error;
 }
 
+async function saveConversationBusinessContext(input: {
+  ownerRef: string;
+  conversationId: string;
+  businessId: string | null;
+}) {
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin
+    .from("local_ai_conversations")
+    .update({
+      business_id: input.businessId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.conversationId)
+    .eq("owner_ref", input.ownerRef);
+  if (error) throw error;
+}
+
 async function insertConversationPair(input: {
   ownerRef: string;
   conversationId: string;
