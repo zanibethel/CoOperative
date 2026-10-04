@@ -355,6 +355,13 @@ function skippedFields(profile: JsonRecord) {
     : [];
 }
 
+function deferredFields(profile: JsonRecord) {
+  const intake = record(metadata(profile).intake);
+  return Array.isArray(intake.deferredFields)
+    ? intake.deferredFields.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
 function factIsRecorded(profile: JsonRecord, key: IntakeFieldKey) {
   const facts = record(metadata(profile).facts);
   return Boolean(record(facts[key]).updatedAt);
@@ -371,7 +378,7 @@ function intakeIsActive(profile: JsonRecord) {
 }
 
 function nextMissingField(business: BusinessRow, profile: JsonRecord) {
-  const skipped = new Set(skippedFields(profile));
+  const skipped = new Set([...skippedFields(profile), ...deferredFields(profile)]);
   return FIELDS.find((field) => !skipped.has(field.key) && field.isMissing(business, profile)) || null;
 }
 
@@ -660,3 +667,326 @@ export async function handleBusinessIntake(input: {
     savedFacts: [current],
   };
 }
+
+
+export type BusinessIntakeBatchQuestion = {
+  key: IntakeFieldKey;
+  question: string;
+};
+
+export type BusinessIntakeBatchAnswer = {
+  key: IntakeFieldKey;
+  status: "known" | "unknown" | "deferred";
+  value?: string | null;
+};
+
+export async function ownedBusinessesForOnboarding(userId: string) {
+  const admin = createAdminSupabaseClient();
+  const { data: organizations, error: organizationError } = await admin
+    .from("organizations")
+    .select("id,name")
+    .eq("owner_user_id", userId)
+    .order("created_at", { ascending: true });
+  if (organizationError) throw organizationError;
+
+  const organizationIds = (organizations || []).map((item) => item.id);
+  if (!organizationIds.length) {
+    return { organizations: [], businesses: [] as Array<{ id: string; name: string; industry: string | null }> };
+  }
+
+  const { data: businesses, error: businessError } = await admin
+    .from("businesses")
+    .select("id,organization_id,name,industry,updated_at")
+    .in("organization_id", organizationIds)
+    .order("updated_at", { ascending: false });
+  if (businessError) throw businessError;
+
+  return {
+    organizations: organizations || [],
+    businesses: (businesses || []).map((business) => ({
+      id: business.id,
+      name: business.name,
+      industry: business.industry || null,
+    })),
+  };
+}
+
+export async function createBusinessFromOnboarding(input: {
+  userId: string;
+  name: string;
+  industry?: string | null;
+  teamSize?: number | null;
+  conversationId: string;
+}) {
+  const admin = createAdminSupabaseClient();
+  const name = input.name.trim().slice(0, 160);
+  if (!name) throw new Error("Business name is required before the business can be created.");
+
+  const { organizations } = await ownedBusinessesForOnboarding(input.userId);
+  let organizationId = organizations[0]?.id || null;
+
+  if (!organizationId) {
+    const { data: organization, error: organizationError } = await admin
+      .from("organizations")
+      .insert({
+        owner_user_id: input.userId,
+        name,
+      })
+      .select("id")
+      .single();
+    if (organizationError) throw organizationError;
+    organizationId = organization.id;
+  }
+
+  const { data: existing, error: existingError } = await admin
+    .from("businesses")
+    .select("id,name,industry,team_size,profile")
+    .eq("organization_id", organizationId)
+    .ilike("name", name)
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  if (existing) return existing.id as string;
+
+  const now = new Date().toISOString();
+  const profile: JsonRecord = {
+    ...(input.teamSize ? { teamSize: Math.max(1, Math.round(input.teamSize)) } : {}),
+    [META_KEY]: {
+      facts: {
+        ...(input.industry
+          ? {
+              industry: {
+                source: "user",
+                agent: "conversational-onboarding",
+                method: "deterministic",
+                confidence: 1,
+                conversationId: input.conversationId,
+                updatedAt: now,
+              },
+            }
+          : {}),
+        ...(input.teamSize
+          ? {
+              teamSize: {
+                source: "user",
+                agent: "conversational-onboarding",
+                method: "deterministic",
+                confidence: 1,
+                conversationId: input.conversationId,
+                updatedAt: now,
+              },
+            }
+          : {}),
+      },
+      intake: {
+        active: true,
+        currentField: null,
+        conversationId: input.conversationId,
+        skippedFields: [],
+        deferredFields: [],
+        startedAt: now,
+        updatedAt: now,
+        version: "business-intake-v2",
+      },
+    },
+  };
+
+  const { data: business, error: businessError } = await admin
+    .from("businesses")
+    .insert({
+      organization_id: organizationId,
+      name,
+      industry: input.industry?.trim().slice(0, 240) || "",
+      team_size: input.teamSize ? Math.max(1, Math.round(input.teamSize)) : 1,
+      profile,
+    })
+    .select("id")
+    .single();
+  if (businessError) throw businessError;
+
+  return business.id as string;
+}
+
+export async function businessIntakeBatchForUser(input: {
+  userId: string;
+  businessId: string;
+  limit?: number;
+}) {
+  const business = await loadOwnedBusiness(input.userId, input.businessId);
+  if (!business) throw new Error("Business not found for this account.");
+
+  const profile = record(business.profile);
+  const excluded = new Set([...skippedFields(profile), ...deferredFields(profile)]);
+  const questions = FIELDS.filter(
+    (field) => !excluded.has(field.key) && field.isMissing(business, profile),
+  )
+    .slice(0, Math.max(1, Math.min(4, input.limit || 3)))
+    .map((field) => ({ key: field.key, question: field.question }));
+
+  return {
+    business: {
+      id: business.id,
+      name: business.name,
+      industry: business.industry,
+    },
+    questions,
+    complete: questions.length === 0,
+  };
+}
+
+export async function saveBusinessIntakeBatch(input: {
+  userId: string;
+  businessId: string;
+  conversationId: string;
+  answers: BusinessIntakeBatchAnswer[];
+}) {
+  const business = await loadOwnedBusiness(input.userId, input.businessId);
+  if (!business) throw new Error("Business not found for this account.");
+
+  let profile = record(business.profile);
+  const savedFacts: string[] = [];
+  const skipped = new Set(skippedFields(profile));
+  const deferred = new Set(deferredFields(profile));
+
+  for (const answer of input.answers) {
+    const definition = FIELDS.find((field) => field.key === answer.key);
+    if (!definition) continue;
+
+    if (answer.status === "unknown") {
+      skipped.add(answer.key);
+      deferred.delete(answer.key);
+      continue;
+    }
+    if (answer.status === "deferred") {
+      deferred.add(answer.key);
+      skipped.delete(answer.key);
+      continue;
+    }
+
+    const raw = (answer.value || "").trim();
+    if (!raw) continue;
+    const parsed = definition.parse(raw);
+    if (!parsed.ok) {
+      return {
+        ok: false as const,
+        clarification: parsed.clarification,
+        fieldKey: answer.key,
+      };
+    }
+
+    profile = withFact(profile, answer.key, parsed.value, input.conversationId);
+    skipped.delete(answer.key);
+    deferred.delete(answer.key);
+    savedFacts.push(answer.key);
+
+    if (answer.key === "industry" && typeof parsed.value === "string") {
+      business.industry = parsed.value;
+    }
+    if (answer.key === "teamSize" && typeof parsed.value === "number") {
+      business.team_size = parsed.value;
+    }
+  }
+
+  const meta = metadata(profile);
+  profile = {
+    ...profile,
+    [META_KEY]: {
+      ...meta,
+      intake: {
+        ...record(meta.intake),
+        active: true,
+        currentField: null,
+        conversationId: input.conversationId,
+        skippedFields: Array.from(skipped),
+        deferredFields: Array.from(deferred),
+        updatedAt: new Date().toISOString(),
+        version: "business-intake-v2",
+      },
+    },
+  };
+
+  await saveBusiness(business, profile);
+  if (business.industry) {
+    await createAdminSupabaseClient()
+      .from("businesses")
+      .update({
+        industry: business.industry,
+        team_size: business.team_size || 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", business.id);
+  }
+
+  const next = await businessIntakeBatchForUser({
+    userId: input.userId,
+    businessId: input.businessId,
+    limit: 3,
+  });
+
+  return {
+    ok: true as const,
+    savedFacts,
+    ...next,
+  };
+}
+
+export async function applyBusinessConversationUpdates(input: {
+  userId: string;
+  businessId: string;
+  conversationId?: string | null;
+  updates: Array<{
+    fieldKey: string;
+    value: string;
+    confidence: number;
+    explicitOwnerStatement: boolean;
+  }>;
+}) {
+  const business = await loadOwnedBusiness(input.userId, input.businessId);
+  if (!business) return [];
+
+  let profile = record(business.profile);
+  const saved: string[] = [];
+  const conversationId = input.conversationId || crypto.randomUUID();
+
+  for (const update of input.updates) {
+    const definition = FIELDS.find((field) => field.key === update.fieldKey);
+    if (
+      !definition ||
+      !update.explicitOwnerStatement ||
+      update.confidence < 0.82 ||
+      !update.value.trim()
+    ) {
+      continue;
+    }
+
+    const parsed = definition.parse(update.value);
+    if (!parsed.ok) continue;
+
+    profile = withFact(profile, definition.key, parsed.value, conversationId);
+    saved.push(definition.key);
+
+    if (definition.key === "industry" && typeof parsed.value === "string") {
+      business.industry = parsed.value;
+    }
+    if (definition.key === "teamSize" && typeof parsed.value === "number") {
+      business.team_size = parsed.value;
+    }
+  }
+
+  if (!saved.length) return saved;
+
+  await saveBusiness(business, profile);
+  await createAdminSupabaseClient()
+    .from("businesses")
+    .update({
+      industry: business.industry || "",
+      team_size: business.team_size || 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", business.id);
+
+  return saved;
+}
+
+export const BUSINESS_CONVERSATION_FIELD_KEYS = FIELDS.map((field) => field.key);
