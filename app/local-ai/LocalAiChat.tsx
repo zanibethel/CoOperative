@@ -1910,7 +1910,20 @@ export default function LocalAiChat() {
           }
         }
 
-        if (!cancelled && threads.length === 0) {
+        if (
+          !cancelled &&
+          onboarding.status === "in_progress" &&
+          onboarding.conversationId
+        ) {
+          await loadConversation(onboarding.conversationId);
+          return;
+        }
+
+        if (
+          !cancelled &&
+          threads.length === 0 &&
+          onboarding.status === "not_started"
+        ) {
           const startedOnboarding = await startOrResumeOnboarding();
           if (startedOnboarding) return;
         }
