@@ -40,6 +40,7 @@ export type EscalationEvidence = {
   automaticPaidBudgetUsd?: number;
   fundedPaidBalanceUsd?: number;
   requiredSuccessRate?: number;
+  userRequestedEscalation?: boolean;
 };
 
 export type EscalationDecision =
@@ -94,6 +95,11 @@ function bounded(value: number, min: number, max: number) {
 function escalationScore(evidence: EscalationEvidence) {
   let score = 0;
   const reasonCodes: string[] = [];
+
+  if (evidence.userRequestedEscalation) {
+    score += 4;
+    reasonCodes.push("user-requested-escalation");
+  }
 
   if (evidence.verificationStatus === "failed") {
     score += 4;
