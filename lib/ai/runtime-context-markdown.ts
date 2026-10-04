@@ -8,7 +8,10 @@ import {
 } from "@/lib/ai/business-chat-policy";
 import { profileRefFromAiOwnerRef } from "@/lib/billing/ai-profile-balance";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
-import { profileFieldsForRuntime } from "@/lib/ai/user-profile-onboarding";
+import {
+  profileFieldsForRuntime,
+  businessProfileFieldsForRuntime,
+} from "@/lib/ai/user-profile-onboarding";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 const CONTEXT_BUCKET = "cooperative-ai-context";
@@ -209,11 +212,20 @@ async function recordDocument(input: {
 async function loadRuntimeEvidence(input: {
   ownerRef: string;
   conversationId?: string | null;
+  businessId?: string | null;
 }) {
   const admin = createAdminSupabaseClient();
 
-  const [profileFields, memoriesResult, jobsResult, mediaResult, reviewResult] = await Promise.all([
+  const [
+    profileFields,
+    businessProfileFields,
+    memoriesResult,
+    jobsResult,
+    mediaResult,
+    reviewResult,
+  ] = await Promise.all([
     profileFieldsForRuntime(input.ownerRef),
+    businessProfileFieldsForRuntime(input.ownerRef, input.businessId),
     admin
       .from("cooperative_memories")
       .select(
@@ -291,7 +303,15 @@ async function loadRuntimeEvidence(input: {
     }
   }
 
-  return { profileFields, memories, jobs, mediaJobs, review, costs };
+  return {
+    profileFields,
+    businessProfileFields,
+    memories,
+    jobs,
+    mediaJobs,
+    review,
+    costs,
+  };
 }
 
 function renderProfileFields(
