@@ -1870,6 +1870,7 @@ export default function LocalAiChat() {
       try {
         await Promise.all([refreshBusinesses(), refreshOwnedNodes()]);
         const threads = await refreshConversations();
+        const onboarding = await refreshOnboarding();
         const savedJobId = window.localStorage.getItem(ACTIVE_JOB_KEY);
 
         if (savedJobId) {
