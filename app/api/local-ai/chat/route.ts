@@ -2777,7 +2777,10 @@ export async function POST(request: Request) {
           : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`) +
         (requestedCapability === "vision"
           ? ` Local vision has first priority for ${Math.round(FREE_VISION_FALLBACK_GRACE_MS / 1000)} seconds; if still unclaimed, CoOperative may use the connected strict-free Hermes/OpenRouter vision fallback. Paid vision fallback is disabled.`
-          : ""),
+          : requestedCapability === "text" &&
+              input.nodeRouting !== "require-node"
+            ? ` Owned/local text has first priority for ${Math.round(FREE_TEXT_FALLBACK_GRACE_MS / 1000)} seconds; if still unclaimed, CoOperative may use strict-free Hermes/OpenRouter text reasoning before any funded paid fallback.`
+            : ""),
       allow_paid_fallback:
         requestedCapability === "text" &&
         input.nodeRouting !== "require-node" &&
