@@ -74,3 +74,90 @@ function dismissedText() {
     "Anything already answered stays saved. Unanswered fields remain unknown until a later conversation gives me something explicit to use.",
   ].join("\n");
 }
+
+function answerValue(value: string) {
+  const text = value.trim();
+  if (/^(?:later|tell you later|i'?ll tell you later|not now|maybe later|defer)$/i.test(text)) {
+    return { status: "deferred" as const, value: null };
+  }
+  if (/^(?:skip|unknown|don'?t know|do not know|n\/a|na|none|pass)$/i.test(text)) {
+    return { status: "unknown" as const, value: null };
+  }
+  return { status: "known" as const, value: text.slice(0, 2000) || null };
+}
+
+function parseBatchReply(message: string, fields: UserProfileFieldDefinition[]) {
+  const normalized = message.trim();
+  const matches = Array.from(
+    normalized.matchAll(
+      /(?:^|\s)([1-3])\s*[).:\-]\s*([\s\S]*?)(?=(?:\s+[1-3]\s*[).:\-])|$)/g,
+    ),
+  );
+
+  if (matches.length) {
+    const numbered = new Map<number, string>();
+    for (const match of matches) {
+      numbered.set(Number(match[1]), (match[2] || "").trim());
+    }
+    return fields.map((field, index) => {
+      const raw = numbered.get(index + 1);
+      return raw === undefined
+        ? { fieldKey: field.key, status: "unknown" as const, value: null }
+        : { fieldKey: field.key, ...answerValue(raw) };
+    });
+  }
+
+  const lines = normalized.split(/\n+/).map((part) => part.trim()).filter(Boolean);
+  return fields.map((field, index) => {
+    const raw = lines[index];
+    return raw === undefined
+      ? { fieldKey: field.key, status: "unknown" as const, value: null }
+      : { fieldKey: field.key, ...answerValue(raw) };
+  });
+}
+
+export async function ensureProfileFieldRows(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin.from("cooperative_user_profile_fields").upsert(
+    USER_PROFILE_FIELD_DEFINITIONS.map((field) => ({
+      owner_ref: ownerRef,
+      field_key: field.key,
+      category: field.category,
+      label: field.label,
+      status: "unknown",
+      source_kind: "onboarding",
+    })),
+    { onConflict: "owner_ref,field_key", ignoreDuplicates: true },
+  );
+  if (error) throw error;
+}
+
+export async function onboardingState(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  await ensureProfileFieldRows(ownerRef);
+
+  const [{ data: session, error: sessionError }, { data: fields, error: fieldsError }] =
+    await Promise.all([
+      admin
+        .from("cooperative_onboarding_sessions")
+        .select("status,current_batch,conversation_id")
+        .eq("owner_ref", ownerRef)
+        .maybeSingle(),
+      admin
+        .from("cooperative_user_profile_fields")
+        .select("field_key,category,label,value_text,status,updated_at")
+        .eq("owner_ref", ownerRef)
+        .order("created_at", { ascending: true }),
+    ]);
+
+  if (sessionError) throw sessionError;
+  if (fieldsError) throw fieldsError;
+
+  return {
+    status: session?.status || "not_started",
+    currentBatch: Number(session?.current_batch || 0),
+    conversationId: session?.conversation_id || null,
+    totalBatches: TOTAL_BATCHES,
+    fields: fields || [],
+  };
+}
