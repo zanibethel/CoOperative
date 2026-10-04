@@ -343,3 +343,77 @@ export async function answerOnboarding(input: {
 
   return { assistantText, state: await onboardingState(input.ownerRef) };
 }
+
+export async function applyProfileFieldUpdates(input: {
+  ownerRef: string;
+  conversationId?: string | null;
+  sourceMessageId?: string | null;
+  sourceKind: string;
+  updates: Array<{
+    fieldKey: string;
+    value: string;
+    confidence: number;
+    explicitOwnerStatement: boolean;
+  }>;
+}) {
+  const admin = createAdminSupabaseClient();
+  await ensureProfileFieldRows(input.ownerRef);
+  const allowed = new Map(
+    USER_PROFILE_FIELD_DEFINITIONS.map((field) => [field.key, field]),
+  );
+  const now = new Date().toISOString();
+
+  for (const update of input.updates) {
+    const field = allowed.get(update.fieldKey);
+    if (
+      !field ||
+      !update.explicitOwnerStatement ||
+      update.confidence < 0.82 ||
+      !update.value.trim()
+    ) {
+      continue;
+    }
+
+    const { data: existing, error: existingError } = await admin
+      .from("cooperative_user_profile_fields")
+      .select("first_known_at")
+      .eq("owner_ref", input.ownerRef)
+      .eq("field_key", update.fieldKey)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    const { error } = await admin.from("cooperative_user_profile_fields").upsert(
+      {
+        owner_ref: input.ownerRef,
+        field_key: field.key,
+        category: field.category,
+        label: field.label,
+        value_text: update.value.trim().slice(0, 2000),
+        status: "known",
+        confidence: update.confidence,
+        source_conversation_id: input.conversationId || null,
+        source_message_id: input.sourceMessageId || null,
+        source_kind: input.sourceKind,
+        first_known_at: existing?.first_known_at || now,
+        last_confirmed_at: now,
+        updated_at: now,
+      },
+      { onConflict: "owner_ref,field_key" },
+    );
+    if (error) throw error;
+  }
+}
+
+export async function profileFieldsForRuntime(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  await ensureProfileFieldRows(ownerRef);
+  const { data, error } = await admin
+    .from("cooperative_user_profile_fields")
+    .select(
+      "field_key,category,label,value_text,status,confidence,last_confirmed_at,updated_at",
+    )
+    .eq("owner_ref", ownerRef)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
