@@ -48,6 +48,25 @@ type JobRow = {
   fallback_attempted_at: string | null;
 };
 
+type MediaJobRow = {
+  id: string;
+  status: string;
+  conversation_id: string | null;
+  kind: string;
+  provider: string;
+  model: string;
+  billing_mode: string | null;
+  provider_cost_bearer: string | null;
+  estimated_provider_cost_microusd: number | string | null;
+  actual_provider_cost_microusd: number | string | null;
+  actual_user_charge_microusd: number | string | null;
+  actual_margin_microusd: number | string | null;
+  error: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+};
+
 type ReservationRow = {
   reference_id: string | null;
   reserved_microusd: number | string | null;
@@ -192,7 +211,7 @@ async function loadRuntimeEvidence(input: {
 }) {
   const admin = createAdminSupabaseClient();
 
-  const [memoriesResult, jobsResult, reviewResult] = await Promise.all([
+  const [memoriesResult, jobsResult, mediaResult, reviewResult] = await Promise.all([
     admin
       .from("cooperative_memories")
       .select(
@@ -211,6 +230,14 @@ async function loadRuntimeEvidence(input: {
       .order("created_at", { ascending: false })
       .limit(50),
     admin
+      .from("media_generation_jobs")
+      .select(
+        "id,status,conversation_id,kind,provider,model,billing_mode,provider_cost_bearer,estimated_provider_cost_microusd,actual_provider_cost_microusd,actual_user_charge_microusd,actual_margin_microusd,error,started_at,completed_at,created_at",
+      )
+      .eq("owner_ref", input.ownerRef)
+      .order("created_at", { ascending: false })
+      .limit(30),
+    admin
       .from("cooperative_reasoning_reviews")
       .select(
         "id,status,summary,reasoning_guidance,codebase_candidates,routing_lessons,created_at",
@@ -224,6 +251,7 @@ async function loadRuntimeEvidence(input: {
 
   if (memoriesResult.error) throw memoriesResult.error;
   if (jobsResult.error) throw jobsResult.error;
+  if (mediaResult.error) throw mediaResult.error;
   if (reviewResult.error) throw reviewResult.error;
 
   const memories = ((memoriesResult.data || []) as MemoryRow[]).filter(
@@ -234,6 +262,7 @@ async function loadRuntimeEvidence(input: {
         item.scope_ref === input.conversationId),
   );
   const jobs = (jobsResult.data || []) as JobRow[];
+  const mediaJobs = (mediaResult.data || []) as MediaJobRow[];
   const review = (reviewResult.data || null) as ReviewRow | null;
 
   const paidJobIds = jobs.filter((job) => executionTier(job) === "paid").map((job) => job.id);
@@ -260,7 +289,7 @@ async function loadRuntimeEvidence(input: {
     }
   }
 
-  return { memories, jobs, review, costs };
+  return { memories, jobs, mediaJobs, review, costs };
 }
 
 function renderMemorySection(memories: MemoryRow[], limit: number) {
@@ -342,6 +371,43 @@ function renderOutcomeLines(
   });
 }
 
+function renderMediaOutcomeLines(mediaJobs: MediaJobRow[], limit: number) {
+  if (!mediaJobs.length) return ["No media-model execution history is recorded yet."];
+
+  return mediaJobs.slice(0, limit).map((job) => {
+    const actualProvider = usdFromMicrousd(job.actual_provider_cost_microusd);
+    const actualCharge = usdFromMicrousd(job.actual_user_charge_microusd);
+    const estimatedProvider = usdFromMicrousd(job.estimated_provider_cost_microusd);
+    const outcome =
+      job.status === "completed"
+        ? "SUCCESS"
+        : job.status === "failed"
+          ? "FAILURE"
+          : job.status === "cancelled"
+            ? "CANCELLED"
+            : job.status.toUpperCase();
+
+    return [
+      "-",
+      iso(job.completed_at || job.created_at),
+      `| ${outcome}`,
+      `| request=media / ${job.kind}`,
+      `| provider=${oneLine(job.provider, 80) || "unknown"}`,
+      `| model=${oneLine(job.model, 120) || "unknown"}`,
+      `| billing=${oneLine(job.billing_mode, 80) || "unknown"}`,
+      `| provider_cost_bearer=${oneLine(job.provider_cost_bearer, 80) || "unknown"}`,
+      `| estimated_provider_cost=${estimatedProvider.toFixed(6)}`,
+      `| actual_provider_cost=${actualProvider.toFixed(6)}`,
+      `| actual_user_charge=${actualCharge.toFixed(6)}`,
+      job.error ? `| error=${oneLine(job.error, 240)}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\s+\|/g, " |")
+      .trim();
+  });
+}
+
 function renderReview(review: ReviewRow | null) {
   if (!review) {
     return [
@@ -376,6 +442,7 @@ function renderRuntimeMarkdown(input: {
   requestType?: string | null;
   memories: MemoryRow[];
   jobs: JobRow[];
+  mediaJobs: MediaJobRow[];
   review: ReviewRow | null;
   costs: Map<string, ReservationRow>;
   promptMode: boolean;
@@ -383,6 +450,7 @@ function renderRuntimeMarkdown(input: {
   const now = new Date().toISOString();
   const memoryLimit = input.promptMode ? 14 : 45;
   const outcomeLimit = input.promptMode ? 14 : 40;
+  const mediaOutcomeLimit = input.promptMode ? 8 : 24;
 
   const lines = [
     "# CoOperative Runtime AI Context",
@@ -420,6 +488,11 @@ function renderRuntimeMarkdown(input: {
     "",
     "Each row is categorized by timestamp, outcome, execution tier, request type, provider/model, latency, and paid cost when recorded.",
     ...renderOutcomeLines(input.jobs, input.costs, outcomeLimit),
+    "",
+    "## Recent media model outcome history",
+    "",
+    "Paid/free media model outcomes are tracked separately with provider-cost and user-charge evidence when available.",
+    ...renderMediaOutcomeLines(input.mediaJobs, mediaOutcomeLimit),
     "",
     "## Periodic reasoning review",
     "",
@@ -536,6 +609,7 @@ export async function buildAndSaveRuntimeContext(input: {
       businessPolicyRevision: COOPERATIVE_BUSINESS_POLICY_REVISION,
       memoryCount: evidence.memories.length,
       outcomeCount: evidence.jobs.length,
+      mediaOutcomeCount: evidence.mediaJobs.length,
       latestReviewId: evidence.review?.id || null,
     },
   });
