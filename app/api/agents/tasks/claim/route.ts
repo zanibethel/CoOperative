@@ -100,6 +100,14 @@ export async function POST(request: Request) {
       taskResult.executorApproval && typeof taskResult.executorApproval === "object"
         ? (taskResult.executorApproval as Record<string, unknown>)
         : null;
+    const sandbox =
+      taskResult.sandbox && typeof taskResult.sandbox === "object"
+        ? (taskResult.sandbox as Record<string, unknown>)
+        : null;
+    const sandboxBaseBranch =
+      sandbox && typeof sandbox.baseBranch === "string"
+        ? sandbox.baseBranch
+        : null;
 
     await admin.from("agent_task_events").insert({
       task_id: task.id,
@@ -110,6 +118,7 @@ export async function POST(request: Request) {
         workerId,
         deniedExamplesLoaded: learningContext.length,
         paidExecutorApproved: Boolean(executorApproval),
+        sandboxBaseBranch,
         workerAuthMode: authorization.mode,
         nodeId: authorization.mode === "node" ? authorization.nodeId : null,
       },
@@ -127,6 +136,8 @@ export async function POST(request: Request) {
       repository,
       learningContext,
       executorApproval,
+      sandbox,
+      sandboxBaseBranch,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Could not claim agent task.";
