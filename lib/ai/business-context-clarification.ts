@@ -264,8 +264,9 @@ export async function resolveBusinessScopeForChat(input: {
         handled: false,
         effectiveMessage: originalTurn,
         selectedBusinessId:
-          input.requestedBusinessId ||
-          (await conversationBusiness(input.ownerRef, input.conversationId)),
+          input.requestedBusinessId === undefined
+            ? await conversationBusiness(input.ownerRef, input.conversationId)
+            : input.requestedBusinessId,
         selectedScope: null,
         routeReason:
           "The user moved to a different request, so the pending scope clarification was dismissed without blocking chat.",
@@ -284,8 +285,9 @@ export async function resolveBusinessScopeForChat(input: {
   }
 
   const requestedBusinessId =
-    input.requestedBusinessId ||
-    (await conversationBusiness(input.ownerRef, input.conversationId));
+    input.requestedBusinessId === undefined
+      ? await conversationBusiness(input.ownerRef, input.conversationId)
+      : input.requestedBusinessId;
 
   if (requestedBusinessId) {
     const owned = businesses.find(
