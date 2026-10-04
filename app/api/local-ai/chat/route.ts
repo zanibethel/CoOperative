@@ -495,10 +495,9 @@ export async function POST(request: Request) {
       message: input.message,
     });
     const effectiveBusinessId = resolvedBusiness.businessId;
-    const businessContext = await buildBusinessChatContext(
-      owner.userId,
-      effectiveBusinessId || undefined,
-    );
+    const businessContext = effectiveBusinessId
+      ? await buildBusinessChatContext(owner.userId, effectiveBusinessId)
+      : null;
     const scopeContext = await businessScopePromptContext(
       ownerRef,
       effectiveBusinessId,
