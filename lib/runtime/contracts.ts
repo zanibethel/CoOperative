@@ -13,7 +13,8 @@ export type ServiceAgentKey =
   | "image"
   | "social"
   | "project"
-  | "node";
+  | "node"
+  | "service-connector";
 
 export type CapabilityKey =
   | "business.intake"
@@ -23,6 +24,7 @@ export type CapabilityKey =
   | "social.prepare"
   | "project.change"
   | "node.manage"
+  | "service.connect"
   | "chat.general";
 
 export type ServiceAgentManifest = {
