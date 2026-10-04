@@ -22,6 +22,7 @@ import {
 } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import { handleConversationalOnboardingTurn } from "@/lib/ai/user-profile-onboarding";
+import { resolveBusinessScopeForChat } from "@/lib/ai/business-context-clarification";
 import { activeNodeIds } from "@/lib/unison/node-access";
 import {
   pollHermesMediaTask,
