@@ -315,6 +315,32 @@ async function businessRows(ownerRef: string, businessId: string) {
   return data || [];
 }
 
+export async function codeFirstOwnedBusinessList(ownerRef: string) {
+  const businesses = await ownedBusinesses(ownerRef);
+  return businesses.map((business) => ({
+    id: business.id as string,
+    name: business.name as string,
+    industry: typeof business.industry === "string" ? business.industry : "",
+  }));
+}
+
+export async function codeFirstProfileFieldSnapshot(
+  ownerRef: string,
+  businessId?: string | null,
+) {
+  const rows = businessId
+    ? await businessRows(ownerRef, businessId)
+    : await personalRows(ownerRef);
+
+  return rows.map((row) => ({
+    key: row.field_key as string,
+    label: row.label as string,
+    value: typeof row.value_text === "string" ? row.value_text : null,
+    status: row.status as string,
+    category: row.category as string,
+  }));
+}
+
 async function updateSession(
   ownerRef: string,
   updates: Record<string, unknown>,
