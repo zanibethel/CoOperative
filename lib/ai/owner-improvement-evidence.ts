@@ -231,7 +231,7 @@ export async function collectOwnerImprovementEvidence(userId: string) {
       rawTenantDocumentsIncluded: false,
       credentialsIncluded: false,
       note:
-        "This evidence pack contains aggregate operational metrics only. It excludes raw chat content, tenant documents, and credentials.",
+        "This evidence pack excludes requester identities, raw chat content, tenant documents, and credentials. For platform code governance it may include bounded sandbox-branch metadata, technical task objectives/summaries, changed-file lists, and check results needed for owner review.",
     },
     chat: {
       conversations: conversations?.length || 0,
