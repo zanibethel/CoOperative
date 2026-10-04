@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import MediaBenchmarkReview from "./MediaBenchmarkReview";
 
 type LiveMediaModel = {
   id: string;
@@ -1449,7 +1450,7 @@ export default function ModelMixer({
               <div>
                 <strong>Quality benchmark showdown</strong>
                 <span>
-                  Z-Image Turbo vs Nano Banana Pro · identical SFW prompts · prepared only.
+                  Z-Image Turbo vs Nano Banana Pro · 6/6 benchmark outputs completed.
                 </span>
               </div>
             </div>
@@ -1492,7 +1493,7 @@ export default function ModelMixer({
                 </div>
 
                 <small className="model-mixer-capability-scope">
-                  Preparing this benchmark makes no paid generation calls. The planned run is
+                  Current live pricing is shown above for context. The completed benchmark used
                   three exact prompts per route with no retry, fallback, or model substitution.
                 </small>
 
@@ -1509,10 +1510,11 @@ export default function ModelMixer({
                 </div>
 
                 <p className="model-mixer-capability-message">
-                  No benchmark run has started. Execution should require a separate explicit
-                  approval for the ${benchmarkPreparation.safeTotalCapUsd.toFixed(2)} safe
-                  maximum.
+                  Benchmark generation is complete. Review and save the outputs below before
+                  testing evidence-driven model selection.
                 </p>
+
+                <MediaBenchmarkReview />
               </>
             ) : (
               <small className="model-mixer-capability-scope">

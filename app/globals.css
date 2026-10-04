@@ -1907,6 +1907,222 @@ b { color: var(--text); }
   margin: 0;
 }
 
+.benchmark-review {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.benchmark-review-head,
+.benchmark-case-head,
+.benchmark-result-head,
+.benchmark-score-head,
+.benchmark-review-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.benchmark-review-head > div,
+.benchmark-case-head > div,
+.benchmark-result-head > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.benchmark-review-head strong,
+.benchmark-case-head strong,
+.benchmark-result-head strong {
+  font-size: .76rem;
+}
+
+.benchmark-review-head span,
+.benchmark-review-head small,
+.benchmark-case-head small,
+.benchmark-result-head small {
+  color: var(--muted);
+  font-size: .64rem;
+  line-height: 1.4;
+}
+
+.benchmark-route-scorecards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.benchmark-route-scorecards > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: color-mix(in srgb, var(--panel-2) 88%, transparent);
+}
+
+.benchmark-route-scorecards strong {
+  font-size: .7rem;
+}
+
+.benchmark-route-scorecards span {
+  color: var(--muted);
+  font-size: .62rem;
+}
+
+.benchmark-case {
+  display: grid;
+  gap: 9px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.benchmark-case-head details {
+  max-width: 58%;
+  color: var(--muted);
+  font-size: .62rem;
+}
+
+.benchmark-case-head summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.benchmark-case-head p,
+.benchmark-case-head ul {
+  margin: 8px 0 0;
+  line-height: 1.45;
+}
+
+.benchmark-case-head ul {
+  padding-left: 18px;
+}
+
+.benchmark-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.benchmark-result-card {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 9px;
+  background: color-mix(in srgb, var(--panel-2) 90%, transparent);
+}
+
+.benchmark-result-head a,
+.benchmark-image-link {
+  color: var(--accent);
+  font-size: .62rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.benchmark-image-link {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #05070b;
+}
+
+.benchmark-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: contain;
+  background: #05070b;
+}
+
+.benchmark-image-missing {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: .65rem;
+}
+
+.benchmark-score-list {
+  display: grid;
+  gap: 7px;
+}
+
+.benchmark-score {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--line);
+  padding-top: 7px;
+}
+
+.benchmark-score-head {
+  align-items: center;
+}
+
+.benchmark-score-head strong {
+  font-size: .65rem;
+}
+
+.benchmark-score-head button,
+.benchmark-review-actions button {
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  color: var(--text);
+  font: inherit;
+  font-size: .62rem;
+  font-weight: 800;
+}
+
+.benchmark-score > small {
+  color: var(--muted);
+  font-size: .6rem;
+}
+
+.benchmark-score-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 54px;
+  gap: 8px;
+  align-items: center;
+}
+
+.benchmark-score-control input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.benchmark-score-control input[type="number"] {
+  width: 54px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: .65rem;
+  font-weight: 800;
+}
+
+.benchmark-review-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.benchmark-review-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
 .model-mixer-content-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2074,6 +2290,20 @@ b { color: var(--text); }
 
   .model-mixer-capability-route-summary {
     grid-template-columns: 1fr;
+  }
+
+  .benchmark-route-scorecards,
+  .benchmark-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .benchmark-case-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .benchmark-case-head details {
+    max-width: none;
   }
 }
 
