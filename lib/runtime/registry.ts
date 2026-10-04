@@ -5,7 +5,7 @@ import type {
   ServiceAgentManifest,
 } from "@/lib/runtime/contracts";
 
-export const SERVICE_AGENT_REGISTRY_REVISION = "2026-10-04.2";
+export const SERVICE_AGENT_REGISTRY_REVISION = "2026-10-04.3";
 
 export const SERVICE_AGENTS: Record<ServiceAgentKey, ServiceAgentManifest> = {
   "business-intake": {
@@ -104,6 +104,20 @@ export const SERVICE_AGENTS: Record<ServiceAgentKey, ServiceAgentManifest> = {
       allowPaid: false,
     },
   },
+  "service-connector": {
+    key: "service-connector",
+    purpose:
+      "Resolve known third-party authorization through deterministic connector code and delegate only missing connector implementation to a bounded builder workflow.",
+    capabilities: ["service.connect"],
+    reads: ["profile", "workflow-state"],
+    writes: ["workflow-state", "artifact", "history"],
+    aiPolicy: {
+      default: "none",
+      allowLocal: true,
+      allowCommunity: true,
+      allowPaid: false,
+    },
+  },
 };
 
 export const CAPABILITY_REGISTRY: Record<CapabilityKey, CapabilityManifest> = {
@@ -155,6 +169,14 @@ export const CAPABILITY_REGISTRY: Record<CapabilityKey, CapabilityManifest> = {
     agent: "node",
     preferredExecution: "code",
     aiOnlyWhenNeeded: false,
+  },
+  "service.connect": {
+    key: "service.connect",
+    purpose:
+      "Connect or reconnect a third-party service through an approved code connector; use AI only to prepare a missing reusable connector.",
+    agent: "service-connector",
+    preferredExecution: "code",
+    aiOnlyWhenNeeded: true,
   },
   "chat.general": {
     key: "chat.general",
