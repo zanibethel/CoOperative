@@ -262,15 +262,19 @@ export async function persistResponseSupport(input: {
       candidate.scope === "conversation" ? input.conversationId : null;
 
     if (status === "active") {
-      const { data: existing } = await admin
+      let existingQuery = admin
         .from("cooperative_memories")
         .select("id,confidence")
         .eq("owner_ref", input.ownerRef)
         .eq("scope", candidate.scope)
         .eq("memory_type", candidate.type)
         .eq("normalized_key", normalizedKey)
-        .eq("status", "active")
-        .maybeSingle();
+        .eq("status", "active");
+      existingQuery =
+        candidate.scope === "conversation" && scopeRef
+          ? existingQuery.eq("scope_ref", scopeRef)
+          : existingQuery.is("scope_ref", null);
+      const { data: existing } = await existingQuery.maybeSingle();
 
       if (existing) {
         await admin
@@ -350,11 +354,12 @@ function terms(value: string) {
 export async function relevantMemorySystemContext(
   ownerRef: string,
   queryText: string,
+  conversationId?: string | null,
 ) {
   const admin = createAdminSupabaseClient();
   const { data, error } = await admin
     .from("cooperative_memories")
-    .select("memory_type,content,confidence,last_confirmed_at")
+    .select("scope,scope_ref,memory_type,content,confidence,last_confirmed_at")
     .eq("owner_ref", ownerRef)
     .eq("status", "active")
     .order("last_confirmed_at", { ascending: false })
@@ -373,7 +378,15 @@ export async function relevantMemorySystemContext(
     open_question: 1,
   };
 
-  const ranked = data
+  const eligible = data.filter(
+    (item) =>
+      item.scope === "owner" ||
+      (item.scope === "conversation" &&
+        Boolean(conversationId) &&
+        item.scope_ref === conversationId),
+  );
+
+  const ranked = eligible
     .map((item, index) => {
       const memoryTerms = terms(item.content);
       let overlap = 0;
