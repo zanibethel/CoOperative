@@ -91,14 +91,15 @@ export default function MediaFullscreenViewer({ media, onClose }: Props) {
     [media],
   );
 
-  if (!media) return null;
+  const activeMedia = media;
+  if (!activeMedia) return null;
 
   async function shareMedia() {
     if (working) return;
     setWorking("share");
     setMessage("");
     try {
-      const file = await exportFile(media);
+      const file = await exportFile(activeMedia);
       if (canShareFile(file)) {
         await navigator.share({
           files: [file],
@@ -108,7 +109,7 @@ export default function MediaFullscreenViewer({ media, onClose }: Props) {
       } else if (typeof navigator.share === "function") {
         await navigator.share({
           title: displayLabel,
-          url: media.url,
+          url: activeMedia.url,
         });
         setMessage("Share sheet opened.");
       } else {
@@ -128,7 +129,7 @@ export default function MediaFullscreenViewer({ media, onClose }: Props) {
     setWorking("photos");
     setMessage("");
     try {
-      const file = await exportFile(media);
+      const file = await exportFile(activeMedia);
 
       // Mobile web apps cannot silently write to the iOS/Android photo library.
       // The native share sheet is the supported path to Save Image / Save Video.
@@ -171,8 +172,8 @@ export default function MediaFullscreenViewer({ media, onClose }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "save",
-          jobId: media.jobId || undefined,
-          mediaUrl: media.jobId ? undefined : media.url,
+          jobId: activeMedia.jobId || undefined,
+          mediaUrl: activeMedia.jobId ? undefined : activeMedia.url,
         }),
       });
       const payload = (await response.json()) as {
@@ -212,11 +213,11 @@ export default function MediaFullscreenViewer({ media, onClose }: Props) {
       onClick={() => setControlsVisible((current) => !current)}
     >
       <div className="media-fullscreen-stage">
-        {media.kind === "image" ? (
-          <img src={media.url} alt={displayLabel} draggable={false} />
+        {activeMedia.kind === "image" ? (
+          <img src={activeMedia.url} alt={displayLabel} draggable={false} />
         ) : (
           <video
-            src={media.url}
+            src={activeMedia.url}
             controls={controlsVisible}
             playsInline
             autoPlay
