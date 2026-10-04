@@ -806,13 +806,16 @@ export async function refreshRuntimeContextAfterOutcome(input: {
   conversationId?: string | null;
   currentRequest?: string | null;
   requestType?: string | null;
+  allowExternalReview?: boolean;
 }) {
   const admin = createAdminSupabaseClient();
 
-  try {
-    await maybeRunReasoningReview(input.ownerRef);
-  } catch {
-    // Review is advisory and must never block chat completion.
+  if (input.allowExternalReview !== false) {
+    try {
+      await maybeRunReasoningReview(input.ownerRef);
+    } catch {
+      // Review is advisory and must never block chat completion.
+    }
   }
 
   const context = await buildAndSaveRuntimeContext({
