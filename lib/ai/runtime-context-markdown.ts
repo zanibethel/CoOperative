@@ -501,6 +501,17 @@ function renderRuntimeMarkdown(input: {
     last_confirmed_at: string | null;
     updated_at: string;
   }>;
+  businessProfileFields: Array<{
+    field_key: string;
+    category: string;
+    label: string;
+    value_text: string | null;
+    status: string;
+    confidence: number | string | null;
+    last_confirmed_at: string | null;
+    updated_at: string;
+  }>;
+  businessId?: string | null;
   memories: MemoryRow[];
   jobs: JobRow[];
   mediaJobs: MediaJobRow[];
@@ -545,6 +556,15 @@ function renderRuntimeMarkdown(input: {
     "",
     "These fields come from the get-to-know-you conversation or later explicit user statements. Unknown/deferred values must not be guessed.",
     ...renderProfileFields(input.profileFields),
+    "",
+    "## Active business structured fields",
+    "",
+    input.businessId
+      ? "These fields belong only to the active business context. Unknown/deferred values must not be guessed."
+      : "No active business was selected for this request.",
+    ...(input.businessId
+      ? renderProfileFields(input.businessProfileFields)
+      : ["No business-specific fields injected."]),
     "",
     "## Most up-to-date reusable memory",
     "",
@@ -635,6 +655,7 @@ async function currentEvidenceMarkdown(input: {
   conversationId?: string | null;
   currentRequest?: string | null;
   requestType?: string | null;
+  businessId?: string | null;
 }) {
   const evidence = await loadRuntimeEvidence(input);
   return {
@@ -658,6 +679,7 @@ export async function buildAndSaveRuntimeContext(input: {
   currentRequest?: string | null;
   requestType?: string | null;
   sourceJobId?: string | null;
+  businessId?: string | null;
 }) {
   const evidence = await currentEvidenceMarkdown(input);
   const ownerKey = safeOwnerKey(input.ownerRef);
@@ -674,6 +696,8 @@ export async function buildAndSaveRuntimeContext(input: {
       requestType: input.requestType || "general",
       businessPolicyRevision: COOPERATIVE_BUSINESS_POLICY_REVISION,
       profileFieldCount: evidence.profileFields.length,
+      businessId: input.businessId || null,
+      businessProfileFieldCount: evidence.businessProfileFields.length,
       memoryCount: evidence.memories.length,
       outcomeCount: evidence.jobs.length,
       mediaOutcomeCount: evidence.mediaJobs.length,
