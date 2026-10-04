@@ -32,6 +32,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
+  try {
   const action = url.searchParams.get("action") || "poll";
   const admin = createAdminSupabaseClient();
 
@@ -113,4 +114,12 @@ export async function GET(request: Request) {
     usage: polled.usage,
     stderrTail: polled.stderr.slice(-1200),
   });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message.slice(0, 1400) : "Probe failed.",
+      },
+      { status: 500 },
+    );
+  }
 }
