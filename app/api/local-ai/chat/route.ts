@@ -348,6 +348,68 @@ async function stageLocalImageReferences(
   }
 }
 
+async function hermesVisionImagesForAttachments(
+  admin: AdminClient,
+  ownerRef: string,
+  attachmentIds: string[],
+): Promise<HermesVisionImage[]> {
+  if (!attachmentIds.length) return [];
+
+  const { data: attachments, error } = await admin
+    .from("local_ai_attachments")
+    .select("id,storage_path,file_name,mime_type")
+    .eq("owner_ref", ownerRef)
+    .in("id", attachmentIds);
+
+  if (error) throw error;
+  if (!attachments || attachments.length !== attachmentIds.length) {
+    throw new Error("One or more vision attachments are no longer available.");
+  }
+
+  const byId = new Map(attachments.map((attachment) => [attachment.id, attachment]));
+  const images: HermesVisionImage[] = [];
+
+  for (const attachmentId of attachmentIds) {
+    const attachment = byId.get(attachmentId);
+    if (!attachment) throw new Error("Vision attachment metadata is missing.");
+
+    const { data: blob, error: downloadError } = await admin.storage
+      .from("local-ai-attachments")
+      .download(attachment.storage_path);
+    if (downloadError) throw downloadError;
+
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (!bytes.length || bytes.byteLength > 12 * 1024 * 1024) {
+      throw new Error("Vision attachment is empty or exceeds the 12 MB limit.");
+    }
+
+    images.push({
+      bytes,
+      fileName: attachment.file_name || `image-${attachmentId}`,
+      mimeType: attachment.mime_type || "image/jpeg",
+    });
+  }
+
+  return images;
+}
+
+function latestUserRequest(messages: unknown) {
+  if (!Array.isArray(messages)) return "Describe and analyze the attached image.";
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const row = messages[index];
+    if (
+      row &&
+      typeof row === "object" &&
+      (row as { role?: unknown }).role === "user" &&
+      typeof (row as { content?: unknown }).content === "string"
+    ) {
+      const value = (row as { content: string }).content.trim();
+      if (value) return value;
+    }
+  }
+  return "Describe and analyze the attached image.";
+}
+
 export async function POST(request: Request) {
   const owner = await currentOwner();
   if (!owner) {
