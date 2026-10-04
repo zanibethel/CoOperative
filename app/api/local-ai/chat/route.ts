@@ -22,7 +22,10 @@ import {
 } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import {
+  answerOnboarding,
   businessScopePromptContext,
+  codeFirstScopeClarification,
+  onboardingState,
   resolveBusinessScope,
   resumeOnboarding,
 } from "@/lib/ai/user-profile-onboarding";
@@ -614,6 +617,39 @@ export async function POST(request: Request) {
       }
     }
 
+    const serverOnboardingState = await onboardingState(ownerRef);
+    if (
+      input.attachmentIds.length === 0 &&
+      serverOnboardingState.status === "in_progress" &&
+      serverOnboardingState.conversationId === conversationId &&
+      serverOnboardingState.phase !== "paused"
+    ) {
+      const intake = await answerOnboarding({
+        ownerRef,
+        conversationId,
+        message: input.message,
+      });
+
+      if (intake.handled !== false) {
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: "text",
+            conversationId,
+            conversationTitle: "Getting to know you",
+            text: intake.assistantText || "Saved.",
+            provider: "code",
+            model: "adaptive-intake-router",
+            businessId: intake.state.businessId || null,
+            routeReason:
+              "Server-side code handled the active intake answer before any AI model was called.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    }
+
     const requestedMaxSpendPerPrompt = maxSpendPerPromptCommand(input.message);
     const asksCurrentMaxSpendPerPrompt = asksMaxSpendPerPrompt(input.message);
 
@@ -874,6 +910,59 @@ export async function POST(request: Request) {
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
       }
+    }
+
+    const scopeClarification = await codeFirstScopeClarification({
+      ownerRef,
+      activeBusinessId: effectiveBusinessId,
+      conversationId,
+      message: input.message,
+    });
+
+    if (scopeClarification && input.attachmentIds.length === 0) {
+      const { error: scopeMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: scopeClarification.text,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (scopeMessageError) throw scopeMessageError;
+
+      await admin
+        .from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "text",
+          conversationId,
+          conversationTitle,
+          text: scopeClarification.text,
+          provider: "code",
+          model: "scope-clarification-router",
+          routeReason:
+            "CoOperative asked the personal-versus-business clarification deterministically before calling local, free, paid, or media AI.",
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     let retryMediaContext:

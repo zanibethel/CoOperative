@@ -82,8 +82,14 @@ Chat defaults to **Personal / no business** rather than silently choosing the fi
 
 A user can explicitly select a business in the UI or name one of their known businesses in the request. CoOperative can resolve an exact named business into the request's business scope.
 
-If scope would materially change the answer and is still unclear, model instructions require one short clarification such as:
+If scope would materially change the answer and is still unclear, CoOperative now asks one short clarification **in deterministic code before any AI model is called**, for example:
 
 > Is this personal, or is it for Business A, Business B, or Business C?
+
+The code-first scope router is intentionally limited to requests where personal/business context materially changes execution, such as creating an event asset, image, flyer, social post, email, website work, proposal, invoice, schedule, campaign, or similar artifact/workflow. It does not interrupt ordinary informational questions.
+
+If the user explicitly says “my business” and only one business exists, code can safely resolve that sole business. If several businesses exist, it asks which one rather than guessing.
+
+The active onboarding conversation is also guarded server-side. Intake answers are mapped and saved through deterministic code before local/free/paid AI can run, even if a client fails to perform its normal onboarding interception.
 
 Once business scope is established, the business-specific structured fields are included in the private runtime Markdown context alongside personal context, without mixing one business into another.

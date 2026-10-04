@@ -1219,7 +1219,8 @@ export async function resolveBusinessScope(input: {
     }
   }
 
-  const message = normalizedBusinessName(input.message || "");
+  const rawMessage = input.message || "";
+  const message = normalizedBusinessName(rawMessage);
   if (message) {
     const matches = businesses.filter((business) => {
       const name = normalizedBusinessName(business.name || "");
@@ -1239,9 +1240,128 @@ export async function resolveBusinessScope(input: {
         source: "explicit-message" as const,
       };
     }
+
+    if (
+      businesses.length === 1 &&
+      /\b(?:my|our|the)\s+(?:business|company|shop|store|organization)\b/i.test(
+        rawMessage,
+      )
+    ) {
+      return {
+        businessId: businesses[0].id as string,
+        businessName: businesses[0].name as string,
+        source: "single-business-cue" as const,
+      };
+    }
   }
 
   return { businessId: null, businessName: null, source: "none" as const };
+}
+
+function requestLikelyNeedsScopeClarification(message: string) {
+  const value = message.replace(/\s+/g, " ").trim();
+  if (!value) return false;
+
+  const explicitPersonal =
+    /\b(?:personal|for me|my family|my household|my home|my birthday|my wedding|my child|my son|my daughter|my spouse|my wife|my husband)\b/i.test(
+      value,
+    );
+  if (explicitPersonal) return false;
+
+  const actionIntent =
+    /\b(?:i need|i want|i'd like|we need|we want|can you|could you|please|help me|let'?s|create|make|generate|design|draft|write|plan|schedule|book|send|post|publish|build|prepare)\b/i.test(
+      value,
+    );
+  if (!actionIntent) return false;
+
+  return /\b(?:event|image|photo|graphic|flyer|poster|logo|video|ad|advertisement|marketing|campaign|social|post|email|message|website|page|invoice|quote|proposal|contract|budget|report|presentation|announcement|promotion|calendar|schedule|booking|customer|client)\b/i.test(
+    value,
+  );
+}
+
+export async function codeFirstScopeClarification(input: {
+  ownerRef: string;
+  activeBusinessId?: string | null;
+  conversationId?: string | null;
+  message: string;
+}) {
+  if (input.activeBusinessId) return null;
+
+  const businesses = await ownedBusinesses(input.ownerRef);
+  if (!businesses.length || !requestLikelyNeedsScopeClarification(input.message)) {
+    return null;
+  }
+
+  const normalizedMessage = normalizedBusinessName(input.message);
+  const namedBusiness = businesses.find((business) => {
+    const name = normalizedBusinessName(business.name || "");
+    return (
+      Boolean(name) &&
+      (normalizedMessage === name ||
+        normalizedMessage.includes(` ${name} `) ||
+        normalizedMessage.startsWith(`${name} `) ||
+        normalizedMessage.endsWith(` ${name}`))
+    );
+  });
+  if (namedBusiness) return null;
+
+  if (
+    businesses.length === 1 &&
+    /\b(?:my|our|the)\s+(?:business|company|shop|store|organization)\b/i.test(
+      input.message,
+    )
+  ) {
+    return null;
+  }
+
+  if (input.conversationId) {
+    const admin = createAdminSupabaseClient();
+    const { data } = await admin
+      .from("local_ai_messages")
+      .select("role,content")
+      .eq("conversation_id", input.conversationId)
+      .eq("owner_ref", input.ownerRef)
+      .order("created_at", { ascending: false })
+      .limit(6);
+
+    const recent = (data || [])
+      .filter((row) => row.role === "user")
+      .map((row) => String(row.content || ""))
+      .join(" ");
+    const normalizedRecent = normalizedBusinessName(recent);
+
+    const recentNamedBusiness = businesses.find((business) => {
+      const name = normalizedBusinessName(business.name || "");
+      return (
+        Boolean(name) &&
+        (normalizedRecent === name ||
+          normalizedRecent.includes(` ${name} `) ||
+          normalizedRecent.startsWith(`${name} `) ||
+          normalizedRecent.endsWith(` ${name}`))
+      );
+    });
+    if (recentNamedBusiness) return null;
+
+    if (
+      /\b(?:personal|for me|my family|my household|my home)\b/i.test(recent)
+    ) {
+      return null;
+    }
+  }
+
+  const names = businesses.slice(0, 4).map((business) => business.name);
+  const businessChoices =
+    names.length === 1
+      ? names[0]
+      : names.length === 2
+        ? `${names[0]} or ${names[1]}`
+        : `${names.slice(0, -1).join(", ")}, or ${names[names.length - 1]}`;
+
+  return {
+    text: `Sure — is this personal, or is it for ${businessChoices}?`,
+    businessIds: businesses.slice(0, 4).map((business) => business.id as string),
+    businessNames: names,
+  };
 }
 
 export async function businessScopePromptContext(
