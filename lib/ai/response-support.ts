@@ -326,11 +326,13 @@ export async function persistResponseSupport(input: {
   answer: string;
   provider: string | null;
   model: string | null;
+  businessId?: string | null;
 }) {
   const packet = await analyzeResponseSupport({
     ownerRef: input.ownerRef,
     messages: input.messages,
     answer: input.answer,
+    businessId: input.businessId || null,
   });
   if (!packet) return null;
 
@@ -426,6 +428,27 @@ export async function persistResponseSupport(input: {
           ? profileError.message.slice(0, 600)
           : "Unknown profile update error",
     });
+  }
+
+  if (input.businessId && packet.businessProfileUpdates.length) {
+    try {
+      await applyBusinessProfileFieldUpdates({
+        ownerRef: input.ownerRef,
+        businessId: input.businessId,
+        conversationId: input.conversationId,
+        sourceKind: "conversation-response-support",
+        updates: packet.businessProfileUpdates,
+      });
+    } catch (businessProfileError) {
+      console.error("Could not update structured business profile fields", {
+        jobId: input.jobId,
+        businessId: input.businessId,
+        detail:
+          businessProfileError instanceof Error
+            ? businessProfileError.message.slice(0, 600)
+            : "Unknown business profile update error",
+      });
+    }
   }
 
   await admin
