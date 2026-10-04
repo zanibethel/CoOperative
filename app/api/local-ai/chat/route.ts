@@ -21,6 +21,10 @@ import {
   settleAiProfileFunds,
 } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
+import {
+  businessScopePromptContext,
+  resumeOnboarding,
+} from "@/lib/ai/user-profile-onboarding";
 import { activeNodeIds } from "@/lib/unison/node-access";
 import {
   pollHermesMediaTask,
