@@ -22,9 +22,12 @@ import {
 } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import { handleCodeFirstChat } from "@/lib/runtime/code-first-chat";
+import { platformFaqDataNeeds } from "@/lib/runtime/platform-faq";
 import {
   answerOnboarding,
   businessScopePromptContext,
+  codeFirstOwnedBusinessList,
+  codeFirstProfileFieldSnapshot,
   codeFirstScopeClarification,
   onboardingState,
   resolveBusinessScope,
@@ -73,7 +76,10 @@ import {
   type MediaAdultCapabilityEvidence,
   type MediaContentPreference,
 } from "@/lib/inference/media-recommendations";
-import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
+import {
+  businessOwnedServiceCredentialForOwner,
+  connectedServiceStatusesForOwner,
+} from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
 import {
   createNousReferenceImageExecutionUrls,
@@ -2766,6 +2772,106 @@ export async function POST(request: Request) {
       );
     }
 
+    const codeFirstNeeds =
+      input.attachmentIds.length === 0
+        ? new Set(platformFaqDataNeeds(input.message))
+        : new Set<ReturnType<typeof platformFaqDataNeeds>[number]>();
+
+    const codeFirstBusinesses = codeFirstNeeds.has("businesses")
+      ? await codeFirstOwnedBusinessList(ownerRef)
+      : undefined;
+
+    const codeFirstProfileFields = codeFirstNeeds.has("profile")
+      ? await codeFirstProfileFieldSnapshot(ownerRef, effectiveBusinessId)
+      : undefined;
+
+    const codeFirstConnectedServices = codeFirstNeeds.has("services")
+      ? await connectedServiceStatusesForOwner(ownerRef)
+      : undefined;
+
+    let codeFirstNodeSummary:
+      | { total: number; fresh: number; paused: number }
+      | undefined;
+    if (codeFirstNeeds.has("nodes")) {
+      const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
+      if (!authorizedNodeIds.length) {
+        codeFirstNodeSummary = { total: 0, fresh: 0, paused: 0 };
+      } else {
+        const { data: nodes, error: nodeStatusError } = await admin
+          .from("unison_nodes")
+          .select("id,state,last_seen_at")
+          .in("id", authorizedNodeIds);
+        if (nodeStatusError) throw nodeStatusError;
+
+        const freshAfter = Date.now() - 90_000;
+        codeFirstNodeSummary = {
+          total: authorizedNodeIds.length,
+          fresh: (nodes || []).filter((node) => {
+            const seenAt = Date.parse(node.last_seen_at || "");
+            return (
+              node.state !== "paused" &&
+              Number.isFinite(seenAt) &&
+              seenAt >= freshAfter
+            );
+          }).length,
+          paused: (nodes || []).filter((node) => node.state === "paused").length,
+        };
+      }
+    }
+
+    let codeFirstRecentJobs:
+      | Array<{
+          kind: string;
+          status: string;
+          provider?: string | null;
+          model?: string | null;
+          createdAt?: string | null;
+          completedAt?: string | null;
+        }>
+      | undefined;
+    if (codeFirstNeeds.has("jobs")) {
+      const [textJobsResult, mediaJobsResult] = await Promise.all([
+        admin
+          .from("inference_jobs")
+          .select("kind,status,result_provider,result_model,created_at,completed_at")
+          .eq("client_owner_ref", ownerRef)
+          .order("created_at", { ascending: false })
+          .limit(5),
+        admin
+          .from("media_generation_jobs")
+          .select("kind,status,provider,model,created_at,completed_at")
+          .eq("owner_ref", ownerRef)
+          .order("created_at", { ascending: false })
+          .limit(5),
+      ]);
+      if (textJobsResult.error) throw textJobsResult.error;
+      if (mediaJobsResult.error) throw mediaJobsResult.error;
+
+      codeFirstRecentJobs = [
+        ...(textJobsResult.data || []).map((job) => ({
+          kind: String(job.kind || "text"),
+          status: String(job.status || "unknown"),
+          provider: job.result_provider || null,
+          model: job.result_model || null,
+          createdAt: job.created_at || null,
+          completedAt: job.completed_at || null,
+        })),
+        ...(mediaJobsResult.data || []).map((job) => ({
+          kind: String(job.kind || "media"),
+          status: String(job.status || "unknown"),
+          provider: job.provider || null,
+          model: job.model || null,
+          createdAt: job.created_at || null,
+          completedAt: job.completed_at || null,
+        })),
+      ]
+        .sort(
+          (a, b) =>
+            Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""),
+        )
+        .slice(0, 5);
+    }
+
     const codeFirstDecision = handleCodeFirstChat({
       message: input.message,
       hasAttachments: input.attachmentIds.length > 0,
@@ -2778,6 +2884,11 @@ export async function POST(request: Request) {
       onboardingStatus: serverOnboardingState.status,
       onboardingMode: serverOnboardingState.mode,
       onboardingPhase: serverOnboardingState.phase,
+      businesses: codeFirstBusinesses,
+      profileFields: codeFirstProfileFields,
+      connectedServices: codeFirstConnectedServices,
+      nodeSummary: codeFirstNodeSummary,
+      recentJobs: codeFirstRecentJobs,
     });
 
     if (codeFirstDecision.handled && codeFirstDecision.text) {

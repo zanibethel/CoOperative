@@ -1,5 +1,10 @@
 import "server-only";
 
+import {
+  answerPlatformFaq,
+  type PlatformFaqContext,
+} from "@/lib/runtime/platform-faq";
+
 export type CodeFirstChatDecision = {
   handled: boolean;
   text?: string;
@@ -8,18 +13,9 @@ export type CodeFirstChatDecision = {
   aiNeeded: boolean;
 };
 
-export type CodeFirstChatInput = {
+export type CodeFirstChatInput = PlatformFaqContext & {
   message: string;
   hasAttachments: boolean;
-  profile: "fast" | "quality";
-  nodeRouting: "default" | "prefer-owned" | "require-node";
-  businessId?: string | null;
-  businessName?: string | null;
-  availableAiBalanceUsd: number;
-  paidAiFunded: boolean;
-  onboardingStatus?: string | null;
-  onboardingMode?: string | null;
-  onboardingPhase?: string | null;
 };
 
 function normalized(message: string) {
@@ -109,12 +105,34 @@ export function handleCodeFirstChat(
 ): CodeFirstChatDecision {
   const value = normalized(input.message);
 
-  if (input.hasAttachments || !value) {
+  if (!value) {
+    return {
+      handled: false,
+      handler: "code-first-escalation",
+      routeReason: "The request contains no deterministic text intent to resolve.",
+      aiNeeded: true,
+    };
+  }
+
+  if (!input.hasAttachments) {
+    const faq = answerPlatformFaq(input.message, input);
+    if (faq) {
+      return {
+        handled: true,
+        handler: faq.key,
+        text: faq.text,
+        routeReason: faq.routeReason,
+        aiNeeded: false,
+      };
+    }
+  }
+
+  if (input.hasAttachments) {
     return {
       handled: false,
       handler: "code-first-escalation",
       routeReason:
-        "The request includes content that needs model interpretation, so deterministic code cannot fully answer it.",
+        "The request includes attached content that needs model interpretation after deterministic attachment checks.",
       aiNeeded: true,
     };
   }

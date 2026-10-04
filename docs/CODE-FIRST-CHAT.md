@@ -23,17 +23,26 @@ The main chat already handles several flows before AI, including:
 - recent failure and media retry guards;
 - media request planning, budget checks, and provider gates.
 
-The general code-first responder adds deterministic answers for:
+The general code-first responder now uses a dedicated platform FAQ registry plus live saved-state lookups.
+
+Deterministic coverage includes:
 
 - simple greetings and acknowledgements;
-- CoOperative identity and capabilities;
+- CoOperative identity, capabilities, and platform help;
 - the code-first / AI-use policy itself;
-- current paid-AI balance;
-- current personal/business scope;
-- current local execution preference;
-- onboarding status.
+- paid-AI balance and paid-AI eligibility;
+- Model Mixer, spend-cap, Fast/Quality, and local/cloud routing FAQs;
+- Personal vs Business scope and onboarding behavior/status;
+- known saved businesses and saved Personal/Business profile facts;
+- connected provider/service status;
+- authorized Unison node availability;
+- recent text/media job status;
+- provider-connection and API-key safety guidance;
+- media generation, attachment, Recovery Agent, project-work, history, and SFW/NSFW platform FAQs.
 
-This list should expand over time as repeated reliable behaviors become deterministic capabilities.
+Live database lookups are intent-gated. CoOperative only reads business/profile/service/node/job state when the user's question requires that state, rather than querying every subsystem on every chat turn.
+
+Repeated reliable behaviors should continue moving into this deterministic layer instead of becoming new prompt instructions.
 
 ## Escalation contract
 
@@ -49,3 +58,10 @@ The fallback reason is carried into the AI job route metadata so it remains clea
 Do not move a request to AI merely because it is phrased conversationally. Natural-language requests that map safely to known state or a deterministic workflow should stay in code.
 
 Likewise, do not force code to fabricate an answer. If deterministic state and rules are insufficient, escalate only the unresolved portion to AI.
+
+
+## Capability-registry pattern
+
+Fixed platform answers live in `lib/runtime/platform-faq.ts`. Each FAQ has a narrow intent matcher and a deterministic answer function. Questions that require current account state declare a data requirement first; the chat route loads only the required state and passes it to the same registry.
+
+This keeps platform behavior auditable and prevents the main chat route from accumulating broad prompt rules or unsafe catch-all keyword handlers.

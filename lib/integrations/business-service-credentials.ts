@@ -64,3 +64,48 @@ export async function businessOwnedServiceCredentialForOwner(
     credential,
   };
 }
+
+
+export async function connectedServiceStatusesForOwner(ownerRef: string) {
+  const userId = userIdFromOwnerRef(ownerRef);
+  if (!userId) return [];
+
+  const admin = createAdminSupabaseClient();
+  const { data: organizations, error: organizationError } = await admin
+    .from("organizations")
+    .select("id")
+    .eq("owner_user_id", userId);
+  if (organizationError) throw organizationError;
+
+  const organizationIds = (organizations || []).map((row) => row.id);
+  if (!organizationIds.length) return [];
+
+  const { data: services, error: serviceError } = await admin
+    .from("connected_services")
+    .select("provider_key,connection_status,updated_at")
+    .in("organization_id", organizationIds)
+    .order("updated_at", { ascending: false });
+  if (serviceError) throw serviceError;
+
+  const latest = new Map<
+    string,
+    { providerKey: string; status: string; updatedAt: string | null }
+  >();
+
+  for (const service of services || []) {
+    const providerKey =
+      typeof service.provider_key === "string" ? service.provider_key : "";
+    if (!providerKey || latest.has(providerKey)) continue;
+    latest.set(providerKey, {
+      providerKey,
+      status:
+        typeof service.connection_status === "string"
+          ? service.connection_status
+          : "unknown",
+      updatedAt:
+        typeof service.updated_at === "string" ? service.updated_at : null,
+    });
+  }
+
+  return Array.from(latest.values());
+}
