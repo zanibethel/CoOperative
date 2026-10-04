@@ -1438,6 +1438,7 @@ export default function LocalAiChat() {
   const [selectedBusinessId, setSelectedBusinessId] = useState<string>("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversationTitle, setConversationTitle] = useState("New chat");
+  const [onboardingState, setOnboardingState] = useState<OnboardingState | null>(null);
   const [input, setInput] = useState("");
   const [profile, setProfile] = useState<Profile>("fast");
   const [status, setStatus] = useState("Ready");
@@ -1535,6 +1536,48 @@ export default function LocalAiChat() {
     setError("");
     return result;
   }, []);
+
+  const refreshOnboarding = useCallback(async () => {
+    const response = await fetch("/api/local-ai/onboarding", {
+      cache: "no-store",
+    });
+    const result = (await response.json()) as OnboardingResult;
+    if (!response.ok || !result.state) {
+      throw new Error(
+        result.detail || result.error || "Could not load get-to-know-you state.",
+      );
+    }
+    setOnboardingState(result.state);
+    return result.state;
+  }, []);
+
+  const startOrResumeOnboarding = useCallback(async () => {
+    let state = await refreshOnboarding();
+
+    if (state.status === "not_started") {
+      const response = await fetch("/api/local-ai/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start" }),
+      });
+      const result = (await response.json()) as OnboardingResult;
+      if (!response.ok || !result.state) {
+        throw new Error(
+          result.detail || result.error || "Could not start get-to-know-you chat.",
+        );
+      }
+      state = result.state;
+      setOnboardingState(state);
+    }
+
+    if (state.status === "in_progress" && state.conversationId) {
+      await loadConversation(state.conversationId);
+      await refreshConversations();
+      return true;
+    }
+
+    return false;
+  }, [loadConversation, refreshConversations, refreshOnboarding]);
 
   const startBackgroundRecovery = useCallback(
     async (jobId: string, targetConversationId?: string | null) => {
