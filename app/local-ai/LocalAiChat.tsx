@@ -1476,6 +1476,7 @@ export default function LocalAiChat() {
     setAttachments([]);
     setMeta("");
     setError("");
+    return result;
   }, []);
 
   const startBackgroundRecovery = useCallback(
