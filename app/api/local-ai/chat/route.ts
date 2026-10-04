@@ -576,7 +576,13 @@ export async function POST(request: Request) {
         input.message,
       )
     ) {
-      const resumed = await resumeOnboarding(ownerRef);
+      const intakeMode =
+        /\bbusiness\b/i.test(input.message)
+          ? "business"
+          : /\bpersonal\b/i.test(input.message)
+            ? "personal"
+            : null;
+      const resumed = await resumeOnboarding(ownerRef, intakeMode);
       if (resumed.conversationId) {
         const { data: lastAssistant } = await admin
           .from("local_ai_messages")
