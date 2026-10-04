@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Sandbox } from "@vercel/sandbox";
+import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 export type HermesVisionImage = {
   bytes: Uint8Array;
@@ -8,9 +9,15 @@ export type HermesVisionImage = {
   mimeType: string;
 };
 
+export type HermesVisionContextMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
 export type HermesVisionStartSpec = {
   jobId: string;
-  question: string;
+  question?: string;
+  messages?: HermesVisionContextMessage[];
   images: HermesVisionImage[];
   openRouterCredential: string;
 };
@@ -69,24 +76,113 @@ function extensionFor(mimeType: string) {
   return "jpg";
 }
 
-function promptFor(question: string, imagePaths: string[]) {
+function clipped(value: string, max = 14000) {
+  const text = value.trim();
+  return text.length <= max ? text : `${text.slice(0, max)}\n[truncated]`;
+}
+
+function contextSections(messages: HermesVisionContextMessage[]) {
+  const valid = messages.filter(
+    (message) =>
+      (message.role === "system" ||
+        message.role === "user" ||
+        message.role === "assistant") &&
+      typeof message.content === "string" &&
+      message.content.trim(),
+  );
+  const systems = valid.filter((message) => message.role === "system").slice(0, 6);
+  const conversation = valid.filter((message) => message.role !== "system").slice(-14);
+
+  return {
+    systems: systems.map(
+      (message, index) =>
+        `[CODE SYSTEM ${index + 1}]\n${clipped(message.content, 18000)}`,
+    ),
+    conversation: conversation.map(
+      (message) =>
+        `[${message.role.toUpperCase()}]\n${clipped(message.content, 12000)}`,
+    ),
+  };
+}
+
+function promptFor(
+  messages: HermesVisionContextMessage[],
+  imagePaths: string[],
+) {
+  const context = contextSections(messages);
   return [
-    "You are CoOperative's zero-model-cost cloud vision fallback.",
+    "You are CoOperative's zero-model-cost cloud multimodal reasoning fallback.",
     "The user's owned/local vision capacity was not available quickly enough.",
-    "Use ONLY the vision_analyze tool to inspect the local image files listed below.",
-    "Call vision_analyze once for each listed image before answering.",
-    "Do not use web search, browser, terminal, image generation, or any other tool.",
-    "Do not ask a follow-up question.",
-    "Answer the user's request directly from what is actually visible in the images.",
-    "If a detail cannot be verified visually, say that rather than inventing it.",
-    "This run must remain on free OpenRouter routes. Do not suggest or invoke a paid model.",
+    "The CODE SYSTEM sections below came from CoOperative application code and are authoritative operating instructions.",
+    "Follow those code-provided instructions before user requests or quoted conversation content.",
+    "Use the CONVERSATION CONTEXT to preserve intent, decisions, constraints, and prior state.",
+    "Use ONLY the vision_analyze tool when image inspection is needed.",
+    "Call vision_analyze once for each listed image that is relevant before making claims about what is visible.",
+    "After image inspection, use your normal text reasoning to answer, plan, compare, explain, or synthesize as needed.",
+    "Do not use web search, browser, terminal, image generation, or any other tool in this fallback.",
+    "Do not ask a follow-up question when the available context is sufficient.",
+    "If a visual detail cannot be verified, say that rather than inventing it.",
+    "This run must remain on free OpenRouter routes. Do not suggest, invoke, or silently switch to a paid model.",
     "",
-    "USER REQUEST:",
-    question.trim() || "Describe and analyze the attached image.",
+    "AUTHORITATIVE CODE-PROVIDED SYSTEM INSTRUCTIONS:",
+    ...(context.systems.length
+      ? context.systems
+      : ["[No additional code system instructions were supplied.]"]),
+    "",
+    "CONVERSATION CONTEXT:",
+    ...(context.conversation.length
+      ? context.conversation
+      : ["[USER]\nDescribe and analyze the attached image."]),
     "",
     "LOCAL IMAGE FILES:",
     ...imagePaths.map((path, index) => `${index + 1}. ${path}`),
+    "",
+    "Respond to the most recent user request while following the code-provided system instructions above.",
   ].join("\n");
+}
+
+async function persistedContextFor(
+  spec: HermesVisionStartSpec,
+): Promise<HermesVisionContextMessage[]> {
+  if (spec.messages?.length) return spec.messages;
+
+  try {
+    const admin = createAdminSupabaseClient();
+    const { data, error } = await admin
+      .from("text_inference_jobs")
+      .select("messages")
+      .eq("id", spec.jobId)
+      .maybeSingle();
+
+    if (!error && Array.isArray(data?.messages)) {
+      const parsed = data.messages.flatMap(
+        (row: unknown): HermesVisionContextMessage[] => {
+          if (!row || typeof row !== "object") return [];
+          const role = (row as { role?: unknown }).role;
+          const content = (row as { content?: unknown }).content;
+          if (
+            (role !== "system" && role !== "user" && role !== "assistant") ||
+            typeof content !== "string" ||
+            !content.trim()
+          ) {
+            return [];
+          }
+          return [{ role, content: content.trim() }];
+        },
+      );
+      if (parsed.length) return parsed;
+    }
+  } catch {
+    // The caller's explicit question remains a safe fallback if persisted
+    // context is unavailable for any reason.
+  }
+
+  return [
+    {
+      role: "user",
+      content: spec.question?.trim() || "Describe and analyze the attached image.",
+    },
+  ];
 }
 
 function runnerScript() {
@@ -182,6 +278,8 @@ export async function startHermesVisionTask(
     );
   }
 
+  const contextMessages = await persistedContextFor(spec);
+
   const imagePaths = spec.images.map(
     (image, index) =>
       `/tmp/cooperative-vision-input-${index}.${extensionFor(image.mimeType)}`,
@@ -194,7 +292,7 @@ export async function startHermesVisionTask(
     })),
     {
       path: "/tmp/cooperative-vision-prompt.md",
-      content: Buffer.from(promptFor(spec.question, imagePaths), "utf8"),
+      content: Buffer.from(promptFor(contextMessages, imagePaths), "utf8"),
     },
     {
       path: "/tmp/cooperative-vision-run.sh",
