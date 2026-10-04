@@ -8,6 +8,7 @@ import {
 } from "@/lib/ai/business-chat-policy";
 import { profileRefFromAiOwnerRef } from "@/lib/billing/ai-profile-balance";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
+import { profileFieldsForRuntime } from "@/lib/ai/user-profile-onboarding";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 const CONTEXT_BUCKET = "cooperative-ai-context";
@@ -211,7 +212,8 @@ async function loadRuntimeEvidence(input: {
 }) {
   const admin = createAdminSupabaseClient();
 
-  const [memoriesResult, jobsResult, mediaResult, reviewResult] = await Promise.all([
+  const [profileFields, memoriesResult, jobsResult, mediaResult, reviewResult] = await Promise.all([
+    profileFieldsForRuntime(input.ownerRef),
     admin
       .from("cooperative_memories")
       .select(
@@ -289,7 +291,36 @@ async function loadRuntimeEvidence(input: {
     }
   }
 
-  return { memories, jobs, mediaJobs, review, costs };
+  return { profileFields, memories, jobs, mediaJobs, review, costs };
+}
+
+function renderProfileFields(
+  fields: Array<{
+    field_key: string;
+    category: string;
+    label: string;
+    value_text: string | null;
+    status: string;
+    confidence: number | string | null;
+    last_confirmed_at: string | null;
+    updated_at: string;
+  }>,
+) {
+  if (!fields.length) return ["No structured profile fields are initialized."];
+
+  return fields.map((field) => {
+    const value =
+      field.status === "known" && field.value_text
+        ? oneLine(field.value_text, 900)
+        : field.status === "deferred"
+          ? "(will tell later)"
+          : "(unknown)";
+    const confirmed =
+      field.last_confirmed_at || field.updated_at || "unknown";
+    return `- [${field.category}] ${field.label}: ${value} | status=${field.status} | updated=${iso(
+      confirmed,
+    )}`;
+  });
 }
 
 function renderMemorySection(memories: MemoryRow[], limit: number) {
@@ -440,6 +471,16 @@ function renderRuntimeMarkdown(input: {
   conversationId?: string | null;
   currentRequest?: string | null;
   requestType?: string | null;
+  profileFields: Array<{
+    field_key: string;
+    category: string;
+    label: string;
+    value_text: string | null;
+    status: string;
+    confidence: number | string | null;
+    last_confirmed_at: string | null;
+    updated_at: string;
+  }>;
   memories: MemoryRow[];
   jobs: JobRow[];
   mediaJobs: MediaJobRow[];
@@ -479,6 +520,11 @@ function renderRuntimeMarkdown(input: {
     "## Current request",
     "",
     oneLine(input.currentRequest, 2500) || "(request text unavailable)",
+    "",
+    "## Structured user profile fields",
+    "",
+    "These fields come from the get-to-know-you conversation or later explicit user statements. Unknown/deferred values must not be guessed.",
+    ...renderProfileFields(input.profileFields),
     "",
     "## Most up-to-date reusable memory",
     "",
@@ -607,6 +653,7 @@ export async function buildAndSaveRuntimeContext(input: {
     metadata: {
       requestType: input.requestType || "general",
       businessPolicyRevision: COOPERATIVE_BUSINESS_POLICY_REVISION,
+      profileFieldCount: evidence.profileFields.length,
       memoryCount: evidence.memories.length,
       outcomeCount: evidence.jobs.length,
       mediaOutcomeCount: evidence.mediaJobs.length,

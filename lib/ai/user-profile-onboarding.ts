@@ -1,0 +1,419 @@
+import "server-only";
+
+import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+
+
+export type ProfileFieldStatus = "known" | "unknown" | "deferred";
+
+export type UserProfileFieldDefinition = {
+  key: string;
+  category: string;
+  label: string;
+  question: string;
+};
+
+export const USER_PROFILE_FIELD_DEFINITIONS: UserProfileFieldDefinition[] = [
+  { key: "preferred_name", category: "identity", label: "Preferred name", question: "What should I call you?" },
+  { key: "primary_help", category: "goals", label: "Primary help", question: "What are the main things you want CoOperative to help you with?" },
+  { key: "response_style", category: "preferences", label: "Response style", question: "How do you like answers: short/direct, detailed, options to compare, step-by-step, or something else?" },
+  { key: "current_work_projects", category: "work", label: "Current work and projects", question: "What work, businesses, projects, or roles matter most to you right now?" },
+  { key: "near_term_goals", category: "goals", label: "Near-term goals", question: "What goals should I keep in mind over the next few months?" },
+  { key: "tradeoff_priorities", category: "preferences", label: "Tradeoff priorities", question: "When there is a tradeoff, what matters most to you: speed, quality, privacy, cost, control, or a mix?" },
+  { key: "recurring_workflows", category: "routines", label: "Recurring workflows", question: "Are there recurring routines or workflows you want me to help with?" },
+  { key: "tools_services_devices", category: "tools", label: "Tools, services, and devices", question: "What tools, services, apps, or devices do you use often that I should account for?" },
+  { key: "boundaries_and_permissions", category: "preferences", label: "Boundaries and permissions", question: "Are there things you want me to avoid, ask permission before doing, or never assume?" },
+  { key: "important_context", category: "context", label: "Important people or context", question: "Are there people, teams, businesses, or other contexts that matter enough for me to remember? Share only what you want remembered." },
+  { key: "interests", category: "interests", label: "Interests", question: "What interests or topics do you enjoy or want more help with?" },
+  { key: "anything_else", category: "context", label: "Anything else", question: "Anything else that would make CoOperative more useful to you or help it understand how you work?" },
+];
+
+const BATCH_SIZE = 3;
+const TOTAL_BATCHES = Math.ceil(USER_PROFILE_FIELD_DEFINITIONS.length / BATCH_SIZE);
+
+function batchFields(batchIndex: number) {
+  const safe = Math.max(0, Math.min(TOTAL_BATCHES - 1, batchIndex));
+  return USER_PROFILE_FIELD_DEFINITIONS.slice(
+    safe * BATCH_SIZE,
+    safe * BATCH_SIZE + BATCH_SIZE,
+  );
+}
+
+function questionText(batchIndex = 0) {
+  const questions = batchFields(batchIndex);
+  const intro =
+    batchIndex === 0
+      ? [
+          "I’d like to get to know you a little so I can make future conversations more useful.",
+          "I’ll ask only a few questions at a time. Numbering your answers 1–3 helps me map them exactly.",
+          "For any question, say “I’ll tell you later” to defer it, or “skip” to leave it unknown until a later conversation fills it in.",
+          "You can say “skip onboarding” at any time.",
+          "",
+        ]
+      : [
+          "Thanks. Here are the next few. Answer, say “later,” or skip anything you do not want to answer.",
+          "",
+        ];
+
+  return [
+    ...intro,
+    ...questions.map((field, index) => `${index + 1}. ${field.question}`),
+  ].join("\n");
+}
+
+function completionText() {
+  return [
+    "That’s enough to get started.",
+    "Anything you answered is now structured profile context. Skipped values stay unknown, and deferred values stay marked for later.",
+    "Normal conversation can fill or correct those fields later when you explicitly tell me something relevant.",
+  ].join("\n");
+}
+
+function dismissedText() {
+  return [
+    "No problem — I’ll stop the get-to-know-you questions.",
+    "Anything already answered stays saved. Unanswered fields remain unknown until a later conversation gives me something explicit to use.",
+  ].join("\n");
+}
+
+function answerValue(value: string) {
+  const text = value.trim();
+  if (/^(?:later|tell you later|i'?ll tell you later|not now|maybe later|defer)$/i.test(text)) {
+    return { status: "deferred" as const, value: null };
+  }
+  if (/^(?:skip|unknown|don'?t know|do not know|n\/a|na|none|pass)$/i.test(text)) {
+    return { status: "unknown" as const, value: null };
+  }
+  return { status: "known" as const, value: text.slice(0, 2000) || null };
+}
+
+function parseBatchReply(message: string, fields: UserProfileFieldDefinition[]) {
+  const normalized = message.trim();
+  const matches = Array.from(
+    normalized.matchAll(
+      /(?:^|\s)([1-3])\s*[).:\-]\s*([\s\S]*?)(?=(?:\s+[1-3]\s*[).:\-])|$)/g,
+    ),
+  );
+
+  if (matches.length) {
+    const numbered = new Map<number, string>();
+    for (const match of matches) {
+      numbered.set(Number(match[1]), (match[2] || "").trim());
+    }
+    return fields.map((field, index) => {
+      const raw = numbered.get(index + 1);
+      return raw === undefined
+        ? { fieldKey: field.key, status: "unknown" as const, value: null }
+        : { fieldKey: field.key, ...answerValue(raw) };
+    });
+  }
+
+  const lines = normalized.split(/\n+/).map((part) => part.trim()).filter(Boolean);
+  return fields.map((field, index) => {
+    const raw = lines[index];
+    return raw === undefined
+      ? { fieldKey: field.key, status: "unknown" as const, value: null }
+      : { fieldKey: field.key, ...answerValue(raw) };
+  });
+}
+
+export async function ensureProfileFieldRows(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin.from("cooperative_user_profile_fields").upsert(
+    USER_PROFILE_FIELD_DEFINITIONS.map((field) => ({
+      owner_ref: ownerRef,
+      field_key: field.key,
+      category: field.category,
+      label: field.label,
+      status: "unknown",
+      source_kind: "onboarding",
+    })),
+    { onConflict: "owner_ref,field_key", ignoreDuplicates: true },
+  );
+  if (error) throw error;
+}
+
+export async function onboardingState(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  await ensureProfileFieldRows(ownerRef);
+
+  const [{ data: session, error: sessionError }, { data: fields, error: fieldsError }] =
+    await Promise.all([
+      admin
+        .from("cooperative_onboarding_sessions")
+        .select("status,current_batch,conversation_id")
+        .eq("owner_ref", ownerRef)
+        .maybeSingle(),
+      admin
+        .from("cooperative_user_profile_fields")
+        .select("field_key,category,label,value_text,status,updated_at")
+        .eq("owner_ref", ownerRef)
+        .order("created_at", { ascending: true }),
+    ]);
+
+  if (sessionError) throw sessionError;
+  if (fieldsError) throw fieldsError;
+
+  return {
+    status: session?.status || "not_started",
+    currentBatch: Number(session?.current_batch || 0),
+    conversationId: session?.conversation_id || null,
+    totalBatches: TOTAL_BATCHES,
+    fields: fields || [],
+  };
+}
+
+export async function startOnboarding(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  const state = await onboardingState(ownerRef);
+  if (state.status === "in_progress" && state.conversationId) return state;
+  if (state.status === "completed" || state.status === "dismissed") return state;
+
+  const now = new Date().toISOString();
+  const conversationId = crypto.randomUUID();
+
+  const { error: conversationError } = await admin
+    .from("local_ai_conversations")
+    .insert({
+      id: conversationId,
+      owner_ref: ownerRef,
+      title: "Getting to know you",
+      profile: "fast",
+      created_at: now,
+      updated_at: now,
+    });
+  if (conversationError) throw conversationError;
+
+  const { error: messageError } = await admin.from("local_ai_messages").insert({
+    conversation_id: conversationId,
+    owner_ref: ownerRef,
+    role: "assistant",
+    content: questionText(0),
+    attachment_ids: [],
+    created_at: now,
+  });
+  if (messageError) throw messageError;
+
+  const { error: sessionError } = await admin
+    .from("cooperative_onboarding_sessions")
+    .upsert(
+      {
+        owner_ref: ownerRef,
+        status: "in_progress",
+        current_batch: 0,
+        conversation_id: conversationId,
+        started_at: now,
+        completed_at: null,
+        dismissed_at: null,
+        updated_at: now,
+      },
+      { onConflict: "owner_ref" },
+    );
+  if (sessionError) throw sessionError;
+
+  return onboardingState(ownerRef);
+}
+
+export async function answerOnboarding(input: {
+  ownerRef: string;
+  conversationId: string;
+  message: string;
+}) {
+  const admin = createAdminSupabaseClient();
+  const state = await onboardingState(input.ownerRef);
+
+  if (
+    state.status !== "in_progress" ||
+    state.conversationId !== input.conversationId
+  ) {
+    throw new Error("No active get-to-know-you conversation matches this reply.");
+  }
+
+  const now = new Date().toISOString();
+  const { data: userMessage, error: userError } = await admin
+    .from("local_ai_messages")
+    .insert({
+      conversation_id: input.conversationId,
+      owner_ref: input.ownerRef,
+      role: "user",
+      content: input.message.trim(),
+      attachment_ids: [],
+      created_at: now,
+    })
+    .select("id")
+    .single();
+  if (userError) throw userError;
+
+  if (
+    /\b(?:skip|stop|end|dismiss)\s+(?:the\s+)?onboarding\b/i.test(
+      input.message,
+    )
+  ) {
+    const assistantText = dismissedText();
+    const { error: assistantError } = await admin
+      .from("local_ai_messages")
+      .insert({
+        conversation_id: input.conversationId,
+        owner_ref: input.ownerRef,
+        role: "assistant",
+        content: assistantText,
+        attachment_ids: [],
+        created_at: now,
+      });
+    if (assistantError) throw assistantError;
+
+    const { error: sessionError } = await admin
+      .from("cooperative_onboarding_sessions")
+      .update({
+        status: "dismissed",
+        dismissed_at: now,
+        updated_at: now,
+      })
+      .eq("owner_ref", input.ownerRef);
+    if (sessionError) throw sessionError;
+
+    await admin
+      .from("local_ai_conversations")
+      .update({ updated_at: now })
+      .eq("id", input.conversationId)
+      .eq("owner_ref", input.ownerRef);
+
+    return { assistantText, state: await onboardingState(input.ownerRef) };
+  }
+
+  const fields = batchFields(Number(state.currentBatch || 0));
+  for (const answer of parseBatchReply(input.message, fields)) {
+    const known = answer.status === "known" && Boolean(answer.value);
+
+    const { data: existing, error: existingError } = await admin
+      .from("cooperative_user_profile_fields")
+      .select("first_known_at")
+      .eq("owner_ref", input.ownerRef)
+      .eq("field_key", answer.fieldKey)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    const { error } = await admin
+      .from("cooperative_user_profile_fields")
+      .update({
+        value_text: known ? answer.value : null,
+        status: known ? "known" : answer.status,
+        confidence: 1,
+        source_conversation_id: input.conversationId,
+        source_message_id: userMessage.id,
+        source_kind: "onboarding",
+        first_known_at: known ? existing?.first_known_at || now : null,
+        last_confirmed_at: known ? now : null,
+        updated_at: now,
+      })
+      .eq("owner_ref", input.ownerRef)
+      .eq("field_key", answer.fieldKey);
+    if (error) throw error;
+  }
+
+  const nextBatch = Number(state.currentBatch || 0) + 1;
+  const completed = nextBatch >= TOTAL_BATCHES;
+  const assistantText = completed ? completionText() : questionText(nextBatch);
+
+  const { error: assistantError } = await admin.from("local_ai_messages").insert({
+    conversation_id: input.conversationId,
+    owner_ref: input.ownerRef,
+    role: "assistant",
+    content: assistantText,
+    attachment_ids: [],
+    created_at: now,
+  });
+  if (assistantError) throw assistantError;
+
+  const { error: sessionError } = await admin
+    .from("cooperative_onboarding_sessions")
+    .update({
+      status: completed ? "completed" : "in_progress",
+      current_batch: completed ? TOTAL_BATCHES : nextBatch,
+      completed_at: completed ? now : null,
+      updated_at: now,
+    })
+    .eq("owner_ref", input.ownerRef);
+  if (sessionError) throw sessionError;
+
+  await admin
+    .from("local_ai_conversations")
+    .update({ updated_at: now })
+    .eq("id", input.conversationId)
+    .eq("owner_ref", input.ownerRef);
+
+  return { assistantText, state: await onboardingState(input.ownerRef) };
+}
+
+export async function applyProfileFieldUpdates(input: {
+  ownerRef: string;
+  conversationId?: string | null;
+  sourceMessageId?: string | null;
+  sourceKind: string;
+  updates: Array<{
+    fieldKey: string;
+    value: string;
+    confidence: number;
+    explicitOwnerStatement: boolean;
+  }>;
+}) {
+  const admin = createAdminSupabaseClient();
+  await ensureProfileFieldRows(input.ownerRef);
+  const allowed = new Map(
+    USER_PROFILE_FIELD_DEFINITIONS.map((field) => [field.key, field]),
+  );
+  const now = new Date().toISOString();
+
+  for (const update of input.updates) {
+    const field = allowed.get(update.fieldKey);
+    if (
+      !field ||
+      !update.explicitOwnerStatement ||
+      update.confidence < 0.82 ||
+      !update.value.trim()
+    ) {
+      continue;
+    }
+
+    const { data: existing, error: existingError } = await admin
+      .from("cooperative_user_profile_fields")
+      .select("first_known_at")
+      .eq("owner_ref", input.ownerRef)
+      .eq("field_key", update.fieldKey)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    const { error } = await admin.from("cooperative_user_profile_fields").upsert(
+      {
+        owner_ref: input.ownerRef,
+        field_key: field.key,
+        category: field.category,
+        label: field.label,
+        value_text: update.value.trim().slice(0, 2000),
+        status: "known",
+        confidence: update.confidence,
+        source_conversation_id: input.conversationId || null,
+        source_message_id: input.sourceMessageId || null,
+        source_kind: input.sourceKind,
+        first_known_at: existing?.first_known_at || now,
+        last_confirmed_at: now,
+        updated_at: now,
+      },
+      { onConflict: "owner_ref,field_key" },
+    );
+    if (error) throw error;
+  }
+}
+
+export async function profileFieldsForRuntime(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  await ensureProfileFieldRows(ownerRef);
+  const { data, error } = await admin
+    .from("cooperative_user_profile_fields")
+    .select(
+      "field_key,category,label,value_text,status,confidence,last_confirmed_at,updated_at",
+    )
+    .eq("owner_ref", ownerRef)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}

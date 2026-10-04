@@ -4,6 +4,10 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import type { TextInferenceMessage } from "@/lib/inference/contracts";
+import {
+  applyProfileFieldUpdates,
+  USER_PROFILE_FIELD_DEFINITIONS,
+} from "@/lib/ai/user-profile-onboarding";
 
 const candidateSchema = z.object({
   type: z.enum([
@@ -23,8 +27,21 @@ const candidateSchema = z.object({
   sensitive: z.boolean().default(false),
 });
 
+const profileFieldKeys = USER_PROFILE_FIELD_DEFINITIONS.map((field) => field.key);
+
 const supportPacketSchema = z.object({
   memoryCandidates: z.array(candidateSchema).max(8).default([]),
+  profileUpdates: z
+    .array(
+      z.object({
+        fieldKey: z.string().refine((value) => profileFieldKeys.includes(value)),
+        value: z.string().min(1).max(2000),
+        confidence: z.number().min(0).max(1),
+        explicitOwnerStatement: z.boolean(),
+      }),
+    )
+    .max(8)
+    .default([]),
   paidHandoff: z.object({
     recommended: z.boolean(),
     reason: z.string().max(900).default(""),
@@ -144,6 +161,29 @@ export async function analyzeResponseSupport(input: {
                     ],
                   },
                 },
+                profileUpdates: {
+                  type: "array",
+                  maxItems: 8,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      fieldKey: {
+                        type: "string",
+                        enum: profileFieldKeys,
+                      },
+                      value: { type: "string" },
+                      confidence: { type: "number", minimum: 0, maximum: 1 },
+                      explicitOwnerStatement: { type: "boolean" },
+                    },
+                    required: [
+                      "fieldKey",
+                      "value",
+                      "confidence",
+                      "explicitOwnerStatement",
+                    ],
+                  },
+                },
                 paidHandoff: {
                   type: "object",
                   additionalProperties: false,
@@ -155,7 +195,7 @@ export async function analyzeResponseSupport(input: {
                   required: ["recommended", "reason", "prompt"],
                 },
               },
-              required: ["memoryCandidates", "paidHandoff"],
+              required: ["memoryCandidates", "profileUpdates", "paidHandoff"],
             },
           },
         },
@@ -317,6 +357,23 @@ export async function persistResponseSupport(input: {
       },
       last_confirmed_at: now,
       updated_at: now,
+    });
+  }
+
+  try {
+    await applyProfileFieldUpdates({
+      ownerRef: input.ownerRef,
+      conversationId: input.conversationId,
+      sourceKind: "conversation-response-support",
+      updates: packet.profileUpdates,
+    });
+  } catch (profileError) {
+    console.error("Could not update structured user profile fields", {
+      jobId: input.jobId,
+      detail:
+        profileError instanceof Error
+          ? profileError.message.slice(0, 600)
+          : "Unknown profile update error",
     });
   }
 

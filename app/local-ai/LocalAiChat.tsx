@@ -77,6 +77,28 @@ type ConversationResult = {
   detail?: string;
 };
 
+type OnboardingState = {
+  status: "not_started" | "in_progress" | "completed" | "dismissed";
+  currentBatch: number;
+  conversationId: string | null;
+  totalBatches: number;
+  fields?: Array<{
+    field_key: string;
+    category: string;
+    label: string;
+    value_text: string | null;
+    status: "known" | "unknown" | "deferred";
+    updated_at: string;
+  }>;
+};
+
+type OnboardingResult = {
+  state?: OnboardingState;
+  assistantText?: string;
+  error?: string;
+  detail?: string;
+};
+
 type AiBalanceSummary = {
   availableMicrousd: number;
   availableUsd: number;
@@ -1416,6 +1438,7 @@ export default function LocalAiChat() {
   const [selectedBusinessId, setSelectedBusinessId] = useState<string>("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversationTitle, setConversationTitle] = useState("New chat");
+  const [onboardingState, setOnboardingState] = useState<OnboardingState | null>(null);
   const [input, setInput] = useState("");
   const [profile, setProfile] = useState<Profile>("fast");
   const [status, setStatus] = useState("Ready");
@@ -1513,6 +1536,48 @@ export default function LocalAiChat() {
     setError("");
     return result;
   }, []);
+
+  const refreshOnboarding = useCallback(async () => {
+    const response = await fetch("/api/local-ai/onboarding", {
+      cache: "no-store",
+    });
+    const result = (await response.json()) as OnboardingResult;
+    if (!response.ok || !result.state) {
+      throw new Error(
+        result.detail || result.error || "Could not load get-to-know-you state.",
+      );
+    }
+    setOnboardingState(result.state);
+    return result.state;
+  }, []);
+
+  const startOrResumeOnboarding = useCallback(async () => {
+    let state = await refreshOnboarding();
+
+    if (state.status === "not_started") {
+      const response = await fetch("/api/local-ai/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start" }),
+      });
+      const result = (await response.json()) as OnboardingResult;
+      if (!response.ok || !result.state) {
+        throw new Error(
+          result.detail || result.error || "Could not start get-to-know-you chat.",
+        );
+      }
+      state = result.state;
+      setOnboardingState(state);
+    }
+
+    if (state.status === "in_progress" && state.conversationId) {
+      await loadConversation(state.conversationId);
+      await refreshConversations();
+      return true;
+    }
+
+    return false;
+  }, [loadConversation, refreshConversations, refreshOnboarding]);
 
   const startBackgroundRecovery = useCallback(
     async (jobId: string, targetConversationId?: string | null) => {
@@ -1805,6 +1870,7 @@ export default function LocalAiChat() {
       try {
         await Promise.all([refreshBusinesses(), refreshOwnedNodes()]);
         const threads = await refreshConversations();
+        const onboarding = await refreshOnboarding();
         const savedJobId = window.localStorage.getItem(ACTIVE_JOB_KEY);
 
         if (savedJobId) {
@@ -1844,6 +1910,24 @@ export default function LocalAiChat() {
           }
         }
 
+        if (
+          !cancelled &&
+          onboarding.status === "in_progress" &&
+          onboarding.conversationId
+        ) {
+          await loadConversation(onboarding.conversationId);
+          return;
+        }
+
+        if (
+          !cancelled &&
+          threads.length === 0 &&
+          onboarding.status === "not_started"
+        ) {
+          const startedOnboarding = await startOrResumeOnboarding();
+          if (startedOnboarding) return;
+        }
+
         if (!cancelled && threads[0]) {
           await loadConversation(threads[0].id);
         }
@@ -1861,7 +1945,14 @@ export default function LocalAiChat() {
       cancelled = true;
       activePollRef.current = null;
     };
-  }, [loadConversation, pollJob, refreshBusinesses, refreshConversations, refreshOwnedNodes]);
+  }, [
+    loadConversation,
+    pollJob,
+    refreshBusinesses,
+    refreshConversations,
+    refreshOwnedNodes,
+    startOrResumeOnboarding,
+  ]);
 
   async function removeAttachment(attachment: ImageAttachment) {
     setAttachments((current) => current.filter((item) => item.id !== attachment.id));
@@ -1891,6 +1982,24 @@ export default function LocalAiChat() {
   async function newChat() {
     if (busy) return;
     await discardPendingAttachments();
+
+    try {
+      const startedOnboarding = await startOrResumeOnboarding();
+      if (startedOnboarding) {
+        setInput("");
+        setMeta("");
+        setError("");
+        setStatus("Ready");
+        return;
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not start get-to-know-you chat.",
+      );
+    }
+
     setConversationId(null);
     setConversationTitle("New chat");
     setMessages([]);
@@ -2115,6 +2224,42 @@ export default function LocalAiChat() {
     setStatus("Preparing context…");
 
     try {
+      if (
+        onboardingState?.status === "in_progress" &&
+        onboardingState.conversationId &&
+        onboardingState.conversationId === conversationId &&
+        currentAttachments.length === 0
+      ) {
+        setStatus("Saving your profile answers…");
+        const onboardingResponse = await fetch("/api/local-ai/onboarding", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "answer",
+            conversationId,
+            message: text,
+          }),
+        });
+        const onboarding = (await onboardingResponse.json()) as OnboardingResult;
+
+        if (!onboardingResponse.ok || !onboarding.state) {
+          throw new Error(
+            onboarding.detail ||
+              onboarding.error ||
+              "Could not save get-to-know-you answers.",
+          );
+        }
+
+        setOnboardingState(onboarding.state);
+        await loadConversation(conversationId);
+        await refreshConversations();
+        setAttachments([]);
+        setMeta("");
+        setStatus("Ready");
+        setBusy(false);
+        return;
+      }
+
       setStatus("Selecting an execution path…");
       const queuedResponse = await fetch("/api/local-ai/chat", {
         method: "POST",
