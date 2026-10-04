@@ -2961,7 +2961,7 @@ export async function GET(request: Request) {
     let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,queued_at,claimed_at,created_at,completed_at,fallback_provider,fallback_model,fallback_sandbox_name,fallback_deadline_at,fallback_attempted_at,fallback_usage",
+        "id,status,profile,conversation_id,business_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,queued_at,claimed_at,created_at,completed_at,fallback_provider,fallback_model,fallback_sandbox_name,fallback_deadline_at,fallback_attempted_at,fallback_usage",
       )
       .eq("client_owner_ref", ownerRef);
 
@@ -3214,6 +3214,7 @@ export async function GET(request: Request) {
                 answer: polled.text.trim(),
                 provider: "openrouter-free",
                 model: job.fallback_model || "openrouter/free",
+                businessId: job.business_id || null,
               });
             } catch (supportError) {
               console.error("Could not persist free vision response support", {
@@ -3563,6 +3564,7 @@ export async function GET(request: Request) {
                 answer: polled.text.trim(),
                 provider: "openrouter-free",
                 model: job.fallback_model || "openrouter/free",
+                businessId: job.business_id || null,
               });
             } catch (supportError) {
               console.error("Could not persist free response support", {
