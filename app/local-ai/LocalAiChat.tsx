@@ -1909,6 +1909,11 @@ export default function LocalAiChat() {
           }
         }
 
+        if (!cancelled && threads.length === 0) {
+          const startedOnboarding = await startOrResumeOnboarding();
+          if (startedOnboarding) return;
+        }
+
         if (!cancelled && threads[0]) {
           await loadConversation(threads[0].id);
         }
@@ -1926,7 +1931,14 @@ export default function LocalAiChat() {
       cancelled = true;
       activePollRef.current = null;
     };
-  }, [loadConversation, pollJob, refreshBusinesses, refreshConversations, refreshOwnedNodes]);
+  }, [
+    loadConversation,
+    pollJob,
+    refreshBusinesses,
+    refreshConversations,
+    refreshOwnedNodes,
+    startOrResumeOnboarding,
+  ]);
 
   async function removeAttachment(attachment: ImageAttachment) {
     setAttachments((current) => current.filter((item) => item.id !== attachment.id));
@@ -1956,6 +1968,24 @@ export default function LocalAiChat() {
   async function newChat() {
     if (busy) return;
     await discardPendingAttachments();
+
+    try {
+      const startedOnboarding = await startOrResumeOnboarding();
+      if (startedOnboarding) {
+        setInput("");
+        setMeta("");
+        setError("");
+        setStatus("Ready");
+        return;
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not start get-to-know-you chat.",
+      );
+    }
+
     setConversationId(null);
     setConversationTitle("New chat");
     setMessages([]);
