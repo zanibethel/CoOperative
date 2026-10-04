@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { authorizeUnisonNode } from "@/lib/unison/auth";
+import { z } from "zod";
+import { textInferenceMessageSchema } from "@/lib/inference/contracts";
+import { persistResponseSupport } from "@/lib/ai/response-support";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -115,7 +118,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("text_inference_jobs")
-      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id")
+      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id,messages,capability,routing_preference")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -263,6 +266,38 @@ export async function POST(request: Request) {
         .eq("owner_ref", job.client_owner_ref);
 
       if (conversationError) throw conversationError;
+
+      if (
+        (job.capability === "text" || job.capability === "vision") &&
+        job.routing_preference !== "require-node"
+      ) {
+        const parsedMessages = z
+          .array(textInferenceMessageSchema)
+          .min(1)
+          .max(40)
+          .safeParse(job.messages);
+        if (parsedMessages.success) {
+          try {
+            await persistResponseSupport({
+              ownerRef: job.client_owner_ref,
+              conversationId: job.conversation_id,
+              jobId,
+              messages: parsedMessages.data,
+              answer: body.text.trim(),
+              provider,
+              model: resultModel,
+            });
+          } catch (supportError) {
+            console.error("Could not persist local response support", {
+              jobId,
+              detail:
+                supportError instanceof Error
+                  ? supportError.message.slice(0, 600)
+                  : "Unknown support error",
+            });
+          }
+        }
+      }
     }
 
     return NextResponse.json({ ok: true, status: "completed" });

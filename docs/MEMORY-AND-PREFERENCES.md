@@ -268,3 +268,26 @@ A decision made through ChatGPT should become part of the same owner/project con
 Do not create channel-specific memory silos.
 
 See `docs/OMNICHANNEL-CONVERSATIONS.md`.
+
+
+## Implemented local/free response support pipeline
+
+Main CoOperative chat now uses completed owned/local and strict-free cloud text responses as evidence for two background support tasks:
+
+1. **Selective structured memory**
+   - A short zero-model-cost `openrouter/free` support pass reviews the recent user conversation plus the completed lower-cost answer.
+   - It may propose up to eight durable memory candidates across preference, policy, decision, goal, fact, lesson, and open-question classes.
+   - One-off requests, speculative assistant claims, credentials, and highly sensitive personal information are explicitly excluded from automatic active memory.
+   - High-confidence durable memories become `active`; lower-confidence or potentially sensitive items remain `candidate` and are not injected into future chats.
+   - Every row keeps owner scope, source conversation/job, extractor, source provider/model, confidence, explicit-owner flag, timestamps, and metadata.
+   - Future text jobs retrieve only a small relevance-ranked set of active memories. Owner memories may cross conversations; conversation-scoped memories stay inside that conversation. Current explicit user instructions override older memory.
+
+2. **Stronger-model handoff drafting**
+   - The same free support pass decides whether a stronger paid model would materially improve correctness, verification, difficult reasoning, long-context synthesis, or a consequential deliverable.
+   - If so, it drafts a self-contained advisory handoff containing the objective, constraints, useful lower-cost findings, and what the stronger model still needs to verify.
+   - Hidden system prompts, credentials, and secrets are forbidden from the handoff.
+   - The draft is stored on the source inference job.
+   - If the normal deterministic paid-fallback policy later selects a qualified funded model, the handoff is appended as **advisory lower-cost context**, followed by an explicit instruction to verify/repair it rather than trust it blindly.
+   - Model qualification, available balance, and the saved per-prompt spend ceiling remain authoritative; the support pass cannot authorize spend.
+
+This keeps memory and escalation intelligence provider-independent: local/free models help compress useful context, while CoOperative code decides what is durable, what is active, and whether a paid executor is actually permitted.

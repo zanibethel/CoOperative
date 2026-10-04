@@ -3,11 +3,16 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
+import { textInferenceMessageSchema } from "@/lib/inference/contracts";
 import {
   COOPERATIVE_BUSINESS_CHAT_POLICY,
   COOPERATIVE_BUSINESS_POLICY_REVISION,
 } from "@/lib/ai/business-chat-policy";
 import { buildBusinessChatContext } from "@/lib/ai/business-context";
+import {
+  persistResponseSupport,
+  relevantMemorySystemContext,
+} from "@/lib/ai/response-support";
 import {
   aiProfileBalanceForUser,
   releaseAiProfileFunds,
@@ -2726,6 +2731,11 @@ export async function POST(request: Request) {
       (currentAttachmentIds.length > 0
         ? "Describe and analyze the attached image."
         : "");
+    const memoryContext = await relevantMemorySystemContext(
+      ownerRef,
+      modelUserText,
+      conversationId,
+    );
     const systemMessages = [
       {
         role: "system" as const,
@@ -2736,6 +2746,14 @@ export async function POST(request: Request) {
             {
               role: "system" as const,
               content: businessContext.systemContext,
+            },
+          ]
+        : []),
+      ...(memoryContext
+        ? [
+            {
+              role: "system" as const,
+              content: memoryContext,
             },
           ]
         : []),
@@ -3103,6 +3121,33 @@ export async function GET(request: Request) {
             .update({ updated_at: completedAt })
             .eq("id", job.conversation_id)
             .eq("owner_ref", ownerRef);
+
+          const parsedMessages = z
+            .array(textInferenceMessageSchema)
+            .min(1)
+            .max(40)
+            .safeParse(job.messages);
+          if (parsedMessages.success) {
+            try {
+              await persistResponseSupport({
+                ownerRef,
+                conversationId: job.conversation_id,
+                jobId: job.id,
+                messages: parsedMessages.data,
+                answer: polled.text.trim(),
+                provider: "openrouter-free",
+                model: job.fallback_model || "openrouter/free",
+              });
+            } catch (supportError) {
+              console.error("Could not persist free vision response support", {
+                jobId: job.id,
+                detail:
+                  supportError instanceof Error
+                    ? supportError.message.slice(0, 600)
+                    : "Unknown support error",
+              });
+            }
+          }
         }
 
         return NextResponse.json(
@@ -3387,6 +3432,33 @@ export async function GET(request: Request) {
             .update({ updated_at: completedAt })
             .eq("id", job.conversation_id)
             .eq("owner_ref", ownerRef);
+
+          const parsedMessages = z
+            .array(textInferenceMessageSchema)
+            .min(1)
+            .max(40)
+            .safeParse(job.messages);
+          if (parsedMessages.success) {
+            try {
+              await persistResponseSupport({
+                ownerRef,
+                conversationId: job.conversation_id,
+                jobId: job.id,
+                messages: parsedMessages.data,
+                answer: polled.text.trim(),
+                provider: "openrouter-free",
+                model: job.fallback_model || "openrouter/free",
+              });
+            } catch (supportError) {
+              console.error("Could not persist free response support", {
+                jobId: job.id,
+                detail:
+                  supportError instanceof Error
+                    ? supportError.message.slice(0, 600)
+                    : "Unknown support error",
+              });
+            }
+          }
         }
 
         return NextResponse.json(
