@@ -564,3 +564,22 @@ Recommendation cards now expose the workflow, quality goal, output configuration
 The selected recommendation's content-output constraint now reaches actual execution. Immediately before owned/local, Nous, or OpenRouter submission, CoOperative re-checks the current saved preference and exact provider/model/endpoint capability evidence for adult-output requests. The same gate also applies to manual retries and automatic local/OpenRouter fallback routes, preventing stale recommendation state from bypassing a later preference or policy change. SFW requests do not become restricted merely because an adult-capable preference is saved.
 
 If current adult-policy evidence cannot be checked at execution time, adult output fails closed rather than relying on stale metadata. `require_adult_capable` requires verified capability; `adult_allowed` and `prefer_adult_capable` may still execute an unknown route only when it is not currently known to be blocked.
+
+
+### Adaptive personal + business conversational intake
+
+User onboarding now branches from a first choice between **Personal intake** and **Business intake**.
+
+The intake is a resumable state machine rather than a blocking form:
+- asks at most three questions at a time;
+- supports known / unknown / deferred values;
+- skipped/deferred fields are not immediately repeated;
+- unrelated requests pause/yield the intake and execute normally;
+- explicit resume commands can return to intake later;
+- completed intake can revisit unresolved fields only when the user explicitly calls it back.
+
+Business intake can select an existing business or create a new one, then persists business-specific identity, customer, offering, goals, workflow, tools, AI, approval, budget, spend, savings, and preference fields in `cooperative_business_profile_fields`. Compatible values synchronize to the existing `businesses` profile.
+
+Normal response-support extraction can update explicit personal facts from ordinary conversation and explicit business facts only when a business scope is established. The chat UI now defaults to personal/no-business context instead of silently selecting the first business. An explicitly named owned business can be resolved by code; otherwise the model receives a scope-clarification policy and asks one concise personal-vs-business question only when that distinction materially matters.
+
+The active business id is persisted on text inference jobs and carried through owned/local, strict-free, and funded premium response-support/outcome context. Business fields are included in the private runtime Markdown only for that active business.
