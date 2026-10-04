@@ -41,6 +41,7 @@ import {
   affordableVideoSuggestion,
 } from "@/lib/inference/nous-managed-media";
 import {
+  bestMediaRecommendationWithinCap,
   buildMediaRecommendationOptions,
   isApprovedPremiumReferenceSmokeRoute,
   requestedMediaRecommendationTier,
@@ -188,6 +189,15 @@ function asksToReduceMediaToFit(message: string) {
   return (
     /\breduce quality to fit\b/.test(value) ||
     /\breduce .{0,100}\b(?:fit|within (?:the )?(?:budget|cap))\b/.test(value)
+  );
+}
+
+function asksForMediaRecommendationsOnly(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\b(?:show|compare|list|review)\b.{0,40}\b(?:media )?(?:options|choices|recommendations|routes|models)\b/.test(value) ||
+    /\b(?:do not|don't|dont)\s+(?:generate|start|run)\b/.test(value) ||
+    /\b(?:before|without)\s+(?:generating|starting|running)\b/.test(value)
   );
 }
 
@@ -1597,11 +1607,17 @@ export async function POST(request: Request) {
         adultContentClass,
       });
       const recommendationTier = requestedMediaRecommendationTier(input.message);
+      const recommendationsOnly = asksForMediaRecommendationsOnly(input.message);
       const selectedRecommendation = recommendationTier
         ? recommendationSet.options.find(
             (option) => option.tier === recommendationTier,
           ) || null
-        : null;
+        : recommendationsOnly
+          ? null
+          : bestMediaRecommendationWithinCap(
+              recommendationSet.options,
+              requestCapUsd,
+            );
 
       const recommendationMarker =
         recommendationSet.options.length > 0
@@ -1647,7 +1663,7 @@ export async function POST(request: Request) {
         );
       };
 
-      if (!recommendationTier) {
+      if (!selectedRecommendation) {
         const message = recommendationText();
         const { error: recommendationError } = await admin
           .from("local_ai_messages")
@@ -1688,7 +1704,9 @@ export async function POST(request: Request) {
             provider: "code",
             model: "media-three-tier-recommendations",
             routeReason:
-              `The media request is clear, so CoOperative applied the saved ${contentPreference} output preference to this ${adultContentClass} request and ranked three exact-request execution recipes using benchmark evidence when available, then configuration quality and cost. No generation started.`,
+              recommendationsOnly
+                ? `The user asked to compare media choices, so CoOperative ranked the exact-request routes but intentionally did not generate.`
+                : `No execution-ready exact-match route fit the current ${requestCapUsd.toFixed(2)} per-prompt ceiling, so CoOperative returned the ranked choices without starting generation.`,
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
@@ -1827,9 +1845,9 @@ export async function POST(request: Request) {
       }
 
       mediaLevel =
-        recommendationTier === "high-end"
+        selectedRecommendation.tier === "high-end"
           ? 4
-          : recommendationTier === "balanced"
+          : selectedRecommendation.tier === "balanced"
             ? 2
             : 1;
 

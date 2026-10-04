@@ -916,6 +916,27 @@ export async function buildMediaRecommendationOptions(input: {
   };
 }
 
+export function bestMediaRecommendationWithinCap(
+  options: MediaRecommendationOption[],
+  currentCapUsd: number,
+) {
+  return (
+    [...options]
+      .filter(
+        (option) =>
+          option.executionReady !== false &&
+          option.capUsd <= currentCapUsd + 0.000001,
+      )
+      .sort(
+        (a, b) =>
+          (b.scorecard?.qualityScore ?? 0) - (a.scorecard?.qualityScore ?? 0) ||
+          (b.scorecard?.benchmarkCoverage ?? 0) -
+            (a.scorecard?.benchmarkCoverage ?? 0) ||
+          a.estimatedCostUsd - b.estimatedCostUsd,
+      )[0] || null
+  );
+}
+
 export function requestedMediaRecommendationTier(
   message: string,
 ): MediaRecommendationTier | null {
