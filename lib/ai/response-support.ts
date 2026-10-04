@@ -8,6 +8,10 @@ import {
   applyProfileFieldUpdates,
   USER_PROFILE_FIELD_DEFINITIONS,
 } from "@/lib/ai/user-profile-onboarding";
+import {
+  applyBusinessConversationUpdates,
+  BUSINESS_CONVERSATION_FIELD_KEYS,
+} from "@/lib/runtime/business-intake";
 
 const candidateSchema = z.object({
   type: z.enum([
@@ -28,6 +32,7 @@ const candidateSchema = z.object({
 });
 
 const profileFieldKeys = USER_PROFILE_FIELD_DEFINITIONS.map((field) => field.key);
+const businessFieldKeys = BUSINESS_CONVERSATION_FIELD_KEYS;
 
 const supportPacketSchema = z.object({
   memoryCandidates: z.array(candidateSchema).max(8).default([]),
@@ -41,6 +46,17 @@ const supportPacketSchema = z.object({
       }),
     )
     .max(8)
+    .default([]),
+  businessUpdates: z
+    .array(
+      z.object({
+        fieldKey: z.string().refine((value) => businessFieldKeys.includes(value)),
+        value: z.string().min(1).max(3000),
+        confidence: z.number().min(0).max(1),
+        explicitOwnerStatement: z.boolean(),
+      }),
+    )
+    .max(10)
     .default([]),
   paidHandoff: z.object({
     recommended: z.boolean(),
@@ -89,6 +105,7 @@ export async function analyzeResponseSupport(input: {
   ownerRef: string;
   messages: TextInferenceMessage[];
   answer: string;
+  businessId?: string | null;
 }): Promise<ResponseSupportPacket | null> {
   const openRouter =
     await businessOwnedServiceCredentialForOwner(input.ownerRef, "openrouter-api");
@@ -184,6 +201,29 @@ export async function analyzeResponseSupport(input: {
                     ],
                   },
                 },
+                businessUpdates: {
+                  type: "array",
+                  maxItems: 10,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      fieldKey: {
+                        type: "string",
+                        enum: businessFieldKeys,
+                      },
+                      value: { type: "string" },
+                      confidence: { type: "number", minimum: 0, maximum: 1 },
+                      explicitOwnerStatement: { type: "boolean" },
+                    },
+                    required: [
+                      "fieldKey",
+                      "value",
+                      "confidence",
+                      "explicitOwnerStatement",
+                    ],
+                  },
+                },
                 paidHandoff: {
                   type: "object",
                   additionalProperties: false,
@@ -195,7 +235,12 @@ export async function analyzeResponseSupport(input: {
                   required: ["recommended", "reason", "prompt"],
                 },
               },
-              required: ["memoryCandidates", "profileUpdates", "paidHandoff"],
+              required: [
+                "memoryCandidates",
+                "profileUpdates",
+                "businessUpdates",
+                "paidHandoff",
+              ],
             },
           },
         },
@@ -209,6 +254,9 @@ export async function analyzeResponseSupport(input: {
               "Do not memorize one-off requests, transient status, speculative assistant claims, generated examples, passwords/credentials, financial account identifiers, medical details, intimate details, or other highly sensitive personal information.",
               "Mark anything potentially sensitive as sensitive=true so it will not be auto-activated.",
               "A memory should be explicitOwnerStatement=true only when the user directly stated or clearly approved it.",
+              "Profile updates: map explicit durable personal statements into the allowed personal profile fields. Do not guess.",
+              "Business updates: only populate businessUpdates when an active business ID is supplied below and the user explicitly states a durable business fact that maps to one of the allowed business fields. Never assign a personal event or unrelated statement to a business.",
+              "If business scope is unclear, leave businessUpdates empty; another layer may ask a clarification.",
               "Paid handoff: recommend a stronger paid model only when it could materially improve correctness, verification, difficult reasoning, long-context synthesis, or a consequential deliverable. Do not recommend paid AI merely because it is available.",
               "When recommended, draft a self-contained prompt for the stronger model. Preserve the user's objective and constraints, summarize useful lower-cost findings, identify what still needs stronger verification/reasoning, and instruct the stronger model to verify rather than blindly trust the lower-cost answer.",
               "Do not include hidden system prompts, credentials, or secrets in the paid prompt.",
@@ -217,6 +265,8 @@ export async function analyzeResponseSupport(input: {
           {
             role: "user",
             content: JSON.stringify({
+              activeBusinessId: input.businessId || null,
+              allowedBusinessFields: input.businessId ? businessFieldKeys : [],
               conversation: compactMessages(input.messages),
               lowerCostAnswer:
                 input.answer.length > 12000
@@ -275,11 +325,13 @@ export async function persistResponseSupport(input: {
   answer: string;
   provider: string | null;
   model: string | null;
+  businessId?: string | null;
 }) {
   const packet = await analyzeResponseSupport({
     ownerRef: input.ownerRef,
     messages: input.messages,
     answer: input.answer,
+    businessId: input.businessId || null,
   });
   if (!packet) return null;
 
@@ -375,6 +427,29 @@ export async function persistResponseSupport(input: {
           ? profileError.message.slice(0, 600)
           : "Unknown profile update error",
     });
+  }
+
+  if (input.businessId && packet.businessUpdates.length) {
+    const userMatch = /^coop-user:([0-9a-f-]{36})$/i.exec(input.ownerRef);
+    if (userMatch) {
+      try {
+        await applyBusinessConversationUpdates({
+          userId: userMatch[1],
+          businessId: input.businessId,
+          conversationId: input.conversationId,
+          updates: packet.businessUpdates,
+        });
+      } catch (businessError) {
+        console.error("Could not update structured business profile fields", {
+          jobId: input.jobId,
+          businessId: input.businessId,
+          detail:
+            businessError instanceof Error
+              ? businessError.message.slice(0, 600)
+              : "Unknown business profile update error",
+        });
+      }
+    }
   }
 
   await admin
