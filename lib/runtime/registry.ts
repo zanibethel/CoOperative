@@ -5,7 +5,7 @@ import type {
   ServiceAgentManifest,
 } from "@/lib/runtime/contracts";
 
-export const SERVICE_AGENT_REGISTRY_REVISION = "2026-10-04.1";
+export const SERVICE_AGENT_REGISTRY_REVISION = "2026-10-04.2";
 
 export const SERVICE_AGENTS: Record<ServiceAgentKey, ServiceAgentManifest> = {
   "business-intake": {
@@ -159,7 +159,7 @@ export const CAPABILITY_REGISTRY: Record<CapabilityKey, CapabilityManifest> = {
   "chat.general": {
     key: "chat.general",
     purpose:
-      "Try deterministic conversation handlers first, then escalate only the unresolved open-ended work.",
+      "Resolve deterministic platform FAQs, saved-state questions, and known workflows first, then escalate only the unresolved open-ended work.",
     agent: null,
     preferredExecution: "code",
     aiOnlyWhenNeeded: true,
