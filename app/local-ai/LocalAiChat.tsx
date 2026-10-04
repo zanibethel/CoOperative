@@ -2210,6 +2210,42 @@ export default function LocalAiChat() {
     setStatus("Preparing context…");
 
     try {
+      if (
+        onboardingState?.status === "in_progress" &&
+        onboardingState.conversationId &&
+        onboardingState.conversationId === conversationId &&
+        currentAttachments.length === 0
+      ) {
+        setStatus("Saving your profile answers…");
+        const onboardingResponse = await fetch("/api/local-ai/onboarding", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "answer",
+            conversationId,
+            message: text,
+          }),
+        });
+        const onboarding = (await onboardingResponse.json()) as OnboardingResult;
+
+        if (!onboardingResponse.ok || !onboarding.state) {
+          throw new Error(
+            onboarding.detail ||
+              onboarding.error ||
+              "Could not save get-to-know-you answers.",
+          );
+        }
+
+        setOnboardingState(onboarding.state);
+        await loadConversation(conversationId);
+        await refreshConversations();
+        setAttachments([]);
+        setMeta("");
+        setStatus("Ready");
+        setBusy(false);
+        return;
+      }
+
       setStatus("Selecting an execution path…");
       const queuedResponse = await fetch("/api/local-ai/chat", {
         method: "POST",
