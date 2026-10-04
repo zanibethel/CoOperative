@@ -12,6 +12,32 @@ export type PlatformFaqContext = {
   onboardingStatus?: string | null;
   onboardingMode?: string | null;
   onboardingPhase?: string | null;
+  businesses?: Array<{ id: string; name: string; industry?: string | null }>;
+  profileFields?: Array<{
+    key: string;
+    label: string;
+    value: string | null;
+    status: string;
+    category: string;
+  }>;
+  connectedServices?: Array<{
+    providerKey: string;
+    status: string;
+    updatedAt?: string | null;
+  }>;
+  nodeSummary?: {
+    total: number;
+    fresh: number;
+    paused: number;
+  } | null;
+  recentJobs?: Array<{
+    kind: string;
+    status: string;
+    provider?: string | null;
+    model?: string | null;
+    createdAt?: string | null;
+    completedAt?: string | null;
+  }>;
 };
 
 export type PlatformFaqAnswer = {
@@ -39,7 +65,214 @@ function hasAny(value: string, patterns: RegExp[]) {
   return patterns.some((pattern) => pattern.test(value));
 }
 
+export type PlatformFaqDataNeed =
+  | "businesses"
+  | "profile"
+  | "services"
+  | "nodes"
+  | "jobs";
+
+export function platformFaqDataNeeds(message: string): PlatformFaqDataNeed[] {
+  const value = normalized(message);
+  const needs = new Set<PlatformFaqDataNeed>();
+
+  if (
+    hasAny(value, [
+      /\bwhat businesses do i have\b/,
+      /\blist (?:my )?businesses\b/,
+      /\bshow (?:me )?(?:my )?businesses\b/,
+      /\bwhich businesses (?:do i|are)\b/,
+    ])
+  ) {
+    needs.add("businesses");
+  }
+
+  if (
+    hasAny(value, [
+      /\bwhat do you know about me\b/,
+      /\bwhat do you know about (?:this|my) business\b/,
+      /\bwhat (?:profile )?(?:info|information|facts) do you have\b/,
+      /\bwhat(?:'s| is) missing from (?:my|the) (?:profile|business profile)\b/,
+      /\bwhat (?:info|information) is missing\b/,
+    ])
+  ) {
+    needs.add("profile");
+  }
+
+  if (
+    hasAny(value, [
+      /\bwhat (?:services|providers) are connected\b/,
+      /\bshow (?:me )?(?:my )?connected (?:services|providers)\b/,
+      /\bis (?:openrouter|nous) connected\b/,
+      /\bconnection status\b/,
+    ])
+  ) {
+    needs.add("services");
+  }
+
+  if (
+    hasAny(value, [
+      /\b(?:node|nodes|unison) status\b/,
+      /\bare (?:my )?nodes? online\b/,
+      /\bhow many nodes?\b/,
+      /\bis (?:my )?(?:pc|computer|node) online\b/,
+      /\bis unison online\b/,
+    ])
+  ) {
+    needs.add("nodes");
+  }
+
+  if (
+    hasAny(value, [
+      /\b(?:job|jobs) status\b/,
+      /\bwhat(?:'s| is) running\b/,
+      /\bwhat(?:'s| is) (?:my )?(?:last|latest) job\b/,
+      /\b(?:last|latest) (?:ai |media )?job\b/,
+      /\bis (?:my |the )?(?:image|video|generation|job) still (?:running|generating|processing)\b/,
+      /\banything (?:running|generating|processing)\b/,
+    ])
+  ) {
+    needs.add("jobs");
+  }
+
+  return Array.from(needs);
+}
+
 export const PLATFORM_FAQ_REGISTRY: PlatformFaqEntry[] = [
+  {
+    key: "platform-business-list",
+    matches: (value) =>
+      hasAny(value, [
+        /\bwhat businesses do i have\b/,
+        /\blist (?:my )?businesses\b/,
+        /\bshow (?:me )?(?:my )?businesses\b/,
+        /\bwhich businesses (?:do i|are)\b/,
+      ]),
+    answer: (context) => {
+      const businesses = context.businesses || [];
+      if (!businesses.length) {
+        return "You do not currently have a saved business profile. You can start Business intake whenever you want.";
+      }
+      return `Your saved businesses are: ${businesses
+        .map((business) =>
+          business.industry
+            ? `${business.name} (${business.industry})`
+            : business.name,
+        )
+        .join(", ")}.`;
+    },
+  },
+  {
+    key: "platform-profile-summary",
+    matches: (value) =>
+      hasAny(value, [
+        /\bwhat do you know about me\b/,
+        /\bwhat do you know about (?:this|my) business\b/,
+        /\bwhat (?:profile )?(?:info|information|facts) do you have\b/,
+        /\bwhat(?:'s| is) missing from (?:my|the) (?:profile|business profile)\b/,
+        /\bwhat (?:info|information) is missing\b/,
+      ]),
+    answer: (context) => {
+      const fields = context.profileFields || [];
+      const known = fields.filter(
+        (field) => field.status === "known" && Boolean(field.value?.trim()),
+      );
+      const missing = fields.filter((field) => field.status !== "known");
+
+      if (!fields.length) {
+        return context.businessId
+          ? "I do not have a deterministic business-profile snapshot available for this request yet."
+          : "I do not have a deterministic Personal profile snapshot available for this request yet.";
+      }
+
+      const wantsMissing = /\bmissing\b/.test(
+        normalized(
+          context.businessId
+            ? "business profile"
+            : "personal profile",
+        ),
+      );
+      void wantsMissing;
+
+      const knownText = known.length
+        ? known
+            .slice(0, 12)
+            .map((field) => `${field.label}: ${field.value}`)
+            .join("; ")
+        : "No profile fields are confirmed yet";
+      const missingText = missing.length
+        ? ` Still missing or deferred: ${missing
+            .slice(0, 8)
+            .map((field) => field.label)
+            .join(", ")}${missing.length > 8 ? ` (+${missing.length - 8} more)` : ""}.`
+        : " No profile fields are currently missing.";
+
+      return `${context.businessId ? "Saved business profile" : "Saved Personal profile"}: ${knownText}.${missingText}`;
+    },
+  },
+  {
+    key: "platform-service-status",
+    matches: (value) =>
+      hasAny(value, [
+        /\bwhat (?:services|providers) are connected\b/,
+        /\bshow (?:me )?(?:my )?connected (?:services|providers)\b/,
+        /\bis (?:openrouter|nous) connected\b/,
+        /\bconnection status\b/,
+      ]),
+    answer: (context) => {
+      const services = context.connectedServices || [];
+      if (!services.length) {
+        return "I do not see any saved provider/service connections for this account.";
+      }
+      return `Current saved service status: ${services
+        .map((service) => `${service.providerKey}: ${service.status}`)
+        .join(", ")}.`;
+    },
+  },
+  {
+    key: "platform-node-status",
+    matches: (value) =>
+      hasAny(value, [
+        /\b(?:node|nodes|unison) status\b/,
+        /\bare (?:my )?nodes? online\b/,
+        /\bhow many nodes?\b/,
+        /\bis (?:my )?(?:pc|computer|node) online\b/,
+        /\bis unison online\b/,
+      ]),
+    answer: (context) => {
+      const summary = context.nodeSummary;
+      if (!summary || summary.total === 0) {
+        return "No authorized Unison nodes are currently attached to this profile.";
+      }
+      return `You have ${summary.total} authorized Unison node${summary.total === 1 ? "" : "s"}. ${summary.fresh} ${summary.fresh === 1 ? "is" : "are"} currently fresh/online, and ${summary.paused} ${summary.paused === 1 ? "is" : "are"} paused.`;
+    },
+  },
+  {
+    key: "platform-job-status",
+    matches: (value) =>
+      hasAny(value, [
+        /\b(?:job|jobs) status\b/,
+        /\bwhat(?:'s| is) running\b/,
+        /\bwhat(?:'s| is) (?:my )?(?:last|latest) job\b/,
+        /\b(?:last|latest) (?:ai |media )?job\b/,
+        /\bis (?:my |the )?(?:image|video|generation|job) still (?:running|generating|processing)\b/,
+        /\banything (?:running|generating|processing)\b/,
+      ]),
+    answer: (context) => {
+      const jobs = context.recentJobs || [];
+      if (!jobs.length) return "I do not see a recent AI or media job for this profile.";
+      const active = jobs.filter((job) =>
+        ["queued", "running", "processing"].includes(job.status),
+      );
+      const selected = active.length ? active : jobs.slice(0, 1);
+      return selected
+        .map((job) => {
+          const route = [job.provider, job.model].filter(Boolean).join(" / ");
+          return `${job.kind} job: ${job.status}${route ? ` (${route})` : ""}`;
+        })
+        .join(". ") + ".";
+    },
+  },
   {
     key: "platform-code-first-policy",
     matches: (value) =>
