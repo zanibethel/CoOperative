@@ -107,6 +107,7 @@ export async function analyzeResponseSupport(input: {
   ownerRef: string;
   messages: TextInferenceMessage[];
   answer: string;
+  businessId?: string | null;
 }): Promise<ResponseSupportPacket | null> {
   const openRouter =
     await businessOwnedServiceCredentialForOwner(input.ownerRef, "openrouter-api");
@@ -202,6 +203,29 @@ export async function analyzeResponseSupport(input: {
                     ],
                   },
                 },
+                businessProfileUpdates: {
+                  type: "array",
+                  maxItems: 8,
+                  items: {
+                    type: "object",
+                    additionalProperties: false,
+                    properties: {
+                      fieldKey: {
+                        type: "string",
+                        enum: businessProfileFieldKeys,
+                      },
+                      value: { type: "string" },
+                      confidence: { type: "number", minimum: 0, maximum: 1 },
+                      explicitOwnerStatement: { type: "boolean" },
+                    },
+                    required: [
+                      "fieldKey",
+                      "value",
+                      "confidence",
+                      "explicitOwnerStatement",
+                    ],
+                  },
+                },
                 paidHandoff: {
                   type: "object",
                   additionalProperties: false,
@@ -213,7 +237,12 @@ export async function analyzeResponseSupport(input: {
                   required: ["recommended", "reason", "prompt"],
                 },
               },
-              required: ["memoryCandidates", "profileUpdates", "paidHandoff"],
+              required: [
+                "memoryCandidates",
+                "profileUpdates",
+                "businessProfileUpdates",
+                "paidHandoff",
+              ],
             },
           },
         },
@@ -227,6 +256,9 @@ export async function analyzeResponseSupport(input: {
               "Do not memorize one-off requests, transient status, speculative assistant claims, generated examples, passwords/credentials, financial account identifiers, medical details, intimate details, or other highly sensitive personal information.",
               "Mark anything potentially sensitive as sensitive=true so it will not be auto-activated.",
               "A memory should be explicitOwnerStatement=true only when the user directly stated or clearly approved it.",
+              "Personal profile updates: extract only explicit durable user statements that map cleanly to the provided personal field keys.",
+              "Business profile updates: emit them only when activeBusinessId is present and the user explicitly states a durable fact about that active business. Never guess that a personal fact belongs to a business or vice versa.",
+              "If scope is ambiguous, do not write a business profile update; leave it for the chat response to clarify.",
               "Paid handoff: recommend a stronger paid model only when it could materially improve correctness, verification, difficult reasoning, long-context synthesis, or a consequential deliverable. Do not recommend paid AI merely because it is available.",
               "When recommended, draft a self-contained prompt for the stronger model. Preserve the user's objective and constraints, summarize useful lower-cost findings, identify what still needs stronger verification/reasoning, and instruct the stronger model to verify rather than blindly trust the lower-cost answer.",
               "Do not include hidden system prompts, credentials, or secrets in the paid prompt.",
@@ -236,6 +268,7 @@ export async function analyzeResponseSupport(input: {
             role: "user",
             content: JSON.stringify({
               conversation: compactMessages(input.messages),
+              activeBusinessId: input.businessId || null,
               lowerCostAnswer:
                 input.answer.length > 12000
                   ? input.answer.slice(0, 12000) + "\n[truncated]"
