@@ -26,6 +26,11 @@ import {
   type HermesVisionImage,
 } from "@/lib/inference/hermes-vision-cloud";
 import {
+  pollHermesTextTask,
+  startHermesTextTask,
+  type HermesTextContextMessage,
+} from "@/lib/inference/hermes-text-cloud";
+import {
   adultMediaContentClass,
   mediaPromptWithResolvedControls,
   planMediaRequest,
@@ -75,6 +80,8 @@ export const maxDuration = 300;
 
 const FREE_VISION_FALLBACK_GRACE_MS = 8_000;
 const FREE_VISION_WORKER_ID = "cooperative-hermes-free-vision";
+const FREE_TEXT_FALLBACK_GRACE_MS = 8_000;
+const FREE_TEXT_WORKER_ID = "cooperative-hermes-free-text";
 
 const modelMixerLevelSchema = z.number().int().min(0).max(4);
 const modelMixerSchema = z.object({
@@ -408,6 +415,42 @@ function latestUserRequest(messages: unknown) {
     }
   }
   return "Describe and analyze the attached image.";
+}
+
+function hermesTextContextMessages(
+  messages: unknown,
+): HermesTextContextMessage[] {
+  if (!Array.isArray(messages)) {
+    return [
+      {
+        role: "user",
+        content: "Answer the user's request using the available context.",
+      },
+    ];
+  }
+
+  const parsed = messages.flatMap((row): HermesTextContextMessage[] => {
+    if (!row || typeof row !== "object") return [];
+    const role = (row as { role?: unknown }).role;
+    const content = (row as { content?: unknown }).content;
+    if (
+      (role !== "system" && role !== "user" && role !== "assistant") ||
+      typeof content !== "string" ||
+      !content.trim()
+    ) {
+      return [];
+    }
+    return [{ role, content: content.trim() }];
+  });
+
+  return parsed.length
+    ? parsed
+    : [
+        {
+          role: "user",
+          content: "Answer the user's request using the available context.",
+        },
+      ];
 }
 
 export async function POST(request: Request) {
@@ -2734,7 +2777,10 @@ export async function POST(request: Request) {
           : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`) +
         (requestedCapability === "vision"
           ? ` Local vision has first priority for ${Math.round(FREE_VISION_FALLBACK_GRACE_MS / 1000)} seconds; if still unclaimed, CoOperative may use the connected strict-free Hermes/OpenRouter vision fallback. Paid vision fallback is disabled.`
-          : ""),
+          : requestedCapability === "text" &&
+              input.nodeRouting !== "require-node"
+            ? ` Owned/local text has first priority for ${Math.round(FREE_TEXT_FALLBACK_GRACE_MS / 1000)} seconds; if still unclaimed, CoOperative may use strict-free Hermes/OpenRouter text reasoning before any funded paid fallback.`
+            : ""),
       allow_paid_fallback:
         requestedCapability === "text" &&
         input.nodeRouting !== "require-node" &&
@@ -3118,6 +3164,288 @@ export async function GET(request: Request) {
           workerId: null,
           routeReason: localRetryReason,
           paidFallbackAllowed: false,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    if (
+      job &&
+      job.capability === "text" &&
+      job.status === "queued" &&
+      !job.worker_id &&
+      !job.fallback_attempted_at &&
+      job.routing_preference !== "require-node" &&
+      Date.now() - Date.parse(job.queued_at || job.created_at || "") >=
+        FREE_TEXT_FALLBACK_GRACE_MS
+    ) {
+      const openRouterService =
+        await businessOwnedServiceCredentialForOwner(ownerRef, "openrouter-api");
+      const openRouterCredential =
+        openRouterService?.credential ||
+        process.env.OPENROUTER_API_KEY?.trim() ||
+        null;
+
+      if (openRouterCredential) {
+        const claimedAt = new Date().toISOString();
+        const cloudRouteReason =
+          `${job.route_reason || ""} Owned/local text was not claimed within ${Math.round(
+            FREE_TEXT_FALLBACK_GRACE_MS / 1000,
+          )} seconds, so CoOperative claimed this same text job for strict-free Hermes/OpenRouter reasoning before any funded paid fallback.`.trim();
+
+        const { data: cloudClaim, error: cloudClaimError } = await admin
+          .from("text_inference_jobs")
+          .update({
+            status: "running",
+            worker_id: FREE_TEXT_WORKER_ID,
+            claimed_at: claimedAt,
+            fallback_provider: "openrouter",
+            fallback_model: "openrouter/free",
+            fallback_attempted_at: claimedAt,
+            route_reason: cloudRouteReason,
+            updated_at: claimedAt,
+          })
+          .eq("id", job.id)
+          .eq("client_owner_ref", ownerRef)
+          .eq("status", "queued")
+          .is("worker_id", null)
+          .is("fallback_attempted_at", null)
+          .select("id,conversation_id,messages")
+          .maybeSingle();
+
+        if (cloudClaimError) throw cloudClaimError;
+
+        if (cloudClaim) {
+          try {
+            const started = await startHermesTextTask({
+              jobId: cloudClaim.id,
+              messages: hermesTextContextMessages(cloudClaim.messages),
+              openRouterCredential,
+            });
+
+            const { error: cloudStartError } = await admin
+              .from("text_inference_jobs")
+              .update({
+                fallback_provider: started.provider,
+                fallback_model: started.model,
+                fallback_sandbox_name: started.sandboxName,
+                fallback_deadline_at: started.deadlineAt,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", cloudClaim.id)
+              .eq("client_owner_ref", ownerRef)
+              .eq("worker_id", FREE_TEXT_WORKER_ID)
+              .eq("status", "running");
+            if (cloudStartError) throw cloudStartError;
+
+            return NextResponse.json(
+              {
+                jobId: cloudClaim.id,
+                execution: "free-cloud-text",
+                status: "running",
+                profile: job.profile,
+                conversationId: cloudClaim.conversation_id,
+                capability: "text",
+                provider: started.provider,
+                model: started.model,
+                workerId: FREE_TEXT_WORKER_ID,
+                routeReason: cloudRouteReason,
+                paidFallbackAllowed: job.allow_paid_fallback === true,
+              },
+              { headers: { "Cache-Control": "no-store" } },
+            );
+          } catch (cloudStartFailure) {
+            const detail =
+              cloudStartFailure instanceof Error
+                ? cloudStartFailure.message
+                : "Free cloud text could not start.";
+            const failedAt = new Date().toISOString();
+            const failedReason =
+              `${cloudRouteReason} The strict-free cloud text attempt could not start (${detail.slice(
+                0,
+                400,
+              )}). CoOperative will only continue to funded premium AI if this job is eligible under the existing spend and balance rules.`.trim();
+
+            const { error: failError } = await admin
+              .from("text_inference_jobs")
+              .update({
+                status: "failed",
+                worker_id: null,
+                claimed_at: null,
+                fallback_sandbox_name: null,
+                fallback_deadline_at: null,
+                route_reason: failedReason,
+                error: detail.slice(0, 1200),
+                completed_at: failedAt,
+                updated_at: failedAt,
+              })
+              .eq("id", cloudClaim.id)
+              .eq("client_owner_ref", ownerRef)
+              .eq("worker_id", FREE_TEXT_WORKER_ID)
+              .eq("status", "running");
+            if (failError) throw failError;
+
+            return NextResponse.json(
+              {
+                jobId: cloudClaim.id,
+                execution: "free-cloud-text",
+                status: "failed",
+                profile: job.profile,
+                conversationId: cloudClaim.conversation_id,
+                capability: "text",
+                workerId: null,
+                routeReason: failedReason,
+                paidFallbackAllowed: job.allow_paid_fallback === true,
+                error: detail.slice(0, 1200),
+              },
+              { headers: { "Cache-Control": "no-store" } },
+            );
+          }
+        }
+      }
+    }
+
+    if (
+      job &&
+      job.capability === "text" &&
+      job.status === "running" &&
+      job.worker_id === FREE_TEXT_WORKER_ID &&
+      job.fallback_sandbox_name &&
+      job.fallback_deadline_at
+    ) {
+      const polled = await pollHermesTextTask({
+        sandboxName: job.fallback_sandbox_name,
+        deadlineAt: job.fallback_deadline_at,
+      });
+
+      if (polled.state === "running") {
+        return NextResponse.json(
+          {
+            jobId: job.id,
+            execution: "free-cloud-text",
+            status: "running",
+            profile: job.profile,
+            conversationId: job.conversation_id,
+            capability: "text",
+            provider: job.fallback_provider || "openrouter",
+            model: job.fallback_model || "openrouter/free",
+            workerId: FREE_TEXT_WORKER_ID,
+            routeReason: job.route_reason,
+            paidFallbackAllowed: job.allow_paid_fallback === true,
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      if (polled.state === "completed" && polled.text) {
+        const completedAt = new Date().toISOString();
+        const claimedMs = Date.parse(job.claimed_at || "");
+        const latencyMs = Number.isFinite(claimedMs)
+          ? Math.max(0, Date.parse(completedAt) - claimedMs)
+          : null;
+
+        const { data: completedJob, error: completionError } = await admin
+          .from("text_inference_jobs")
+          .update({
+            status: "completed",
+            result_text: polled.text,
+            partial_text: polled.text,
+            result_model: job.fallback_model || "openrouter/free",
+            result_provider: "openrouter-free",
+            latency_ms: latencyMs,
+            fallback_usage: polled.usage,
+            error: null,
+            completed_at: completedAt,
+            updated_at: completedAt,
+          })
+          .eq("id", job.id)
+          .eq("client_owner_ref", ownerRef)
+          .eq("worker_id", FREE_TEXT_WORKER_ID)
+          .eq("status", "running")
+          .select("id")
+          .maybeSingle();
+        if (completionError) throw completionError;
+
+        if (completedJob && job.conversation_id) {
+          const { error: messageError } = await admin
+            .from("local_ai_messages")
+            .upsert(
+              {
+                conversation_id: job.conversation_id,
+                owner_ref: ownerRef,
+                role: "assistant",
+                content: polled.text.trim(),
+                attachment_ids: [],
+                job_id: job.id,
+              },
+              { onConflict: "job_id,role" },
+            );
+          if (messageError) throw messageError;
+
+          await admin
+            .from("local_ai_conversations")
+            .update({ updated_at: completedAt })
+            .eq("id", job.conversation_id)
+            .eq("owner_ref", ownerRef);
+        }
+
+        return NextResponse.json(
+          {
+            jobId: job.id,
+            execution: "free-cloud-text",
+            status: "completed",
+            profile: job.profile,
+            conversationId: job.conversation_id,
+            capability: "text",
+            text: polled.text,
+            provider: "openrouter-free",
+            model: job.fallback_model || "openrouter/free",
+            latencyMs,
+            workerId: FREE_TEXT_WORKER_ID,
+            routeReason: job.route_reason,
+            paidFallbackAllowed: job.allow_paid_fallback === true,
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      const failedAt = new Date().toISOString();
+      const failureDetail =
+        polled.error || "Free cloud text did not return a usable answer.";
+      const failedReason =
+        `${job.route_reason || ""} The strict-free cloud text attempt failed (${failureDetail.slice(
+          0,
+          400,
+        )}). CoOperative will only continue to funded premium AI if this job is eligible under the existing spend and balance rules.`.trim();
+
+      const { error: failError } = await admin
+        .from("text_inference_jobs")
+        .update({
+          status: "failed",
+          fallback_usage: polled.usage,
+          route_reason: failedReason,
+          error: failureDetail.slice(0, 1200),
+          completed_at: failedAt,
+          updated_at: failedAt,
+        })
+        .eq("id", job.id)
+        .eq("client_owner_ref", ownerRef)
+        .eq("worker_id", FREE_TEXT_WORKER_ID)
+        .eq("status", "running");
+      if (failError) throw failError;
+
+      return NextResponse.json(
+        {
+          jobId: job.id,
+          execution: "free-cloud-text",
+          status: "failed",
+          profile: job.profile,
+          conversationId: job.conversation_id,
+          capability: "text",
+          workerId: FREE_TEXT_WORKER_ID,
+          routeReason: failedReason,
+          paidFallbackAllowed: job.allow_paid_fallback === true,
+          error: failureDetail,
         },
         { headers: { "Cache-Control": "no-store" } },
       );
@@ -3860,9 +4188,11 @@ export async function GET(request: Request) {
         execution:
           job.worker_id === FREE_VISION_WORKER_ID
             ? "free-cloud-vision"
-            : job.worker_id === "cooperative-paid-router"
-              ? "paid-ai"
-              : "local-ai",
+            : job.worker_id === FREE_TEXT_WORKER_ID
+              ? "free-cloud-text"
+              : job.worker_id === "cooperative-paid-router"
+                ? "paid-ai"
+                : "local-ai",
         status: job.status,
         profile: job.profile,
         conversationId: job.conversation_id,

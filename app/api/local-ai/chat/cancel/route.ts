@@ -4,6 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 import { cancelHermesMediaTask } from "@/lib/inference/hermes-media-cloud";
 import { cancelHermesVisionTask } from "@/lib/inference/hermes-vision-cloud";
+import { cancelHermesTextTask } from "@/lib/inference/hermes-text-cloud";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -42,6 +43,12 @@ export async function POST(request: Request) {
           job.fallback_sandbox_name
         ) {
           await cancelHermesVisionTask(job.fallback_sandbox_name);
+        }
+        if (
+          job.worker_id === "cooperative-hermes-free-text" &&
+          job.fallback_sandbox_name
+        ) {
+          await cancelHermesTextTask(job.fallback_sandbox_name);
         }
 
         const { error: updateError } = await admin
