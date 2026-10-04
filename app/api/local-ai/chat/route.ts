@@ -94,6 +94,10 @@ import {
   planServiceConnectIntent,
   serviceConnectAssistantMessage,
 } from "@/lib/runtime/service-connect-intent";
+import {
+  connectorBuildAssistantMessage,
+  queueConnectorBuild,
+} from "@/lib/runtime/service-connector-build";
 import { startRecoveryForJob } from "@/lib/recovery/server";
 
 export const runtime = "nodejs";
@@ -763,7 +767,35 @@ export async function POST(request: Request) {
 
     if (serviceConnectIntent && input.attachmentIds.length === 0) {
       const userText = input.message.trim();
-      const assistantText = serviceConnectAssistantMessage(serviceConnectIntent);
+
+      let assistantText: string;
+      let connectorBuildTaskId: string | null = null;
+      let connectorBuildStatus: string | null = null;
+      let aiNeeded = false;
+      let routeReason: string;
+
+      if (serviceConnectIntent.type === "available") {
+        assistantText = serviceConnectAssistantMessage(serviceConnectIntent);
+        routeReason =
+          "CoOperative matched an implemented provider connector and opened its secure code-based authorization flow without invoking AI.";
+      } else {
+        const build = await queueConnectorBuild({
+          userId: owner.userId,
+          ownerRef,
+          conversationId,
+          intent: serviceConnectIntent,
+        });
+        connectorBuildTaskId = build.taskId;
+        connectorBuildStatus = build.status;
+        aiNeeded = true;
+        assistantText = connectorBuildAssistantMessage({
+          intent: serviceConnectIntent,
+          taskId: build.taskId,
+          reused: build.reused,
+        });
+        routeReason =
+          "No approved reusable connector exists for this provider. Code recorded the request and delegated only the missing connector implementation to the bounded Repo Engineer workflow; credentials and account authorization remain outside AI.";
+      }
 
       const { error: connectIntentError } = await admin
         .from("local_ai_messages")
@@ -802,9 +834,24 @@ export async function POST(request: Request) {
           conversationTitle,
           text: assistantText,
           provider: "code",
-          model: "service-connect-intent",
-          routeReason:
-            "CoOperative detected a provider setup request and opened a secure credential flow without sending the credential through chat.",
+          model:
+            serviceConnectIntent.type === "available"
+              ? "service-connector-registry"
+              : "connector-build-router",
+          routeReason,
+          aiNeeded,
+          aiPurpose: aiNeeded ? "connector-build" : null,
+          connectorBuildTaskId,
+          connectorBuildStatus,
+          connector: {
+            providerKey: serviceConnectIntent.providerKey,
+            providerName: serviceConnectIntent.providerName,
+            kind: serviceConnectIntent.kind,
+            status:
+              serviceConnectIntent.type === "available"
+                ? "available"
+                : "build-required",
+          },
         },
         { status: 200, headers: { "Cache-Control": "no-store" } },
       );

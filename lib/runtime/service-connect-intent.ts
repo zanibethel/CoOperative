@@ -1,22 +1,67 @@
+import {
+  proposedProviderKey,
+  serviceConnectorByKey,
+  serviceConnectorForText,
+  type ServiceConnectorAuthKind,
+} from "@/lib/runtime/service-connector-registry";
+
 export type ServiceConnectIntent =
   | {
-      providerKey: "openrouter-api";
-      providerName: "OpenRouter";
-      kind: "api-key";
+      type: "available";
+      providerKey: string;
+      providerName: string;
+      kind: "api-key" | "oauth";
     }
   | {
-      providerKey: "nous-portal";
-      providerName: "Nous Portal";
-      kind: "oauth";
+      type: "build-required";
+      providerKey: string;
+      providerName: string;
+      kind: ServiceConnectorAuthKind | "unknown";
+      source: "known-registry" | "unknown-provider";
     };
 
-const OPENROUTER_PATTERN = /\bopen\s*router\b|\bopenrouter\b/i;
-const NOUS_PATTERN =
-  /\bnous\b|\bnous\s+portal\b|\bhermes\s+portal\b|\bhermes\s+(?:free|included)\s+models?\b/i;
 const CONNECTION_PATTERN =
-  /\b(connect|setup|set up|configure|configured|configuration|sign in|login|log in|link|api key|key|credential|got the key|have the key|ready to connect)\b/i;
+  /\b(connect|setup|set up|configure|configured|configuration|sign in|signin|log in|login|link|authorize|integrate|integration|api key|credential|got the key|have the key|ready to connect)\b/i;
 const GENERIC_KEY_READY_PATTERN =
   /\b(i\s+)?(got|have|created|made|generated)\b.{0,18}\b(api\s+)?key\b|\bready\b.{0,18}\bkey\b/i;
+
+function cleanedProviderCandidate(message: string) {
+  const compact = message.replace(/\s+/g, " ").trim();
+
+  const patterns = [
+    /\b(?:connect|link|authorize|integrate)\s+(?:to\s+|with\s+|my\s+|our\s+|the\s+)?(.{2,80}?)(?:[?.!]|$)/i,
+    /\b(?:sign\s*in|log\s*in|login)\s+(?:to\s+|with\s+)?(.{2,80}?)(?:[?.!]|$)/i,
+    /\b(?:setup|set up|configure)\s+(?:my\s+|our\s+|the\s+)?(.{2,80}?)(?:\s+(?:connection|integration|account))?(?:[?.!]|$)/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = compact.match(pattern);
+    const raw = match?.[1]
+      ?.replace(/\b(?:account|service|provider|integration|connection)\b$/i, "")
+      .trim();
+    if (!raw) continue;
+
+    const normalized = raw.toLowerCase();
+    if (
+      [
+        "a provider",
+        "provider",
+        "service",
+        "a service",
+        "my account",
+        "account",
+        "third party",
+        "third-party",
+      ].includes(normalized)
+    ) {
+      continue;
+    }
+
+    return raw.slice(0, 80);
+  }
+
+  return null;
+}
 
 export function planServiceConnectIntent(
   message: string,
@@ -25,53 +70,85 @@ export function planServiceConnectIntent(
   const text = message.trim();
   if (!text) return null;
 
-  if (NOUS_PATTERN.test(text) && CONNECTION_PATTERN.test(text)) {
-    return {
-      providerKey: "nous-portal",
-      providerName: "Nous Portal",
-      kind: "oauth",
-    };
-  }
+  const connector = serviceConnectorForText(text);
+  const hasConnectionIntent = CONNECTION_PATTERN.test(text);
 
-  if (OPENROUTER_PATTERN.test(text) && CONNECTION_PATTERN.test(text)) {
+  if (connector && hasConnectionIntent) {
+    if (
+      connector.implementation === "available" &&
+      (connector.authKind === "oauth" || connector.authKind === "api-key")
+    ) {
+      return {
+        type: "available",
+        providerKey: connector.providerKey,
+        providerName: connector.providerName,
+        kind: connector.authKind,
+      };
+    }
+
     return {
-      providerKey: "openrouter-api",
-      providerName: "OpenRouter",
-      kind: "api-key",
+      type: "build-required",
+      providerKey: connector.providerKey,
+      providerName: connector.providerName,
+      kind: connector.authKind,
+      source: "known-registry",
     };
   }
 
   if (GENERIC_KEY_READY_PATTERN.test(text)) {
-    const hasPendingOpenRouter = recentAssistantMessages.some((content) =>
-      /SECURE_SERVICE_CONNECT:openrouter-api/i.test(content),
-    );
-    if (hasPendingOpenRouter) {
-      return {
-        providerKey: "openrouter-api",
-        providerName: "OpenRouter",
-        kind: "api-key",
-      };
+    const pendingMarker = recentAssistantMessages
+      .map((content) =>
+        content.match(/SECURE_SERVICE_CONNECT:([a-z0-9-]+)/i)?.[1] || null,
+      )
+      .find(Boolean);
+
+    if (pendingMarker) {
+      const pendingConnector = serviceConnectorByKey(pendingMarker);
+      if (
+        pendingConnector?.implementation === "available" &&
+        pendingConnector.authKind === "api-key"
+      ) {
+        return {
+          type: "available",
+          providerKey: pendingConnector.providerKey,
+          providerName: pendingConnector.providerName,
+          kind: "api-key",
+        };
+      }
     }
   }
 
-  return null;
+  if (!hasConnectionIntent) return null;
+
+  const providerName = cleanedProviderCandidate(text);
+  if (!providerName) return null;
+
+  return {
+    type: "build-required",
+    providerKey: proposedProviderKey(providerName) || "custom-provider",
+    providerName,
+    kind: "unknown",
+    source: "unknown-provider",
+  };
 }
 
-export function serviceConnectAssistantMessage(intent: ServiceConnectIntent) {
+export function serviceConnectAssistantMessage(
+  intent: Extract<ServiceConnectIntent, { type: "available" }>,
+) {
   if (intent.kind === "oauth") {
     return [
-      `I can connect ${intent.providerName} to CoOperative from here.`,
+      `I can connect ${intent.providerName} from here.`,
       "",
-      "Use the secure sign-in card below. You’ll approve CoOperative/Hermes in Nous Portal once; CoOperative keeps the rotating refresh grant encrypted server-side and gives temporary Hermes workers only short-lived access.",
+      "Use the secure sign-in card below. CoOperative handles the connection flow in code and stores approved authorization state server-side; the AI model does not need your sign-in credentials.",
       "",
       `OAUTH_SERVICE_CONNECT:${intent.providerKey}`,
     ].join("\n");
   }
 
   return [
-    `Perfect. I can connect ${intent.providerName} for Hermes from here.`,
+    `I can connect ${intent.providerName} from here.`,
     "",
-    "Paste the API key into the secure field below—not into normal chat. CoOperative will verify it directly with the provider, encrypt it in the server-side vault, and only expose it to an approved Hermes job when needed.",
+    "Use the secure credential card below rather than pasting the key into normal chat. CoOperative verifies and stores it through the connector code path.",
     "",
     `SECURE_SERVICE_CONNECT:${intent.providerKey}`,
   ].join("\n");

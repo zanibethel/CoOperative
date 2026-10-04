@@ -10,6 +10,10 @@ import MediaFullscreenViewer, {
   type FullscreenMedia,
 } from "./MediaFullscreenViewer";
 import MediaCloudPicker from "./MediaCloudPicker";
+import {
+  serviceConnectorByKey,
+  serviceConnectorDisplayName,
+} from "@/lib/runtime/service-connector-registry";
 
 type Profile = "fast" | "quality";
 type NodeRouting = "default" | "prefer-owned" | "require-node";
@@ -333,6 +337,18 @@ function oauthServiceConnectDirective(content: string) {
 
   return {
     providerKey: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+function connectorBuildDirective(content: string) {
+  const match = content.match(
+    /CONNECTOR_BUILD_STATUS:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
+  );
+  if (!match) return null;
+
+  return {
+    taskId: match[1],
     text: content.replace(match[0], "").trim(),
   };
 }
@@ -835,8 +851,9 @@ function SecureServiceConnectCard({
   conversationId,
   onConnected,
 }: SecureServiceConnectCardProps) {
-  const providerName =
-    providerKey === "openrouter-api" ? "OpenRouter" : providerKey;
+  const connector = serviceConnectorByKey(providerKey);
+  const providerName = serviceConnectorDisplayName(providerKey);
+  const credentialHelpUrl = connector?.credentialHelpUrl || null;
   const [credential, setCredential] = useState("");
   const [working, setWorking] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -953,14 +970,14 @@ function SecureServiceConnectCard({
           >
             {working ? "Verifying securely…" : `Connect ${providerName}`}
           </button>
-          {providerKey === "openrouter-api" ? (
+          {credentialHelpUrl ? (
             <a
               className="secure-service-key-link"
-              href="https://openrouter.ai/settings/keys"
+              href={credentialHelpUrl}
               target="_blank"
               rel="noreferrer"
             >
-              Create or manage OpenRouter keys
+              Create or manage {providerName} credentials
             </a>
           ) : null}
         </>
@@ -971,16 +988,24 @@ function SecureServiceConnectCard({
   );
 }
 
-type NousPortalConnectCardProps = {
+type OAuthServiceConnectCardProps = {
+  providerKey: string;
   conversationId: string | null;
   onConnected: () => Promise<void> | void;
 };
 
-function NousPortalConnectCard({
+function OAuthServiceConnectCard({
+  providerKey,
   conversationId,
   onConnected,
-}: NousPortalConnectCardProps) {
-  const [checking, setChecking] = useState(true);
+}: OAuthServiceConnectCardProps) {
+  const connector = serviceConnectorByKey(providerKey);
+  const providerName = serviceConnectorDisplayName(providerKey);
+  const endpoint = connector?.endpoint || "";
+  const connectorConfigurationError = endpoint
+    ? ""
+    : `${providerName} connector endpoint is not configured.`;
+  const [checking, setChecking] = useState(Boolean(endpoint));
   const [working, setWorking] = useState(false);
   const [connected, setConnected] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -990,19 +1015,25 @@ function NousPortalConnectCard({
   const [cardError, setCardError] = useState("");
 
   useEffect(() => {
+    if (!endpoint) return;
+
     let cancelled = false;
-    void fetch("/api/local-ai/nous-connect", { cache: "no-store" })
+    void fetch(endpoint, { cache: "no-store" })
       .then(async (response) => {
         const payload = (await response.json()) as {
           connected?: boolean;
           error?: string;
         };
-        if (!response.ok) throw new Error(payload.error || "Could not check Nous Portal.");
+        if (!response.ok) {
+          throw new Error(payload.error || `Could not check ${providerName}.`);
+        }
         if (!cancelled) setConnected(Boolean(payload.connected));
       })
       .catch((err) => {
         if (!cancelled) {
-          setCardError(err instanceof Error ? err.message : "Could not check Nous Portal.");
+          setCardError(
+            err instanceof Error ? err.message : `Could not check ${providerName}.`,
+          );
         }
       })
       .finally(() => {
@@ -1012,14 +1043,17 @@ function NousPortalConnectCard({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [endpoint, providerName]);
 
   async function startConnection() {
     if (working) return;
     setWorking(true);
     setCardError("");
     try {
-      const response = await fetch("/api/local-ai/nous-connect", {
+      if (!endpoint) {
+        throw new Error(`${providerName} connector endpoint is not configured.`);
+      }
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1035,7 +1069,7 @@ function NousPortalConnectCard({
         error?: string;
       };
       if (!response.ok) {
-        throw new Error(payload.error || "Could not start Nous Portal sign-in.");
+        throw new Error(payload.error || `Could not start ${providerName} sign-in.`);
       }
       if (payload.connected) {
         setConnected(true);
@@ -1043,7 +1077,7 @@ function NousPortalConnectCard({
         return;
       }
       if (!payload.sessionId || !payload.verificationUrl) {
-        throw new Error("Nous Portal did not return a usable sign-in session.");
+        throw new Error(`${providerName} did not return a usable sign-in session.`);
       }
       setSessionId(payload.sessionId);
       setVerificationUrl(payload.verificationUrl);
@@ -1052,7 +1086,7 @@ function NousPortalConnectCard({
       window.open(payload.verificationUrl, "_blank", "noopener,noreferrer");
     } catch (err) {
       setCardError(
-        err instanceof Error ? err.message : "Could not start Nous Portal sign-in.",
+        err instanceof Error ? err.message : `Could not start ${providerName} sign-in.`,
       );
     } finally {
       setWorking(false);
@@ -1065,7 +1099,7 @@ function NousPortalConnectCard({
     let cancelled = false;
     const timer = window.setInterval(() => {
       void fetch(
-        `/api/local-ai/nous-connect?sessionId=${encodeURIComponent(sessionId)}`,
+        `${endpoint}?sessionId=${encodeURIComponent(sessionId)}`,
         { cache: "no-store" },
       )
         .then(async (response) => {
@@ -1093,7 +1127,7 @@ function NousPortalConnectCard({
           ) {
             window.clearInterval(timer);
             setSessionId(null);
-            setCardError(payload.error || "Nous Portal sign-in did not complete.");
+            setCardError(payload.error || `${providerName} sign-in did not complete.`);
             return;
           }
 
@@ -1106,7 +1140,7 @@ function NousPortalConnectCard({
         .catch((err) => {
           if (!cancelled) {
             setCardError(
-              err instanceof Error ? err.message : "Could not check Nous Portal sign-in.",
+              err instanceof Error ? err.message : `Could not check ${providerName} sign-in.`,
             );
           }
         });
@@ -1116,17 +1150,24 @@ function NousPortalConnectCard({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [sessionId, connected, pollIntervalMs, onConnected]);
+  }, [
+    sessionId,
+    connected,
+    pollIntervalMs,
+    onConnected,
+    endpoint,
+    providerName,
+  ]);
 
   return (
     <div className="secure-service-card">
       <div className="secure-service-head">
         <span className="secure-service-lock" aria-hidden="true">↗</span>
         <div>
-          <strong>Nous Portal connection</strong>
+          <strong>{providerName} connection</strong>
           <small>
-            Sign in once. CoOperative keeps the rotating OAuth grant encrypted
-            and gives temporary Hermes workers only short-lived access.
+            Sign in through the provider. CoOperative keeps approved OAuth state
+            in encrypted server-side storage and never sends it through chat.
           </small>
         </div>
       </div>
@@ -1138,13 +1179,13 @@ function NousPortalConnectCard({
           <span>✓</span>
           <div>
             <strong>Connected</strong>
-            <small>Hermes can prefer your Nous Portal model/tool access.</small>
+            <small>{providerName} is authorized for its approved CoOperative capabilities.</small>
           </div>
         </div>
       ) : sessionId ? (
         <>
           <div className="secure-service-oauth-code">
-            <small>Nous authorization code</small>
+            <small>{providerName} authorization code</small>
             <strong>{userCode || "Open the approval page"}</strong>
           </div>
           <a
@@ -1153,7 +1194,7 @@ function NousPortalConnectCard({
             target="_blank"
             rel="noreferrer"
           >
-            Approve in Nous Portal
+            Approve in {providerName}
           </a>
           <div className="secure-service-status">
             Waiting for your approval… This card will finish automatically.
@@ -1166,15 +1207,122 @@ function NousPortalConnectCard({
           onClick={() => void startConnection()}
           disabled={working}
         >
-          {working ? "Starting secure sign-in…" : "Connect Nous Portal"}
+          {working ? "Starting secure sign-in…" : `Connect ${providerName}`}
         </button>
       )}
 
-      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+      {cardError || connectorConfigurationError ? (
+        <div className="secure-service-error">
+          {cardError || connectorConfigurationError}
+        </div>
+      ) : null}
     </div>
   );
 }
 
+
+type ConnectorBuildStatus = {
+  taskId?: string;
+  status?: string;
+  branchName?: string | null;
+  error?: string | null;
+  providerKey?: string | null;
+  providerName?: string | null;
+};
+
+function ConnectorBuildStatusCard({ taskId }: { taskId: string }) {
+  const [state, setState] = useState<ConnectorBuildStatus | null>(null);
+  const [cardError, setCardError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+
+    async function refresh() {
+      try {
+        const response = await fetch(
+          `/api/local-ai/connector-build?taskId=${encodeURIComponent(taskId)}`,
+          { cache: "no-store" },
+        );
+        const payload = (await response.json()) as ConnectorBuildStatus & {
+          error?: string | null;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error || "Could not read connector build status.");
+        }
+        if (cancelled) return;
+
+        setState(payload);
+        setCardError("");
+
+        if (
+          payload.status === "queued" ||
+          payload.status === "claimed" ||
+          payload.status === "running"
+        ) {
+          timer = window.setTimeout(refresh, 3000);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCardError(
+            err instanceof Error
+              ? err.message
+              : "Could not read connector build status.",
+          );
+          timer = window.setTimeout(refresh, 5000);
+        }
+      }
+    }
+
+    void refresh();
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [taskId]);
+
+  const status = state?.status || "queued";
+  const providerName = state?.providerName || "Third-party";
+  const active =
+    status === "queued" || status === "claimed" || status === "running";
+
+  return (
+    <div className="secure-service-card">
+      <div className="secure-service-head">
+        <span className="secure-service-lock" aria-hidden="true">⌘</span>
+        <div>
+          <strong>{providerName} connector build</strong>
+          <small>
+            AI may research and prepare connector code, but it cannot receive
+            credentials, authorize your account, merge, or deploy it.
+          </small>
+        </div>
+      </div>
+
+      <div className="secure-service-status">
+        {active
+          ? `Builder status: ${status}. Preparing a reusable connector for review…`
+          : status === "completed"
+            ? "Connector preparation completed and is ready for review."
+            : status === "needs_approval"
+              ? "Connector preparation is waiting for owner approval."
+              : `Builder status: ${status}.`}
+      </div>
+
+      {state?.branchName ? (
+        <div className="secure-service-status">
+          Prepared branch: <strong>{state.branchName}</strong>
+        </div>
+      ) : null}
+
+      {state?.error ? (
+        <div className="secure-service-error">{state.error}</div>
+      ) : null}
+      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+    </div>
+  );
+}
 
 type RecoveryStatusCardProps = {
   incidentId: string;
@@ -2658,11 +2806,12 @@ export default function LocalAiChat() {
                 ) : null}
                 {message.content ? (() => {
                   const oauthConnect = oauthServiceConnectDirective(message.content);
-                  if (oauthConnect?.providerKey === "nous-portal") {
+                  if (oauthConnect) {
                     return (
                       <>
                         {oauthConnect.text ? <div>{oauthConnect.text}</div> : null}
-                        <NousPortalConnectCard
+                        <OAuthServiceConnectCard
+                          providerKey={oauthConnect.providerKey}
                           conversationId={conversationId}
                           onConnected={async () => {
                             setServiceConnectionRevision((current) => current + 1);
@@ -2673,6 +2822,16 @@ export default function LocalAiChat() {
                             }
                           }}
                         />
+                      </>
+                    );
+                  }
+
+                  const connectorBuild = connectorBuildDirective(message.content);
+                  if (connectorBuild) {
+                    return (
+                      <>
+                        {connectorBuild.text ? <div>{connectorBuild.text}</div> : null}
+                        <ConnectorBuildStatusCard taskId={connectorBuild.taskId} />
                       </>
                     );
                   }
