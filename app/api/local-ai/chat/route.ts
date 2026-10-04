@@ -21,6 +21,7 @@ import {
   settleAiProfileFunds,
 } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
+import { handleCodeFirstChat } from "@/lib/runtime/code-first-chat";
 import {
   answerOnboarding,
   businessScopePromptContext,
@@ -2766,6 +2767,73 @@ export async function POST(request: Request) {
       );
     }
 
+    const codeFirstDecision = handleCodeFirstChat({
+      message: input.message,
+      hasAttachments: input.attachmentIds.length > 0,
+      profile: input.profile,
+      nodeRouting: input.nodeRouting,
+      businessId: effectiveBusinessId,
+      businessName: businessContext?.business.name || null,
+      availableAiBalanceUsd: profileBalance.availableUsd,
+      paidAiFunded: profileBalance.funded,
+      onboardingStatus: serverOnboardingState.status,
+      onboardingMode: serverOnboardingState.mode,
+      onboardingPhase: serverOnboardingState.phase,
+    });
+
+    if (codeFirstDecision.handled && codeFirstDecision.text) {
+      const { error: codeFirstMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: codeFirstDecision.text,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (codeFirstMessageError) throw codeFirstMessageError;
+
+      const { error: codeFirstConversationError } = await admin
+        .from("local_ai_conversations")
+        .update({
+          profile: input.profile,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+      if (codeFirstConversationError) throw codeFirstConversationError;
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "text",
+          profile: input.profile,
+          conversationId,
+          conversationTitle,
+          text: codeFirstDecision.text,
+          provider: "code",
+          model: codeFirstDecision.handler,
+          routeReason: codeFirstDecision.routeReason,
+          business: businessContext?.business ?? null,
+          businessId: effectiveBusinessId,
+          aiNeeded: false,
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     const { data: previousMessages, error: historyError } = await admin
       .from("local_ai_messages")
       .select("role,content,attachment_ids")
@@ -2974,7 +3042,8 @@ export async function POST(request: Request) {
           : requestedCapability === "text" &&
               input.nodeRouting !== "require-node"
             ? ` Owned/local text has first priority for ${Math.round(FREE_TEXT_FALLBACK_GRACE_MS / 1000)} seconds; if still unclaimed, CoOperative may use strict-free Hermes/OpenRouter text reasoning before any funded paid fallback.`
-            : ""),
+            : "") +
+        ` Code-first preflight: ${codeFirstDecision.routeReason}`,
       allow_paid_fallback:
         requestedCapability === "text" &&
         input.nodeRouting !== "require-node" &&
@@ -3037,6 +3106,8 @@ export async function POST(request: Request) {
         availableAiBalanceUsd: profileBalance.availableUsd,
         modelMixer: input.modelMixer || null,
         requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
+        aiNeeded: codeFirstDecision.aiNeeded,
+        aiEscalationReason: codeFirstDecision.routeReason,
       },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
