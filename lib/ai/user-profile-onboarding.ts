@@ -710,33 +710,81 @@ export async function startOnboarding(ownerRef: string) {
   return onboardingState(ownerRef);
 }
 
-export async function resumeOnboarding(ownerRef: string) {
-  const state = await onboardingState(ownerRef);
-  if (state.status === "completed" || state.status === "dismissed") return state;
-  if (state.status === "not_started" || !state.conversationId) {
-    return startOnboarding(ownerRef);
-  }
+export async function resumeOnboarding(
+  ownerRef: string,
+  requestedMode?: "personal" | "business" | null,
+) {
+  let state = await onboardingState(ownerRef);
+  if (state.status === "dismissed") return state;
 
-  const admin = createAdminSupabaseClient();
+  if (state.status === "not_started" || !state.conversationId) {
+    state = await startOnboarding(ownerRef);
+  }
+  if (!state.conversationId) return state;
+
   let assistantText = choiceText();
   let phase = state.phase;
-  let mode = state.mode;
+  let mode: IntakeMode = requestedMode || state.mode;
   let businessId = state.businessId;
 
-  if (mode === "personal") {
+  if (requestedMode === "business") {
+    const businesses = await ownedBusinesses(ownerRef);
+    mode = "business";
+    businessId = null;
+    phase = businesses.length ? "select_business" : "new_business_basics";
+    assistantText = businesses.length
+      ? businessSelectionText(businesses)
+      : newBusinessBasicsText();
+  } else if (requestedMode === "personal") {
     const rows = await personalRows(ownerRef);
-    const fields = nextFields(USER_PROFILE_FIELD_DEFINITIONS, rows);
+    const fields =
+      nextFields(USER_PROFILE_FIELD_DEFINITIONS, rows).length > 0
+        ? nextFields(USER_PROFILE_FIELD_DEFINITIONS, rows)
+        : revisitFields(USER_PROFILE_FIELD_DEFINITIONS, rows);
+    mode = "personal";
+    businessId = null;
     if (!fields.length) {
-      await updateSession(ownerRef, { status: "completed", phase: "completed", completed_at: new Date().toISOString() });
+      assistantText =
+        "Your personal setup is already filled in. If anything changes, just tell me naturally and I’ll update it. You can also say “start business intake” anytime.";
+      phase = "completed";
+    } else {
+      phase = "personal_questions";
+      assistantText = batchQuestionText(fields, "personal");
+    }
+  } else if (mode === "personal") {
+    const rows = await personalRows(ownerRef);
+    const automatic = nextFields(USER_PROFILE_FIELD_DEFINITIONS, rows);
+    const fields =
+      automatic.length > 0
+        ? automatic
+        : state.status === "completed"
+          ? revisitFields(USER_PROFILE_FIELD_DEFINITIONS, rows)
+          : [];
+    if (!fields.length) {
+      await updateSession(ownerRef, {
+        status: "completed",
+        phase: "completed",
+        completed_at: new Date().toISOString(),
+      });
       return onboardingState(ownerRef);
     }
     phase = "personal_questions";
     assistantText = batchQuestionText(fields, "personal");
   } else if (mode === "business" && businessId) {
     const rows = await businessRows(ownerRef, businessId);
-    const fields = nextFields(BUSINESS_PROFILE_FIELD_DEFINITIONS, rows);
+    const automatic = nextFields(BUSINESS_PROFILE_FIELD_DEFINITIONS, rows);
+    const fields =
+      automatic.length > 0
+        ? automatic
+        : state.status === "completed"
+          ? revisitFields(BUSINESS_PROFILE_FIELD_DEFINITIONS, rows)
+          : [];
     if (!fields.length) {
-      await updateSession(ownerRef, { status: "completed", phase: "completed", completed_at: new Date().toISOString() });
+      await updateSession(ownerRef, {
+        status: "completed",
+        phase: "completed",
+        completed_at: new Date().toISOString(),
+      });
       return onboardingState(ownerRef);
     }
     phase = "business_questions";
@@ -750,14 +798,16 @@ export async function resumeOnboarding(ownerRef: string) {
   } else {
     mode = "choose";
     phase = "choose_mode";
+    businessId = null;
   }
 
   await updateSession(ownerRef, {
-    status: "in_progress",
+    status: phase === "completed" ? "completed" : "in_progress",
     mode,
     phase,
     business_id: businessId,
     paused_reason: null,
+    completed_at: phase === "completed" ? new Date().toISOString() : null,
   });
   await addAssistantMessage(ownerRef, state.conversationId, assistantText);
   await touchConversation(ownerRef, state.conversationId);
