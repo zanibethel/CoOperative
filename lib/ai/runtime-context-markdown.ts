@@ -238,7 +238,7 @@ async function loadRuntimeEvidence(input: {
     admin
       .from("text_inference_jobs")
       .select(
-        "id,status,conversation_id,capability,task_class,created_at,claimed_at,completed_at,worker_id,result_provider,result_model,latency_ms,prompt_tokens,output_tokens,error,route_reason,fallback_provider,fallback_model,fallback_attempted_at",
+        "id,status,conversation_id,business_id,capability,task_class,created_at,claimed_at,completed_at,worker_id,result_provider,result_model,latency_ms,prompt_tokens,output_tokens,error,route_reason,fallback_provider,fallback_model,fallback_attempted_at",
       )
       .eq("client_owner_ref", input.ownerRef)
       .order("created_at", { ascending: false })
@@ -1011,6 +1011,7 @@ export async function refreshRuntimeContextAfterOutcome(input: {
   currentRequest?: string | null;
   requestType?: string | null;
   allowExternalReview?: boolean;
+  businessId?: string | null;
 }) {
   const admin = createAdminSupabaseClient();
 
@@ -1028,6 +1029,7 @@ export async function refreshRuntimeContextAfterOutcome(input: {
     currentRequest: input.currentRequest || null,
     requestType: input.requestType || null,
     sourceJobId: input.jobId,
+    businessId: input.businessId || null,
   });
 
   const { data: job, error } = await admin
