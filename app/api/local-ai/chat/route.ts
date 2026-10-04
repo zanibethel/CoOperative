@@ -2729,9 +2729,12 @@ export async function POST(request: Request) {
       routing_mode: input.profile === "quality" ? "local-quality" : "local-fast",
       task_class: "general",
       route_reason:
-        input.profile === "quality"
+        (input.profile === "quality"
           ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`
-          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`,
+          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`) +
+        (requestedCapability === "vision"
+          ? ` Local vision has first priority for ${Math.round(FREE_VISION_FALLBACK_GRACE_MS / 1000)} seconds; if still unclaimed, CoOperative may use the connected strict-free Hermes/OpenRouter vision fallback. Paid vision fallback is disabled.`
+          : ""),
       allow_paid_fallback:
         requestedCapability === "text" &&
         input.nodeRouting !== "require-node" &&
@@ -2773,6 +2776,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         jobId,
+        execution: "local-ai",
         status: "queued",
         profile: input.profile,
         conversationId,
@@ -3854,7 +3858,11 @@ export async function GET(request: Request) {
       {
         jobId: job.id,
         execution:
-          job.worker_id === "cooperative-paid-router" ? "paid-ai" : undefined,
+          job.worker_id === FREE_VISION_WORKER_ID
+            ? "free-cloud-vision"
+            : job.worker_id === "cooperative-paid-router"
+              ? "paid-ai"
+              : "local-ai",
         status: job.status,
         profile: job.profile,
         conversationId: job.conversation_id,
