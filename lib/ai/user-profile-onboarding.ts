@@ -161,3 +161,185 @@ export async function onboardingState(ownerRef: string) {
     fields: fields || [],
   };
 }
+
+export async function startOnboarding(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  const state = await onboardingState(ownerRef);
+  if (state.status === "in_progress" && state.conversationId) return state;
+  if (state.status === "completed" || state.status === "dismissed") return state;
+
+  const now = new Date().toISOString();
+  const conversationId = crypto.randomUUID();
+
+  const { error: conversationError } = await admin
+    .from("local_ai_conversations")
+    .insert({
+      id: conversationId,
+      owner_ref: ownerRef,
+      title: "Getting to know you",
+      profile: "fast",
+      created_at: now,
+      updated_at: now,
+    });
+  if (conversationError) throw conversationError;
+
+  const { error: messageError } = await admin.from("local_ai_messages").insert({
+    conversation_id: conversationId,
+    owner_ref: ownerRef,
+    role: "assistant",
+    content: questionText(0),
+    attachment_ids: [],
+    created_at: now,
+  });
+  if (messageError) throw messageError;
+
+  const { error: sessionError } = await admin
+    .from("cooperative_onboarding_sessions")
+    .upsert(
+      {
+        owner_ref: ownerRef,
+        status: "in_progress",
+        current_batch: 0,
+        conversation_id: conversationId,
+        started_at: now,
+        completed_at: null,
+        dismissed_at: null,
+        updated_at: now,
+      },
+      { onConflict: "owner_ref" },
+    );
+  if (sessionError) throw sessionError;
+
+  return onboardingState(ownerRef);
+}
+
+export async function answerOnboarding(input: {
+  ownerRef: string;
+  conversationId: string;
+  message: string;
+}) {
+  const admin = createAdminSupabaseClient();
+  const state = await onboardingState(input.ownerRef);
+
+  if (
+    state.status !== "in_progress" ||
+    state.conversationId !== input.conversationId
+  ) {
+    throw new Error("No active get-to-know-you conversation matches this reply.");
+  }
+
+  const now = new Date().toISOString();
+  const { data: userMessage, error: userError } = await admin
+    .from("local_ai_messages")
+    .insert({
+      conversation_id: input.conversationId,
+      owner_ref: input.ownerRef,
+      role: "user",
+      content: input.message.trim(),
+      attachment_ids: [],
+      created_at: now,
+    })
+    .select("id")
+    .single();
+  if (userError) throw userError;
+
+  if (
+    /\b(?:skip|stop|end|dismiss)\s+(?:the\s+)?onboarding\b/i.test(
+      input.message,
+    )
+  ) {
+    const assistantText = dismissedText();
+    const { error: assistantError } = await admin
+      .from("local_ai_messages")
+      .insert({
+        conversation_id: input.conversationId,
+        owner_ref: input.ownerRef,
+        role: "assistant",
+        content: assistantText,
+        attachment_ids: [],
+        created_at: now,
+      });
+    if (assistantError) throw assistantError;
+
+    const { error: sessionError } = await admin
+      .from("cooperative_onboarding_sessions")
+      .update({
+        status: "dismissed",
+        dismissed_at: now,
+        updated_at: now,
+      })
+      .eq("owner_ref", input.ownerRef);
+    if (sessionError) throw sessionError;
+
+    await admin
+      .from("local_ai_conversations")
+      .update({ updated_at: now })
+      .eq("id", input.conversationId)
+      .eq("owner_ref", input.ownerRef);
+
+    return { assistantText, state: await onboardingState(input.ownerRef) };
+  }
+
+  const fields = batchFields(Number(state.currentBatch || 0));
+  for (const answer of parseBatchReply(input.message, fields)) {
+    const known = answer.status === "known" && Boolean(answer.value);
+
+    const { data: existing, error: existingError } = await admin
+      .from("cooperative_user_profile_fields")
+      .select("first_known_at")
+      .eq("owner_ref", input.ownerRef)
+      .eq("field_key", answer.fieldKey)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    const { error } = await admin
+      .from("cooperative_user_profile_fields")
+      .update({
+        value_text: known ? answer.value : null,
+        status: known ? "known" : answer.status,
+        confidence: 1,
+        source_conversation_id: input.conversationId,
+        source_message_id: userMessage.id,
+        source_kind: "onboarding",
+        first_known_at: known ? existing?.first_known_at || now : null,
+        last_confirmed_at: known ? now : null,
+        updated_at: now,
+      })
+      .eq("owner_ref", input.ownerRef)
+      .eq("field_key", answer.fieldKey);
+    if (error) throw error;
+  }
+
+  const nextBatch = Number(state.currentBatch || 0) + 1;
+  const completed = nextBatch >= TOTAL_BATCHES;
+  const assistantText = completed ? completionText() : questionText(nextBatch);
+
+  const { error: assistantError } = await admin.from("local_ai_messages").insert({
+    conversation_id: input.conversationId,
+    owner_ref: input.ownerRef,
+    role: "assistant",
+    content: assistantText,
+    attachment_ids: [],
+    created_at: now,
+  });
+  if (assistantError) throw assistantError;
+
+  const { error: sessionError } = await admin
+    .from("cooperative_onboarding_sessions")
+    .update({
+      status: completed ? "completed" : "in_progress",
+      current_batch: completed ? TOTAL_BATCHES : nextBatch,
+      completed_at: completed ? now : null,
+      updated_at: now,
+    })
+    .eq("owner_ref", input.ownerRef);
+  if (sessionError) throw sessionError;
+
+  await admin
+    .from("local_ai_conversations")
+    .update({ updated_at: now })
+    .eq("id", input.conversationId)
+    .eq("owner_ref", input.ownerRef);
+
+  return { assistantText, state: await onboardingState(input.ownerRef) };
+}
