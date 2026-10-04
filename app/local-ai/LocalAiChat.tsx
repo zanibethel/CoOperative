@@ -140,6 +140,8 @@ type JobResult = {
   provider?: string | null;
   conversationId?: string | null;
   conversationTitle?: string | null;
+  businessId?: string | null;
+  businessScopeSource?: "selected" | "explicit-message" | "none";
   messages?: unknown;
   partialText?: string | null;
   text?: string | null;
@@ -1496,8 +1498,7 @@ export default function LocalAiChat() {
     setAiBalance(result.aiBalance || null);
 
     const saved = window.localStorage.getItem(ACTIVE_BUSINESS_KEY) || "";
-    const selected =
-      items.find((item) => item.id === saved)?.id || items[0]?.id || "";
+    const selected = items.find((item) => item.id === saved)?.id || "";
     setSelectedBusinessId(selected);
 
     if (selected) {
@@ -2261,6 +2262,14 @@ export default function LocalAiChat() {
         }
 
         setOnboardingState(onboarding.state);
+        if (onboarding.state.businessId) {
+          setSelectedBusinessId(onboarding.state.businessId);
+          window.localStorage.setItem(
+            ACTIVE_BUSINESS_KEY,
+            onboarding.state.businessId,
+          );
+          await refreshBusinesses();
+        }
         if (onboarding.handled !== false) {
           await loadConversation(conversationId);
           await refreshConversations();
@@ -2316,6 +2325,10 @@ export default function LocalAiChat() {
       }
       if (queued.conversationTitle) {
         setConversationTitle(queued.conversationTitle);
+      }
+      if (queued.businessId) {
+        setSelectedBusinessId(queued.businessId);
+        window.localStorage.setItem(ACTIVE_BUSINESS_KEY, queued.businessId);
       }
 
       if (
@@ -2387,13 +2400,19 @@ export default function LocalAiChat() {
             onChange={(event) => {
               const id = event.target.value;
               setSelectedBusinessId(id);
-              if (id) window.localStorage.setItem(ACTIVE_BUSINESS_KEY, id);
+              if (id) {
+                window.localStorage.setItem(ACTIVE_BUSINESS_KEY, id);
+              } else {
+                window.localStorage.removeItem(ACTIVE_BUSINESS_KEY);
+              }
             }}
             disabled={busy || businesses.length === 0}
           >
-            {businesses.length === 0 ? (
-              <option value="">No business profile yet</option>
-            ) : null}
+            <option value="">
+              {businesses.length === 0
+                ? "Personal / no business profile yet"
+                : "Personal / no business"}
+            </option>
             {businesses.map((business) => (
               <option value={business.id} key={business.id}>
                 {business.name}
