@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 const BUCKET = "local-ai-attachments";
-const MAX_BYTES = 3 * 1024 * 1024;
+const MAX_BYTES = 12 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 async function currentUserId() {
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     }
     if (file.size <= 0 || file.size > MAX_BYTES) {
       return NextResponse.json(
-        { error: "Image must be 3 MB or smaller after compression." },
+        { error: "Image must be 12 MB or smaller after compression." },
         { status: 413 },
       );
     }
