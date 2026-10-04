@@ -11,6 +11,15 @@ const ATTACHMENT_BUCKET = "local-ai-attachments";
 const MAX_LIBRARY_BYTES = 50 * 1024 * 1024;
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 
+type SourceMediaJob = {
+  id: string;
+  kind: "image" | "video";
+  result_url: string | null;
+  provider: string | null;
+  model: string | null;
+  prompt: string | null;
+};
+
 const saveSchema = z.object({
   action: z.literal("save").default("save"),
   jobId: z.string().uuid().optional(),
@@ -244,16 +253,7 @@ export async function POST(request: Request) {
       );
     }
 
-    let job:
-      | {
-          id: string;
-          kind: "image" | "video";
-          result_url: string | null;
-          provider: string | null;
-          model: string | null;
-          prompt: string | null;
-        }
-      | null = null;
+    let job: SourceMediaJob | null = null;
 
     if (input.jobId) {
       const { data, error } = await admin
@@ -264,7 +264,7 @@ export async function POST(request: Request) {
         .eq("status", "completed")
         .maybeSingle();
       if (error) throw error;
-      job = data as typeof job;
+      job = data ? (data as SourceMediaJob) : null;
     }
 
     if (!job && input.mediaUrl) {
@@ -278,12 +278,12 @@ export async function POST(request: Request) {
         .order("completed_at", { ascending: false })
         .limit(80);
       if (error) throw error;
-      job =
-        ((recentJobs || []).find(
-          (candidate) =>
-            candidate.result_url &&
-            normalizeRemoteMediaUrl(candidate.result_url) === requestedUrl,
-        ) as typeof job) || null;
+      const matched = (recentJobs || []).find(
+        (candidate) =>
+          candidate.result_url &&
+          normalizeRemoteMediaUrl(candidate.result_url) === requestedUrl,
+      );
+      job = matched ? (matched as SourceMediaJob) : null;
     }
 
     if (!job?.result_url) {
