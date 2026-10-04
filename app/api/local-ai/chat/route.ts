@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
+import { textInferenceMessageSchema } from "@/lib/inference/contracts";
 import {
   COOPERATIVE_BUSINESS_CHAT_POLICY,
   COOPERATIVE_BUSINESS_POLICY_REVISION,
@@ -2732,7 +2733,7 @@ export async function POST(request: Request) {
         : "");
     const memoryContext =
       requestedCapability === "text"
-        ? await relevantMemorySystemContext(ownerRef, modelUserText)
+        ? await relevantMemorySystemContext(ownerRef, modelUserText, conversationId)
         : null;
     const systemMessages = [
       {
