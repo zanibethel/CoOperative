@@ -30,6 +30,7 @@ BLOCKED_SUFFIXES = {".pem",".key",".p12",".pfx",".crt",".cer"}
 SAFE_WRITE_SUFFIXES = {".ts",".tsx",".js",".jsx",".mjs",".cjs",".py",".md",".json",".css",".scss",".html",".yml",".yaml",".toml"}
 MAX_WRITE_FILES = 6
 MAX_TOTAL_WRITE_CHARS = 140000
+SANDBOX_BRANCH_PREFIX = "sandbox/"
 
 class AgentError(RuntimeError):
     pass
@@ -141,18 +142,21 @@ def safe_path(repo, relative, write=False, memory_only=False, memory_files=None)
 def update_remote(repo, branch):
     run(["git","fetch","origin",branch], repo, timeout=180)
 
-def create_worktree(source_repo, repository, task_id):
+def _valid_sandbox_branch(branch):
+    return (
+        isinstance(branch, str)
+        and branch.startswith(SANDBOX_BRANCH_PREFIX)
+        and ".." not in branch
+        and re.fullmatch(r"[A-Za-z0-9._/-]{1,220}", branch) is not None
+    )
+
+def create_worktree(source_repo, repository, task_id, continuation_branch=None):
     branch_base = str(repository.get("defaultBranch") or "main")
-    update_remote(source_repo, branch_base)
     safe_task = re.sub(r"[^a-zA-Z0-9-]", "-", task_id)[:36]
-    branch = f"agent/{safe_task}"
     repo_dir = re.sub(r"[^a-zA-Z0-9._-]", "-", str(repository["localDirName"]))
     worktree = (WORKTREE_ROOT / repo_dir / safe_task).resolve()
     worktree.parent.mkdir(parents=True, exist_ok=True)
 
-    # Task IDs are unique and this worker executes one task at a time. If the
-    # exact task worktree already exists, it is residue from an interrupted or
-    # retried attempt and can be cleaned before recreating the isolated branch.
     if worktree.exists():
         listed = run(
             ["git", "worktree", "list", "--porcelain"],
@@ -171,31 +175,82 @@ def create_worktree(source_repo, repository, task_id):
         if worktree.exists():
             shutil.rmtree(worktree, ignore_errors=False)
 
-    existing_branch = run(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
-        source_repo,
-        timeout=30,
-        check=False,
-    ).returncode == 0
-    if existing_branch:
+    if continuation_branch:
+        if not _valid_sandbox_branch(continuation_branch):
+            raise AgentError("Requested continuation branch is not an approved sandbox branch.")
+        branch = continuation_branch
+        update_remote(source_repo, branch)
         run(
-            ["git", "branch", "-D", branch],
+            ["git", "worktree", "add", "--detach", str(worktree), f"origin/{branch}"],
+            source_repo,
+            timeout=180,
+        )
+    else:
+        update_remote(source_repo, branch_base)
+        branch = f"{SANDBOX_BRANCH_PREFIX}task-{safe_task[:12]}"
+        existing_branch = run(
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
             source_repo,
             timeout=30,
             check=False,
+        ).returncode == 0
+        if existing_branch:
+            run(
+                ["git", "branch", "-D", branch],
+                source_repo,
+                timeout=30,
+                check=False,
+            )
+        run(
+            ["git", "worktree", "add", "-b", branch, str(worktree), f"origin/{branch_base}"],
+            source_repo,
+            timeout=180,
         )
 
-    run(
-        ["git","worktree","add","-b",branch,str(worktree),f"origin/{branch_base}"],
-        source_repo,
-        timeout=180,
-    )
     source_modules = source_repo / "node_modules"
     target_modules = worktree / "node_modules"
     if source_modules.is_dir() and not target_modules.exists():
-        try: target_modules.symlink_to(source_modules, target_is_directory=True)
-        except OSError: pass
+        try:
+            target_modules.symlink_to(source_modules, target_is_directory=True)
+        except OSError:
+            pass
     return worktree, branch
+
+def push_sandbox_branch(repo, branch, changed_files, summary):
+    if not _valid_sandbox_branch(branch):
+        raise AgentError("Refusing to push a non-sandbox branch.")
+    if not changed_files:
+        return {"pushed": False, "commitSha": None, "reason": "no-changes"}
+
+    run(["git", "config", "user.name", "CoOperative Sandbox Agent"], repo, check=False)
+    run(["git", "config", "user.email", "sandbox@cooperative.local"], repo, check=False)
+    run(["git", "add", "--", *changed_files], repo, timeout=60)
+
+    cached = run(["git", "diff", "--cached", "--quiet"], repo, check=False)
+    if cached.returncode == 0:
+        return {"pushed": False, "commitSha": None, "reason": "no-staged-changes"}
+
+    compact_summary = re.sub(r"\s+", " ", str(summary or "Prepared sandbox change")).strip()[:96]
+    run(
+        ["git", "commit", "-m", f"Sandbox change: {compact_summary}"],
+        repo,
+        timeout=120,
+    )
+    commit_sha = run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    push = run(
+        ["git", "push", "-u", "origin", f"HEAD:refs/heads/{branch}"],
+        repo,
+        timeout=240,
+        check=False,
+    )
+    if push.returncode != 0:
+        return {
+            "pushed": False,
+            "commitSha": commit_sha,
+            "reason": "push-failed",
+            "output": push.stdout[-6000:],
+        }
+    return {"pushed": True, "commitSha": commit_sha, "reason": "pushed"}
 
 def objective_terms(objective):
     words = re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}", objective.lower())
@@ -328,6 +383,8 @@ def system_prompt(agent, mode):
         "Never request, reveal, or modify secrets. Never propose production pushes, deployments, "
         "destructive operations, migrations, auth/billing/access-control changes, or arbitrary shell commands. "
         "Preserve working architecture and make the smallest justified change. "
+        "Code changes must be portable and reusable for other users whenever possible; do not hard-code one user's identity, "
+        "account, business, branch, or temporary workaround when a shared abstraction can solve the same issue safely. "
     )
     if mode in {"prepare_change","update_memory"}:
         return common + (
@@ -632,13 +689,32 @@ def handle_task(task):
     profile = str(task.get("requestedProfile") or agent.get("preferredProfile") or "fast")
     executor_approval = task.get("executorApproval")
     use_paid_executor = isinstance(executor_approval, dict)
+    sandbox_base_branch = task.get("sandboxBaseBranch")
 
     source = ensure_repo(repository)
     progress(task_id, f"Approved repo resolved at {source}.", metadata={"githubRepo":repository["githubRepo"]})
     target, branch = source, None
     if mode in {"prepare_change","update_memory"}:
-        target, branch = create_worktree(source, repository, task_id)
-        progress(task_id, f"Created isolated agent branch {branch}.", branch_name=branch)
+        target, branch = create_worktree(
+            source,
+            repository,
+            task_id,
+            continuation_branch=sandbox_base_branch if mode == "prepare_change" else None,
+        )
+        progress(
+            task_id,
+            (
+                f"Continued sandbox branch {branch}."
+                if sandbox_base_branch
+                else f"Created isolated sandbox branch {branch}."
+            ),
+            branch_name=branch,
+            metadata={
+                "sandboxBaseBranch": sandbox_base_branch,
+                "mergeAllowed": False,
+                "ownerReviewRequired": True,
+            },
+        )
     else:
         update_remote(source, str(repository.get("defaultBranch") or "main"))
 
@@ -868,6 +944,37 @@ def handle_task(task):
         checks = []
     diff_stat = run(["git","diff","--stat"], target, check=False).stdout[-12000:]
     diff = run(["git","diff","--no-ext-diff"], target, check=False).stdout[-50000:]
+
+    sandbox_push = {
+        "pushed": False,
+        "commitSha": None,
+        "reason": "not-applicable",
+    }
+    if mode == "prepare_change" and branch and changed:
+        sandbox_push = push_sandbox_branch(
+            target,
+            branch,
+            changed,
+            plan.get("summary") or objective,
+        )
+        progress(
+            task_id,
+            (
+                f"Pushed sandbox branch {branch} for user testing."
+                if sandbox_push.get("pushed")
+                else f"Sandbox branch {branch} was prepared but could not be pushed."
+            ),
+            kind="sandbox_branch_pushed" if sandbox_push.get("pushed") else "sandbox_branch_push_failed",
+            branch_name=branch,
+            metadata={
+                "branchName": branch,
+                "commitSha": sandbox_push.get("commitSha"),
+                "pushed": sandbox_push.get("pushed"),
+                "reason": sandbox_push.get("reason"),
+                "mergeAllowed": False,
+            },
+        )
+
     complete(task_id, "needs_approval", branch_name=branch, result={
         "summary":plan.get("summary") or "Prepared bounded repository change.",
         "changedFiles":changed,
@@ -889,6 +996,18 @@ def handle_task(task):
         "provider": llm.get("provider"),
         "estimatedCostUsd": llm.get("estimatedCostUsd"),
         "executorApproval": executor_approval if use_paid_executor else None,
+        "sandbox": {
+            "branchName": branch,
+            "baseBranch": sandbox_base_branch,
+            "continued": bool(sandbox_base_branch),
+            "pushed": sandbox_push.get("pushed"),
+            "commitSha": sandbox_push.get("commitSha"),
+            "pushReason": sandbox_push.get("reason"),
+            "mergeAllowed": False,
+            "ownerReviewRequired": True,
+            "minimalChangeRequired": True,
+            "portableForOtherUsersRequired": True,
+        } if mode == "prepare_change" else None,
     })
 
 def local_node_available():
