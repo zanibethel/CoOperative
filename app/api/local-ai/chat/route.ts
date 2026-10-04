@@ -21,6 +21,7 @@ import {
   settleAiProfileFunds,
 } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
+import { handleConversationalOnboardingTurn } from "@/lib/ai/user-profile-onboarding";
 import { activeNodeIds } from "@/lib/unison/node-access";
 import {
   pollHermesMediaTask,
@@ -480,12 +481,6 @@ export async function POST(request: Request) {
 
     const admin = createAdminSupabaseClient();
     const ownerRef = owner.ownerRef;
-    const businessContext = await buildBusinessChatContext(
-      owner.userId,
-      input.businessId,
-    );
-    const profileBalance =
-      businessContext?.aiBalance ?? (await aiProfileBalanceForUser(owner.userId));
 
     let conversationId = input.conversationId;
     let conversationTitle = "";
@@ -554,6 +549,76 @@ export async function POST(request: Request) {
       if (attachError) throw attachError;
     }
 
+    const onboardingTurn = await handleConversationalOnboardingTurn({
+      userId: owner.userId,
+      ownerRef,
+      conversationId,
+      message: input.message,
+      hasAttachments: input.attachmentIds.length > 0,
+    });
+
+    if (!input.businessId && onboardingTurn.selectedBusinessId) {
+      input.businessId = onboardingTurn.selectedBusinessId;
+    }
+
+    if (onboardingTurn.handled && onboardingTurn.assistantText) {
+      const { error: onboardingMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: input.attachmentIds,
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: onboardingTurn.assistantText,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (onboardingMessageError) throw onboardingMessageError;
+
+      await admin
+        .from("local_ai_conversations")
+        .update({
+          profile: input.profile,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "text",
+          profile: input.profile,
+          conversationId,
+          conversationTitle,
+          text: onboardingTurn.assistantText,
+          provider: "code",
+          model: "conversational-onboarding",
+          routeReason: onboardingTurn.routeReason,
+          savedFacts: onboardingTurn.savedFacts || [],
+          selectedBusinessId: onboardingTurn.selectedBusinessId || null,
+          onboardingState: onboardingTurn.state,
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const businessContext = await buildBusinessChatContext(
+      owner.userId,
+      input.businessId,
+    );
+    const profileBalance =
+      businessContext?.aiBalance ?? (await aiProfileBalanceForUser(owner.userId));
 
     const requestedMaxSpendPerPrompt = maxSpendPerPromptCommand(input.message);
     const asksCurrentMaxSpendPerPrompt = asksMaxSpendPerPrompt(input.message);
