@@ -2842,7 +2842,7 @@ export async function GET(request: Request) {
               role: "assistant",
               content: resultText,
               attachment_ids: [],
-              job_id: null,
+              job_id: localImageJob.id,
             });
           }
         }
@@ -2958,7 +2958,7 @@ export async function GET(request: Request) {
                 role: "assistant",
                 content: resultText,
                 attachment_ids: [],
-                job_id: localImageJob.id,
+                job_id: mediaJob.id,
               });
             if (resultMessageError) throw resultMessageError;
 
