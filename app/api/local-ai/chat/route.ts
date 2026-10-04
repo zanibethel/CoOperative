@@ -2743,7 +2743,6 @@ export async function POST(request: Request) {
         conversationId,
         currentRequest: modelUserText,
         requestType: `${requestedCapability} / general`,
-        sourceJobId: jobId,
       });
     } catch (contextError) {
       console.error("Could not build private runtime markdown context", {
