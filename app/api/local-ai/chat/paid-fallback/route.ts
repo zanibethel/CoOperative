@@ -518,6 +518,27 @@ export async function POST(request: Request) {
     if (conversationError) throw conversationError;
 
     try {
+      await persistResponseSupport({
+        ownerRef,
+        conversationId: sourceJob.conversation_id,
+        jobId: paidJobId,
+        messages: parsedMessages.data,
+        answer: result.text,
+        provider: result.provider,
+        model: result.model,
+        businessId: sourceJob.business_id || null,
+      });
+    } catch (supportError) {
+      console.error("Could not persist premium response support", {
+        jobId: paidJobId,
+        detail:
+          supportError instanceof Error
+            ? supportError.message.slice(0, 600)
+            : "Unknown support error",
+      });
+    }
+
+    try {
       await refreshRuntimeContextAfterOutcome({
         ownerRef,
         jobId: paidJobId,
