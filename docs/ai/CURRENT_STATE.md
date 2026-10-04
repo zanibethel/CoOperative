@@ -262,6 +262,28 @@ Behavior:
 
 This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
 
+### Strict-free Hermes text reasoning fallback
+
+Normal text chat now follows the intended cost/capability ladder after all deterministic/code handlers have had the first chance to answer:
+
+`code/deterministic -> owned/local text -> strict-free Hermes/OpenRouter text -> funded premium text (only when existing balance/cap rules allow)`.
+
+Behavior:
+- deterministic/business/media-routing handlers still run before any model job is queued;
+- owned/local text gets an 8-second claim window;
+- required-node routing remains a hard boundary and never spills to cloud;
+- if a normal text job is still unclaimed after 8 seconds and OpenRouter is connected, CoOperative atomically claims that same job for `cooperative-hermes-free-text`;
+- Hermes runs in Vercel Sandbox with `openrouter/free`;
+- the text fallback is reasoning-only: the Hermes CLI platform is explicitly configured with an empty toolset list, so it cannot browse, run terminal/file tools, or perform external side effects;
+- the fallback receives the original code-authored system/business instructions plus recent conversation history from the queued inference job;
+- code-provided system instructions remain authoritative over user conversation turns;
+- successful free reasoning completes the original job/conversation, with no profile-balance reservation or charge;
+- if free reasoning fails and the source text job is eligible for funded fallback, the existing paid-fallback path may run next under the saved per-prompt spend cap and available profile balance;
+- if paid fallback is not eligible, the failed job continues through the normal failure/recovery path;
+- Stop/cancel terminates the free Hermes text sandbox.
+
+The chat UI reports `Checking local reasoning capacity…` and then `Using free cloud reasoning…` when that lane takes over.
+
 ### Strict-free Hermes vision fallback
 
 Image-understanding chat now has a zero-model-cost cloud fallback behind the owned/local vision queue.
