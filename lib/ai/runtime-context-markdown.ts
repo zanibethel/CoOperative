@@ -172,7 +172,7 @@ async function uploadMarkdown(path: string, markdown: string) {
     path,
     Buffer.from(markdown, "utf8"),
     {
-      contentType: "text/markdown; charset=utf-8",
+      contentType: "text/markdown",
       upsert: true,
     },
   );
