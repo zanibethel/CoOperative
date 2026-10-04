@@ -262,6 +262,23 @@ Behavior:
 
 This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
 
+### Benchmark review UI
+
+The completed Z-Image Turbo vs Nano Banana Pro benchmark is now reviewable inside the owner Model Mixer.
+
+The review flow:
+- loads the six completed `media_quality_v1` source jobs directly from `media_generation_jobs`;
+- presents each matched prompt as a side-by-side Z-Image/Nano Banana comparison;
+- exposes the original prompt and scoring criteria beside the images;
+- allows owner scoring on a 0–100 scale;
+- composition and realism cases score visual quality + prompt adherence;
+- the hands case additionally scores anatomy/hands;
+- each save appends source-job-linked `manual_review` evidence to `media_model_benchmarks`;
+- route scorecards average the latest review for each source job/dimension so the three test images contribute to aggregate visual-quality and prompt-adherence scores while the hands test contributes anatomy evidence;
+- saved evidence is consumed immediately by evidence-driven routing.
+
+Unknown/unreviewed dimensions remain unknown. Reference fidelity, edit strength, and speed are not inferred from this review.
+
 ### First quality benchmark executed
 
 The first controlled SFW quality comparison between Nous / `fal-ai/z-image/turbo` and Nous / `fal-ai/nano-banana-pro` completed successfully.
