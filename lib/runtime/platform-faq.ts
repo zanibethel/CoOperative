@@ -172,7 +172,7 @@ export const PLATFORM_FAQ_REGISTRY: PlatformFaqEntry[] = [
         /\bwhat(?:'s| is) missing from (?:my|the) (?:profile|business profile)\b/,
         /\bwhat (?:info|information) is missing\b/,
       ]),
-    answer: (context) => {
+    answer: (context, value) => {
       const fields = context.profileFields || [];
       const known = fields.filter(
         (field) => field.status === "known" && Boolean(field.value?.trim()),
