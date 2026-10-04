@@ -92,6 +92,63 @@ export async function POST(request: Request) {
         };
       });
 
+    const { data: recentSandboxRows, error: sandboxRowsError } = await admin
+      .from("agent_tasks")
+      .select("id,branch_name,result,updated_at")
+      .eq("repo_key", task.repo_key)
+      .eq("mode", "prepare_change")
+      .neq("id", task.id)
+      .not("branch_name", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(30);
+    if (sandboxRowsError) throw sandboxRowsError;
+
+    const sandboxCandidates = (recentSandboxRows || [])
+      .map((row) => {
+        const result =
+          row.result && typeof row.result === "object"
+            ? (row.result as Record<string, unknown>)
+            : {};
+        const sandbox =
+          result.sandbox && typeof result.sandbox === "object"
+            ? (result.sandbox as Record<string, unknown>)
+            : {};
+        return {
+          taskId: row.id,
+          branchName:
+            typeof row.branch_name === "string" ? row.branch_name : "",
+          summary:
+            typeof result.summary === "string"
+              ? result.summary.slice(0, 800)
+              : "",
+          changedFiles: Array.isArray(result.changedFiles)
+            ? result.changedFiles
+                .filter((value): value is string => typeof value === "string")
+                .slice(0, 16)
+            : [],
+          diffStat:
+            typeof result.diffStat === "string"
+              ? result.diffStat.slice(0, 1000)
+              : "",
+          checksPassed: result.checksPassed === true,
+          pushed: sandbox.pushed === true,
+          commitSha:
+            typeof sandbox.commitSha === "string" ? sandbox.commitSha : null,
+          promotionState:
+            typeof sandbox.promotionState === "string"
+              ? sandbox.promotionState
+              : "testing",
+        };
+      })
+      .filter(
+        (candidate) =>
+          candidate.branchName.startsWith("sandbox/") &&
+          candidate.checksPassed &&
+          candidate.pushed &&
+          candidate.promotionState !== "rejected",
+      )
+      .slice(0, 8);
+
     const taskResult =
       task.result && typeof task.result === "object"
         ? (task.result as Record<string, unknown>)
@@ -119,6 +176,7 @@ export async function POST(request: Request) {
         deniedExamplesLoaded: learningContext.length,
         paidExecutorApproved: Boolean(executorApproval),
         sandboxBaseBranch,
+        reusableSandboxCandidates: sandboxCandidates.length,
         workerAuthMode: authorization.mode,
         nodeId: authorization.mode === "node" ? authorization.nodeId : null,
       },
@@ -138,6 +196,7 @@ export async function POST(request: Request) {
       executorApproval,
       sandbox,
       sandboxBaseBranch,
+      sandboxCandidates,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Could not claim agent task.";
