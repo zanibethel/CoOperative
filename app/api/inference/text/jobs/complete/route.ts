@@ -268,7 +268,7 @@ export async function POST(request: Request) {
       if (conversationError) throw conversationError;
 
       if (
-        job.capability === "text" &&
+        (job.capability === "text" || job.capability === "vision") &&
         job.routing_preference !== "require-node"
       ) {
         const parsedMessages = z
