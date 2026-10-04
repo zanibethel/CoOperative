@@ -32,7 +32,7 @@ const candidateSchema = z.object({
 });
 
 const profileFieldKeys = USER_PROFILE_FIELD_DEFINITIONS.map((field) => field.key);
-const businessFieldKeys = BUSINESS_CONVERSATION_FIELD_KEYS;
+const businessFieldKeys: readonly string[] = BUSINESS_CONVERSATION_FIELD_KEYS;
 
 const supportPacketSchema = z.object({
   memoryCandidates: z.array(candidateSchema).max(8).default([]),
