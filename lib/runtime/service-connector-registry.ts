@@ -73,6 +73,7 @@ export const SERVICE_CONNECTOR_REGISTRY: ServiceConnectorDescriptor[] = [
       "google calendar",
       "google drive",
       "google docs",
+      "google account",
     ],
   },
   {
