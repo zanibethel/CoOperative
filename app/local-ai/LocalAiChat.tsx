@@ -439,6 +439,23 @@ function MediaRecommendationChoices({
   };
 
   const sorted = [...options].sort((a, b) => order[a.tier] - order[b.tier]);
+  const autoChoice =
+    typeof currentCapUsd === "number"
+      ? [...options]
+          .filter(
+            (option) =>
+              option.executionReady !== false &&
+              option.capUsd <= currentCapUsd + 0.000001,
+          )
+          .sort(
+            (a, b) =>
+              (b.scorecard?.qualityScore ?? 0) -
+                (a.scorecard?.qualityScore ?? 0) ||
+              (b.scorecard?.benchmarkCoverage ?? 0) -
+                (a.scorecard?.benchmarkCoverage ?? 0) ||
+              a.estimatedCostUsd - b.estimatedCostUsd,
+          )[0] || null
+      : null;
 
   return (
     <div className="media-recommendation-list" aria-label="Media recommendations">
@@ -446,24 +463,37 @@ function MediaRecommendationChoices({
         const overCap =
           typeof currentCapUsd === "number" &&
           option.capUsd > currentCapUsd + 0.000001;
+        const isAutoChoice = autoChoice?.tier === option.tier;
         return (
-        <details className={`media-recommendation-card ${option.tier}`} key={option.tier}>
+        <details
+          className={`media-recommendation-card ${option.tier}${overCap ? " over-cap" : ""}${isAutoChoice ? " auto-choice" : ""}`}
+          key={option.tier}
+        >
           <summary>
             <span className="media-recommendation-title">
               <small>{tierName[option.tier]}</small>
               <strong>{option.label}</strong>
             </span>
             <span className="media-recommendation-price">
-              {option.estimatedCostUsd.toLocaleString(undefined, {
-                style: "currency",
-                currency: "USD",
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 3,
-              })}
-              {overCap && typeof currentCapUsd === "number" ? (
-                <small>
-                  {"Over $" + currentCapUsd.toFixed(2) + " cap · +$" +
-                    (option.capUsd - currentCapUsd).toFixed(2) + " required"}
+              <strong>
+                {option.estimatedCostUsd.toLocaleString(undefined, {
+                  style: "currency",
+                  currency: "USD",
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 3,
+                })}
+              </strong>
+              {typeof currentCapUsd === "number" ? (
+                <small className={overCap ? "over-cap" : isAutoChoice ? "auto-choice" : ""}>
+                  {overCap
+                    ? "Over $" +
+                      currentCapUsd.toFixed(2) +
+                      " cap · +$" +
+                      (option.capUsd - currentCapUsd).toFixed(2) +
+                      " required"
+                    : isAutoChoice
+                      ? "Auto choice · fits $" + currentCapUsd.toFixed(2) + " cap"
+                      : "Fits $" + currentCapUsd.toFixed(2) + " cap"}
                 </small>
               ) : null}
             </span>
