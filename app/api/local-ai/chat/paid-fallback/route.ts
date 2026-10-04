@@ -16,7 +16,10 @@ import {
   textTaskClassSchema,
 } from "@/lib/inference/contracts";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
-import { paidHandoffMessages } from "@/lib/ai/response-support";
+import {
+  paidHandoffMessages,
+  persistResponseSupport,
+} from "@/lib/ai/response-support";
 import { refreshRuntimeContextAfterOutcome } from "@/lib/ai/runtime-context-markdown";
 import {
   aiProfileBalanceForUser,
@@ -513,6 +516,27 @@ export async function POST(request: Request) {
       .eq("id", sourceJob.conversation_id)
       .eq("owner_ref", ownerRef);
     if (conversationError) throw conversationError;
+
+    try {
+      await persistResponseSupport({
+        ownerRef,
+        conversationId: sourceJob.conversation_id,
+        jobId: paidJobId,
+        messages: parsedMessages.data,
+        answer: result.text,
+        provider: result.provider,
+        model: result.model,
+        businessId: sourceJob.business_id || null,
+      });
+    } catch (supportError) {
+      console.error("Could not persist paid response support", {
+        jobId: paidJobId,
+        detail:
+          supportError instanceof Error
+            ? supportError.message.slice(0, 600)
+            : "Unknown support error",
+      });
+    }
 
     try {
       await refreshRuntimeContextAfterOutcome({
