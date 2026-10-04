@@ -2958,7 +2958,7 @@ export async function GET(request: Request) {
                 role: "assistant",
                 content: resultText,
                 attachment_ids: [],
-                job_id: null,
+                job_id: localImageJob.id,
               });
             if (resultMessageError) throw resultMessageError;
 
