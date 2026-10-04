@@ -213,16 +213,33 @@ async function readText(sandbox: Sandbox, path: string) {
   return (await result.stdout()).trim();
 }
 
+function repairMediaUrl(raw: string) {
+  const cleaned = raw.replace(/[)\]}>.,]+$/, "");
+  try {
+    const parsed = new URL(cleaned);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parsed.hostname.endsWith(".b") && parts[0]?.endsWith(".media")) {
+      parsed.hostname =
+        parsed.hostname.replace(".", "") + "." + parts.shift();
+      parsed.pathname = "/" + parts.join("/");
+      return parsed.toString();
+    }
+  } catch {
+    return cleaned;
+  }
+  return cleaned;
+}
+
 function extractMediaUrl(stdout: string) {
   const mediaMatches = [...stdout.matchAll(/MEDIA:\s*(https?:\/\/\S+)/gi)];
   const media = mediaMatches.at(-1)?.[1];
-  if (media) return media.replace(/[)\]}>.,]+$/, "");
+  if (media) return repairMediaUrl(media);
 
   const urls = [...stdout.matchAll(/https?:\/\/[^\s"'<>]+/g)].map((match) => match[0]);
   const likelyMedia = urls
     .filter((url) => /\.(?:png|jpe?g|webp|gif|mp4|webm)(?:\?|$)/i.test(url))
     .at(-1);
-  return likelyMedia?.replace(/[)\]}>.,]+$/, "") || null;
+  return likelyMedia ? repairMediaUrl(likelyMedia) : null;
 }
 
 export async function startHermesMediaTask(

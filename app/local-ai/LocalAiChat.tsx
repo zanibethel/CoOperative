@@ -244,13 +244,30 @@ function executionStep(
   return capability === "vision" ? "Using local vision…" : "Using local AI…";
 }
 
+function repairGeneratedMediaUrl(raw: string) {
+  const cleaned = raw.replace(/[)\]}>.,]+$/, "");
+  try {
+    const parsed = new URL(cleaned);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    if (parsed.hostname.endsWith(".b") && parts[0]?.endsWith(".media")) {
+      parsed.hostname =
+        parsed.hostname.replace(".", "") + "." + parts.shift();
+      parsed.pathname = "/" + parts.join("/");
+      return parsed.toString();
+    }
+  } catch {
+    return cleaned;
+  }
+  return cleaned;
+}
+
 function generatedMedia(content: string) {
   const match = content.match(/MEDIA_(IMAGE|VIDEO):(https?:\/\/\S+)/i);
   if (!match) return null;
 
   return {
     kind: match[1].toLowerCase() as "image" | "video",
-    url: match[2].replace(/[)\]}>.,]+$/, ""),
+    url: repairGeneratedMediaUrl(match[2]),
     text: content.replace(match[0], "").trim(),
   };
 }
