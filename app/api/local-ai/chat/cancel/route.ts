@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 import { cancelHermesMediaTask } from "@/lib/inference/hermes-media-cloud";
+import { cancelHermesVisionTask } from "@/lib/inference/hermes-vision-cloud";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     const admin = createAdminSupabaseClient();
     const { data: job, error: jobError } = await admin
       .from("text_inference_jobs")
-      .select("id,status")
+      .select("id,status,worker_id,fallback_sandbox_name")
       .eq("id", input.jobId)
       .eq("client_owner_ref", ownerRef)
       .maybeSingle();
@@ -36,6 +37,13 @@ export async function POST(request: Request) {
 
     if (job) {
       if (job.status === "queued" || job.status === "running") {
+        if (
+          job.worker_id === "cooperative-hermes-free-vision" &&
+          job.fallback_sandbox_name
+        ) {
+          await cancelHermesVisionTask(job.fallback_sandbox_name);
+        }
+
         const { error: updateError } = await admin
           .from("text_inference_jobs")
           .update({

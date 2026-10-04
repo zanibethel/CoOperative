@@ -21,6 +21,11 @@ import {
   startHermesMediaTask,
 } from "@/lib/inference/hermes-media-cloud";
 import {
+  pollHermesVisionTask,
+  startHermesVisionTask,
+  type HermesVisionImage,
+} from "@/lib/inference/hermes-vision-cloud";
+import {
   adultMediaContentClass,
   mediaPromptWithResolvedControls,
   planMediaRequest,
@@ -67,6 +72,9 @@ import { startRecoveryForJob } from "@/lib/recovery/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+const FREE_VISION_FALLBACK_GRACE_MS = 8_000;
+const FREE_VISION_WORKER_ID = "cooperative-hermes-free-vision";
 
 const modelMixerLevelSchema = z.number().int().min(0).max(4);
 const modelMixerSchema = z.object({
@@ -338,6 +346,68 @@ async function stageLocalImageReferences(
     }
     throw error;
   }
+}
+
+async function hermesVisionImagesForAttachments(
+  admin: AdminClient,
+  ownerRef: string,
+  attachmentIds: string[],
+): Promise<HermesVisionImage[]> {
+  if (!attachmentIds.length) return [];
+
+  const { data: attachments, error } = await admin
+    .from("local_ai_attachments")
+    .select("id,storage_path,file_name,mime_type")
+    .eq("owner_ref", ownerRef)
+    .in("id", attachmentIds);
+
+  if (error) throw error;
+  if (!attachments || attachments.length !== attachmentIds.length) {
+    throw new Error("One or more vision attachments are no longer available.");
+  }
+
+  const byId = new Map(attachments.map((attachment) => [attachment.id, attachment]));
+  const images: HermesVisionImage[] = [];
+
+  for (const attachmentId of attachmentIds) {
+    const attachment = byId.get(attachmentId);
+    if (!attachment) throw new Error("Vision attachment metadata is missing.");
+
+    const { data: blob, error: downloadError } = await admin.storage
+      .from("local-ai-attachments")
+      .download(attachment.storage_path);
+    if (downloadError) throw downloadError;
+
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (!bytes.length || bytes.byteLength > 12 * 1024 * 1024) {
+      throw new Error("Vision attachment is empty or exceeds the 12 MB limit.");
+    }
+
+    images.push({
+      bytes,
+      fileName: attachment.file_name || `image-${attachmentId}`,
+      mimeType: attachment.mime_type || "image/jpeg",
+    });
+  }
+
+  return images;
+}
+
+function latestUserRequest(messages: unknown) {
+  if (!Array.isArray(messages)) return "Describe and analyze the attached image.";
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const row = messages[index];
+    if (
+      row &&
+      typeof row === "object" &&
+      (row as { role?: unknown }).role === "user" &&
+      typeof (row as { content?: unknown }).content === "string"
+    ) {
+      const value = (row as { content: string }).content.trim();
+      if (value) return value;
+    }
+  }
+  return "Describe and analyze the attached image.";
 }
 
 export async function POST(request: Request) {
@@ -2659,9 +2729,12 @@ export async function POST(request: Request) {
       routing_mode: input.profile === "quality" ? "local-quality" : "local-fast",
       task_class: "general",
       route_reason:
-        input.profile === "quality"
+        (input.profile === "quality"
           ? `Manual Local Quality selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`
-          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`,
+          : `Manual Local Fast selection. Business policy ${COOPERATIVE_BUSINESS_POLICY_REVISION} applied.${businessContext ? " Active business economic context applied." : ""}${nodeRouteNote}${mixerRouteNote}`) +
+        (requestedCapability === "vision"
+          ? ` Local vision has first priority for ${Math.round(FREE_VISION_FALLBACK_GRACE_MS / 1000)} seconds; if still unclaimed, CoOperative may use the connected strict-free Hermes/OpenRouter vision fallback. Paid vision fallback is disabled.`
+          : ""),
       allow_paid_fallback:
         requestedCapability === "text" &&
         input.nodeRouting !== "require-node" &&
@@ -2703,6 +2776,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         jobId,
+        execution: "local-ai",
         status: "queued",
         profile: input.profile,
         conversationId,
@@ -2746,7 +2820,7 @@ export async function GET(request: Request) {
     let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,created_at,completed_at",
+        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,queued_at,claimed_at,created_at,completed_at,fallback_provider,fallback_model,fallback_sandbox_name,fallback_deadline_at,fallback_attempted_at,fallback_usage",
       )
       .eq("client_owner_ref", ownerRef);
 
@@ -2760,6 +2834,295 @@ export async function GET(request: Request) {
     const { data: job, error } = await query.maybeSingle();
 
     if (error) throw error;
+
+    if (
+      job &&
+      job.capability === "vision" &&
+      job.status === "queued" &&
+      !job.worker_id &&
+      !job.fallback_attempted_at &&
+      job.routing_preference !== "require-node" &&
+      Date.now() - Date.parse(job.queued_at || job.created_at || "") >=
+        FREE_VISION_FALLBACK_GRACE_MS
+    ) {
+      const openRouterService =
+        await businessOwnedServiceCredentialForOwner(ownerRef, "openrouter-api");
+      const openRouterCredential =
+        openRouterService?.credential ||
+        process.env.OPENROUTER_API_KEY?.trim() ||
+        null;
+
+      if (openRouterCredential) {
+        const claimedAt = new Date().toISOString();
+        const cloudRouteReason =
+          `${job.route_reason || ""} Local vision was not claimed within ${Math.round(
+            FREE_VISION_FALLBACK_GRACE_MS / 1000,
+          )} seconds, so CoOperative claimed this same vision job for a zero-model-cost Hermes/OpenRouter fallback. Paid model fallback remains disabled.`.trim();
+
+        const { data: cloudClaim, error: cloudClaimError } = await admin
+          .from("text_inference_jobs")
+          .update({
+            status: "running",
+            worker_id: FREE_VISION_WORKER_ID,
+            claimed_at: claimedAt,
+            fallback_provider: "openrouter",
+            fallback_model: "openrouter/free",
+            fallback_attempted_at: claimedAt,
+            route_reason: cloudRouteReason,
+            updated_at: claimedAt,
+          })
+          .eq("id", job.id)
+          .eq("client_owner_ref", ownerRef)
+          .eq("status", "queued")
+          .is("worker_id", null)
+          .is("fallback_attempted_at", null)
+          .select("id,conversation_id,attachment_ids,messages")
+          .maybeSingle();
+
+        if (cloudClaimError) throw cloudClaimError;
+
+        if (cloudClaim) {
+          try {
+            const images = await hermesVisionImagesForAttachments(
+              admin,
+              ownerRef,
+              Array.isArray(cloudClaim.attachment_ids)
+                ? cloudClaim.attachment_ids
+                : [],
+            );
+            const started = await startHermesVisionTask({
+              jobId: cloudClaim.id,
+              question: latestUserRequest(cloudClaim.messages),
+              images,
+              openRouterCredential,
+            });
+
+            const { error: cloudStartError } = await admin
+              .from("text_inference_jobs")
+              .update({
+                fallback_provider: started.provider,
+                fallback_model: started.visionModel,
+                fallback_sandbox_name: started.sandboxName,
+                fallback_deadline_at: started.deadlineAt,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", cloudClaim.id)
+              .eq("client_owner_ref", ownerRef)
+              .eq("worker_id", FREE_VISION_WORKER_ID)
+              .eq("status", "running");
+            if (cloudStartError) throw cloudStartError;
+
+            return NextResponse.json(
+              {
+                jobId: cloudClaim.id,
+                execution: "free-cloud-vision",
+                status: "running",
+                profile: job.profile,
+                conversationId: cloudClaim.conversation_id,
+                capability: "vision",
+                provider: started.provider,
+                model: started.visionModel,
+                workerId: FREE_VISION_WORKER_ID,
+                routeReason: cloudRouteReason,
+                paidFallbackAllowed: false,
+              },
+              { headers: { "Cache-Control": "no-store" } },
+            );
+          } catch (cloudStartFailure) {
+            const detail =
+              cloudStartFailure instanceof Error
+                ? cloudStartFailure.message
+                : "Free cloud vision could not start.";
+            const fallbackBackToLocalReason =
+              `${cloudRouteReason} The free cloud attempt could not start (${detail.slice(
+                0,
+                400,
+              )}); the job was returned to the owned/local queue without trying a paid model.`;
+
+            const { error: releaseError } = await admin
+              .from("text_inference_jobs")
+              .update({
+                status: "queued",
+                worker_id: null,
+                claimed_at: null,
+                fallback_sandbox_name: null,
+                fallback_deadline_at: null,
+                route_reason: fallbackBackToLocalReason,
+                error: null,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", cloudClaim.id)
+              .eq("client_owner_ref", ownerRef)
+              .eq("worker_id", FREE_VISION_WORKER_ID);
+            if (releaseError) throw releaseError;
+
+            return NextResponse.json(
+              {
+                jobId: cloudClaim.id,
+                execution: "local-ai",
+                status: "queued",
+                profile: job.profile,
+                conversationId: cloudClaim.conversation_id,
+                capability: "vision",
+                workerId: null,
+                routeReason: fallbackBackToLocalReason,
+                paidFallbackAllowed: false,
+              },
+              { headers: { "Cache-Control": "no-store" } },
+            );
+          }
+        }
+      }
+    }
+
+    if (
+      job &&
+      job.capability === "vision" &&
+      job.status === "running" &&
+      job.worker_id === FREE_VISION_WORKER_ID &&
+      job.fallback_sandbox_name &&
+      job.fallback_deadline_at
+    ) {
+      const polled = await pollHermesVisionTask({
+        sandboxName: job.fallback_sandbox_name,
+        deadlineAt: job.fallback_deadline_at,
+      });
+
+      if (polled.state === "running") {
+        return NextResponse.json(
+          {
+            jobId: job.id,
+            execution: "free-cloud-vision",
+            status: "running",
+            profile: job.profile,
+            conversationId: job.conversation_id,
+            capability: "vision",
+            provider: job.fallback_provider || "openrouter",
+            model: job.fallback_model || "openrouter/free",
+            workerId: FREE_VISION_WORKER_ID,
+            routeReason: job.route_reason,
+            paidFallbackAllowed: false,
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      if (polled.state === "completed" && polled.text) {
+        const completedAt = new Date().toISOString();
+        const claimedMs = Date.parse(job.claimed_at || "");
+        const latencyMs = Number.isFinite(claimedMs)
+          ? Math.max(0, Date.parse(completedAt) - claimedMs)
+          : null;
+
+        const { data: completedJob, error: completionError } = await admin
+          .from("text_inference_jobs")
+          .update({
+            status: "completed",
+            result_text: polled.text,
+            partial_text: polled.text,
+            result_model: job.fallback_model || "openrouter/free",
+            result_provider: "openrouter-free",
+            latency_ms: latencyMs,
+            fallback_usage: polled.usage,
+            error: null,
+            completed_at: completedAt,
+            updated_at: completedAt,
+          })
+          .eq("id", job.id)
+          .eq("client_owner_ref", ownerRef)
+          .eq("worker_id", FREE_VISION_WORKER_ID)
+          .eq("status", "running")
+          .select("id")
+          .maybeSingle();
+        if (completionError) throw completionError;
+
+        if (completedJob && job.conversation_id) {
+          const { error: messageError } = await admin
+            .from("local_ai_messages")
+            .upsert(
+              {
+                conversation_id: job.conversation_id,
+                owner_ref: ownerRef,
+                role: "assistant",
+                content: polled.text.trim(),
+                attachment_ids: [],
+                job_id: job.id,
+              },
+              { onConflict: "job_id,role" },
+            );
+          if (messageError) throw messageError;
+
+          await admin
+            .from("local_ai_conversations")
+            .update({ updated_at: completedAt })
+            .eq("id", job.conversation_id)
+            .eq("owner_ref", ownerRef);
+        }
+
+        return NextResponse.json(
+          {
+            jobId: job.id,
+            execution: "free-cloud-vision",
+            status: "completed",
+            profile: job.profile,
+            conversationId: job.conversation_id,
+            capability: "vision",
+            text: polled.text,
+            provider: "openrouter-free",
+            model: job.fallback_model || "openrouter/free",
+            latencyMs,
+            workerId: FREE_VISION_WORKER_ID,
+            routeReason: job.route_reason,
+            paidFallbackAllowed: false,
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      const failedAt = new Date().toISOString();
+      const failureDetail =
+        polled.error || "Free cloud vision did not return a usable answer.";
+      const localRetryReason =
+        `${job.route_reason || ""} The zero-cost cloud vision attempt failed (${failureDetail.slice(
+          0,
+          400,
+        )}); CoOperative returned the same job to owned/local vision and did not try a paid model.`.trim();
+
+      const { error: localReleaseError } = await admin
+        .from("text_inference_jobs")
+        .update({
+          status: "queued",
+          worker_id: null,
+          claimed_at: null,
+          fallback_sandbox_name: null,
+          fallback_deadline_at: null,
+          fallback_usage: polled.usage,
+          route_reason: localRetryReason,
+          error: null,
+          updated_at: failedAt,
+        })
+        .eq("id", job.id)
+        .eq("client_owner_ref", ownerRef)
+        .eq("worker_id", FREE_VISION_WORKER_ID)
+        .eq("status", "running");
+      if (localReleaseError) throw localReleaseError;
+
+      return NextResponse.json(
+        {
+          jobId: job.id,
+          execution: "local-ai",
+          status: "queued",
+          profile: job.profile,
+          conversationId: job.conversation_id,
+          capability: "vision",
+          workerId: null,
+          routeReason: localRetryReason,
+          paidFallbackAllowed: false,
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     if (!job) {
       let mediaQuery = admin
         .from("media_generation_jobs")
@@ -3495,7 +3858,11 @@ export async function GET(request: Request) {
       {
         jobId: job.id,
         execution:
-          job.worker_id === "cooperative-paid-router" ? "paid-ai" : undefined,
+          job.worker_id === FREE_VISION_WORKER_ID
+            ? "free-cloud-vision"
+            : job.worker_id === "cooperative-paid-router"
+              ? "paid-ai"
+              : "local-ai",
         status: job.status,
         profile: job.profile,
         conversationId: job.conversation_id,

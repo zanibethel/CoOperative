@@ -262,6 +262,26 @@ Behavior:
 
 This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
 
+### Strict-free Hermes vision fallback
+
+Image-understanding chat now has a zero-model-cost cloud fallback behind the owned/local vision queue.
+
+Routing:
+- local/owned vision gets the first 8 seconds to claim a vision job;
+- if the job is still unclaimed, CoOperative atomically claims that same job for `cooperative-hermes-free-vision`;
+- Hermes runs in Vercel Sandbox using OpenRouter `openrouter/free` for orchestration;
+- Hermes `vision_analyze` is pinned to the explicitly-free `qwen/qwen3.8-27b:free` auxiliary model by default;
+- all attached images remain private and are copied into the sandbox from authenticated Supabase storage;
+- if free cloud vision succeeds, the result is written back to the original text inference job/conversation;
+- if it fails, the original job returns to the owned/local queue and `fallback_attempted_at` prevents a cloud retry loop;
+- paid vision fallback remains disabled regardless of the Model Mixer spend ceiling;
+- required-node routing never spills to cloud;
+- cancellation stops the Hermes vision sandbox.
+
+The UI distinguishes `Checking local vision capacity…` from `Using free cloud vision…`, so zero-cost cloud fallback is visible rather than being presented as local execution.
+
+The fallback path has a successful TypeScript/Vercel preview build. A preview-only live probe could not reach production-only Supabase credentials, so end-to-end provider execution must be verified from the authenticated production chat after deployment; no paid route is permitted during that verification.
+
 ### Chat media handling and CoOperative Cloud
 
 Generated media in main CoOperative chat now has a dedicated handling flow.
