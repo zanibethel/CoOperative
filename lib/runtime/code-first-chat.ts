@@ -1,4 +1,9 @@
-import "server-only";\n\nimport { answerPlatformFaq } from "@/lib/runtime/platform-faq";
+import "server-only";
+
+import {
+  answerPlatformFaq,
+  type PlatformFaqContext,
+} from "@/lib/runtime/platform-faq";
 
 export type CodeFirstChatDecision = {
   handled: boolean;
