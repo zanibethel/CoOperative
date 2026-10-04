@@ -8,18 +8,9 @@ export type CodeFirstChatDecision = {
   aiNeeded: boolean;
 };
 
-export type CodeFirstChatInput = {
+export type CodeFirstChatInput = PlatformFaqContext & {
   message: string;
   hasAttachments: boolean;
-  profile: "fast" | "quality";
-  nodeRouting: "default" | "prefer-owned" | "require-node";
-  businessId?: string | null;
-  businessName?: string | null;
-  availableAiBalanceUsd: number;
-  paidAiFunded: boolean;
-  onboardingStatus?: string | null;
-  onboardingMode?: string | null;
-  onboardingPhase?: string | null;
 };
 
 function normalized(message: string) {
