@@ -107,7 +107,7 @@ const modelMixerSchema = z.object({
 const chatRequestSchema = z
   .object({
     conversationId: z.string().uuid().optional(),
-    businessId: z.string().uuid().optional(),
+    businessId: z.string().uuid().nullable().optional(),
     message: z.string().max(16000).default(""),
     attachmentIds: z.array(z.string().uuid()).max(4).default([]),
     profile: z.enum(["fast", "quality"]).default("fast"),
@@ -621,13 +621,13 @@ export async function POST(request: Request) {
       ownerRef,
       conversationId,
       message: input.message,
-      requestedBusinessId: input.businessId || null,
+      requestedBusinessId: input.businessId,
     });
 
     effectiveRequestText = scopeResolution.effectiveMessage;
 
     if (scopeResolution.selectedScope === "personal") {
-      input.businessId = undefined;
+      input.businessId = null;
     } else if (scopeResolution.selectedBusinessId) {
       input.businessId = scopeResolution.selectedBusinessId;
     }
@@ -681,7 +681,7 @@ export async function POST(request: Request) {
 
     const businessContext = await buildBusinessChatContext(
       owner.userId,
-      input.businessId,
+      input.businessId || undefined,
     );
     const profileBalance =
       businessContext?.aiBalance ?? (await aiProfileBalanceForUser(owner.userId));
@@ -3645,6 +3645,7 @@ export async function GET(request: Request) {
                 answer: polled.text.trim(),
                 provider: "openrouter-free",
                 model: job.fallback_model || "openrouter/free",
+                businessId: job.business_id || null,
               });
             } catch (supportError) {
               console.error("Could not persist free response support", {
