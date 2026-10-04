@@ -791,6 +791,11 @@ export async function handleConversationalOnboardingTurn(input: {
         last_question_keys: personalBatchFields(0).map((field) => field.key),
         paused_reason: null,
       });
+      await saveConversationBusinessContext({
+        ownerRef: input.ownerRef,
+        conversationId: input.conversationId,
+        businessId: null,
+      });
       return {
         handled: true,
         assistantText,
@@ -924,6 +929,11 @@ export async function handleConversationalOnboardingTurn(input: {
       completed_at: completed ? new Date().toISOString() : null,
       paused_reason: null,
     });
+    await saveConversationBusinessContext({
+      ownerRef: input.ownerRef,
+      conversationId: input.conversationId,
+      businessId: selection.business.id,
+    });
 
     return {
       handled: true,
@@ -1013,6 +1023,11 @@ export async function handleConversationalOnboardingTurn(input: {
       last_question_keys: batch.questions.map((question) => question.key),
       completed_at: batch.complete ? new Date().toISOString() : null,
       paused_reason: null,
+    });
+    await saveConversationBusinessContext({
+      ownerRef: input.ownerRef,
+      conversationId: input.conversationId,
+      businessId,
     });
 
     return {
