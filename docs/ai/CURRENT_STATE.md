@@ -262,6 +262,31 @@ Behavior:
 
 This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
 
+### Local/free response memory + paid handoff support
+
+Completed owned/local and strict-free cloud text responses now feed a zero-model-cost support pass through `openrouter/free`.
+
+The support pass has two bounded responsibilities:
+- extract only durable memory candidates worth reusing later;
+- draft an advisory stronger-model handoff when a paid model could materially improve the result.
+
+Memory behavior:
+- durable high-confidence, non-sensitive owner statements can become active structured memory automatically;
+- weaker or sensitive candidates remain non-active;
+- every memory keeps provenance to the source conversation/job and source model/provider;
+- future text chat injects only a small relevance-ranked set of active owner memories, plus same-conversation memories;
+- current explicit user instructions override older memory.
+
+Paid handoff behavior:
+- a recommendation does not authorize spend;
+- the free support pass stores a self-contained draft prompt with the lower-cost findings and unresolved verification work;
+- the deterministic escalation evaluator still chooses whether a qualified paid executor is justified and within the saved per-prompt cap / funded balance;
+- when paid fallback is actually allowed, the stored lower-cost handoff is passed as advisory context and the stronger model is told to verify/repair it instead of trusting it blindly.
+
+Schema:
+- `cooperative_memories` holds structured memory/provenance;
+- `text_inference_jobs.support_packet`, `support_analyzed_at`, `paid_prompt_draft`, and `paid_prompt_reason` preserve support output with the originating job.
+
 ### Strict-free Hermes text reasoning fallback
 
 Normal text chat now follows the intended cost/capability ladder after all deterministic/code handlers have had the first chance to answer:
