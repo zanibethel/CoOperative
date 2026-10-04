@@ -65,6 +65,7 @@ type ConversationSummary = {
   id: string;
   title: string;
   profile: Profile;
+  businessId?: string | null;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -1538,6 +1539,13 @@ export default function LocalAiChat() {
     setConversationId(result.conversation.id);
     setConversationTitle(result.conversation.title);
     setProfile(result.conversation.profile);
+    const conversationBusinessId = result.conversation.businessId || "";
+    setSelectedBusinessId(conversationBusinessId);
+    if (conversationBusinessId) {
+      window.localStorage.setItem(ACTIVE_BUSINESS_KEY, conversationBusinessId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_BUSINESS_KEY);
+    }
     setMessages(result.messages || []);
     setAttachments([]);
     setMeta("");
@@ -2272,6 +2280,13 @@ export default function LocalAiChat() {
       }
       if (queued.conversationTitle) {
         setConversationTitle(queued.conversationTitle);
+      }
+      if (queued.selectedBusinessId) {
+        setSelectedBusinessId(queued.selectedBusinessId);
+        window.localStorage.setItem(
+          ACTIVE_BUSINESS_KEY,
+          queued.selectedBusinessId,
+        );
       }
 
       if (
