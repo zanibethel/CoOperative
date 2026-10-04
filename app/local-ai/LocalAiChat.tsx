@@ -1601,9 +1601,13 @@ export default function LocalAiChat() {
 
           if (result.status === "queued") {
             setStatus(
-              result.execution === "paid-ai"
-                ? "Using funded high-quality AI…"
-                : "Waiting for local capacity…",
+              result.execution === "media"
+                ? result.capability === "video"
+                  ? "Preparing video generation…"
+                  : "Preparing image generation…"
+                : result.execution === "paid-ai"
+                  ? "Using funded high-quality AI…"
+                  : "Waiting for local capacity…",
             );
             await wait(1000);
             continue;
