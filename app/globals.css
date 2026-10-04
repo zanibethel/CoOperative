@@ -3538,15 +3538,20 @@ b { color: var(--text); }
 .media-fullscreen-overlay.visible {
   opacity: 1;
   visibility: visible;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .media-fullscreen-topbar {
+  position: absolute;
+  top: max(14px, env(safe-area-inset-top));
+  left: max(14px, env(safe-area-inset-left));
+  right: max(14px, env(safe-area-inset-right));
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
   color: white;
+  pointer-events: none;
 }
 
 .media-fullscreen-topbar strong {
@@ -3561,33 +3566,40 @@ b { color: var(--text); }
   flex: 0 0 auto;
   width: 42px;
   height: 42px;
-  border: 1px solid #ffffff38;
+  border: 1px solid #ffffff2e;
   border-radius: 999px;
-  background: #111b;
+  background: #1119;
   color: white;
   font-size: 1.7rem;
   line-height: 1;
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
 }
 
 .media-fullscreen-actions {
-  align-self: center;
-  width: min(100%, 720px);
+  position: absolute;
+  left: 50%;
+  bottom: max(52px, calc(env(safe-area-inset-bottom) + 42px));
+  translate: -50% 0;
+  width: min(calc(100vw - 32px), 720px);
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 9px;
+  pointer-events: none;
 }
 
 .media-fullscreen-actions button {
   min-height: 46px;
-  border: 1px solid #ffffff32;
+  border: 1px solid #ffffff26;
   border-radius: 13px;
   padding: 9px 11px;
-  background: #10141be8;
+  background: #10141b99;
   color: white;
   font: inherit;
   font-size: .72rem;
   font-weight: 800;
   backdrop-filter: blur(14px);
+  pointer-events: auto;
 }
 
 .media-fullscreen-actions button:disabled {
@@ -3596,21 +3608,25 @@ b { color: var(--text); }
 
 .media-fullscreen-message,
 .media-fullscreen-hint {
-  align-self: center;
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  width: min(calc(100vw - 40px), 640px);
   color: #fff;
   text-align: center;
   text-shadow: 0 1px 8px #000;
+  pointer-events: none;
 }
 
 .media-fullscreen-message {
-  margin-top: 8px;
+  bottom: max(108px, calc(env(safe-area-inset-bottom) + 98px));
   font-size: .72rem;
 }
 
 .media-fullscreen-hint {
-  margin-top: 7px;
+  bottom: max(14px, env(safe-area-inset-bottom));
   font-size: .62rem;
-  opacity: .74;
+  opacity: .64;
 }
 
 /* Attachment source menu + persistent CoOperative Cloud */
@@ -3786,12 +3802,19 @@ b { color: var(--text); }
 
 @media (max-width: 760px) {
   .media-fullscreen-actions {
+    bottom: max(48px, calc(env(safe-area-inset-bottom) + 38px));
     grid-template-columns: 1fr;
-    width: min(88vw, 420px);
+    width: min(84vw, 420px);
+    gap: 7px;
   }
 
   .media-fullscreen-actions button {
     min-height: 44px;
+    background: #10141b8c;
+  }
+
+  .media-fullscreen-message {
+    bottom: max(198px, calc(env(safe-area-inset-bottom) + 188px));
   }
 
   .attachment-source-menu {
