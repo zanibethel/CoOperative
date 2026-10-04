@@ -4,6 +4,7 @@ import { authorizeUnisonNode } from "@/lib/unison/auth";
 import { z } from "zod";
 import { textInferenceMessageSchema } from "@/lib/inference/contracts";
 import { persistResponseSupport } from "@/lib/ai/response-support";
+import { refreshRuntimeContextAfterOutcome } from "@/lib/ai/runtime-context-markdown";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -166,6 +167,24 @@ export async function POST(request: Request) {
           completedAt,
           latencyMs: null,
         });
+
+        try {
+          await refreshRuntimeContextAfterOutcome({
+            ownerRef: job.client_owner_ref,
+            jobId,
+            conversationId: job.conversation_id,
+            requestType: `${job.capability || "text"} / local failure`,
+            allowExternalReview: job.routing_preference !== "require-node",
+          });
+        } catch (contextError) {
+          console.error("Could not archive local failure context", {
+            jobId,
+            detail:
+              contextError instanceof Error
+                ? contextError.message.slice(0, 600)
+                : "Unknown context error",
+          });
+        }
       }
 
       return NextResponse.json({ ok: true, status: "failed" });
@@ -297,6 +316,26 @@ export async function POST(request: Request) {
             });
           }
         }
+      }
+    }
+
+    if (!job.personal_use) {
+      try {
+        await refreshRuntimeContextAfterOutcome({
+          ownerRef: job.client_owner_ref,
+          jobId,
+          conversationId: job.conversation_id,
+          requestType: `${job.capability || "text"} / local success`,
+          allowExternalReview: job.routing_preference !== "require-node",
+        });
+      } catch (contextError) {
+        console.error("Could not refresh local runtime context", {
+          jobId,
+          detail:
+            contextError instanceof Error
+              ? contextError.message.slice(0, 600)
+              : "Unknown context error",
+        });
       }
     }
 

@@ -17,6 +17,7 @@ import {
 } from "@/lib/inference/contracts";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
 import { paidHandoffMessages } from "@/lib/ai/response-support";
+import { refreshRuntimeContextAfterOutcome } from "@/lib/ai/runtime-context-markdown";
 import {
   aiProfileBalanceForUser,
   cooperativeProfileRef,
@@ -82,7 +83,7 @@ export async function POST(request: Request) {
     const { data: sourceJob, error: sourceError } = await admin
       .from("text_inference_jobs")
       .select(
-        "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd,paid_prompt_draft,paid_prompt_reason,support_packet",
+        "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd,paid_prompt_draft,paid_prompt_reason,support_packet,context_document_path,context_document_generated_at",
       )
       .eq("id", input.jobId)
       .eq("client_owner_ref", ownerRef)
@@ -262,6 +263,8 @@ export async function POST(request: Request) {
       verification_status: "not_run",
       model_mixer: sourceJob.model_mixer || null,
       request_max_spend_microusd: sourceJob.request_max_spend_microusd ?? null,
+      context_document_path: sourceJob.context_document_path || null,
+      context_document_generated_at: sourceJob.context_document_generated_at || null,
       capability: "text",
       routing_preference: "default",
       fallback_for_job_id: sourceJob.id,
@@ -323,6 +326,24 @@ export async function POST(request: Request) {
         })
         .eq("id", paidJobId);
 
+      try {
+        await refreshRuntimeContextAfterOutcome({
+          ownerRef,
+          jobId: paidJobId,
+          conversationId: sourceJob.conversation_id,
+          requestType: "text / paid reservation failure",
+          allowExternalReview: true,
+        });
+      } catch (contextError) {
+        console.error("Could not archive paid reservation failure", {
+          jobId: paidJobId,
+          detail:
+            contextError instanceof Error
+              ? contextError.message.slice(0, 600)
+              : "Unknown context error",
+        });
+      }
+
       return NextResponse.json(
         {
           error:
@@ -363,6 +384,24 @@ export async function POST(request: Request) {
         })
         .eq("id", paidJobId);
 
+      try {
+        await refreshRuntimeContextAfterOutcome({
+          ownerRef,
+          jobId: paidJobId,
+          conversationId: sourceJob.conversation_id,
+          requestType: "text / paid execution failure",
+          allowExternalReview: true,
+        });
+      } catch (contextError) {
+        console.error("Could not archive paid execution failure", {
+          jobId: paidJobId,
+          detail:
+            contextError instanceof Error
+              ? contextError.message.slice(0, 600)
+              : "Unknown context error",
+        });
+      }
+
       throw executionError;
     }
 
@@ -391,6 +430,24 @@ export async function POST(request: Request) {
           updated_at: completedAt,
         })
         .eq("id", paidJobId);
+
+      try {
+        await refreshRuntimeContextAfterOutcome({
+          ownerRef,
+          jobId: paidJobId,
+          conversationId: sourceJob.conversation_id,
+          requestType: "text / paid cost verification failure",
+          allowExternalReview: true,
+        });
+      } catch (contextError) {
+        console.error("Could not archive paid cost failure", {
+          jobId: paidJobId,
+          detail:
+            contextError instanceof Error
+              ? contextError.message.slice(0, 600)
+              : "Unknown context error",
+        });
+      }
 
       return NextResponse.json(
         {
@@ -455,6 +512,24 @@ export async function POST(request: Request) {
       .eq("id", sourceJob.conversation_id)
       .eq("owner_ref", ownerRef);
     if (conversationError) throw conversationError;
+
+    try {
+      await refreshRuntimeContextAfterOutcome({
+        ownerRef,
+        jobId: paidJobId,
+        conversationId: sourceJob.conversation_id,
+        requestType: "text / paid success",
+        allowExternalReview: true,
+      });
+    } catch (contextError) {
+      console.error("Could not refresh paid runtime context", {
+        jobId: paidJobId,
+        detail:
+          contextError instanceof Error
+            ? contextError.message.slice(0, 600)
+            : "Unknown context error",
+      });
+    }
 
     return NextResponse.json(
       {
