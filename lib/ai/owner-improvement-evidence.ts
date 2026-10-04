@@ -41,6 +41,7 @@ export async function collectOwnerImprovementEvidence(userId: string) {
     { data: textJobs, error: textError },
     { data: agentTasks, error: agentError },
     { data: agentEvents, error: eventError },
+    { data: platformBranchTasks, error: platformBranchError },
     { data: conversations, error: conversationError },
     { data: messages, error: messageError },
     { data: nodes, error: nodeError },
@@ -67,6 +68,14 @@ export async function collectOwnerImprovementEvidence(userId: string) {
       .order("created_at", { ascending: false })
       .limit(1000),
     admin
+      .from("agent_tasks")
+      .select("id,repo_key,mode,status,branch_name,objective,result,error,created_at,updated_at,completed_at")
+      .eq("repo_key", "cooperative")
+      .eq("mode", "prepare_change")
+      .not("branch_name", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(500),
+    admin
       .from("local_ai_conversations")
       .select("id,created_at,updated_at")
       .eq("owner_ref", ownerRef),
@@ -91,6 +100,7 @@ export async function collectOwnerImprovementEvidence(userId: string) {
     textError ||
     agentError ||
     eventError ||
+    platformBranchError ||
     conversationError ||
     messageError ||
     nodeError ||
@@ -138,7 +148,7 @@ export async function collectOwnerImprovementEvidence(userId: string) {
   const usageRows = usage || [];
   const completedUsage = usageRows.filter((entry) => entry.status === "completed");
 
-  const branchCandidates = (agentTasks || [])
+  const branchCandidates = (platformBranchTasks || [])
     .filter(
       (task) =>
         task.mode === "prepare_change" &&
