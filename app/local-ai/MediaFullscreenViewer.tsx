@@ -91,8 +91,8 @@ export default function MediaFullscreenViewer({ media, onClose }: Props) {
     [media],
   );
 
-  const activeMedia = media;
-  if (!activeMedia) return null;
+  if (!media) return null;
+  const activeMedia: FullscreenMedia = media;
 
   async function shareMedia() {
     if (working) return;
@@ -113,7 +113,7 @@ export default function MediaFullscreenViewer({ media, onClose }: Props) {
         });
         setMessage("Share sheet opened.");
       } else {
-        await navigator.clipboard.writeText(media.url);
+        await navigator.clipboard.writeText(activeMedia.url);
         setMessage("Media link copied.");
       }
     } catch (error) {
