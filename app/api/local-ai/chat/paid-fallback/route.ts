@@ -334,6 +334,7 @@ export async function POST(request: Request) {
           conversationId: sourceJob.conversation_id,
           requestType: "text / paid reservation failure",
           allowExternalReview: true,
+          businessId: sourceJob.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not archive paid reservation failure", {
@@ -392,6 +393,7 @@ export async function POST(request: Request) {
           conversationId: sourceJob.conversation_id,
           requestType: "text / paid execution failure",
           allowExternalReview: true,
+          businessId: sourceJob.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not archive paid execution failure", {
@@ -439,6 +441,7 @@ export async function POST(request: Request) {
           conversationId: sourceJob.conversation_id,
           requestType: "text / paid cost verification failure",
           allowExternalReview: true,
+          businessId: sourceJob.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not archive paid cost failure", {
