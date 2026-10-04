@@ -2238,9 +2238,9 @@ export default function LocalAiChat() {
         onboardingState?.status === "in_progress" &&
         onboardingState.conversationId &&
         onboardingState.conversationId === conversationId &&
-        currentAttachments.length === 0
+        onboardingState.phase !== "paused"
       ) {
-        setStatus("Saving your profile answers…");
+        setStatus("Saving intake answers…");
         const onboardingResponse = await fetch("/api/local-ai/onboarding", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -2261,13 +2261,15 @@ export default function LocalAiChat() {
         }
 
         setOnboardingState(onboarding.state);
-        await loadConversation(conversationId);
-        await refreshConversations();
-        setAttachments([]);
-        setMeta("");
-        setStatus("Ready");
-        setBusy(false);
-        return;
+        if (onboarding.handled !== false) {
+          await loadConversation(conversationId);
+          await refreshConversations();
+          setAttachments([]);
+          setMeta("");
+          setStatus("Ready");
+          setBusy(false);
+          return;
+        }
       }
 
       setStatus("Selecting an execution path…");
