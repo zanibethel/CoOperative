@@ -16,6 +16,7 @@ import {
   textTaskClassSchema,
 } from "@/lib/inference/contracts";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
+import { paidHandoffMessages } from "@/lib/ai/response-support";
 import {
   aiProfileBalanceForUser,
   cooperativeProfileRef,
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
     const { data: sourceJob, error: sourceError } = await admin
       .from("text_inference_jobs")
       .select(
-        "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd",
+        "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd,paid_prompt_draft,paid_prompt_reason,support_packet",
       )
       .eq("id", input.jobId)
       .eq("client_owner_ref", ownerRef)
@@ -125,6 +126,13 @@ export async function POST(request: Request) {
       );
     }
 
+    const paidMessages = paidHandoffMessages(
+      parsedMessages.data,
+      typeof sourceJob.paid_prompt_draft === "string"
+        ? sourceJob.paid_prompt_draft
+        : null,
+    );
+
     const profileBalance = await aiProfileBalanceForUser(userId);
     if (!profileBalance.funded) {
       return NextResponse.json(
@@ -163,7 +171,7 @@ export async function POST(request: Request) {
     const evidence: EscalationEvidence = {
       taskClass: parsedTaskClass.data,
       localProfile: parsedProfile.data,
-      messages: parsedMessages.data,
+      messages: paidMessages,
       requestedOutputTokens:
         typeof sourceJob.max_tokens === "number"
           ? Math.max(16, Math.min(4096, sourceJob.max_tokens))
@@ -244,7 +252,10 @@ export async function POST(request: Request) {
       routing_mode: "auto",
       task_class: parsedTaskClass.data,
       route_reason:
-        "Hard local execution failure triggered deterministic funded paid-AI escalation.",
+        typeof sourceJob.paid_prompt_draft === "string" &&
+        sourceJob.paid_prompt_draft.trim()
+          ? "Lower-cost local/free reasoning prepared an advisory escalation handoff; deterministic funded paid-AI escalation then selected a qualified executor within the saved cap."
+          : "Hard local execution failure triggered deterministic funded paid-AI escalation.",
       allow_paid_fallback: false,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
@@ -291,6 +302,10 @@ export async function POST(request: Request) {
         sourceJobId: sourceJob.id,
         conversationId: sourceJob.conversation_id,
         provider: decision.candidate.provider,
+        handoffPrepared: Boolean(
+          typeof sourceJob.paid_prompt_draft === "string" &&
+            sourceJob.paid_prompt_draft.trim(),
+        ),
         model: decision.candidate.model,
         requestSpendCapUsd,
       },
@@ -454,7 +469,10 @@ export async function POST(request: Request) {
         latencyMs,
         execution: "paid-ai",
         routeReason:
-          "Local execution failed; profile-funded high-quality AI completed the request.",
+          typeof sourceJob.paid_prompt_draft === "string" &&
+          sourceJob.paid_prompt_draft.trim()
+            ? "Local/free reasoning prepared the stronger-model handoff; a profile-funded qualified model completed the request within the saved spend policy."
+            : "Local execution failed; profile-funded high-quality AI completed the request.",
         funding: {
           reservationId: reservation.id,
           chargedUsd: result.estimatedCostUsd,
