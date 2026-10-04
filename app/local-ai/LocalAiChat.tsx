@@ -420,9 +420,11 @@ function mediaRecommendationsDirective(content: string) {
 
 function MediaRecommendationChoices({
   options,
+  currentCapUsd,
   onChoose,
 }: {
   options: MediaRecommendationOption[];
+  currentCapUsd: number | null;
   onChoose: (option: MediaRecommendationOption) => void;
 }) {
   const order: Record<MediaRecommendationOption["tier"], number> = {
@@ -440,7 +442,11 @@ function MediaRecommendationChoices({
 
   return (
     <div className="media-recommendation-list" aria-label="Media recommendations">
-      {sorted.map((option) => (
+      {sorted.map((option) => {
+        const overCap =
+          typeof currentCapUsd === "number" &&
+          option.capUsd > currentCapUsd + 0.000001;
+        return (
         <details className={`media-recommendation-card ${option.tier}`} key={option.tier}>
           <summary>
             <span className="media-recommendation-title">
@@ -454,6 +460,12 @@ function MediaRecommendationChoices({
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 3,
               })}
+              {overCap && typeof currentCapUsd === "number" ? (
+                <small>
+                  {"Over $" + currentCapUsd.toFixed(2) + " cap · +$" +
+                    (option.capUsd - currentCapUsd).toFixed(2) + " required"}
+                </small>
+              ) : null}
             </span>
           </summary>
 
@@ -651,7 +663,8 @@ function MediaRecommendationChoices({
             </button>
           </div>
         </details>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -2360,6 +2373,7 @@ export default function LocalAiChat() {
                         ) : null}
                         <MediaRecommendationChoices
                           options={mediaRecommendations.options}
+                          currentCapUsd={mediaRecommendations.currentCapUsd}
                           onChoose={(option) => {
                             const mediaLevel =
                               option.tier === "high-end"
