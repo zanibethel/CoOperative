@@ -93,3 +93,12 @@ If the user explicitly says “my business” and only one business exists, code
 The active onboarding conversation is also guarded server-side. Intake answers are mapped and saved through deterministic code before local/free/paid AI can run, even if a client fails to perform its normal onboarding interception.
 
 Once business scope is established, the business-specific structured fields are included in the private runtime Markdown context alongside personal context, without mixing one business into another.
+
+
+## Code-first default after intake
+
+The same code-first rule now applies beyond onboarding. After intake, scope, settings, media planning, and other specialized deterministic handlers have had a chance to respond, main chat runs the general code-first responder before creating a text or vision AI job.
+
+If code can fully answer from saved state or a known workflow, the response returns immediately as `execution: "code"`. AI is only eligible after that layer explicitly declines because model reasoning, interpretation, synthesis, or generation is still needed.
+
+See `docs/CODE-FIRST-CHAT.md` for the full routing contract.
