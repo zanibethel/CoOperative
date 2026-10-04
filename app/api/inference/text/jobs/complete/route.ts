@@ -118,7 +118,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("text_inference_jobs")
-      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id,messages,capability")
+      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id,messages,capability,routing_preference")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -267,7 +267,10 @@ export async function POST(request: Request) {
 
       if (conversationError) throw conversationError;
 
-      if (job.capability === "text") {
+      if (
+        job.capability === "text" &&
+        job.routing_preference !== "require-node"
+      ) {
         const parsedMessages = z
           .array(textInferenceMessageSchema)
           .min(1)
