@@ -280,6 +280,8 @@ Routing:
 
 The UI distinguishes `Checking local vision capacity…` from `Using free cloud vision…`, so zero-cost cloud fallback is visible rather than being presented as local execution.
 
+The free cloud path is multimodal reasoning, not a vision-only captioner. Hermes uses the free main model for text reasoning/synthesis after `vision_analyze` inspects the image. Before the sandbox starts, it reloads the original persisted inference job and carries forward the code-authored system/business instructions plus recent conversation context. Those code-provided system instructions are explicitly marked authoritative over user turns, so cloud fallback follows the same deterministic operating policy instead of answering from only the latest image prompt.
+
 The fallback path has a successful TypeScript/Vercel preview build. A preview-only live probe could not reach production-only Supabase credentials, so end-to-end provider execution must be verified from the authenticated production chat after deployment; no paid route is permitted during that verification.
 
 ### Chat media handling and CoOperative Cloud
