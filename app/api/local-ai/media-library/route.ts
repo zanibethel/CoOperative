@@ -9,7 +9,7 @@ export const maxDuration = 60;
 const LIBRARY_BUCKET = "cooperative-media-library";
 const ATTACHMENT_BUCKET = "local-ai-attachments";
 const MAX_LIBRARY_BYTES = 50 * 1024 * 1024;
-const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 
 type SourceMediaJob = {
   id: string;
@@ -194,7 +194,7 @@ export async function POST(request: Request) {
       }
       if (Number(item.size_bytes) > MAX_ATTACHMENT_BYTES) {
         return NextResponse.json(
-          { error: "This saved image is larger than the current 3 MB chat attachment limit." },
+          { error: "This saved image is larger than the current 12 MB chat attachment limit." },
           { status: 413 },
         );
       }
