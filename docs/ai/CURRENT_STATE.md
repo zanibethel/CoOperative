@@ -262,6 +262,21 @@ Behavior:
 
 This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
 
+### Automatic evidence-ranked media execution
+
+Clear media requests now execute automatically when at least one exact, execution-ready route fits the current per-prompt spend ceiling.
+
+Behavior:
+- explicit High / Medium / Low recommendation selections still execute the requested tier;
+- requests that explicitly ask to compare/show/review options still stop at the recommendation cards;
+- otherwise CoOperative filters the ranked options to routes whose safe cap fits the current prompt ceiling and whose execution path is enabled;
+- among those routes it chooses the highest evidence-driven routing quality score, then stronger benchmark coverage, then lower cost;
+- if no route fits, generation does not start and the ranked choices remain visible;
+- over-cap cards now visibly show the current prompt cap and the additional amount required;
+- selecting an over-cap card remains an explicit user action that can raise the request cap for that chosen execution.
+
+This closes the gap exposed by the first post-benchmark test: with a $0.05 prompt cap, Nano Banana Pro may remain the highest-quality visible route at about $0.15, while Z-Image Turbo at about $0.005 should be selected and started automatically when it is the best evidence-ranked route that actually fits the cap.
+
 ### Benchmark review UI
 
 The completed Z-Image Turbo vs Nano Banana Pro benchmark is now reviewable inside the owner Model Mixer.
