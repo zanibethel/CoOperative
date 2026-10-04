@@ -262,6 +262,19 @@ Behavior:
 
 This is the foundation for future multi-user main-chat access: each entitled login can carry its own balance plus its own per-prompt spend ceiling.
 
+### Branched personal/business conversational onboarding
+
+First-use main chat now starts an optional code-driven onboarding choice for each logged-in account: **Business intake** or **Personal setup**.
+
+- Personal setup asks three questions at a time and writes structured `known`, `unknown`, or `deferred` profile fields.
+- Business intake lists existing owned businesses or creates a new business from name/industry/team-size basics, then continues the deterministic business intake in batches of up to three questions.
+- `skip` leaves a value unknown; `later` defers it. Neither path guesses.
+- If the user ignores onboarding and asks an unrelated question, onboarding is paused and the normal request proceeds. Already saved answers are retained and the flow can be resumed explicitly later.
+- Normal local/free/paid chat support may fill missing personal or active-business fields only from explicit, high-confidence user statements.
+- `local_ai_conversations.business_id` persists selected business scope and `text_inference_jobs.business_id` carries that scope through local/free/paid reasoning.
+- If no business is selected and a task such as an image, event, campaign, post, email, document, or other output could reasonably be personal or business-related, code asks whether it is personal or associated with one of the user's saved businesses before execution.
+- Pending scope questions live in `cooperative_context_clarifications`; choosing personal or a business resumes the original request, while an unrelated new request dismisses the pending clarification rather than blocking chat.
+
 ### Private per-user runtime context Markdown
 
 Main CoOperative chat now renders a fresh private Markdown context document from database evidence before local/owned or strict-free reasoning is queued.
