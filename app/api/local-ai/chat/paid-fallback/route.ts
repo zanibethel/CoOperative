@@ -30,9 +30,185 @@ export const maxDuration = 210;
 
 const requestSchema = z.object({
   jobId: z.string().uuid(),
+  mode: z.enum(["automatic", "suggested"]).default("automatic"),
 });
 
 const profileSchema = z.enum(["fast", "quality"]);
+
+function recommendedHandoff(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const paidHandoff = (value as { paidHandoff?: unknown }).paidHandoff;
+  return Boolean(
+    paidHandoff &&
+      typeof paidHandoff === "object" &&
+      !Array.isArray(paidHandoff) &&
+      (paidHandoff as { recommended?: unknown }).recommended === true,
+  );
+}
+
+async function paidSourceJob(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  ownerRef: string,
+  jobId: string,
+) {
+  const { data, error } = await admin
+    .from("text_inference_jobs")
+    .select(
+      "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd,paid_prompt_draft,paid_prompt_reason,support_packet,routing_preference",
+    )
+    .eq("id", jobId)
+    .eq("client_owner_ref", ownerRef)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+function parsedSourceEvidence(sourceJob: NonNullable<Awaited<ReturnType<typeof paidSourceJob>>>) {
+  const messages = z
+    .array(textInferenceMessageSchema)
+    .min(1)
+    .max(40)
+    .safeParse(sourceJob.messages);
+  const profile = profileSchema.safeParse(sourceJob.profile);
+  const taskClass = textTaskClassSchema.safeParse(sourceJob.task_class);
+  if (!messages.success || !profile.success || !taskClass.success) return null;
+
+  const paidMessages = paidHandoffMessages(
+    messages.data,
+    typeof sourceJob.paid_prompt_draft === "string"
+      ? sourceJob.paid_prompt_draft
+      : null,
+  );
+  return {
+    messages: messages.data,
+    paidMessages,
+    profile: profile.data,
+    taskClass: taskClass.data,
+  };
+}
+
+function requestCapUsd(sourceJob: { request_max_spend_microusd?: unknown }) {
+  return typeof sourceJob.request_max_spend_microusd === "number"
+    ? sourceJob.request_max_spend_microusd / 1_000_000
+    : null;
+}
+
+export async function GET(request: Request) {
+  const userId = await mainCooperativeUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const ownerRef = `coop-user:${userId}`;
+  const admin = createAdminSupabaseClient();
+
+  try {
+    const url = new URL(request.url);
+    const jobId = url.searchParams.get("jobId") || "";
+    if (!jobId) {
+      return NextResponse.json({ error: "jobId is required." }, { status: 400 });
+    }
+
+    const sourceJob = await paidSourceJob(admin, ownerRef, jobId);
+    if (
+      !sourceJob ||
+      sourceJob.status !== "completed" ||
+      sourceJob.capability !== "text" ||
+      sourceJob.routing_preference === "require-node" ||
+      !recommendedHandoff(sourceJob.support_packet) ||
+      typeof sourceJob.paid_prompt_draft !== "string" ||
+      !sourceJob.paid_prompt_draft.trim()
+    ) {
+      return NextResponse.json(
+        { available: false },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const parsed = parsedSourceEvidence(sourceJob);
+    if (!parsed) {
+      return NextResponse.json(
+        { available: false, reason: "The source job has invalid escalation evidence." },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const profileBalance = await aiProfileBalanceForUser(userId);
+    const capUsd = requestCapUsd(sourceJob);
+    const effectiveBudgetUsd =
+      capUsd === null
+        ? profileBalance.availableUsd
+        : Math.min(profileBalance.availableUsd, capUsd);
+
+    const evidence: EscalationEvidence = {
+      taskClass: parsed.taskClass,
+      localProfile: parsed.profile,
+      messages: parsed.paidMessages,
+      requestedOutputTokens:
+        typeof sourceJob.max_tokens === "number"
+          ? Math.max(16, Math.min(4096, sourceJob.max_tokens))
+          : 768,
+      localAttempts: 1,
+      localFailures: 0,
+      localExecutionUnavailable: false,
+      verificationStatus: "passed",
+      allowPaidFallback: true,
+      automaticPaidBudgetUsd: Math.max(0, effectiveBudgetUsd),
+      fundedPaidBalanceUsd: profileBalance.availableUsd,
+      requiredSuccessRate: 0.8,
+      userRequestedEscalation: true,
+    };
+
+    const candidate = configuredOpenAiCandidate(evidence);
+    const decision = evaluatePaidEscalation(
+      evidence,
+      candidate ? [candidate] : [],
+    );
+    const selected = decision.candidate || candidate;
+    const estimatedCostUsd = selected?.estimatedMarginalCostUsd;
+    const withinCap =
+      typeof estimatedCostUsd === "number" &&
+      Number.isFinite(estimatedCostUsd) &&
+      (capUsd === null || estimatedCostUsd <= capUsd + 1e-9);
+    const withinBalance =
+      typeof estimatedCostUsd === "number" &&
+      Number.isFinite(estimatedCostUsd) &&
+      profileBalance.availableUsd + 1e-9 >= estimatedCostUsd;
+
+    return NextResponse.json(
+      {
+        available: Boolean(selected),
+        canRun:
+          Boolean(selected) &&
+          profileBalance.funded &&
+          withinCap &&
+          withinBalance &&
+          decision.action === "escalate",
+        provider: selected?.provider || null,
+        model: selected?.model || null,
+        estimatedCostUsd:
+          typeof estimatedCostUsd === "number" ? estimatedCostUsd : null,
+        maxSpendUsd: capUsd,
+        availableBalanceUsd: profileBalance.availableUsd,
+        reason:
+          typeof sourceJob.paid_prompt_reason === "string"
+            ? sourceJob.paid_prompt_reason
+            : decision.reason,
+        prompt: sourceJob.paid_prompt_draft.trim(),
+        decisionReason: decision.reason,
+        decisionAction: decision.action,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message : "Could not prepare paid-model suggestion.";
+    return NextResponse.json(
+      { error: "Could not prepare paid-model suggestion.", detail: detail.slice(0, 1200) },
+      { status: 502, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+}
 
 export async function POST(request: Request) {
   const userId = await mainCooperativeUserId();
@@ -79,28 +255,42 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: sourceJob, error: sourceError } = await admin
-      .from("text_inference_jobs")
-      .select(
-        "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd,paid_prompt_draft,paid_prompt_reason,support_packet",
-      )
-      .eq("id", input.jobId)
-      .eq("client_owner_ref", ownerRef)
-      .maybeSingle();
-
-    if (sourceError) throw sourceError;
+    const sourceJob = await paidSourceJob(admin, ownerRef, input.jobId);
     if (!sourceJob) {
       return NextResponse.json({ error: "Local AI job not found." }, { status: 404 });
     }
-    if (sourceJob.status !== "failed") {
+    const suggestedMode = input.mode === "suggested";
+    if (
+      (!suggestedMode && sourceJob.status !== "failed") ||
+      (suggestedMode && sourceJob.status !== "completed")
+    ) {
       return NextResponse.json(
-        { error: `Paid fallback requires a failed local job, not ${sourceJob.status}.` },
+        {
+          error: suggestedMode
+            ? `Suggested stronger-model execution requires a completed lower-cost job, not ${sourceJob.status}.`
+            : `Paid fallback requires a failed local/free job, not ${sourceJob.status}.`,
+        },
         { status: 409 },
       );
     }
-    if (sourceJob.allow_paid_fallback !== true || sourceJob.capability !== "text") {
+    if (
+      sourceJob.capability !== "text" ||
+      sourceJob.routing_preference === "require-node" ||
+      (!suggestedMode && sourceJob.allow_paid_fallback !== true)
+    ) {
       return NextResponse.json(
         { error: "This job is not eligible for funded paid fallback." },
+        { status: 409 },
+      );
+    }
+    if (
+      suggestedMode &&
+      (!recommendedHandoff(sourceJob.support_packet) ||
+        typeof sourceJob.paid_prompt_draft !== "string" ||
+        !sourceJob.paid_prompt_draft.trim())
+    ) {
+      return NextResponse.json(
+        { error: "No stronger-model handoff was recommended for this response." },
         { status: 409 },
       );
     }
@@ -111,27 +301,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const parsedMessages = z
-      .array(textInferenceMessageSchema)
-      .min(1)
-      .max(40)
-      .safeParse(sourceJob.messages);
-    const parsedProfile = profileSchema.safeParse(sourceJob.profile);
-    const parsedTaskClass = textTaskClassSchema.safeParse(sourceJob.task_class);
-
-    if (!parsedMessages.success || !parsedProfile.success || !parsedTaskClass.success) {
+    const parsed = parsedSourceEvidence(sourceJob);
+    if (!parsed) {
       return NextResponse.json(
-        { error: "The failed local job does not contain valid escalation evidence." },
+        { error: "The source job does not contain valid escalation evidence." },
         { status: 409 },
       );
     }
 
-    const paidMessages = paidHandoffMessages(
-      parsedMessages.data,
-      typeof sourceJob.paid_prompt_draft === "string"
-        ? sourceJob.paid_prompt_draft
-        : null,
-    );
+    const parsedMessages = parsed.messages;
+    const parsedProfile = parsed.profile;
+    const parsedTaskClass = parsed.taskClass;
+    const paidMessages = parsed.paidMessages;
 
     const profileBalance = await aiProfileBalanceForUser(userId);
     if (!profileBalance.funded) {
@@ -149,10 +330,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const requestSpendCapUsd =
-      typeof sourceJob.request_max_spend_microusd === "number"
-        ? sourceJob.request_max_spend_microusd / 1_000_000
-        : null;
+    const requestSpendCapUsd = requestCapUsd(sourceJob);
     const effectivePaidBudgetUsd =
       requestSpendCapUsd === null
         ? profileBalance.availableUsd
@@ -169,21 +347,22 @@ export async function POST(request: Request) {
     }
 
     const evidence: EscalationEvidence = {
-      taskClass: parsedTaskClass.data,
-      localProfile: parsedProfile.data,
+      taskClass: parsedTaskClass,
+      localProfile: parsedProfile,
       messages: paidMessages,
       requestedOutputTokens:
         typeof sourceJob.max_tokens === "number"
           ? Math.max(16, Math.min(4096, sourceJob.max_tokens))
           : 768,
       localAttempts: 1,
-      localFailures: 1,
-      localExecutionUnavailable: true,
-      verificationStatus: "inconclusive",
+      localFailures: suggestedMode ? 0 : 1,
+      localExecutionUnavailable: suggestedMode ? false : true,
+      verificationStatus: suggestedMode ? "passed" : "inconclusive",
       allowPaidFallback: true,
       automaticPaidBudgetUsd: effectivePaidBudgetUsd,
       fundedPaidBalanceUsd: profileBalance.availableUsd,
       requiredSuccessRate: 0.8,
+      userRequestedEscalation: suggestedMode,
     };
 
     const candidate = configuredOpenAiCandidate(evidence);
@@ -244,16 +423,17 @@ export async function POST(request: Request) {
       status: "running",
       client_owner_ref: ownerRef,
       conversation_id: sourceJob.conversation_id,
-      messages: parsedMessages.data,
+      messages: paidMessages,
       profile: "quality",
       max_tokens: evidence.requestedOutputTokens,
       temperature:
         typeof sourceJob.temperature === "number" ? sourceJob.temperature : 0.2,
       routing_mode: "auto",
       task_class: parsedTaskClass.data,
-      route_reason:
-        typeof sourceJob.paid_prompt_draft === "string" &&
-        sourceJob.paid_prompt_draft.trim()
+      route_reason: suggestedMode
+        ? "The user explicitly chose the stronger-model suggestion prepared by lower-cost reasoning; deterministic policy selected a qualified funded executor within the saved cap."
+        : typeof sourceJob.paid_prompt_draft === "string" &&
+            sourceJob.paid_prompt_draft.trim()
           ? "Lower-cost local/free reasoning prepared an advisory escalation handoff; deterministic funded paid-AI escalation then selected a qualified executor within the saved cap."
           : "Hard local execution failure triggered deterministic funded paid-AI escalation.",
       allow_paid_fallback: false,
@@ -306,6 +486,7 @@ export async function POST(request: Request) {
           typeof sourceJob.paid_prompt_draft === "string" &&
             sourceJob.paid_prompt_draft.trim(),
         ),
+        explicitSuggestedUpgrade: suggestedMode,
         model: decision.candidate.model,
         requestSpendCapUsd,
       },
@@ -468,9 +649,10 @@ export async function POST(request: Request) {
         outputTokens: result.outputTokens,
         latencyMs,
         execution: "paid-ai",
-        routeReason:
-          typeof sourceJob.paid_prompt_draft === "string" &&
-          sourceJob.paid_prompt_draft.trim()
+        routeReason: suggestedMode
+          ? "You explicitly chose the stronger-model suggestion; the prepared lower-cost handoff was verified/reworked by a qualified funded model within the saved spend policy."
+          : typeof sourceJob.paid_prompt_draft === "string" &&
+              sourceJob.paid_prompt_draft.trim()
             ? "Local/free reasoning prepared the stronger-model handoff; a profile-funded qualified model completed the request within the saved spend policy."
             : "Local execution failed; profile-funded high-quality AI completed the request.",
         funding: {
