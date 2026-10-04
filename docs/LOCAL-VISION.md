@@ -32,7 +32,24 @@ This avoids silently overcommitting unified memory. The first request after a ca
 8. Temporary local files are deleted when generation finishes.
 9. Saved conversations retain authenticated image previews for later review.
 
-No image attachment is made public, and this path has no paid-model fallback.
+No image attachment is made public.
+
+## Zero-cost cloud fallback
+
+Main CoOperative chat keeps local vision first. When an image-understanding job remains unclaimed for 8 seconds and the profile has a connected OpenRouter credential, CoOperative may claim the same job for a strict-free Hermes cloud fallback.
+
+The fallback contract:
+- Hermes runs in an isolated Vercel Sandbox.
+- The orchestration model is `openrouter/free`.
+- `vision_analyze` is pinned to an explicitly free multimodal OpenRouter SKU (`qwen/qwen3.8-27b:free` by default, overridable with `HERMES_FREE_VISION_MODEL`).
+- Hermes is configured to pre-analyze images through the auxiliary vision route.
+- Up to four owned/private chat images are copied directly into the sandbox as local files; no public attachment URL is created.
+- The fallback has no permission to use a paid model and does not reserve/charge the user's AI balance.
+- If the free route is unavailable, rate-limited, or fails, the same job returns to the local vision queue and is not retried through a paid model.
+- A user-selected required node remains a hard boundary and never spills to cloud.
+- Stop/cancel also terminates the free vision sandbox.
+
+This is a capacity fallback, not a replacement for owned/local compute.
 
 ## Follow-up context
 
