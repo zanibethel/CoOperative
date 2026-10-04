@@ -3176,6 +3176,26 @@ export async function GET(request: Request) {
           }
         }
 
+        if (completedJob) {
+          try {
+            await refreshRuntimeContextAfterOutcome({
+              ownerRef,
+              jobId: job.id,
+              conversationId: job.conversation_id,
+              requestType: "vision / free-cloud success",
+              allowExternalReview: true,
+            });
+          } catch (contextError) {
+            console.error("Could not refresh free vision runtime context", {
+              jobId: job.id,
+              detail:
+                contextError instanceof Error
+                  ? contextError.message.slice(0, 600)
+                  : "Unknown context error",
+            });
+          }
+        }
+
         return NextResponse.json(
           {
             jobId: job.id,
@@ -3356,6 +3376,24 @@ export async function GET(request: Request) {
               .eq("status", "running");
             if (failError) throw failError;
 
+            try {
+              await refreshRuntimeContextAfterOutcome({
+                ownerRef,
+                jobId: cloudClaim.id,
+                conversationId: cloudClaim.conversation_id,
+                requestType: "text / free-cloud start failure",
+                allowExternalReview: true,
+              });
+            } catch (contextError) {
+              console.error("Could not archive free text start failure", {
+                jobId: cloudClaim.id,
+                detail:
+                  contextError instanceof Error
+                    ? contextError.message.slice(0, 600)
+                    : "Unknown context error",
+              });
+            }
+
             return NextResponse.json(
               {
                 jobId: cloudClaim.id,
@@ -3487,6 +3525,26 @@ export async function GET(request: Request) {
           }
         }
 
+        if (completedJob) {
+          try {
+            await refreshRuntimeContextAfterOutcome({
+              ownerRef,
+              jobId: job.id,
+              conversationId: job.conversation_id,
+              requestType: "text / free-cloud success",
+              allowExternalReview: true,
+            });
+          } catch (contextError) {
+            console.error("Could not refresh free text runtime context", {
+              jobId: job.id,
+              detail:
+                contextError instanceof Error
+                  ? contextError.message.slice(0, 600)
+                  : "Unknown context error",
+            });
+          }
+        }
+
         return NextResponse.json(
           {
             jobId: job.id,
@@ -3531,6 +3589,24 @@ export async function GET(request: Request) {
         .eq("worker_id", FREE_TEXT_WORKER_ID)
         .eq("status", "running");
       if (failError) throw failError;
+
+      try {
+        await refreshRuntimeContextAfterOutcome({
+          ownerRef,
+          jobId: job.id,
+          conversationId: job.conversation_id,
+          requestType: "text / free-cloud failure",
+          allowExternalReview: true,
+        });
+      } catch (contextError) {
+        console.error("Could not archive free text failure", {
+          jobId: job.id,
+          detail:
+            contextError instanceof Error
+              ? contextError.message.slice(0, 600)
+              : "Unknown context error",
+        });
+      }
 
       return NextResponse.json(
         {
