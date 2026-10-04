@@ -2133,6 +2133,17 @@ export default function LocalAiChat() {
       window.localStorage.setItem(ACTIVE_JOB_KEY, queued.jobId);
       await pollJob(queued.jobId, fallbackMessages);
     } catch (err) {
+      if (
+        await recoverInterruptedSend(
+          err,
+          text,
+          currentAttachments,
+          fallbackMessages,
+        )
+      ) {
+        return;
+      }
+
       setError(err instanceof Error ? err.message : "Local AI request failed.");
       setStatus("Ready");
       setBusy(false);
