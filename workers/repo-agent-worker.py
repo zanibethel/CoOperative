@@ -682,6 +682,61 @@ def run_checks(repo, commands):
         })
     return results
 
+def collect_sandbox_candidate_evidence(source_repo, repository, candidates):
+    if not isinstance(candidates, list) or not candidates:
+        return ""
+
+    branch_base = str(repository.get("defaultBranch") or "main")
+    sections = [
+        "SUCCESSFUL UNMERGED SANDBOX CANDIDATES:",
+        "These are reusable code candidates only. Requester identities and raw chat content are intentionally excluded.",
+        "Prefer a proven minimal pattern when it satisfies the current objective, but do not copy unrelated changes.",
+    ]
+
+    for candidate in candidates[:5]:
+        if not isinstance(candidate, dict):
+            continue
+        branch = candidate.get("branchName")
+        if not _valid_sandbox_branch(branch):
+            continue
+        fetch = run(
+            ["git", "fetch", "origin", branch],
+            source_repo,
+            timeout=120,
+            check=False,
+        )
+        if fetch.returncode != 0:
+            sections.append(f"\nCANDIDATE {branch}: fetch unavailable.")
+            continue
+        diff_stat = run(
+            ["git", "diff", "--stat", f"origin/{branch_base}...origin/{branch}"],
+            source_repo,
+            timeout=60,
+            check=False,
+        ).stdout[-5000:]
+        diff = run(
+            ["git", "diff", "--no-ext-diff", f"origin/{branch_base}...origin/{branch}"],
+            source_repo,
+            timeout=60,
+            check=False,
+        ).stdout[-12000:]
+        sections.append(
+            "\n".join(
+                [
+                    f"\nCANDIDATE {branch}",
+                    f"summary={str(candidate.get('summary') or '')[:800]}",
+                    f"changedFiles={json.dumps(candidate.get('changedFiles') or [])[:1600]}",
+                    f"commitSha={str(candidate.get('commitSha') or '')[:120]}",
+                    "DIFF STAT:",
+                    diff_stat,
+                    "DIFF:",
+                    diff,
+                ]
+            )
+        )
+
+    return "\n".join(sections)[:30000]
+
 def handle_task(task):
     task_id = str(task["taskId"])
     agent, repository = task["agent"], task["repository"]
@@ -719,9 +774,18 @@ def handle_task(task):
         update_remote(source, str(repository.get("defaultBranch") or "main"))
 
     learning_context = task.get("learningContext") or []
+    sandbox_candidates = task.get("sandboxCandidates") or []
     priority_paths = []
     if isinstance(learning_context, list):
         for item in learning_context[:3]:
+            if not isinstance(item, dict):
+                continue
+            for relative in item.get("changedFiles") or []:
+                if isinstance(relative, str) and relative not in priority_paths:
+                    priority_paths.append(relative)
+
+    if isinstance(sandbox_candidates, list):
+        for item in sandbox_candidates[:8]:
             if not isinstance(item, dict):
                 continue
             for relative in item.get("changedFiles") or []:
@@ -736,6 +800,7 @@ def handle_task(task):
             "candidateFiles":context["files"],
             "searchTerms":context["terms"],
             "priorityFiles":priority_paths[:10],
+            "sandboxCandidates":len(sandbox_candidates) if isinstance(sandbox_candidates, list) else 0,
         },
     )
 
@@ -745,6 +810,13 @@ def handle_task(task):
         progress(task_id, "Allowlisted verification checks completed.", metadata={"checks":[{"command":x["command"],"passed":x["passed"]} for x in checks]})
 
     evidence = context["text"]
+    sandbox_evidence = collect_sandbox_candidate_evidence(
+        source,
+        repository,
+        sandbox_candidates,
+    )
+    if sandbox_evidence:
+        evidence += "\n\n" + sandbox_evidence
     if checks:
         check_evidence = []
         for item in checks:
@@ -988,6 +1060,7 @@ def handle_task(task):
         "profile":profile,
         "scopeGuard":guard,
         "learningExamplesUsed":len(learning_context) if isinstance(learning_context, list) else 0,
+        "sandboxCandidatesReviewed":len(sandbox_candidates) if isinstance(sandbox_candidates, list) else 0,
         "formatRecovered":format_recovered,
         "planFormat":"raw-edit-v1",
         "editCount":plan.get("editCount", 0),
