@@ -766,6 +766,24 @@ export async function handleConversationalOnboardingTurn(input: {
   }
 
   if (state.phase === "choose_mode") {
+    const explicitModePhrase =
+      /\b(?:business intake|business setup|personal setup|personal profile)\b/i.test(
+        text,
+      );
+    if (looksLikeNewRequest(text) && !explicitModePhrase) {
+      await updateSession(input.ownerRef, {
+        status: "paused",
+        paused_reason:
+          "User moved to another request before choosing an onboarding mode.",
+      });
+      return {
+        handled: false,
+        state: await onboardingState(input.ownerRef),
+        routeReason:
+          "Initial onboarding paused because the user made a normal request instead of choosing a setup flow.",
+      };
+    }
+
     const mode = parseMode(text);
     if (!mode) {
       await updateSession(input.ownerRef, {
@@ -873,6 +891,39 @@ export async function handleConversationalOnboardingTurn(input: {
 
   if (state.phase === "business_select") {
     const { businesses } = await ownedBusinessesForOnboarding(input.userId);
+    const asksToCreateBusiness =
+      /\b(?:create|set up|setup|add)\b.{0,20}\bnew business\b/i.test(text);
+
+    if (looksLikeNewRequest(text) && !asksToCreateBusiness) {
+      const mentionedBusiness = businesses.find((business) =>
+        text.toLowerCase().includes(business.name.toLowerCase()),
+      );
+
+      if (mentionedBusiness) {
+        await saveConversationBusinessContext({
+          ownerRef: input.ownerRef,
+          conversationId: input.conversationId,
+          businessId: mentionedBusiness.id,
+        });
+      }
+
+      await updateSession(input.ownerRef, {
+        status: "paused",
+        business_id: mentionedBusiness?.id || state.businessId || null,
+        paused_reason:
+          "User moved to another request during business selection.",
+      });
+
+      return {
+        handled: false,
+        selectedBusinessId: mentionedBusiness?.id || null,
+        state: await onboardingState(input.ownerRef),
+        routeReason: mentionedBusiness
+          ? "Business onboarding paused; the normal request continues with the explicitly named business context."
+          : "Business onboarding paused because the user moved to a normal request.",
+      };
+    }
+
     const selection = matchBusinessSelection(text, businesses);
 
     if (!selection) {
