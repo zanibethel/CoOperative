@@ -3236,6 +3236,7 @@ export async function GET(request: Request) {
               conversationId: job.conversation_id,
               requestType: "vision / free-cloud success",
               allowExternalReview: true,
+              businessId: job.business_id || null,
             });
           } catch (contextError) {
             console.error("Could not refresh free vision runtime context", {
@@ -3586,6 +3587,7 @@ export async function GET(request: Request) {
               conversationId: job.conversation_id,
               requestType: "text / free-cloud success",
               allowExternalReview: true,
+              businessId: job.business_id || null,
             });
           } catch (contextError) {
             console.error("Could not refresh free text runtime context", {
@@ -3650,6 +3652,7 @@ export async function GET(request: Request) {
           conversationId: job.conversation_id,
           requestType: "text / free-cloud failure",
           allowExternalReview: true,
+          businessId: job.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not archive free text failure", {
