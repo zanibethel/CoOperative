@@ -21,6 +21,11 @@ import {
   settleAiProfileFunds,
 } from "@/lib/billing/ai-profile-balance";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
+import {
+  businessScopePromptContext,
+  resolveBusinessScope,
+  resumeOnboarding,
+} from "@/lib/ai/user-profile-onboarding";
 import { activeNodeIds } from "@/lib/unison/node-access";
 import {
   pollHermesMediaTask,
@@ -480,9 +485,19 @@ export async function POST(request: Request) {
 
     const admin = createAdminSupabaseClient();
     const ownerRef = owner.ownerRef;
+    const resolvedBusiness = await resolveBusinessScope({
+      ownerRef,
+      requestedBusinessId: input.businessId || null,
+      message: input.message,
+    });
+    const effectiveBusinessId = resolvedBusiness.businessId;
     const businessContext = await buildBusinessChatContext(
       owner.userId,
-      input.businessId,
+      effectiveBusinessId || undefined,
+    );
+    const scopeContext = await businessScopePromptContext(
+      ownerRef,
+      effectiveBusinessId,
     );
     const profileBalance =
       businessContext?.aiBalance ?? (await aiProfileBalanceForUser(owner.userId));
@@ -554,6 +569,50 @@ export async function POST(request: Request) {
       if (attachError) throw attachError;
     }
 
+
+    if (
+      input.attachmentIds.length === 0 &&
+      /\b(?:continue|resume|restart|return to|start)\b.{0,24}\b(?:intake|onboarding|get[- ]to[- ]know[- ]you|profile setup)\b/i.test(
+        input.message,
+      )
+    ) {
+      const intakeMode =
+        /\bbusiness\b/i.test(input.message)
+          ? "business"
+          : /\bpersonal\b/i.test(input.message)
+            ? "personal"
+            : null;
+      const resumed = await resumeOnboarding(ownerRef, intakeMode);
+      if (resumed.conversationId) {
+        const { data: lastAssistant } = await admin
+          .from("local_ai_messages")
+          .select("content")
+          .eq("conversation_id", resumed.conversationId)
+          .eq("owner_ref", ownerRef)
+          .eq("role", "assistant")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: "text",
+            conversationId: resumed.conversationId,
+            conversationTitle: "Getting to know you",
+            text:
+              lastAssistant?.content ||
+              "Intake is ready to continue in the setup conversation.",
+            provider: "code",
+            model: "adaptive-intake-router",
+            routeReason:
+              "CoOperative resumed the saved personal/business intake state without invoking an AI model.",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    }
 
     const requestedMaxSpendPerPrompt = maxSpendPerPromptCommand(input.message);
     const asksCurrentMaxSpendPerPrompt = asksMaxSpendPerPrompt(input.message);
@@ -2558,7 +2617,7 @@ export async function POST(request: Request) {
 
     const directResult = await handleBusinessIntake({
       userId: owner.userId,
-      businessId: input.businessId,
+      businessId: effectiveBusinessId || undefined,
       conversationId,
       message: input.message,
       hasAttachments: input.attachmentIds.length > 0,
@@ -2743,6 +2802,7 @@ export async function POST(request: Request) {
         conversationId,
         currentRequest: modelUserText,
         requestType: `${requestedCapability} / general`,
+        businessId: effectiveBusinessId,
       });
     } catch (contextError) {
       console.error("Could not build private runtime markdown context", {
@@ -2767,6 +2827,10 @@ export async function POST(request: Request) {
             },
           ]
         : []),
+      {
+        role: "system" as const,
+        content: scopeContext,
+      },
       ...(runtimeContext
         ? [
             {
@@ -2831,6 +2895,7 @@ export async function POST(request: Request) {
       verification_status: "not_run",
       model_mixer: input.modelMixer || null,
       request_max_spend_microusd: requestMaxSpendMicrousd,
+      business_id: effectiveBusinessId,
       context_document_path: runtimeContext?.storagePath || null,
       context_document_generated_at: runtimeContext?.generatedAt || null,
     });
@@ -2871,6 +2936,8 @@ export async function POST(request: Request) {
         conversationId,
         conversationTitle,
         business: businessContext?.business ?? null,
+        businessId: effectiveBusinessId,
+        businessScopeSource: resolvedBusiness.source,
         routingPreference: input.nodeRouting,
         preferredNodeId,
         targetNodeId,
@@ -2909,7 +2976,7 @@ export async function GET(request: Request) {
     let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,conversation_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,queued_at,claimed_at,created_at,completed_at,fallback_provider,fallback_model,fallback_sandbox_name,fallback_deadline_at,fallback_attempted_at,fallback_usage",
+        "id,status,profile,conversation_id,business_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,queued_at,claimed_at,created_at,completed_at,fallback_provider,fallback_model,fallback_sandbox_name,fallback_deadline_at,fallback_attempted_at,fallback_usage",
       )
       .eq("client_owner_ref", ownerRef);
 
@@ -3162,6 +3229,7 @@ export async function GET(request: Request) {
                 answer: polled.text.trim(),
                 provider: "openrouter-free",
                 model: job.fallback_model || "openrouter/free",
+                businessId: job.business_id || null,
               });
             } catch (supportError) {
               console.error("Could not persist free vision response support", {
@@ -3183,6 +3251,7 @@ export async function GET(request: Request) {
               conversationId: job.conversation_id,
               requestType: "vision / free-cloud success",
               allowExternalReview: true,
+              businessId: job.business_id || null,
             });
           } catch (contextError) {
             console.error("Could not refresh free vision runtime context", {
@@ -3511,6 +3580,7 @@ export async function GET(request: Request) {
                 answer: polled.text.trim(),
                 provider: "openrouter-free",
                 model: job.fallback_model || "openrouter/free",
+                businessId: job.business_id || null,
               });
             } catch (supportError) {
               console.error("Could not persist free response support", {
@@ -3532,6 +3602,7 @@ export async function GET(request: Request) {
               conversationId: job.conversation_id,
               requestType: "text / free-cloud success",
               allowExternalReview: true,
+              businessId: job.business_id || null,
             });
           } catch (contextError) {
             console.error("Could not refresh free text runtime context", {
@@ -3596,6 +3667,7 @@ export async function GET(request: Request) {
           conversationId: job.conversation_id,
           requestType: "text / free-cloud failure",
           allowExternalReview: true,
+          businessId: job.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not archive free text failure", {

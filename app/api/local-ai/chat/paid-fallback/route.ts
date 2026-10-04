@@ -16,7 +16,7 @@ import {
   textTaskClassSchema,
 } from "@/lib/inference/contracts";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
-import { paidHandoffMessages } from "@/lib/ai/response-support";
+import { paidHandoffMessages, persistResponseSupport } from "@/lib/ai/response-support";
 import { refreshRuntimeContextAfterOutcome } from "@/lib/ai/runtime-context-markdown";
 import {
   aiProfileBalanceForUser,
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     const { data: sourceJob, error: sourceError } = await admin
       .from("text_inference_jobs")
       .select(
-        "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd,paid_prompt_draft,paid_prompt_reason,support_packet,context_document_path,context_document_generated_at",
+        "id,status,client_owner_ref,conversation_id,business_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd,paid_prompt_draft,paid_prompt_reason,support_packet,context_document_path,context_document_generated_at",
       )
       .eq("id", input.jobId)
       .eq("client_owner_ref", ownerRef)
@@ -263,6 +263,7 @@ export async function POST(request: Request) {
       verification_status: "not_run",
       model_mixer: sourceJob.model_mixer || null,
       request_max_spend_microusd: sourceJob.request_max_spend_microusd ?? null,
+      business_id: sourceJob.business_id || null,
       context_document_path: sourceJob.context_document_path || null,
       context_document_generated_at: sourceJob.context_document_generated_at || null,
       capability: "text",
@@ -333,6 +334,7 @@ export async function POST(request: Request) {
           conversationId: sourceJob.conversation_id,
           requestType: "text / paid reservation failure",
           allowExternalReview: true,
+          businessId: sourceJob.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not archive paid reservation failure", {
@@ -391,6 +393,7 @@ export async function POST(request: Request) {
           conversationId: sourceJob.conversation_id,
           requestType: "text / paid execution failure",
           allowExternalReview: true,
+          businessId: sourceJob.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not archive paid execution failure", {
@@ -438,6 +441,7 @@ export async function POST(request: Request) {
           conversationId: sourceJob.conversation_id,
           requestType: "text / paid cost verification failure",
           allowExternalReview: true,
+          businessId: sourceJob.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not archive paid cost failure", {
@@ -512,6 +516,27 @@ export async function POST(request: Request) {
       .eq("id", sourceJob.conversation_id)
       .eq("owner_ref", ownerRef);
     if (conversationError) throw conversationError;
+
+    try {
+      await persistResponseSupport({
+        ownerRef,
+        conversationId: sourceJob.conversation_id,
+        jobId: paidJobId,
+        messages: parsedMessages.data,
+        answer: result.text,
+        provider: result.provider,
+        model: result.model,
+        businessId: sourceJob.business_id || null,
+      });
+    } catch (supportError) {
+      console.error("Could not persist premium response support", {
+        jobId: paidJobId,
+        detail:
+          supportError instanceof Error
+            ? supportError.message.slice(0, 600)
+            : "Unknown support error",
+      });
+    }
 
     try {
       await refreshRuntimeContextAfterOutcome({

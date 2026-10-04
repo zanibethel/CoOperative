@@ -43,3 +43,47 @@ The private per-user `runtime-context.md` includes all structured profile fields
 Unknown and deferred values are explicitly marked so local/free/paid reasoning cannot treat missing profile data as known.
 
 Current explicit user instructions always override older profile values. Later explicit corrections can update a known field.
+
+
+## Adaptive personal / business intake
+
+The first setup conversation now starts by asking whether the user wants a **Personal intake** or **Business intake**.
+
+### Personal intake
+Personal intake uses small batches (up to three questions) to establish durable user preferences, goals, work/project context, tools, recurring workflows, boundaries, interests, and other useful non-sensitive context.
+
+### Business intake
+Business intake first selects an existing business or creates a new business profile. It then asks small batches about:
+- business identity and the user's role;
+- customers and products/services;
+- current goals;
+- team size and recurring workflows;
+- tools/services/devices;
+- bottlenecks;
+- actions that require human approval;
+- current AI use and local/cloud preferences;
+- technology/AI spend, budget ceilings, savings goals, and cost/quality preference.
+
+Business answers are stored in `cooperative_business_profile_fields` and synchronized into the existing `businesses` record/profile where compatible.
+
+### Skip, defer, and interruption
+Every question is optional.
+- `skip` / `pass` leaves the field unknown and prevents it from being repeatedly asked during the current intake.
+- `later` on an individual answer marks it deferred.
+- `pause intake` / `not now` pauses the flow.
+- If the user asks an unrelated question while intake is active, intake yields immediately to normal chat without duplicating the message. The saved intake state remains resumable.
+- Explicit commands such as `continue intake`, `start personal intake`, or `start business intake` resume the appropriate branch. Explicitly resuming a completed branch can revisit fields that were skipped/deferred.
+
+### Natural profile completion
+Normal chat continues to feed the response-support extractor. Explicit durable user statements can update the personal profile. When a business is explicitly active, explicit durable statements about that business can update its business profile. Ambiguous facts are not written to a business profile.
+
+### Personal vs business scope
+Chat defaults to **Personal / no business** rather than silently choosing the first business.
+
+A user can explicitly select a business in the UI or name one of their known businesses in the request. CoOperative can resolve an exact named business into the request's business scope.
+
+If scope would materially change the answer and is still unclear, model instructions require one short clarification such as:
+
+> Is this personal, or is it for Business A, Business B, or Business C?
+
+Once business scope is established, the business-specific structured fields are included in the private runtime Markdown context alongside personal context, without mixing one business into another.

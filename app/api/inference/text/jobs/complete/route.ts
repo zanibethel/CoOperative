@@ -119,7 +119,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("text_inference_jobs")
-      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id,messages,capability,routing_preference")
+      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id,messages,capability,routing_preference,business_id")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -175,6 +175,7 @@ export async function POST(request: Request) {
             conversationId: job.conversation_id,
             requestType: `${job.capability || "text"} / local failure`,
             allowExternalReview: job.routing_preference !== "require-node",
+            businessId: job.business_id || null,
           });
         } catch (contextError) {
           console.error("Could not archive local failure context", {
@@ -305,6 +306,7 @@ export async function POST(request: Request) {
               answer: body.text.trim(),
               provider,
               model: resultModel,
+              businessId: job.business_id || null,
             });
           } catch (supportError) {
             console.error("Could not persist local response support", {
@@ -327,6 +329,7 @@ export async function POST(request: Request) {
           conversationId: job.conversation_id,
           requestType: `${job.capability || "text"} / local success`,
           allowExternalReview: job.routing_preference !== "require-node",
+          businessId: job.business_id || null,
         });
       } catch (contextError) {
         console.error("Could not refresh local runtime context", {

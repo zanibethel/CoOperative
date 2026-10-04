@@ -6,12 +6,17 @@ import {
   answerOnboarding,
   onboardingState,
   startOnboarding,
+  resumeOnboarding,
 } from "@/lib/ai/user-profile-onboarding";
 
 export const runtime = "nodejs";
 
 const postSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("start") }),
+  z.object({
+    action: z.literal("resume"),
+    mode: z.enum(["personal", "business"]).optional(),
+  }),
   z.object({
     action: z.literal("answer"),
     conversationId: z.string().uuid(),
@@ -57,8 +62,11 @@ export async function POST(request: Request) {
     const input = postSchema.parse(await request.json());
     const ownerRef = ownerRefFor(userId);
 
-    if (input.action === "start") {
-      const state = await startOnboarding(ownerRef);
+    if (input.action === "start" || input.action === "resume") {
+      const state =
+        input.action === "resume"
+          ? await resumeOnboarding(ownerRef, input.mode || null)
+          : await startOnboarding(ownerRef);
       return NextResponse.json(
         { state },
         { headers: { "Cache-Control": "no-store" } },

@@ -8,7 +8,10 @@ import {
 } from "@/lib/ai/business-chat-policy";
 import { profileRefFromAiOwnerRef } from "@/lib/billing/ai-profile-balance";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
-import { profileFieldsForRuntime } from "@/lib/ai/user-profile-onboarding";
+import {
+  profileFieldsForRuntime,
+  businessProfileFieldsForRuntime,
+} from "@/lib/ai/user-profile-onboarding";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 const CONTEXT_BUCKET = "cooperative-ai-context";
@@ -209,11 +212,20 @@ async function recordDocument(input: {
 async function loadRuntimeEvidence(input: {
   ownerRef: string;
   conversationId?: string | null;
+  businessId?: string | null;
 }) {
   const admin = createAdminSupabaseClient();
 
-  const [profileFields, memoriesResult, jobsResult, mediaResult, reviewResult] = await Promise.all([
+  const [
+    profileFields,
+    businessProfileFields,
+    memoriesResult,
+    jobsResult,
+    mediaResult,
+    reviewResult,
+  ] = await Promise.all([
     profileFieldsForRuntime(input.ownerRef),
+    businessProfileFieldsForRuntime(input.ownerRef, input.businessId),
     admin
       .from("cooperative_memories")
       .select(
@@ -226,7 +238,7 @@ async function loadRuntimeEvidence(input: {
     admin
       .from("text_inference_jobs")
       .select(
-        "id,status,conversation_id,capability,task_class,created_at,claimed_at,completed_at,worker_id,result_provider,result_model,latency_ms,prompt_tokens,output_tokens,error,route_reason,fallback_provider,fallback_model,fallback_attempted_at",
+        "id,status,conversation_id,business_id,capability,task_class,created_at,claimed_at,completed_at,worker_id,result_provider,result_model,latency_ms,prompt_tokens,output_tokens,error,route_reason,fallback_provider,fallback_model,fallback_attempted_at",
       )
       .eq("client_owner_ref", input.ownerRef)
       .order("created_at", { ascending: false })
@@ -291,7 +303,15 @@ async function loadRuntimeEvidence(input: {
     }
   }
 
-  return { profileFields, memories, jobs, mediaJobs, review, costs };
+  return {
+    profileFields,
+    businessProfileFields,
+    memories,
+    jobs,
+    mediaJobs,
+    review,
+    costs,
+  };
 }
 
 function renderProfileFields(
@@ -481,6 +501,17 @@ function renderRuntimeMarkdown(input: {
     last_confirmed_at: string | null;
     updated_at: string;
   }>;
+  businessProfileFields: Array<{
+    field_key: string;
+    category: string;
+    label: string;
+    value_text: string | null;
+    status: string;
+    confidence: number | string | null;
+    last_confirmed_at: string | null;
+    updated_at: string;
+  }>;
+  businessId?: string | null;
   memories: MemoryRow[];
   jobs: JobRow[];
   mediaJobs: MediaJobRow[];
@@ -525,6 +556,15 @@ function renderRuntimeMarkdown(input: {
     "",
     "These fields come from the get-to-know-you conversation or later explicit user statements. Unknown/deferred values must not be guessed.",
     ...renderProfileFields(input.profileFields),
+    "",
+    "## Active business structured fields",
+    "",
+    input.businessId
+      ? "These fields belong only to the active business context. Unknown/deferred values must not be guessed."
+      : "No active business was selected for this request.",
+    ...(input.businessId
+      ? renderProfileFields(input.businessProfileFields)
+      : ["No business-specific fields injected."]),
     "",
     "## Most up-to-date reusable memory",
     "",
@@ -615,6 +655,7 @@ async function currentEvidenceMarkdown(input: {
   conversationId?: string | null;
   currentRequest?: string | null;
   requestType?: string | null;
+  businessId?: string | null;
 }) {
   const evidence = await loadRuntimeEvidence(input);
   return {
@@ -638,6 +679,7 @@ export async function buildAndSaveRuntimeContext(input: {
   currentRequest?: string | null;
   requestType?: string | null;
   sourceJobId?: string | null;
+  businessId?: string | null;
 }) {
   const evidence = await currentEvidenceMarkdown(input);
   const ownerKey = safeOwnerKey(input.ownerRef);
@@ -654,6 +696,8 @@ export async function buildAndSaveRuntimeContext(input: {
       requestType: input.requestType || "general",
       businessPolicyRevision: COOPERATIVE_BUSINESS_POLICY_REVISION,
       profileFieldCount: evidence.profileFields.length,
+      businessId: input.businessId || null,
+      businessProfileFieldCount: evidence.businessProfileFields.length,
       memoryCount: evidence.memories.length,
       outcomeCount: evidence.jobs.length,
       mediaOutcomeCount: evidence.mediaJobs.length,
@@ -967,6 +1011,7 @@ export async function refreshRuntimeContextAfterOutcome(input: {
   currentRequest?: string | null;
   requestType?: string | null;
   allowExternalReview?: boolean;
+  businessId?: string | null;
 }) {
   const admin = createAdminSupabaseClient();
 
@@ -984,6 +1029,7 @@ export async function refreshRuntimeContextAfterOutcome(input: {
     currentRequest: input.currentRequest || null,
     requestType: input.requestType || null,
     sourceJobId: input.jobId,
+    businessId: input.businessId || null,
   });
 
   const { data: job, error } = await admin
