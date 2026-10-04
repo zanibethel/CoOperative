@@ -26,6 +26,11 @@ import {
   type HermesVisionImage,
 } from "@/lib/inference/hermes-vision-cloud";
 import {
+  pollHermesTextTask,
+  startHermesTextTask,
+  type HermesTextContextMessage,
+} from "@/lib/inference/hermes-text-cloud";
+import {
   adultMediaContentClass,
   mediaPromptWithResolvedControls,
   planMediaRequest,
@@ -75,6 +80,8 @@ export const maxDuration = 300;
 
 const FREE_VISION_FALLBACK_GRACE_MS = 8_000;
 const FREE_VISION_WORKER_ID = "cooperative-hermes-free-vision";
+const FREE_TEXT_FALLBACK_GRACE_MS = 8_000;
+const FREE_TEXT_WORKER_ID = "cooperative-hermes-free-text";
 
 const modelMixerLevelSchema = z.number().int().min(0).max(4);
 const modelMixerSchema = z.object({
@@ -408,6 +415,42 @@ function latestUserRequest(messages: unknown) {
     }
   }
   return "Describe and analyze the attached image.";
+}
+
+function hermesTextContextMessages(
+  messages: unknown,
+): HermesTextContextMessage[] {
+  if (!Array.isArray(messages)) {
+    return [
+      {
+        role: "user",
+        content: "Answer the user's request using the available context.",
+      },
+    ];
+  }
+
+  const parsed = messages.flatMap((row): HermesTextContextMessage[] => {
+    if (!row || typeof row !== "object") return [];
+    const role = (row as { role?: unknown }).role;
+    const content = (row as { content?: unknown }).content;
+    if (
+      (role !== "system" && role !== "user" && role !== "assistant") ||
+      typeof content !== "string" ||
+      !content.trim()
+    ) {
+      return [];
+    }
+    return [{ role, content: content.trim() }];
+  });
+
+  return parsed.length
+    ? parsed
+    : [
+        {
+          role: "user",
+          content: "Answer the user's request using the available context.",
+        },
+      ];
 }
 
 export async function POST(request: Request) {
