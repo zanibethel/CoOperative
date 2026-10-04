@@ -1,7 +1,7 @@
 export type AgentKey = "repo-engineer" | "project-memory" | "debugger" | "verifier";
 export type AgentTaskMode = "inspect" | "prepare_change" | "update_memory" | "verify";
 
-export const AGENT_REGISTRY_REVISION = "2026-09-30.3";
+export const AGENT_REGISTRY_REVISION = "2026-10-04.4";
 
 export const AGENT_REGISTRY = {
   "repo-engineer": {
@@ -9,7 +9,7 @@ export const AGENT_REGISTRY = {
     name: "Repo Engineer",
     purpose:
       "Inspect approved repositories, prepare bounded code changes, and run deterministic checks.",
-    preferredProfile: "fast",
+    preferredProfile: "quality",
     escalationProfile: "quality",
     modes: ["inspect", "prepare_change"],
     tools: [
@@ -124,6 +124,12 @@ export function publicAgentRegistry() {
       noSurprisePaidFallback: true,
       secretsReadableByModel: false,
       destructiveActions: "blocked",
+      sandboxBranches: "default-for-code-changes",
+      sandboxBranchPush: "allowed-for-testing",
+      sandboxBranchContinuation: true,
+      branchChanges: "minimal-and-portable",
+      mergeToDefaultBranch: "owner-review-only",
+      ownerReviewCadenceDays: 7,
       productionPush: "human-approval-required",
       productionDeploy: "human-approval-required",
       migrations: "human-approval-required",
