@@ -21,6 +21,11 @@ import {
   startHermesMediaTask,
 } from "@/lib/inference/hermes-media-cloud";
 import {
+  pollHermesVisionTask,
+  startHermesVisionTask,
+  type HermesVisionImage,
+} from "@/lib/inference/hermes-vision-cloud";
+import {
   adultMediaContentClass,
   mediaPromptWithResolvedControls,
   planMediaRequest,
@@ -67,6 +72,9 @@ import { startRecoveryForJob } from "@/lib/recovery/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+const FREE_VISION_FALLBACK_GRACE_MS = 8_000;
+const FREE_VISION_WORKER_ID = "cooperative-hermes-free-vision";
 
 const modelMixerLevelSchema = z.number().int().min(0).max(4);
 const modelMixerSchema = z.object({
