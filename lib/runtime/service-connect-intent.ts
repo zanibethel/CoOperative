@@ -1,5 +1,6 @@
 import {
   proposedProviderKey,
+  serviceConnectorByKey,
   serviceConnectorForText,
   type ServiceConnectorAuthKind,
 } from "@/lib/runtime/service-connector-registry";
@@ -102,9 +103,7 @@ export function planServiceConnectIntent(
       .find(Boolean);
 
     if (pendingMarker) {
-      const pendingConnector = serviceConnectorForText(
-        recentAssistantMessages.join("\n"),
-      );
+      const pendingConnector = serviceConnectorByKey(pendingMarker);
       if (
         pendingConnector?.implementation === "available" &&
         pendingConnector.authKind === "api-key"
