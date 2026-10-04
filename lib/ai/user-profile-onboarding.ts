@@ -159,6 +159,21 @@ function looksLikeUnrelatedRequest(message: string) {
 
 function nextFields<T extends UserProfileFieldDefinition>(
   definitions: T[],
+  rows: Array<{ field_key: string; status: string; source_kind?: string | null }>,
+) {
+  const byKey = new Map(rows.map((row) => [row.field_key, row]));
+  return definitions
+    .filter((field) => {
+      const row = byKey.get(field.key);
+      if (!row) return true;
+      if (row.status === "known" || row.status === "deferred") return false;
+      return !/-(?:skipped|deferred)$/.test(row.source_kind || "");
+    })
+    .slice(0, BATCH_SIZE);
+}
+
+function revisitFields<T extends UserProfileFieldDefinition>(
+  definitions: T[],
   rows: Array<{ field_key: string; status: string }>,
 ) {
   const byKey = new Map(rows.map((row) => [row.field_key, row.status]));
@@ -280,7 +295,7 @@ async function personalRows(ownerRef: string) {
   const admin = createAdminSupabaseClient();
   const { data, error } = await admin
     .from("cooperative_user_profile_fields")
-    .select("field_key,category,label,value_text,status,confidence,last_confirmed_at,updated_at")
+    .select("field_key,category,label,value_text,status,confidence,source_kind,last_confirmed_at,updated_at")
     .eq("owner_ref", ownerRef)
     .order("created_at", { ascending: true });
   if (error) throw error;
@@ -292,7 +307,7 @@ async function businessRows(ownerRef: string, businessId: string) {
   const admin = createAdminSupabaseClient();
   const { data, error } = await admin
     .from("cooperative_business_profile_fields")
-    .select("field_key,category,label,value_text,status,confidence,last_confirmed_at,updated_at")
+    .select("field_key,category,label,value_text,status,confidence,source_kind,last_confirmed_at,updated_at")
     .eq("owner_ref", ownerRef)
     .eq("business_id", businessId)
     .order("created_at", { ascending: true });
@@ -387,7 +402,12 @@ async function savePersonalAnswers(input: {
         confidence: 1,
         source_conversation_id: input.conversationId,
         source_message_id: input.sourceMessageId,
-        source_kind: "personal-intake",
+        source_kind:
+          answer.status === "unknown"
+            ? "personal-intake-skipped"
+            : answer.status === "deferred"
+              ? "personal-intake-deferred"
+              : "personal-intake",
         first_known_at: known ? existing?.first_known_at || now : existing?.first_known_at || null,
         last_confirmed_at: known ? now : null,
         updated_at: now,
@@ -498,7 +518,12 @@ async function saveBusinessAnswers(input: {
           confidence: 1,
           source_conversation_id: input.conversationId,
           source_message_id: input.sourceMessageId,
-          source_kind: input.sourceKind || "business-intake",
+          source_kind:
+            answer.status === "unknown"
+              ? `${input.sourceKind || "business-intake"}-skipped`
+              : answer.status === "deferred"
+                ? `${input.sourceKind || "business-intake"}-deferred`
+                : input.sourceKind || "business-intake",
           first_known_at: known ? existing?.first_known_at || now : existing?.first_known_at || null,
           last_confirmed_at: known ? now : null,
           updated_at: now,
