@@ -312,7 +312,7 @@ function looksLikeBatchReply(message: string, fieldCount: number) {
 
 function parseBatchReply(
   message: string,
-  fields: Array<{ key: string }>,
+  fields: ReadonlyArray<{ key: string }>,
 ): Array<{ fieldKey: string; status: ProfileFieldStatus; value: string | null }> {
   const normalized = message.trim();
   const numbered = numberedParts(normalized, Math.max(1, Math.min(4, fields.length)));
