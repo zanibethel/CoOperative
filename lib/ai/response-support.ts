@@ -5,7 +5,9 @@ import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import type { TextInferenceMessage } from "@/lib/inference/contracts";
 import {
+  applyBusinessProfileFieldUpdates,
   applyProfileFieldUpdates,
+  BUSINESS_PROFILE_FIELD_DEFINITIONS,
   USER_PROFILE_FIELD_DEFINITIONS,
 } from "@/lib/ai/user-profile-onboarding";
 
@@ -28,6 +30,9 @@ const candidateSchema = z.object({
 });
 
 const profileFieldKeys = USER_PROFILE_FIELD_DEFINITIONS.map((field) => field.key);
+const businessProfileFieldKeys = BUSINESS_PROFILE_FIELD_DEFINITIONS.map(
+  (field) => field.key,
+);
 
 const supportPacketSchema = z.object({
   memoryCandidates: z.array(candidateSchema).max(8).default([]),
@@ -36,6 +41,19 @@ const supportPacketSchema = z.object({
       z.object({
         fieldKey: z.string().refine((value) => profileFieldKeys.includes(value)),
         value: z.string().min(1).max(2000),
+        confidence: z.number().min(0).max(1),
+        explicitOwnerStatement: z.boolean(),
+      }),
+    )
+    .max(8)
+    .default([]),
+  businessProfileUpdates: z
+    .array(
+      z.object({
+        fieldKey: z
+          .string()
+          .refine((value) => businessProfileFieldKeys.includes(value)),
+        value: z.string().min(1).max(3000),
         confidence: z.number().min(0).max(1),
         explicitOwnerStatement: z.boolean(),
       }),
