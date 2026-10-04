@@ -90,12 +90,21 @@ export async function mediaBenchmarkEvidenceForOwner(
       continue;
     }
 
-    const key = [
-      row.provider,
-      row.model,
-      row.endpoint || "",
-      row.dimension,
-    ].join("|");
+    const key = row.source_job_id
+      ? [
+          row.provider,
+          row.model,
+          row.endpoint || "",
+          row.dimension,
+          row.source_job_id,
+        ].join("|")
+      : [
+          row.provider,
+          row.model,
+          row.endpoint || "",
+          row.dimension,
+          "route-level",
+        ].join("|");
     if (latest.has(key)) continue;
 
     const sourceType =
@@ -149,6 +158,7 @@ export function mediaBenchmarkSummaryForRoute(
 
   let measuredDimensions = 0;
   let latestMeasuredAt: string | null = null;
+  const scores = new Map<keyof MediaBenchmarkDimensionScores, number[]>();
 
   for (const item of evidence || []) {
     if (
@@ -160,9 +170,10 @@ export function mediaBenchmarkSummaryForRoute(
     }
 
     const key = dimensionKey(item.dimension);
-    dimensions[key] = item.status === "measured" ? item.score : null;
     if (item.status === "measured" && item.score !== null) {
-      measuredDimensions += 1;
+      const bucket = scores.get(key) || [];
+      bucket.push(item.score);
+      scores.set(key, bucket);
     }
     if (
       !latestMeasuredAt ||
@@ -170,6 +181,14 @@ export function mediaBenchmarkSummaryForRoute(
     ) {
       latestMeasuredAt = item.measuredAt;
     }
+  }
+
+  for (const [key, values] of scores) {
+    if (!values.length) continue;
+    dimensions[key] = Number(
+      (values.reduce((total, value) => total + value, 0) / values.length).toFixed(1),
+    );
+    measuredDimensions += 1;
   }
 
   return {
