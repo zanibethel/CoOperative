@@ -1113,6 +1113,62 @@ export async function businessProfileFieldsForRuntime(
   }
 }
 
+function normalizedBusinessName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export async function resolveBusinessScope(input: {
+  ownerRef: string;
+  requestedBusinessId?: string | null;
+  message?: string | null;
+}) {
+  const businesses = await ownedBusinesses(input.ownerRef);
+  if (!businesses.length) {
+    return { businessId: null, businessName: null, source: "none" as const };
+  }
+
+  if (input.requestedBusinessId) {
+    const selected = businesses.find(
+      (business) => business.id === input.requestedBusinessId,
+    );
+    if (selected) {
+      return {
+        businessId: selected.id as string,
+        businessName: selected.name as string,
+        source: "selected" as const,
+      };
+    }
+  }
+
+  const message = normalizedBusinessName(input.message || "");
+  if (message) {
+    const matches = businesses.filter((business) => {
+      const name = normalizedBusinessName(business.name || "");
+      if (!name || name.length < 2) return false;
+      return (
+        message === name ||
+        message.includes(` ${name} `) ||
+        message.startsWith(`${name} `) ||
+        message.endsWith(` ${name}`)
+      );
+    });
+
+    if (matches.length === 1) {
+      return {
+        businessId: matches[0].id as string,
+        businessName: matches[0].name as string,
+        source: "explicit-message" as const,
+      };
+    }
+  }
+
+  return { businessId: null, businessName: null, source: "none" as const };
+}
+
 export async function businessScopePromptContext(
   ownerRef: string,
   activeBusinessId?: string | null,
