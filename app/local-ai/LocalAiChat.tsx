@@ -99,7 +99,13 @@ type AttachmentResult = {
 
 type JobResult = {
   jobId?: string;
-  execution?: "code" | "local-ai" | "community-ai" | "paid-ai" | "media";
+  execution?:
+    | "code"
+    | "local-ai"
+    | "community-ai"
+    | "paid-ai"
+    | "free-cloud-vision"
+    | "media";
   status?: string;
   profile?: Profile;
   capability?: "text" | "vision" | "image" | "video";
@@ -235,6 +241,8 @@ function executionStep(
   if (status === "Selecting an execution path…") return status;
   if (status === "Waiting for local capacity…") return status;
   if (status === "Using local vision…") return status;
+  if (status === "Using free cloud vision…") return status;
+  if (status === "Checking local vision capacity…") return status;
   if (status === "Using local AI…") return status;
   if (status === "Using funded high-quality AI…") return status;
   if (status === "Generating image…") return status;
@@ -1619,9 +1627,11 @@ export default function LocalAiChat() {
                 : "Generating image…"
               : result.execution === "paid-ai"
                 ? "Using funded high-quality AI…"
-                : result.capability === "vision"
-                  ? "Using local vision…"
-                  : "Using local AI…";
+                : result.execution === "free-cloud-vision"
+                  ? "Using free cloud vision…"
+                  : result.capability === "vision"
+                    ? "Using local vision…"
+                    : "Using local AI…";
 
           if (result.status === "queued") {
             setStatus(
@@ -1631,7 +1641,11 @@ export default function LocalAiChat() {
                   : "Preparing image generation…"
                 : result.execution === "paid-ai"
                   ? "Using funded high-quality AI…"
-                  : "Waiting for local capacity…",
+                  : result.execution === "free-cloud-vision"
+                    ? "Using free cloud vision…"
+                    : result.capability === "vision"
+                      ? "Checking local vision capacity…"
+                      : "Waiting for local capacity…",
             );
             await wait(1000);
             continue;
