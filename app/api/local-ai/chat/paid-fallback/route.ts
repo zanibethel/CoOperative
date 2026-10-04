@@ -16,7 +16,7 @@ import {
   textTaskClassSchema,
 } from "@/lib/inference/contracts";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
-import { paidHandoffMessages } from "@/lib/ai/response-support";
+import { paidHandoffMessages, persistResponseSupport } from "@/lib/ai/response-support";
 import { refreshRuntimeContextAfterOutcome } from "@/lib/ai/runtime-context-markdown";
 import {
   aiProfileBalanceForUser,
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     const { data: sourceJob, error: sourceError } = await admin
       .from("text_inference_jobs")
       .select(
-        "id,status,client_owner_ref,conversation_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd,paid_prompt_draft,paid_prompt_reason,support_packet,context_document_path,context_document_generated_at",
+        "id,status,client_owner_ref,conversation_id,business_id,messages,profile,max_tokens,temperature,task_class,allow_paid_fallback,capability,error,model_mixer,request_max_spend_microusd,paid_prompt_draft,paid_prompt_reason,support_packet,context_document_path,context_document_generated_at",
       )
       .eq("id", input.jobId)
       .eq("client_owner_ref", ownerRef)
@@ -263,6 +263,7 @@ export async function POST(request: Request) {
       verification_status: "not_run",
       model_mixer: sourceJob.model_mixer || null,
       request_max_spend_microusd: sourceJob.request_max_spend_microusd ?? null,
+      business_id: sourceJob.business_id || null,
       context_document_path: sourceJob.context_document_path || null,
       context_document_generated_at: sourceJob.context_document_generated_at || null,
       capability: "text",
