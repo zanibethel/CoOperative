@@ -1,4 +1,4 @@
-import "server-only";
+import "server-only";\n\nimport { answerPlatformFaq } from "@/lib/runtime/platform-faq";
 
 export type CodeFirstChatDecision = {
   handled: boolean;
@@ -109,12 +109,34 @@ export function handleCodeFirstChat(
 ): CodeFirstChatDecision {
   const value = normalized(input.message);
 
-  if (input.hasAttachments || !value) {
+  if (!value) {
+    return {
+      handled: false,
+      handler: "code-first-escalation",
+      routeReason: "The request contains no deterministic text intent to resolve.",
+      aiNeeded: true,
+    };
+  }
+
+  if (!input.hasAttachments) {
+    const faq = answerPlatformFaq(input.message, input);
+    if (faq) {
+      return {
+        handled: true,
+        handler: faq.key,
+        text: faq.text,
+        routeReason: faq.routeReason,
+        aiNeeded: false,
+      };
+    }
+  }
+
+  if (input.hasAttachments) {
     return {
       handled: false,
       handler: "code-first-escalation",
       routeReason:
-        "The request includes content that needs model interpretation, so deterministic code cannot fully answer it.",
+        "The request includes attached content that needs model interpretation after deterministic attachment checks.",
       aiNeeded: true,
     };
   }
