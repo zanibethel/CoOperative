@@ -49,7 +49,7 @@ export type PlatformFaqAnswer = {
 type PlatformFaqEntry = {
   key: string;
   matches: (value: string) => boolean;
-  answer: (context: PlatformFaqContext) => string;
+  answer: (context: PlatformFaqContext, value: string) => string;
 };
 
 function normalized(message: string) {
@@ -185,14 +185,7 @@ export const PLATFORM_FAQ_REGISTRY: PlatformFaqEntry[] = [
           : "I do not have a deterministic Personal profile snapshot available for this request yet.";
       }
 
-      const wantsMissing = /\bmissing\b/.test(
-        normalized(
-          context.businessId
-            ? "business profile"
-            : "personal profile",
-        ),
-      );
-      void wantsMissing;
+      const wantsMissing = /\bmissing\b/.test(value);
 
       const knownText = known.length
         ? known
@@ -207,6 +200,15 @@ export const PLATFORM_FAQ_REGISTRY: PlatformFaqEntry[] = [
             .join(", ")}${missing.length > 8 ? ` (+${missing.length - 8} more)` : ""}.`
         : " No profile fields are currently missing.";
 
+      if (wantsMissing) {
+        return missing.length
+          ? `${context.businessId ? "Business profile" : "Personal profile"} fields still missing or deferred: ${missing
+              .slice(0, 12)
+              .map((field) => field.label)
+              .join(", ")}${missing.length > 12 ? ` (+${missing.length - 12} more)` : ""}.`
+          : `No ${context.businessId ? "business" : "Personal"} profile fields are currently missing.`;
+      }
+
       return `${context.businessId ? "Saved business profile" : "Saved Personal profile"}: ${knownText}.${missingText}`;
     },
   },
@@ -219,8 +221,23 @@ export const PLATFORM_FAQ_REGISTRY: PlatformFaqEntry[] = [
         /\bis (?:openrouter|nous) connected\b/,
         /\bconnection status\b/,
       ]),
-    answer: (context) => {
+    answer: (context, value) => {
       const services = context.connectedServices || [];
+      const requestedProvider = /\bopenrouter\b/.test(value)
+        ? "openrouter"
+        : /\bnous\b/.test(value)
+          ? "nous"
+          : null;
+
+      if (requestedProvider) {
+        const matching = services.find((service) =>
+          service.providerKey.toLowerCase().includes(requestedProvider),
+        );
+        return matching
+          ? `${matching.providerKey} is currently ${matching.status}.`
+          : `I do not see a saved ${requestedProvider === "openrouter" ? "OpenRouter" : "Nous"} connection for this account.`;
+      }
+
       if (!services.length) {
         return "I do not see any saved provider/service connections for this account.";
       }
@@ -593,7 +610,7 @@ export function answerPlatformFaq(
 
   return {
     key: match.key,
-    text: match.answer(context),
+    text: match.answer(context, value),
     routeReason: `A deterministic platform FAQ handler (${match.key}) fully answered the request without invoking AI.`,
   };
 }
