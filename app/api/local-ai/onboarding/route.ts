@@ -66,6 +66,7 @@ export async function POST(request: Request) {
     }
 
     const result = await answerOnboarding({
+      userId,
       ownerRef,
       conversationId: input.conversationId,
       message: input.message,
