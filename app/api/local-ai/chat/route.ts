@@ -614,6 +614,71 @@ export async function POST(request: Request) {
       );
     }
 
+    let effectiveRequestText = input.message.trim();
+
+    const scopeResolution = await resolveBusinessScopeForChat({
+      userId: owner.userId,
+      ownerRef,
+      conversationId,
+      message: input.message,
+      requestedBusinessId: input.businessId || null,
+    });
+
+    effectiveRequestText = scopeResolution.effectiveMessage;
+
+    if (scopeResolution.selectedScope === "personal") {
+      input.businessId = undefined;
+    } else if (scopeResolution.selectedBusinessId) {
+      input.businessId = scopeResolution.selectedBusinessId;
+    }
+
+    if (scopeResolution.handled && scopeResolution.assistantText) {
+      const { error: scopeMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: input.attachmentIds,
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: scopeResolution.assistantText,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (scopeMessageError) throw scopeMessageError;
+
+      await admin
+        .from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "text",
+          profile: input.profile,
+          conversationId,
+          conversationTitle,
+          text: scopeResolution.assistantText,
+          provider: "code",
+          model: "business-context-clarifier",
+          routeReason: scopeResolution.routeReason,
+          selectedBusinessId: null,
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     const businessContext = await buildBusinessChatContext(
       owner.userId,
       input.businessId,
@@ -1388,7 +1453,7 @@ export async function POST(request: Request) {
     }
 
     let effectiveMediaRequestText =
-      retryMediaContext?.content || input.message.trim();
+      retryMediaContext?.content || effectiveRequestText;
     let effectiveMediaAttachmentIds = retryMediaContext
       ? [...retryMediaContext.attachmentIds]
       : [...input.attachmentIds];
@@ -2794,7 +2859,7 @@ export async function POST(request: Request) {
 
     const visibleUserText = input.message.trim();
     const modelUserText =
-      visibleUserText ||
+      effectiveRequestText ||
       (currentAttachmentIds.length > 0
         ? "Describe and analyze the attached image."
         : "");
@@ -2948,6 +3013,7 @@ export async function POST(request: Request) {
         availableAiBalanceUsd: profileBalance.availableUsd,
         modelMixer: input.modelMixer || null,
         requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
+        selectedBusinessId: input.businessId || null,
       },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
