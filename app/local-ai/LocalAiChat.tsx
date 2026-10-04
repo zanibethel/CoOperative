@@ -2242,7 +2242,7 @@ export default function LocalAiChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           conversationId: conversationId || undefined,
-          businessId: selectedBusinessId || undefined,
+          businessId: selectedBusinessId || null,
           message: text,
           attachmentIds: currentAttachments.map((attachment) => attachment.id),
           profile,
