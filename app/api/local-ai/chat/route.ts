@@ -23,6 +23,7 @@ import {
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import {
   businessScopePromptContext,
+  resolveBusinessScope,
   resumeOnboarding,
 } from "@/lib/ai/user-profile-onboarding";
 import { activeNodeIds } from "@/lib/unison/node-access";
@@ -484,13 +485,19 @@ export async function POST(request: Request) {
 
     const admin = createAdminSupabaseClient();
     const ownerRef = owner.ownerRef;
+    const resolvedBusiness = await resolveBusinessScope({
+      ownerRef,
+      requestedBusinessId: input.businessId || null,
+      message: input.message,
+    });
+    const effectiveBusinessId = resolvedBusiness.businessId;
     const businessContext = await buildBusinessChatContext(
       owner.userId,
-      input.businessId,
+      effectiveBusinessId || undefined,
     );
     const scopeContext = await businessScopePromptContext(
       ownerRef,
-      input.businessId || null,
+      effectiveBusinessId,
     );
     const profileBalance =
       businessContext?.aiBalance ?? (await aiProfileBalanceForUser(owner.userId));
@@ -2604,7 +2611,7 @@ export async function POST(request: Request) {
 
     const directResult = await handleBusinessIntake({
       userId: owner.userId,
-      businessId: input.businessId,
+      businessId: effectiveBusinessId || undefined,
       conversationId,
       message: input.message,
       hasAttachments: input.attachmentIds.length > 0,
@@ -2789,7 +2796,7 @@ export async function POST(request: Request) {
         conversationId,
         currentRequest: modelUserText,
         requestType: `${requestedCapability} / general`,
-        businessId: input.businessId || null,
+        businessId: effectiveBusinessId,
       });
     } catch (contextError) {
       console.error("Could not build private runtime markdown context", {
@@ -2882,7 +2889,7 @@ export async function POST(request: Request) {
       verification_status: "not_run",
       model_mixer: input.modelMixer || null,
       request_max_spend_microusd: requestMaxSpendMicrousd,
-      business_id: input.businessId || null,
+      business_id: effectiveBusinessId,
       context_document_path: runtimeContext?.storagePath || null,
       context_document_generated_at: runtimeContext?.generatedAt || null,
     });
@@ -2923,6 +2930,8 @@ export async function POST(request: Request) {
         conversationId,
         conversationTitle,
         business: businessContext?.business ?? null,
+        businessId: effectiveBusinessId,
+        businessScopeSource: resolvedBusiness.source,
         routingPreference: input.nodeRouting,
         preferredNodeId,
         targetNodeId,
