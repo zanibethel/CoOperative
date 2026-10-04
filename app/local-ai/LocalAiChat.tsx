@@ -1002,7 +1002,10 @@ function OAuthServiceConnectCard({
   const connector = serviceConnectorByKey(providerKey);
   const providerName = serviceConnectorDisplayName(providerKey);
   const endpoint = connector?.endpoint || "";
-  const [checking, setChecking] = useState(true);
+  const connectorConfigurationError = endpoint
+    ? ""
+    : `${providerName} connector endpoint is not configured.`;
+  const [checking, setChecking] = useState(Boolean(endpoint));
   const [working, setWorking] = useState(false);
   const [connected, setConnected] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -1012,15 +1015,9 @@ function OAuthServiceConnectCard({
   const [cardError, setCardError] = useState("");
 
   useEffect(() => {
-    let cancelled = false;
-    if (!endpoint) {
-      setCardError(`${providerName} connector endpoint is not configured.`);
-      setChecking(false);
-      return () => {
-        cancelled = true;
-      };
-    }
+    if (!endpoint) return;
 
+    let cancelled = false;
     void fetch(endpoint, { cache: "no-store" })
       .then(async (response) => {
         const payload = (await response.json()) as {
@@ -1214,7 +1211,11 @@ function OAuthServiceConnectCard({
         </button>
       )}
 
-      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+      {cardError || connectorConfigurationError ? (
+        <div className="secure-service-error">
+          {cardError || connectorConfigurationError}
+        </div>
+      ) : null}
     </div>
   );
 }
