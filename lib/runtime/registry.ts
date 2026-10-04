@@ -5,7 +5,7 @@ import type {
   ServiceAgentManifest,
 } from "@/lib/runtime/contracts";
 
-export const SERVICE_AGENT_REGISTRY_REVISION = "2026-10-01.1";
+export const SERVICE_AGENT_REGISTRY_REVISION = "2026-10-04.1";
 
 export const SERVICE_AGENTS: Record<ServiceAgentKey, ServiceAgentManifest> = {
   "business-intake": {
@@ -158,9 +158,10 @@ export const CAPABILITY_REGISTRY: Record<CapabilityKey, CapabilityManifest> = {
   },
   "chat.general": {
     key: "chat.general",
-    purpose: "Handle an open-ended conversation request after code-first routing declines it.",
+    purpose:
+      "Try deterministic conversation handlers first, then escalate only the unresolved open-ended work.",
     agent: null,
-    preferredExecution: "local-ai",
+    preferredExecution: "code",
     aiOnlyWhenNeeded: true,
   },
 };
