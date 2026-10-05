@@ -93,6 +93,7 @@ The current owner direction includes:
 - when a signed-in CoOperative profile is linked to a capable personal node, prefer that node automatically for AI work after deterministic code;
 - local/business-owned and other qualified zero-marginal-cost compute before unnecessary paid external compute;
 - paid model access requires a funded CoOperative profile balance and must remain inside the user's request/model-mixer spend policy;
+- CoOperative-funded paid AI uses a fixed sell-price quote with an enforced minimum markup over estimated provider cost (currently 50% floor); user-owned/BYOK provider spend remains economically separate;
 - no surprise paid fallback;
 - minimize unavoidable manual setup;
 - optimize total value, not sticker price alone;
