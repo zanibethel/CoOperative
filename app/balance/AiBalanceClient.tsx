@@ -37,6 +37,8 @@ function money(value: number) {
   }).format(value);
 }
 
+const PENDING_PAID_RESUME_KEY = "cooperative.local-ai.pending-paid-resume-job";
+
 export default function AiBalanceClient() {
   const [balance, setBalance] = useState<BalanceResponse | null>(null);
   const [busyOption, setBusyOption] = useState("");
@@ -68,6 +70,15 @@ export default function AiBalanceClient() {
             const updated = await refresh();
             if (updated.availableUsd > next.availableUsd) break;
           }
+
+          const resumeJobId = window.localStorage.getItem(PENDING_PAID_RESUME_KEY);
+          if (resumeJobId) {
+            window.location.assign(
+              `/local-ai?resumePaidJob=${encodeURIComponent(resumeJobId)}`,
+            );
+            return;
+          }
+
           window.history.replaceState(null, "", window.location.pathname);
         }
       } catch (err) {
