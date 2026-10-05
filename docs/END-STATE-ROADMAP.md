@@ -1,6 +1,6 @@
 # CoOperative End-State Vision & Roadmap
 
-Last updated: 2026-09-30
+Last updated: 2026-10-04
 
 This document is the canonical bridge between CoOperative's long-term product vision and the concrete sequence of work required to reach it.
 
@@ -89,7 +89,10 @@ CoOperative must preserve explicit operating principles as first-class machine-r
 The current owner direction includes:
 
 - deterministic code/playbooks before AI;
-- local/business-owned compute before unnecessary paid external compute;
+- one CoOperative chat product across web/mobile/node-installed use rather than separate product forks;
+- when a signed-in CoOperative profile is linked to a capable personal node, prefer that node automatically for AI work after deterministic code;
+- local/business-owned and other qualified zero-marginal-cost compute before unnecessary paid external compute;
+- paid model access requires a funded CoOperative profile balance and must remain inside the user's request/model-mixer spend policy;
 - no surprise paid fallback;
 - minimize unavoidable manual setup;
 - optimize total value, not sticker price alone;
@@ -130,23 +133,72 @@ This applies to:
 
 Third-party AI contributes reasoning. It does not become the policy authority.
 
+## Unified CoOperative chat end state
+
+CoOperative should converge on **one primary AI chat experience** for signed-in users.
+
+The browser/mobile chat and the chat used by a profile with an installed CoOperativeLocalAI/Unison node should be the same logical product, sharing the same:
+
+- authenticated profile;
+- conversations/history policy;
+- Personal/Business scope;
+- projects and attachments;
+- connected services;
+- Model Mixer / quality intent;
+- web-access policy;
+- CoOperative funded AI balance;
+- execution evidence;
+- routing policy.
+
+Installing a node should **add capability to the same profile/chat**, not create a separate AI product. When the profile is authorized on a capable online node, that node becomes the preferred AI execution target after deterministic code. If the node is unavailable or lacks the required capability, the same chat may continue through other allowed zero-cost/free routes and then, only when funded and permitted, paid routes.
+
+The installed local desktop chat may retain an offline/local-only shell for privacy and resilience, but when it is authenticated/synced it should represent the same CoOperative profile and conversations rather than a competing chat identity.
+
+The intended request ladder is:
+
+```text
+user request
+  -> deterministic CoOperative code / saved workflows / known tools
+  -> profile-matched personal or business-owned local node when capable
+  -> other authorized owned/platform zero-marginal-cost compute when capable
+  -> qualified strict-free/community execution when policy allows
+  -> funded paid model only when needed, allowed, and inside the request ceiling
+```
+
+The router must not call an AI model when deterministic code can complete the request.
+
+If free/local resources cannot satisfy the request and the next qualified executor is paid, CoOperative should calculate the expected request cost before execution. If the profile balance is insufficient, chat should explain the capability gap, show the estimated minimum funded balance required to continue, and present a secure Stripe balance-add action. The original request should remain resumable after funding.
+
+Web access follows the same unified-profile principle:
+
+- Web **Off** remains the privacy-safe default;
+- Web **Auto** allows deterministic code to search only when current external information is needed;
+- Web **Always** permits search on each eligible turn;
+- URL/domain access is additionally constrained by a code-enforced capability/domain policy;
+- known OAuth/service domains use their registered connector;
+- authenticated/private resources require the corresponding authorization;
+- localhost/private-network, credential-bearing, executable-download, and other elevated-risk URLs remain blocked or explicitly authorized according to policy.
+
 ## Target execution fabric
 
 CoOperative should be hardware- and provider-independent.
 
 ```text
-                     CoOperative Router
-                            |
-         +------------------+------------------+
-         |                  |                  |
- deterministic          owned compute      connected compute
- code/playbooks              |                  |
-                       +-----+------+      +-----+------+
-                       |            |      |            |
-                    local Mac    AWS GPU  business AI  approved API
-                                                  |
-                                             human workforce
-                                             when required
+                     CoOperative Chat / Router
+                              |
+                    deterministic code first
+                              |
+                    profile execution policy
+                              |
+        +---------------------+----------------------+
+        |                     |                      |
+ profile-matched local    other owned/free      funded paid
+ personal/business node   qualified compute     qualified models
+        |                     |                      |
+   PC / Mac / edge      platform / Unison /      approved APIs
+                       strict-free providers
+                              |
+                     human workforce when required
 ```
 
 Each execution target should advertise:
@@ -290,6 +342,39 @@ Sign in to CoOperative
 
 **Exit criteria:** a normal Windows user can install, repair, restart, update, and uninstall a Unison node without manually opening PowerShell, copying pairing codes, or interacting with CMD scripts.
 
+## Phase 0.75 — unify CoOperative chat, node identity, web policy, and paid-balance routing
+
+**Goal:** make the main CoOperative chat the single profile-level AI experience whether or not the user installs a local node.
+
+Build:
+
+- converge the current web/main chat and remote Personal AI/mobile workflow on one conversation/profile contract;
+- preserve the local desktop node shell for offline/local-only operation while allowing authenticated history/project continuity with the same profile;
+- automatically recognize profile-authorized personal nodes and make the best capable node the preferred AI route after deterministic code;
+- keep node preference capability-aware rather than forcing a node to handle a task it cannot perform;
+- preserve code-first responses before any model route;
+- define one routing ladder: code → profile-matched local/owned → other qualified free/zero-cost → paid;
+- unify Model Mixer / Fast-Quality intent across web, mobile, and node-assisted chat;
+- unify web access settings across surfaces: Off / Auto / Always;
+- add a deterministic URL/domain permission registry for public, connector-owned, authenticated/private, local-network, downloadable, and blocked URL classes;
+- retain explicit privacy status in the UI showing where inference ran and whether web access was used;
+- use the existing profile AI balance as the hard paid-model eligibility gate;
+- estimate paid-request cost before execution and compute the balance shortfall;
+- when insufficient, return an in-chat funding card with the minimum amount required (or the smallest configured Stripe top-up that satisfies it);
+- after Stripe confirms funding, make the original request resumable without requiring the user to reconstruct it;
+- never silently switch from a user's node/free route to a paid route.
+
+**Current foundation already implemented:**
+
+- signed-in profiles can link authorized Unison nodes;
+- remote/mobile Personal AI can require a linked node and preserve hosted conversation history;
+- node membership can establish a preferred Personal AI node;
+- desktop CoOperativeLocalAI supports Web Off / Auto / Always while inference remains local;
+- profile AI balances, reservations, settlement/release, Stripe top-up intents, and Stripe webhook crediting exist;
+- paid fallback already checks funded balance and request spend caps before execution.
+
+**Exit criteria:** the same signed-in CoOperative chat works with or without a node; adding a node automatically gives that profile a preferred local execution path without creating a second product; free/local routing remains usable at zero paid balance; and a paid-only capability can surface an exact funding requirement, accept Stripe funding, and resume safely.
+
 ## Phase 1 — enforce the CoOperative reasoning layer
 
 **Goal:** make CoOperative's direction and reasoning discipline part of runtime behavior, not documentation only.
@@ -356,6 +441,10 @@ Build:
 - business-owned AI candidates;
 - explicit marginal-cost estimates;
 - owner/tenant automatic-spend budgets;
+- profile-funded paid-AI balance as a hard eligibility gate;
+- pre-execution paid cost estimate and balance-shortfall calculation;
+- in-chat secure Stripe funding action when a paid-capability request is underfunded;
+- resumable continuation after successful funding;
 - approval-required path when cost is unknown or above budget;
 - provider-neutral execution adapter contract;
 - actual-cost and verified-outcome logging;
@@ -365,7 +454,7 @@ The local model is not the sole judge of its own capability. Escalation should b
 
 Unknown cost must never auto-run. No surprise paid fallback remains a hard rule.
 
-**Current progress:** deterministic evaluator and authenticated evaluation endpoint implemented; provider execution is the next layer.
+**Current progress:** deterministic evaluator, funded profile-balance ledger, Stripe top-ups, reservation/settlement logic, request spend caps, and an authenticated paid fallback executor are implemented. Remaining work is to make this behavior universal in the unified chat/router and expose minimum-required funding/resume UX consistently.
 
 **Exit criteria:** after a verified local miss, CoOperative can select a benchmark-qualified stronger executor, obtain approval when required, execute through a configured connector, and record cost + verified outcome.
 
@@ -544,6 +633,8 @@ Steps:
 
 **Goal:** make customer budgets, funded CoOperative balance, economic value, and platform margin measurable and enforceable without misaligned incentives.
 
+The **AI execution balance** is a foundational capability and should not wait for this late business-economics phase. Profile AI balance, Stripe top-up, reservations, and paid-execution debit accounting already exist and belong in the unified chat routing foundation. This phase extends that same economic discipline into broader business savings and managed-spend reporting.
+
 Track:
 
 - baseline cost;
@@ -636,6 +727,8 @@ The strongest long-term advantage is not owning a particular model. It is owning
 Target shell:
 
 - conversations remain the center of the experience;
+- one chat identity follows the signed-in profile across browser, mobile, and node-assisted execution;
+- installing a capable local node upgrades routing/cost/privacy for that same chat instead of creating a separate product;
 - a business/project selector establishes the active tenant and initiative;
 - connected services and available capabilities are discoverable beside chat;
 - Budget & Savings shows baseline spend, CoOperative balance, hard budget ceiling, current managed spend, and savings state;
@@ -652,20 +745,23 @@ The interface may borrow familiar interaction patterns from modern AI assistants
 Until changed by a new explicit owner decision, prioritize:
 
 1. stabilize current Mac/local workers and agent recovery;
-2. prove the first Windows Unison node is reliably heartbeating, then build the branded signed Unison Windows installer/tray agent described in Phase 0.5;
-3. finish the current image/agent test loop;
-4. implement runtime Reasoning Envelope enforcement;
-5. finish the governed escalation evaluator and connect the first stronger executor;
-6. build CoOperative eval/benchmark harness and use it to qualify escalation candidates;
-7. benchmark stronger open-weight reasoning models;
-8. build AWS execution target and prove Mac-independent inference;
-9. add business-owned AI connector contract;
-10. build service/cost discovery;
-11. build migration planner/executor;
-12. run the radio-station cost-optimization pilot;
-13. add verified-savings ledger/business model;
-14. build owner-facing owned-model Improvement Reports and approval flow in Owner Dashboard chat;
-15. expand into broader business migrations and human-workforce execution.
+2. prove the Windows Unison/CoOperativeLocalAI installer and profile-node linking flow is reliable;
+3. unify the main/public signed-in chat and remote Personal AI around one profile/conversation/router contract (Phase 0.75);
+4. make a linked capable personal node the default AI route for its matching profile after deterministic code;
+5. unify Web Off / Auto / Always and add code-enforced URL/domain access policy across chat surfaces;
+6. finish the paid-balance UX: estimate paid need, show minimum funding shortfall, launch Stripe top-up, and resume the request;
+7. finish the current image/agent test loop;
+8. implement runtime Reasoning Envelope enforcement;
+9. finish the governed escalation evaluator and qualify/connect stronger executors;
+10. build CoOperative eval/benchmark harness and use it to qualify routing/model candidates;
+11. benchmark stronger open-weight reasoning models;
+12. build AWS execution target and prove Mac-independent inference;
+13. expand business-owned/third-party AI connector support;
+14. build service/cost discovery and migration planning/execution;
+15. run the radio-station cost-optimization pilot;
+16. extend verified-savings/business economics ledger;
+17. build owner-facing owned-model Improvement Reports and approval flow in Owner Dashboard chat;
+18. expand into broader business migrations and human-workforce execution.
 
 # Non-goals
 
@@ -675,7 +771,10 @@ Do not:
 - migrate Vercel/Supabase/AWS infrastructure without measured benefit;
 - optimize solely for the cheapest sticker price;
 - make a specific AI provider foundational to the platform;
+- create a separate primary chat product merely because a user installed a node;
+- force AI execution when deterministic code can satisfy the request;
 - treat consumer AI subscriptions as unauthorized API access;
+- allow paid models when the profile has no sufficient funded balance;
 - silently spend customer/owner money;
 - give AI broader operational permissions simply because it is more capable;
 - train on raw private tenant data by default;
@@ -689,10 +788,11 @@ CoOperative reaches the intended end state when a business owner can connect the
 1. understand the current operation;
 2. identify meaningful economic opportunities;
 3. reason using the business's direction and current evidence;
-4. choose the best qualified compute/tool/provider;
-5. prepare a safe improvement or migration;
-6. obtain human approval at the right boundary;
-7. execute with minimal owner effort;
-8. verify and roll back when necessary;
-9. measure real business value;
-10. learn the reusable parts so the next similar job is cheaper and easier.
+4. choose the best qualified compute/tool/provider using code-first, profile-matched local/free-first, funded-paid-last routing;
+5. preserve one chat/profile experience across browser, mobile, and node-assisted execution;
+6. prepare a safe improvement or migration;
+7. obtain human approval at the right boundary;
+8. execute with minimal owner effort;
+9. verify and roll back when necessary;
+10. measure real business value;
+11. learn the reusable parts so the next similar job is cheaper and easier.
