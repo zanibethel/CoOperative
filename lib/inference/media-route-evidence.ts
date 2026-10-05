@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { recordModelCapabilityEvidence } from "@/lib/inference/model-capability-registry";
 
 export type MediaRouteEvidenceKind =
   | "provider-policy"
@@ -37,6 +38,42 @@ export async function recordMediaRouteOutcome(input: {
     detail: input.detail?.slice(0, 1600) || null,
   });
   if (error) throw error;
+
+  const routeKind = input.requestShape.startsWith("video")
+    ? "video"
+    : "image";
+  const capabilityKey =
+    input.outcomeKind === "capability-refusal"
+      ? `request-shape-${input.requestShape.replace(/[^a-z0-9-]+/gi, "-").toLowerCase()}`
+      : `runtime-${input.outcomeKind.replace(/[^a-z0-9-]+/gi, "-").toLowerCase()}`;
+
+  await recordModelCapabilityEvidence({
+    ownerRef: input.ownerRef,
+    provider: input.provider,
+    model: input.model,
+    endpoint: input.endpoint || "",
+    routeKind,
+    capabilityKey,
+    scope: input.requestShape,
+    state:
+      input.outcomeKind === "capability-refusal"
+        ? "unsupported"
+        : input.outcomeKind,
+    sourceType: "runtime",
+    sourceRef: input.sourceJobId,
+    confidence: input.outcomeKind === "capability-refusal" ? 0.95 : 0.8,
+    evidence: {
+      outcomeKind: input.outcomeKind,
+      executionMode: input.executionMode || "unknown",
+      blocksRoute: input.blocksRoute === true,
+      detail: input.detail?.slice(0, 1200) || null,
+    },
+  }).catch((e) => {
+    console.error("Could not mirror media route outcome into model evidence", {
+      sourceJobId: input.sourceJobId,
+      detail: e instanceof Error ? e.message.slice(0, 600) : "unknown",
+    });
+  });
 }
 
 export async function knownCapabilityBlockedMediaRoutes(input: {
