@@ -3959,14 +3959,7 @@ export async function GET(request: Request) {
             result_model: job.fallback_model || "openrouter/free",
             result_provider: "openrouter-free",
             latency_ms: latencyMs,
-            fallback_usage: {
-              ...(job.fallback_usage &&
-              typeof job.fallback_usage === "object" &&
-              !Array.isArray(job.fallback_usage)
-                ? job.fallback_usage
-                : {}),
-              ...(polled.usage || {}),
-            },
+            fallback_usage: polled.usage,
             error: null,
             completed_at: completedAt,
             updated_at: completedAt,
@@ -4363,7 +4356,14 @@ export async function GET(request: Request) {
             result_model: job.fallback_model || "openrouter/free",
             result_provider: "openrouter-free",
             latency_ms: latencyMs,
-            fallback_usage: polled.usage,
+            fallback_usage: {
+              ...(job.fallback_usage &&
+              typeof job.fallback_usage === "object" &&
+              !Array.isArray(job.fallback_usage)
+                ? job.fallback_usage
+                : {}),
+              ...(polled.usage || {}),
+            },
             error: null,
             completed_at: completedAt,
             updated_at: completedAt,
