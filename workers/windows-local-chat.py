@@ -242,6 +242,22 @@ async function hostedRequest(path="",options={}){
   if(!r.ok)throw new Error(j.error||"Hosted history sync failed.");
   return j;
 }
+async function profileSettingsRequest(options={}){
+  const headers={"Content-Type":"application/json",...(options.headers||{})};
+  if(cooperativeProfileToken)headers["X-Cooperative-Profile-Token"]=cooperativeProfileToken;
+  const r=await fetch("/api/profile-settings",{cache:"no-store",...options,headers});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j.error||"Profile settings sync failed.");
+  return j;
+}
+async function syncProfileSettings(){
+  if(!cooperativeProfileToken)return;
+  try{
+    const j=await profileSettingsRequest();
+    const mode=["off","auto","always"].includes(j.webAccessMode)?j.webAccessMode:"off";
+    state.webMode=mode;$("webMode").value=mode;saveState();updateWebWarning();
+  }catch{}
+}
 async function recoveryRequest(path="",options={}){
   const headers={...(options.headers||{})};
   if(cooperativeProfileToken)headers["X-Cooperative-Profile-Token"]=cooperativeProfileToken;
@@ -497,9 +513,17 @@ $("fileInput").onchange=e=>handleFiles(e.target.files,e.target.dataset.project==
 $("send").onclick=send;$("input").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
 $("mic").onclick=toggleMic;$("projectToggle").onclick=()=>$("projectPanel").classList.toggle("hidden");
 $("modelMode").onchange=()=>{state.modelMode=$("modelMode").value;saveState()};
-$("webMode").onchange=()=>{state.webMode=$("webMode").value;saveState();updateWebWarning()};
+$("webMode").onchange=()=>{
+  state.webMode=$("webMode").value;saveState();updateWebWarning();
+  if(cooperativeProfileToken){
+    void profileSettingsRequest({
+      method:"POST",
+      body:JSON.stringify({webAccessMode:state.webMode})
+    }).catch(e=>$("error").textContent=e.message||String(e));
+  }
+};
 $("voiceReply").onclick=()=>{state.voiceReply=!state.voiceReply;saveState();updateVoiceButton()};
-loadState();if(!state.activeConversationId&&state.conversations.length)state.activeConversationId=state.conversations[0].id;renderAll();void syncHostedHistory();setInterval(()=>void syncHostedHistory(),15000);$("input").focus();
+loadState();if(!state.activeConversationId&&state.conversations.length)state.activeConversationId=state.conversations[0].id;renderAll();void syncProfileSettings();void syncHostedHistory();setInterval(()=>void syncHostedHistory(),15000);$("input").focus();
 </script>
 </body>
 </html>
@@ -596,6 +620,52 @@ def hosted_history_request(
         except Exception:
             detail = response.text
         raise RuntimeError(str(detail or "Hosted history sync failed.")[:700])
+    value = response.json()
+    return value if isinstance(value, dict) else {}
+
+
+def hosted_profile_settings_request(
+    method: str,
+    profile_token: str | None,
+    web_access_mode: str | None = None,
+) -> dict:
+    if not NODE_ID or not NODE_TOKEN:
+        raise RuntimeError("This CoOperativeLocalAI is not linked to a Unison node.")
+    if not profile_token:
+        raise RuntimeError(
+            "This Windows profile is not linked to a CoOperative user yet. "
+            "Run the Unison installer once from this Windows profile."
+        )
+
+    url = f"{COOPERATIVE_URL}/api/personal-ai/node/settings"
+    headers = {
+        "Authorization": f"Bearer {NODE_TOKEN}",
+        "X-Cooperative-Profile-Token": profile_token,
+        "Content-Type": "application/json",
+    }
+    if method == "GET":
+        response = httpx.get(
+            url,
+            params={"nodeId": NODE_ID},
+            headers=headers,
+            timeout=30.0,
+            follow_redirects=True,
+        )
+    else:
+        response = httpx.patch(
+            url,
+            headers=headers,
+            json={"nodeId": NODE_ID, "webAccessMode": web_access_mode or "off"},
+            timeout=30.0,
+            follow_redirects=True,
+        )
+
+    if not response.is_success:
+        try:
+            detail = response.json().get("detail") or response.json().get("error")
+        except Exception:
+            detail = response.text
+        raise RuntimeError(str(detail or "Profile settings sync failed.")[:700])
     value = response.json()
     return value if isinstance(value, dict) else {}
 
@@ -1130,6 +1200,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(502, {"error": str(exc)[:800]})
             return
 
+        if parsed.path == "/api/profile-settings":
+            profile_token = self.headers.get("X-Cooperative-Profile-Token")
+            try:
+                self._json(
+                    200,
+                    hosted_profile_settings_request(
+                        "GET",
+                        profile_token=profile_token,
+                    ),
+                )
+            except Exception as exc:
+                self._json(502, {"error": str(exc)[:800]})
+            return
+
         if parsed.path == "/api/recovery":
             incident_id = (parse_qs(parsed.query).get("incidentId") or [None])[0]
             profile_token = self.headers.get("X-Cooperative-Profile-Token")
@@ -1222,6 +1306,22 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     raise RuntimeError("Unknown hosted history action.")
                 self._json(200, result)
+                return
+
+            if parsed.path == "/api/profile-settings":
+                body = json.loads(self._read_body(32_000) or b"{}")
+                profile_token = self.headers.get("X-Cooperative-Profile-Token")
+                web_access_mode = str(body.get("webAccessMode") or "off").lower()
+                if web_access_mode not in {"off", "auto", "always"}:
+                    raise RuntimeError("Invalid web access mode.")
+                self._json(
+                    200,
+                    hosted_profile_settings_request(
+                        "PATCH",
+                        profile_token=profile_token,
+                        web_access_mode=web_access_mode,
+                    ),
+                )
                 return
 
             if parsed.path == "/api/recovery":
