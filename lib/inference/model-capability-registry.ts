@@ -1,0 +1,1040 @@
+import "server-only";
+
+import { createHash } from "crypto";
+
+import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { nousManagedMediaCatalog } from "@/lib/inference/nous-managed-media";
+import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog";
+import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
+
+export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-05.1";
+
+type JsonMap = Record<string, unknown>;
+
+type RouteSnapshot = {
+  provider: string;
+  model: string;
+  endpoint: string;
+  routeKind: string;
+  displayName: string;
+  source: string;
+  status: string;
+  free: boolean;
+  recommended: boolean;
+  executionReady: boolean;
+  inputModalities: string[];
+  outputModalities: string[];
+  capabilitySummary: JsonMap;
+  pricing: JsonMap;
+  limits: JsonMap;
+  policySummary: JsonMap;
+  benchmarkSummary: JsonMap;
+  runtimeSummary: JsonMap;
+  metadata: JsonMap;
+};
+
+type ScanSourceResult = {
+  source: string;
+  provider: string;
+  ok: boolean;
+  count: number;
+  detail?: string;
+};
+
+type ExistingPolicyRow = {
+  provider: string;
+  model: string;
+  endpoint: string;
+  adult_content_policy: string | null;
+  adult_content_policy_source: string | null;
+  adult_content_policy_checked_at: string | null;
+  adult_non_explicit_policy: string | null;
+  adult_non_explicit_policy_source: string | null;
+  adult_non_explicit_policy_checked_at: string | null;
+  adult_explicit_policy: string | null;
+  adult_explicit_policy_source: string | null;
+  adult_explicit_policy_checked_at: string | null;
+  reference_capability: string | null;
+  reference_capability_source: string | null;
+  notes: string | null;
+  updated_at: string | null;
+};
+
+function routeKey(input: {
+  provider: string;
+  model: string;
+  endpoint?: string | null;
+  routeKind: string;
+}) {
+  return [
+    input.provider,
+    input.model,
+    input.endpoint || "",
+    input.routeKind,
+  ].join("|");
+}
+
+function policyKey(provider: string, model: string, endpoint = "") {
+  return [provider, model, endpoint].join("|");
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as JsonMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, nested]) => [key, stableValue(nested)]),
+  );
+}
+
+function fingerprint(snapshot: RouteSnapshot) {
+  return createHash("sha256")
+    .update(JSON.stringify(stableValue(snapshot)))
+    .digest("hex");
+}
+
+function changedFields(before: JsonMap, after: JsonMap) {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...keys].filter(
+    (key) =>
+      JSON.stringify(stableValue(before[key])) !==
+      JSON.stringify(stableValue(after[key])),
+  );
+}
+
+function policySummary(row: ExistingPolicyRow | undefined): JsonMap {
+  if (!row) {
+    return {
+      adult: {
+        general: "unknown",
+        nonExplicit: "unknown",
+        explicit: "unknown",
+      },
+      referenceCapability: "unknown",
+    };
+  }
+
+  return {
+    adult: {
+      general: row.adult_content_policy || "unknown",
+      generalSource: row.adult_content_policy_source,
+      generalCheckedAt: row.adult_content_policy_checked_at,
+      nonExplicit: row.adult_non_explicit_policy || "unknown",
+      nonExplicitSource: row.adult_non_explicit_policy_source,
+      nonExplicitCheckedAt: row.adult_non_explicit_policy_checked_at,
+      explicit: row.adult_explicit_policy || "unknown",
+      explicitSource: row.adult_explicit_policy_source,
+      explicitCheckedAt: row.adult_explicit_policy_checked_at,
+    },
+    referenceCapability: row.reference_capability || "unknown",
+    referenceCapabilitySource: row.reference_capability_source,
+    notes: row.notes,
+    evidenceUpdatedAt: row.updated_at,
+  };
+}
+
+function inferEvidenceRouteKind(row: ExistingPolicyRow) {
+  const endpoint = row.endpoint || "";
+  if (/video|pixverse/i.test(row.model) || /video/i.test(endpoint)) {
+    return "video";
+  }
+  if (endpoint) return "image-edit";
+  return "image";
+}
+
+function snapshotSummary(snapshot: RouteSnapshot): JsonMap {
+  return {
+    provider: snapshot.provider,
+    model: snapshot.model,
+    endpoint: snapshot.endpoint,
+    routeKind: snapshot.routeKind,
+    status: snapshot.status,
+    free: snapshot.free,
+    recommended: snapshot.recommended,
+    executionReady: snapshot.executionReady,
+    inputModalities: snapshot.inputModalities,
+    outputModalities: snapshot.outputModalities,
+    capabilitySummary: snapshot.capabilitySummary,
+    pricing: snapshot.pricing,
+    limits: snapshot.limits,
+    policySummary: snapshot.policySummary,
+    runtimeSummary: snapshot.runtimeSummary,
+  };
+}
+
+async function loadEvidenceMaps() {
+  const admin = createAdminSupabaseClient();
+  const [
+    { data: policies, error: policyError },
+    { data: runtimeRows, error: runtimeError },
+  ] = await Promise.all([
+    admin
+      .from("media_model_capabilities")
+      .select(
+        "provider,model,endpoint,adult_content_policy,adult_content_policy_source,adult_content_policy_checked_at,adult_non_explicit_policy,adult_non_explicit_policy_source,adult_non_explicit_policy_checked_at,adult_explicit_policy,adult_explicit_policy_source,adult_explicit_policy_checked_at,reference_capability,reference_capability_source,notes,updated_at",
+      ),
+    admin
+      .from("media_route_outcomes")
+      .select(
+        "provider,model,endpoint,execution_mode,request_shape,outcome_kind,blocks_route,created_at",
+      )
+      .order("created_at", { ascending: false })
+      .limit(1000),
+  ]);
+
+  if (policyError) throw policyError;
+  if (runtimeError) throw runtimeError;
+
+  const policyMap = new Map<string, ExistingPolicyRow>();
+  for (const row of (policies || []) as ExistingPolicyRow[]) {
+    policyMap.set(policyKey(row.provider, row.model, row.endpoint || ""), row);
+  }
+
+  const runtimeMap = new Map<string, JsonMap>();
+  for (const row of runtimeRows || []) {
+    const key = policyKey(row.provider, row.model, row.endpoint || "");
+    if (runtimeMap.has(key)) continue;
+    runtimeMap.set(key, {
+      latestOutcome: row.outcome_kind,
+      latestRequestShape: row.request_shape,
+      latestExecutionMode: row.execution_mode,
+      blocksRoute: row.blocks_route === true,
+      observedAt: row.created_at,
+    });
+  }
+
+  return { policyMap, runtimeMap, policyRows: (policies || []) as ExistingPolicyRow[] };
+}
+
+function localRegistrySnapshots(
+  policyMap: Map<string, ExistingPolicyRow>,
+  runtimeMap: Map<string, JsonMap>,
+) {
+  const registry = publicTextModelRegistry();
+  const routes: RouteSnapshot[] = [];
+
+  for (const profile of registry.profiles) {
+    routes.push({
+      provider: "cooperative-local",
+      model: profile.defaultModelId,
+      endpoint: "",
+      routeKind: "text",
+      displayName: `Local ${profile.profile} · ${profile.defaultModelId}`,
+      source: "text-model-registry",
+      status: "active",
+      free: true,
+      recommended: true,
+      executionReady: true,
+      inputModalities: ["text"],
+      outputModalities: ["text"],
+      capabilitySummary: {
+        textGeneration: true,
+        profile: profile.profile,
+        runtime: profile.runtime,
+        purpose: profile.purpose,
+        toolCalling: "unknown",
+        structuredOutput: "unknown",
+        reasoning: profile.profile === "quality" ? "preferred" : "available",
+      },
+      pricing: {
+        billing: "owned-local",
+        estimatedProviderCostUsd: 0,
+      },
+      limits: {},
+      policySummary: policySummary(
+        policyMap.get(policyKey("cooperative-local", profile.defaultModelId)),
+      ),
+      benchmarkSummary: {},
+      runtimeSummary:
+        runtimeMap.get(policyKey("cooperative-local", profile.defaultModelId)) || {},
+      metadata: {
+        registryRevision: registry.revision,
+        overrideEnv: profile.overrideEnv,
+      },
+    });
+  }
+
+  routes.push({
+    provider: "cooperative-local",
+    model: registry.capabilities[0].defaultModelId,
+    endpoint: "",
+    routeKind: "vision",
+    displayName: `Local vision · ${registry.capabilities[0].defaultModelId}`,
+    source: "text-model-registry",
+    status: "active",
+    free: true,
+    recommended: true,
+    executionReady: true,
+    inputModalities: ["text", "image"],
+    outputModalities: ["text"],
+    capabilitySummary: {
+      vision: true,
+      imageUnderstanding: true,
+      runtime: registry.capabilities[0].runtime,
+      purpose: registry.capabilities[0].purpose,
+    },
+    pricing: { billing: "owned-local", estimatedProviderCostUsd: 0 },
+    limits: {},
+    policySummary: {},
+    benchmarkSummary: {},
+    runtimeSummary: {},
+    metadata: {
+      registryRevision: registry.revision,
+      overrideEnv: registry.capabilities[0].overrideEnv,
+    },
+  });
+
+  for (const backend of registry.ownedNodeBackends) {
+    routes.push({
+      provider: "cooperative-local",
+      model: backend.defaultModelId,
+      endpoint: backend.runtime,
+      routeKind: "text-runtime",
+      displayName: backend.runtime,
+      source: "text-model-registry",
+      status: "active",
+      free: true,
+      recommended: false,
+      executionReady: true,
+      inputModalities: ["text"],
+      outputModalities: ["text"],
+      capabilitySummary: {
+        capabilities: backend.capabilities,
+        runtime: backend.runtime,
+        purpose: backend.purpose,
+      },
+      pricing: { billing: "owned-node", estimatedProviderCostUsd: 0 },
+      limits: {},
+      policySummary: {},
+      benchmarkSummary: {},
+      runtimeSummary: {},
+      metadata: { registryRevision: registry.revision },
+    });
+  }
+
+  return routes;
+}
+
+export async function recordModelCapabilityEvidence(input: {
+  ownerRef?: string | null;
+  provider: string;
+  model: string;
+  endpoint?: string | null;
+  routeKind: string;
+  capabilityKey: string;
+  scope?: string;
+  state: string;
+  sourceType: string;
+  sourceRef?: string | null;
+  confidence?: number;
+  observedAt?: string;
+  expiresAt?: string | null;
+  evidence?: JsonMap;
+}) {
+  const admin = createAdminSupabaseClient();
+  const endpoint = input.endpoint || "";
+
+  const { data: route, error: routeError } = await admin
+    .from("ai_model_registry")
+    .select("id")
+    .eq("provider", input.provider)
+    .eq("model", input.model)
+    .eq("endpoint", endpoint)
+    .eq("route_kind", input.routeKind)
+    .maybeSingle();
+  if (routeError) throw routeError;
+
+  const { data, error } = await admin
+    .from("ai_model_capability_evidence")
+    .insert({
+      registry_route_id: route?.id || null,
+      owner_ref: input.ownerRef || null,
+      provider: input.provider,
+      model: input.model,
+      endpoint,
+      route_kind: input.routeKind,
+      capability_key: input.capabilityKey,
+      scope: input.scope || "",
+      state: input.state,
+      source_type: input.sourceType,
+      source_ref: input.sourceRef || null,
+      confidence: Math.min(1, Math.max(0, input.confidence ?? 0.5)),
+      observed_at: input.observedAt || new Date().toISOString(),
+      expires_at: input.expiresAt || null,
+      evidence: input.evidence || {},
+    })
+    .select("id")
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+async function persistSpecializedPolicyEvidence(
+  routeId: string,
+  route: RouteSnapshot,
+  currentFingerprintChanged: boolean,
+) {
+  if (!currentFingerprintChanged) return;
+
+  const adult =
+    route.policySummary.adult &&
+    typeof route.policySummary.adult === "object"
+      ? (route.policySummary.adult as JsonMap)
+      : null;
+
+  if (adult) {
+    for (const [key, capabilityKey] of [
+      ["general", "adult-content"],
+      ["nonExplicit", "adult-non-explicit"],
+      ["explicit", "adult-explicit"],
+    ] as const) {
+      const state = adult[key];
+      if (typeof state !== "string" || state === "unknown") continue;
+      const source =
+        typeof adult[`${key}Source`] === "string"
+          ? String(adult[`${key}Source`])
+          : null;
+      const observedAt =
+        typeof adult[`${key}CheckedAt`] === "string"
+          ? String(adult[`${key}CheckedAt`])
+          : new Date().toISOString();
+
+      const admin = createAdminSupabaseClient();
+      const { error } = await admin
+        .from("ai_model_capability_evidence")
+        .insert({
+          registry_route_id: routeId,
+          owner_ref: null,
+          provider: route.provider,
+          model: route.model,
+          endpoint: route.endpoint,
+          route_kind: route.routeKind,
+          capability_key: capabilityKey,
+          scope: key,
+          state,
+          source_type: "policy",
+          source_ref: source,
+          confidence: state === "allowed" || state === "disallowed" ? 0.9 : 0.5,
+          observed_at: observedAt,
+          evidence: {
+            migratedFrom: "media_model_capabilities",
+          },
+        });
+      if (error) throw error;
+    }
+  }
+}
+
+export async function scanModelCapabilities(input: {
+  triggerSource?: string;
+} = {}) {
+  const admin = createAdminSupabaseClient();
+  const scanId = crypto.randomUUID();
+  const triggerSource = input.triggerSource || "manual";
+  const startedAt = new Date().toISOString();
+
+  const { error: runInsertError } = await admin
+    .from("ai_model_scan_runs")
+    .insert({
+      id: scanId,
+      scanner_version: MODEL_CAPABILITY_SCANNER_VERSION,
+      trigger_source: triggerSource,
+      status: "running",
+      sources: [],
+      started_at: startedAt,
+    });
+  if (runInsertError) throw runInsertError;
+
+  try {
+    const { policyMap, runtimeMap, policyRows } = await loadEvidenceMaps();
+    const routes: RouteSnapshot[] = [];
+    const sources: ScanSourceResult[] = [];
+    const successfulProviders = new Set<string>();
+
+    const [openRouterResult, nousResult] = await Promise.allSettled([
+      openRouterMediaCatalog(true),
+      nousManagedMediaCatalog(),
+    ]);
+
+    if (openRouterResult.status === "fulfilled") {
+      const catalog = openRouterResult.value;
+      successfulProviders.add("openrouter");
+
+      for (const model of catalog.image) {
+        routes.push({
+          provider: "openrouter",
+          model: model.id,
+          endpoint: "",
+          routeKind: "image",
+          displayName: model.name || model.id,
+          source: catalog.source,
+          status: "active",
+          free: model.free,
+          recommended: model.recommended === true,
+          executionReady: true,
+          inputModalities: model.inputModalities,
+          outputModalities: ["image"],
+          capabilitySummary: {
+            textToImage: true,
+            imageToImage:
+              model.inputModalities.some(
+                (value) => value.toLowerCase() === "image",
+              ) || (model.minInputReferences ?? 0) > 0,
+            referenceImages:
+              model.inputModalities.some(
+                (value) => value.toLowerCase() === "image",
+              ) || (model.minInputReferences ?? 0) > 0,
+            minInputReferences: model.minInputReferences ?? 0,
+            aspectRatios: model.aspectRatios,
+            resolutions: model.resolutions,
+            transparency: "unknown",
+            inpainting: "unknown",
+            outpainting: "unknown",
+            styleTransfer: "unknown",
+          },
+          pricing: {
+            free: model.free,
+            unit: model.unit,
+            minUnitCostUsd: model.minUnitCostUsd,
+            maxUnitCostUsd: model.maxUnitCostUsd,
+            costLabel: model.costLabel,
+            skus: model.pricingSkus,
+          },
+          limits: {
+            aspectRatios: model.aspectRatios,
+            resolutions: model.resolutions,
+            minInputReferences: model.minInputReferences ?? 0,
+          },
+          policySummary: policySummary(
+            policyMap.get(policyKey("openrouter", model.id)),
+          ),
+          benchmarkSummary: {},
+          runtimeSummary:
+            runtimeMap.get(policyKey("openrouter", model.id)) || {},
+          metadata: {
+            catalogFetchedAt: catalog.fetchedAt,
+            recommendedByCoOperative: model.recommended === true,
+          },
+        });
+      }
+
+      for (const model of catalog.video) {
+        routes.push({
+          provider: "openrouter",
+          model: model.id,
+          endpoint: "",
+          routeKind: "video",
+          displayName: model.name || model.id,
+          source: catalog.source,
+          status: "active",
+          free: model.free,
+          recommended: model.recommended === true,
+          executionReady: true,
+          inputModalities: model.inputModalities,
+          outputModalities: ["video"],
+          capabilitySummary: {
+            textToVideo: true,
+            imageToVideo: model.inputModalities.some(
+              (value) => value.toLowerCase() === "image",
+            ),
+            audioGeneration: model.audioSupported,
+            durations: model.durations,
+            aspectRatios: model.aspectRatios,
+            resolutions: model.resolutions,
+          },
+          pricing: {
+            free: model.free,
+            unit: model.unit,
+            minUnitCostUsd: model.minUnitCostUsd,
+            maxUnitCostUsd: model.maxUnitCostUsd,
+            costLabel: model.costLabel,
+            skus: model.pricingSkus,
+          },
+          limits: {
+            durations: model.durations,
+            aspectRatios: model.aspectRatios,
+            resolutions: model.resolutions,
+          },
+          policySummary: policySummary(
+            policyMap.get(policyKey("openrouter", model.id)),
+          ),
+          benchmarkSummary: {},
+          runtimeSummary:
+            runtimeMap.get(policyKey("openrouter", model.id)) || {},
+          metadata: { catalogFetchedAt: catalog.fetchedAt },
+        });
+      }
+
+      sources.push({
+        source: catalog.source,
+        provider: "openrouter",
+        ok: true,
+        count: catalog.image.length + catalog.video.length,
+      });
+    } else {
+      sources.push({
+        source: "openrouter-live",
+        provider: "openrouter",
+        ok: false,
+        count: 0,
+        detail:
+          openRouterResult.reason instanceof Error
+            ? openRouterResult.reason.message.slice(0, 500)
+            : "OpenRouter catalog scan failed.",
+      });
+    }
+
+    if (nousResult.status === "fulfilled") {
+      const catalog = nousResult.value;
+      successfulProviders.add("nous");
+
+      for (const model of catalog.image) {
+        routes.push({
+          provider: "nous",
+          model: model.model,
+          endpoint: "",
+          routeKind: "image",
+          displayName: model.model.replace(/^fal-ai\//, ""),
+          source: catalog.source,
+          status: "active",
+          free: false,
+          recommended: true,
+          executionReady: true,
+          inputModalities: ["text"],
+          outputModalities: ["image"],
+          capabilitySummary: {
+            textToImage: true,
+            imageToImage: false,
+            referenceImages: false,
+            qualityLabel: model.qualityLabel,
+            minQualityLevel: model.minLevel,
+          },
+          pricing: {
+            estimatedCostUsd: model.estimatedCostUsd,
+            pricingSource: model.pricingSource,
+          },
+          limits: {},
+          policySummary: policySummary(
+            policyMap.get(policyKey("nous", model.model)),
+          ),
+          benchmarkSummary: {},
+          runtimeSummary:
+            runtimeMap.get(policyKey("nous", model.model)) || {},
+          metadata: {
+            catalogFetchedAt: catalog.fetchedAt,
+            qualityLabel: model.qualityLabel,
+          },
+        });
+      }
+
+      if (catalog.video) {
+        routes.push({
+          provider: "nous",
+          model: catalog.video.model,
+          endpoint: "",
+          routeKind: "video",
+          displayName: "PixVerse V6",
+          source: catalog.source,
+          status: "active",
+          free: false,
+          recommended: true,
+          executionReady: true,
+          inputModalities: ["text"],
+          outputModalities: ["video"],
+          capabilitySummary: {
+            textToVideo: true,
+            audioGeneration: true,
+            resolutions: Object.keys(catalog.video.rates),
+          },
+          pricing: {
+            unit: "second",
+            rates: catalog.video.rates,
+            pricingSource: catalog.video.pricingSource,
+          },
+          limits: {
+            durationSeconds: catalog.video.durationSeconds,
+            resolutions: Object.keys(catalog.video.rates),
+          },
+          policySummary: policySummary(
+            policyMap.get(policyKey("nous", catalog.video.model)),
+          ),
+          benchmarkSummary: {},
+          runtimeSummary:
+            runtimeMap.get(policyKey("nous", catalog.video.model)) || {},
+          metadata: { catalogFetchedAt: catalog.fetchedAt },
+        });
+      }
+
+      sources.push({
+        source: catalog.source,
+        provider: "nous",
+        ok: true,
+        count: catalog.image.length + (catalog.video ? 1 : 0),
+      });
+    } else {
+      sources.push({
+        source: "nous-managed-live",
+        provider: "nous",
+        ok: false,
+        count: 0,
+        detail:
+          nousResult.reason instanceof Error
+            ? nousResult.reason.message.slice(0, 500)
+            : "Nous catalog scan failed.",
+      });
+    }
+
+    successfulProviders.add("cooperative-local");
+    const localRoutes = localRegistrySnapshots(policyMap, runtimeMap);
+    routes.push(...localRoutes);
+    sources.push({
+      source: "text-model-registry",
+      provider: "cooperative-local",
+      ok: true,
+      count: localRoutes.length,
+    });
+
+    // Preserve specialized exact routes, such as edit/reference endpoints, even
+    // when they are not exposed as standalone entries in the current live catalog.
+    for (const row of policyRows) {
+      if (!row.endpoint) continue;
+      const kind = inferEvidenceRouteKind(row);
+      const key = routeKey({
+        provider: row.provider,
+        model: row.model,
+        endpoint: row.endpoint,
+        routeKind: kind,
+      });
+      if (
+        routes.some(
+          (route) =>
+            routeKey(route) === key,
+        )
+      ) {
+        continue;
+      }
+
+      routes.push({
+        provider: row.provider,
+        model: row.model,
+        endpoint: row.endpoint,
+        routeKind: kind,
+        displayName: `${row.model} · ${row.endpoint}`,
+        source: "capability-evidence",
+        status: "evidence-only",
+        free: false,
+        recommended: false,
+        executionReady: false,
+        inputModalities: kind === "image-edit" ? ["text", "image"] : ["text"],
+        outputModalities: [kind.startsWith("video") ? "video" : "image"],
+        capabilitySummary: {
+          referenceImages: kind === "image-edit",
+          evidenceOnly: true,
+        },
+        pricing: {},
+        limits: {},
+        policySummary: policySummary(row),
+        benchmarkSummary: {},
+        runtimeSummary:
+          runtimeMap.get(policyKey(row.provider, row.model, row.endpoint)) || {},
+        metadata: {
+          evidenceOnly: true,
+          lastCapabilityUpdate: row.updated_at,
+        },
+      });
+    }
+
+    const deduped = [
+      ...new Map(routes.map((route) => [routeKey(route), route])).values(),
+    ];
+
+    const { data: existingRows, error: existingError } = await admin
+      .from("ai_model_registry")
+      .select("*");
+    if (existingError) throw existingError;
+
+    const existingMap = new Map(
+      (existingRows || []).map((row) => [
+        routeKey({
+          provider: row.provider,
+          model: row.model,
+          endpoint: row.endpoint,
+          routeKind: row.route_kind,
+        }),
+        row,
+      ]),
+    );
+
+    const seen = new Set<string>();
+    let newCount = 0;
+    let changedCount = 0;
+    let missingCount = 0;
+    const now = new Date().toISOString();
+
+    for (const route of deduped) {
+      const key = routeKey(route);
+      seen.add(key);
+      const current = existingMap.get(key);
+      const currentFingerprint = fingerprint(route);
+      const summary = snapshotSummary(route);
+
+      if (!current) {
+        const { data: inserted, error } = await admin
+          .from("ai_model_registry")
+          .insert({
+            provider: route.provider,
+            model: route.model,
+            endpoint: route.endpoint,
+            route_kind: route.routeKind,
+            display_name: route.displayName,
+            source: route.source,
+            status: route.status,
+            free: route.free,
+            recommended: route.recommended,
+            execution_ready: route.executionReady,
+            input_modalities: route.inputModalities,
+            output_modalities: route.outputModalities,
+            capability_summary: route.capabilitySummary,
+            pricing: route.pricing,
+            limits: route.limits,
+            policy_summary: route.policySummary,
+            benchmark_summary: route.benchmarkSummary,
+            runtime_summary: route.runtimeSummary,
+            metadata: route.metadata,
+            current_fingerprint: currentFingerprint,
+            first_seen_at: now,
+            last_seen_at: now,
+            last_changed_at: now,
+            last_scan_id: scanId,
+            created_at: now,
+            updated_at: now,
+          })
+          .select("id")
+          .single();
+        if (error) throw error;
+
+        await admin.from("ai_model_scan_changes").insert({
+          scan_id: scanId,
+          registry_route_id: inserted.id,
+          provider: route.provider,
+          model: route.model,
+          endpoint: route.endpoint,
+          route_kind: route.routeKind,
+          change_type: "new",
+          previous_fingerprint: null,
+          new_fingerprint: currentFingerprint,
+          changed_fields: Object.keys(summary),
+          before_summary: {},
+          after_summary: summary,
+        });
+
+        await persistSpecializedPolicyEvidence(
+          inserted.id,
+          route,
+          true,
+        );
+        newCount += 1;
+        continue;
+      }
+
+      const before: JsonMap = {
+        provider: current.provider,
+        model: current.model,
+        endpoint: current.endpoint,
+        routeKind: current.route_kind,
+        status: current.status,
+        free: current.free,
+        recommended: current.recommended,
+        executionReady: current.execution_ready,
+        inputModalities: current.input_modalities,
+        outputModalities: current.output_modalities,
+        capabilitySummary: current.capability_summary,
+        pricing: current.pricing,
+        limits: current.limits,
+        policySummary: current.policy_summary,
+        runtimeSummary: current.runtime_summary,
+      };
+      const changed = current.current_fingerprint !== currentFingerprint;
+
+      const { error: updateError } = await admin
+        .from("ai_model_registry")
+        .update({
+          display_name: route.displayName,
+          source: route.source,
+          status: route.status,
+          free: route.free,
+          recommended: route.recommended,
+          execution_ready: route.executionReady,
+          input_modalities: route.inputModalities,
+          output_modalities: route.outputModalities,
+          capability_summary: route.capabilitySummary,
+          pricing: route.pricing,
+          limits: route.limits,
+          policy_summary: route.policySummary,
+          benchmark_summary: route.benchmarkSummary,
+          runtime_summary: route.runtimeSummary,
+          metadata: route.metadata,
+          current_fingerprint: currentFingerprint,
+          last_seen_at: now,
+          last_changed_at: changed ? now : current.last_changed_at,
+          last_scan_id: scanId,
+          updated_at: now,
+        })
+        .eq("id", current.id);
+      if (updateError) throw updateError;
+
+      if (changed) {
+        const fields = changedFields(before, summary);
+        await admin.from("ai_model_scan_changes").insert({
+          scan_id: scanId,
+          registry_route_id: current.id,
+          provider: route.provider,
+          model: route.model,
+          endpoint: route.endpoint,
+          route_kind: route.routeKind,
+          change_type:
+            current.status === "missing" && route.status !== "missing"
+              ? "restored"
+              : "updated",
+          previous_fingerprint: current.current_fingerprint,
+          new_fingerprint: currentFingerprint,
+          changed_fields: fields,
+          before_summary: before,
+          after_summary: summary,
+        });
+
+        await persistSpecializedPolicyEvidence(
+          current.id,
+          route,
+          true,
+        );
+        changedCount += 1;
+      }
+    }
+
+    for (const current of existingRows || []) {
+      const key = routeKey({
+        provider: current.provider,
+        model: current.model,
+        endpoint: current.endpoint,
+        routeKind: current.route_kind,
+      });
+      if (seen.has(key)) continue;
+      if (!successfulProviders.has(current.provider)) continue;
+      if (current.status === "missing") continue;
+
+      const previousSummary: JsonMap = {
+        status: current.status,
+        source: current.source,
+      };
+      const { error: missingError } = await admin
+        .from("ai_model_registry")
+        .update({
+          status: "missing",
+          execution_ready: false,
+          last_changed_at: now,
+          last_scan_id: scanId,
+          updated_at: now,
+        })
+        .eq("id", current.id);
+      if (missingError) throw missingError;
+
+      await admin.from("ai_model_scan_changes").insert({
+        scan_id: scanId,
+        registry_route_id: current.id,
+        provider: current.provider,
+        model: current.model,
+        endpoint: current.endpoint,
+        route_kind: current.route_kind,
+        change_type: "missing",
+        previous_fingerprint: current.current_fingerprint,
+        new_fingerprint: current.current_fingerprint,
+        changed_fields: ["status", "executionReady"],
+        before_summary: previousSummary,
+        after_summary: {
+          status: "missing",
+          executionReady: false,
+        },
+      });
+      missingCount += 1;
+    }
+
+    const completedAt = new Date().toISOString();
+    const { error: completeError } = await admin
+      .from("ai_model_scan_runs")
+      .update({
+        status: "completed",
+        sources,
+        discovered_count: deduped.length,
+        new_count: newCount,
+        changed_count: changedCount,
+        missing_count: missingCount,
+        completed_at: completedAt,
+        metadata: {
+          successfulProviders: [...successfulProviders],
+        },
+      })
+      .eq("id", scanId);
+    if (completeError) throw completeError;
+
+    return {
+      scanId,
+      scannerVersion: MODEL_CAPABILITY_SCANNER_VERSION,
+      status: "completed" as const,
+      discoveredCount: deduped.length,
+      newCount,
+      changedCount,
+      missingCount,
+      sources,
+      completedAt,
+    };
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message : "Model capability scan failed.";
+    await admin
+      .from("ai_model_scan_runs")
+      .update({
+        status: "failed",
+        error: detail.slice(0, 1600),
+        completed_at: new Date().toISOString(),
+      })
+      .eq("id", scanId);
+
+    throw error;
+  }
+}
+
+export async function latestModelRegistrySnapshot() {
+  const admin = createAdminSupabaseClient();
+  const [
+    { data: latestRun, error: runError },
+    { data: routes, error: routesError },
+  ] = await Promise.all([
+    admin
+      .from("ai_model_scan_runs")
+      .select(
+        "id,scanner_version,trigger_source,status,sources,discovered_count,new_count,changed_count,missing_count,error,started_at,completed_at",
+      )
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    admin
+      .from("ai_model_registry")
+      .select(
+        "id,provider,model,endpoint,route_kind,display_name,source,status,free,recommended,execution_ready,input_modalities,output_modalities,capability_summary,pricing,limits,policy_summary,benchmark_summary,runtime_summary,first_seen_at,last_seen_at,last_changed_at",
+      )
+      .order("provider")
+      .order("route_kind")
+      .order("display_name"),
+  ]);
+
+  if (runError) throw runError;
+  if (routesError) throw routesError;
+
+  return {
+    latestRun,
+    routes: routes || [],
+  };
+}
