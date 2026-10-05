@@ -1,5 +1,6 @@
 import "server-only";
 
+import { paidAiPriceQuote } from "@/lib/billing/paid-ai-pricing";
 import {
   estimateOpenRouterMediaCostUsd,
   recommendedForRequest,
@@ -96,6 +97,8 @@ export type MediaRecommendationOption = {
   model: string;
   modelName: string;
   estimatedCostUsd: number;
+  providerCostEstimateUsd: number;
+  markupPercent: number;
   capUsd: number;
   increaseNeededUsd: number;
   summary: string;
@@ -485,6 +488,8 @@ function discoveredReferenceCandidate(
     model: model.model,
     modelName: model.displayName,
     estimatedCostUsd: model.pricing.estimatedCostUsd,
+    providerCostEstimateUsd: model.pricing.estimatedCostUsd,
+    markupPercent: 0,
     capUsd: nextCent(model.pricing.estimatedCostUsd),
     pricingSource: model.pricing.source,
     resolution: null,
@@ -554,6 +559,7 @@ export async function buildMediaRecommendationOptions(input: {
   benchmarkEvidence?: MediaBenchmarkEvidence[];
   adultOutputRequested?: boolean;
   adultContentClass?: MediaAdultContentClass;
+  cooperativeManagedOpenRouter?: boolean;
 }) {
   const { plan, openRouterCatalog, currentCapUsd } = input;
   const contentPreference = input.contentPreference || "sfw_only";
@@ -596,12 +602,20 @@ export async function buildMediaRecommendationOptions(input: {
     });
     if (estimatedCostUsd === null || !Number.isFinite(estimatedCostUsd)) continue;
 
+    const sellPrice =
+      !model.free && input.cooperativeManagedOpenRouter
+        ? paidAiPriceQuote(estimatedCostUsd)
+        : null;
+    const quotedCostUsd = sellPrice?.userQuoteUsd ?? estimatedCostUsd;
+
     candidates.push({
       provider: "openrouter",
       model: model.id,
       modelName: model.name || model.id,
-      estimatedCostUsd,
-      capUsd: nextCent(estimatedCostUsd),
+      estimatedCostUsd: quotedCostUsd,
+      providerCostEstimateUsd: estimatedCostUsd,
+      markupPercent: sellPrice?.markupPercent ?? 0,
+      capUsd: nextCent(quotedCostUsd),
       pricingSource: openRouterCatalog?.source || "openrouter-live",
       resolution: plan.resolution,
       audio: plan.kind === "video" ? plan.audio : null,
@@ -632,6 +646,8 @@ export async function buildMediaRecommendationOptions(input: {
         model: nousCatalog.video.model,
         modelName: "PixVerse V6",
         estimatedCostUsd,
+        providerCostEstimateUsd: estimatedCostUsd,
+        markupPercent: 0,
         capUsd: nextCent(estimatedCostUsd),
         pricingSource: nousCatalog.video.pricingSource,
         resolution,
@@ -668,6 +684,8 @@ export async function buildMediaRecommendationOptions(input: {
           model: model.model,
           modelName: model.model.replace(/^fal-ai\//, ""),
           estimatedCostUsd: model.estimatedCostUsd,
+          providerCostEstimateUsd: model.estimatedCostUsd,
+          markupPercent: 0,
           capUsd: nextCent(model.estimatedCostUsd),
           pricingSource: model.pricingSource,
           resolution: null,
@@ -689,6 +707,8 @@ export async function buildMediaRecommendationOptions(input: {
             model: "local-image-quality-identity",
             modelName: "Owned Local Quality · Identity",
             estimatedCostUsd: 0,
+            providerCostEstimateUsd: 0,
+            markupPercent: 0,
             capUsd: 0,
             pricingSource: "owned-local",
             resolution: null,
@@ -706,6 +726,8 @@ export async function buildMediaRecommendationOptions(input: {
             model: "local-image-quality-reference",
             modelName: "Owned Local Quality · Reference",
             estimatedCostUsd: 0,
+            providerCostEstimateUsd: 0,
+            markupPercent: 0,
             capUsd: 0,
             pricingSource: "owned-local",
             resolution: null,
@@ -723,6 +745,8 @@ export async function buildMediaRecommendationOptions(input: {
             model: "local-image-fast-reference",
             modelName: "Owned Local Fast · Reference",
             estimatedCostUsd: 0,
+            providerCostEstimateUsd: 0,
+            markupPercent: 0,
             capUsd: 0,
             pricingSource: "owned-local",
             resolution: null,
@@ -742,6 +766,8 @@ export async function buildMediaRecommendationOptions(input: {
           model: "local-image-quality",
           modelName: "Owned local image generator",
           estimatedCostUsd: 0,
+          providerCostEstimateUsd: 0,
+          markupPercent: 0,
           capUsd: 0,
           pricingSource: "owned-local",
           resolution: null,
