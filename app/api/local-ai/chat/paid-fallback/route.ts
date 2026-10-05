@@ -27,6 +27,10 @@ import {
   reserveAiProfileFunds,
   settleAiProfileFunds,
 } from "@/lib/billing/ai-profile-balance";
+import {
+  paidAiPriceQuote,
+  realizedPaidAiMargin,
+} from "@/lib/billing/paid-ai-pricing";
 
 export const runtime = "nodejs";
 export const maxDuration = 210;
@@ -192,11 +196,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const estimatedCostUsd = decision.candidate.estimatedMarginalCostUsd;
+    const providerCostEstimateUsd =
+      decision.candidate.estimatedMarginalCostUsd;
     if (
-      typeof estimatedCostUsd !== "number" ||
-      !Number.isFinite(estimatedCostUsd) ||
-      estimatedCostUsd <= 0
+      typeof providerCostEstimateUsd !== "number" ||
+      !Number.isFinite(providerCostEstimateUsd) ||
+      providerCostEstimateUsd <= 0
     ) {
       return NextResponse.json(
         {
@@ -208,23 +213,28 @@ export async function POST(request: Request) {
       );
     }
 
+    const priceQuote = paidAiPriceQuote(providerCostEstimateUsd);
+    const quotedUserPriceUsd = priceQuote.userQuoteUsd;
+
     if (
       requestSpendCapUsd !== null &&
-      estimatedCostUsd > requestSpendCapUsd
+      quotedUserPriceUsd > requestSpendCapUsd
     ) {
       return NextResponse.json(
         {
           error: "The selected paid model would exceed this request's Model Mixer spend cap.",
           requestSpendCapUsd,
-          estimatedCostUsd,
-          suggestedMinimumCapUsd: estimatedCostUsd,
+          estimatedCostUsd: quotedUserPriceUsd,
+          providerCostEstimateUsd: priceQuote.providerCostEstimateUsd,
+          markupPercent: priceQuote.markupPercent,
+          suggestedMinimumCapUsd: quotedUserPriceUsd,
         },
         { status: 409 },
       );
     }
 
     const fundingRequirement = paidFundingRequirement({
-      estimatedCostUsd,
+      estimatedCostUsd: quotedUserPriceUsd,
       availableBalanceUsd: profileBalance.availableUsd,
       maxSpendUsd: requestSpendCapUsd,
     });
@@ -256,7 +266,7 @@ export async function POST(request: Request) {
 
       const directive = [
         `AI_FUNDING_REQUIRED:${sourceJob.id}`,
-        `ESTIMATED_USD:${estimatedCostUsd.toFixed(6)}`,
+        `ESTIMATED_USD:${quotedUserPriceUsd.toFixed(6)}`,
         `AVAILABLE_USD:${profileBalance.availableUsd.toFixed(6)}`,
         `MINIMUM_BALANCE_USD:${fundingRequirement.minimumRequiredBalanceUsd.toFixed(6)}`,
         `SHORTFALL_USD:${fundingRequirement.shortfallUsd.toFixed(6)}`,
@@ -269,7 +279,7 @@ export async function POST(request: Request) {
       ].join("\n");
 
       const assistantText = [
-        `The free/local routes could not complete this request. A qualified paid model is available and is estimated to cost about ${estimatedCostUsd.toFixed(4)}.`,
+        `The free/local routes could not complete this request. A qualified paid model is available for a quoted CoOperative price of about ${quotedUserPriceUsd.toFixed(4)}.`,
         `Your available CoOperative AI balance is ${profileBalance.availableUsd.toFixed(4)}, so you need at least ${fundingRequirement.shortfallUsd.toFixed(4)} more before I can use it.`,
         minimumCoveringOption
           ? `The smallest configured Stripe top-up that covers this request is ${minimumCoveringOption.amountUsd.toFixed(2)}.`
@@ -298,7 +308,7 @@ export async function POST(request: Request) {
           sourceJobId: sourceJob.id,
           error: "Additional funded AI balance is required for this paid route.",
           fundingRequired: {
-            estimatedCostUsd,
+            estimatedCostUsd: quotedUserPriceUsd,
             availableBalanceUsd: profileBalance.availableUsd,
             shortfallUsd: fundingRequirement.shortfallUsd,
             minimumRequiredBalanceUsd:
@@ -383,7 +393,7 @@ export async function POST(request: Request) {
 
     const reservation = await reserveAiProfileFunds({
       profileRef: cooperativeProfileRef(userId),
-      estimatedCostUsd,
+      estimatedCostUsd: quotedUserPriceUsd,
       source: "local-chat-paid-fallback",
       referenceId: paidJobId,
       metadata: {
@@ -396,6 +406,10 @@ export async function POST(request: Request) {
         ),
         model: decision.candidate.model,
         requestSpendCapUsd,
+        providerCostEstimateUsd: priceQuote.providerCostEstimateUsd,
+        quotedUserPriceUsd,
+        markupPercent: priceQuote.markupPercent,
+        estimatedMarginUsd: priceQuote.markupUsd,
       },
     });
 
@@ -432,7 +446,7 @@ export async function POST(request: Request) {
 
       const latestBalance = await aiProfileBalanceForUser(userId);
       const raceFunding = paidFundingRequirement({
-        estimatedCostUsd,
+        estimatedCostUsd: quotedUserPriceUsd,
         availableBalanceUsd: latestBalance.availableUsd,
         maxSpendUsd: requestSpendCapUsd,
       });
@@ -443,7 +457,7 @@ export async function POST(request: Request) {
           status: "funding-required",
           sourceJobId: sourceJob.id,
           fundingRequired: {
-            estimatedCostUsd,
+            estimatedCostUsd: quotedUserPriceUsd,
             availableBalanceUsd: latestBalance.availableUsd,
             shortfallUsd: raceFunding.shortfallUsd,
             minimumRequiredBalanceUsd: raceFunding.minimumRequiredBalanceUsd,
@@ -560,9 +574,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const realizedMargin = realizedPaidAiMargin({
+      userChargeUsd: quotedUserPriceUsd,
+      actualProviderCostUsd: result.estimatedCostUsd,
+    });
+
     const availableMicrousd = await settleAiProfileFunds({
       reservationId: reservation.id,
-      actualCostUsd: result.estimatedCostUsd,
+      actualCostUsd: quotedUserPriceUsd,
       metadata: {
         sourceJobId: sourceJob.id,
         paidJobId,
@@ -572,6 +591,12 @@ export async function POST(request: Request) {
         promptTokens: result.promptTokens,
         outputTokens: result.outputTokens,
         requestSpendCapUsd,
+        quotedUserPriceUsd,
+        providerCostEstimateUsd: priceQuote.providerCostEstimateUsd,
+        actualProviderCostUsd: realizedMargin.actualProviderCostUsd,
+        markupPercent: priceQuote.markupPercent,
+        realizedMarginUsd: realizedMargin.marginUsd,
+        profitable: realizedMargin.profitable,
       },
     });
 
@@ -673,7 +698,7 @@ export async function POST(request: Request) {
             : "Local execution failed; profile-funded high-quality AI completed the request.",
         funding: {
           reservationId: reservation.id,
-          chargedUsd: result.estimatedCostUsd,
+          chargedUsd: quotedUserPriceUsd,
           availableMicrousd,
         },
       },

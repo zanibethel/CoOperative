@@ -78,6 +78,11 @@ No balance means paid models are unavailable, not that CoOperative chat itself i
 
 User-connected provider accounts remain economically separate: Nous subscription routes and OpenRouter BYOK routes continue to use the user's own provider entitlement/account and are labeled as such rather than also debiting the CoOperative balance. When a CoOperative-managed OpenRouter credential is available, paid OpenRouter fallback prefers that managed route so Stripe-funded balance can pay for it.
 
+
+**Paid-AI sell-price rule:** when CoOperative itself pays the upstream provider, the upstream cost estimate is wholesale/internal. CoOperative applies the configured paid-AI markup (default 20%) and exposes only the resulting sell-price quote to the user. The request spend cap, funding requirement, reservation, and successful balance debit all use that same quoted sell price. Provider cost, markup, and realized margin remain separate internal billing metadata for owner reporting. If actual provider cost differs from the estimate, the user is not repriced after execution; the successful debit remains the pre-execution quote. Failed requests release the reservation and debit $0.
+
+BYOK and user-owned subscription routes do not receive this CoOperative markup because the user/provider relationship is paying that upstream cost directly.
+
 ## Unified web/URL access policy
 
 Web settings should belong to the CoOperative profile and behave consistently across browser/mobile/node-assisted chat:
