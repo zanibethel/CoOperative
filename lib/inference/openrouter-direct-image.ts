@@ -19,6 +19,7 @@ export type DirectOpenRouterImageResult =
       status: number;
       error: string;
       usage: Record<string, unknown> | null;
+      failureStage: "transport-uncertain" | "provider-response" | "post-provider";
     };
 
 function normalizeBase64(value: string) {
@@ -121,6 +122,7 @@ export async function executeOpenRouterImageDirect(input: {
             : error.message
           : "OpenRouter image generation request failed.",
       usage: null,
+      failureStage: "transport-uncertain",
     };
   }
 
@@ -148,6 +150,7 @@ export async function executeOpenRouterImageDirect(input: {
       status: response.status,
       error: String(detail).slice(0, 1600),
       usage,
+      failureStage: "provider-response",
     };
   }
 
@@ -191,6 +194,7 @@ export async function executeOpenRouterImageDirect(input: {
           ? error.message.slice(0, 1600)
           : "Could not persist the generated OpenRouter image.",
       usage,
+      failureStage: "post-provider",
     };
   }
 }
