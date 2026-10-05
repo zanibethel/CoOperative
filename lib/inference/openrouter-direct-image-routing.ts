@@ -3,6 +3,7 @@ import "server-only";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import {
   cooperativeProfileRef,
+  releaseAiProfileFunds,
   reserveAiProfileFunds,
 } from "@/lib/billing/ai-profile-balance";
 import { paidAiPriceQuote } from "@/lib/billing/paid-ai-pricing";
@@ -52,6 +53,24 @@ export type DirectImageFallbackResult =
     }
   | { kind: "none" };
 
+async function activeAttemptForRoot(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  rootJobId: string,
+  sourceJobId: string,
+) {
+  const { data, error } = await admin
+    .from("media_generation_jobs")
+    .select("id,model")
+    .eq("request_root_job_id", rootJobId)
+    .in("status", ["queued", "running"])
+    .neq("id", sourceJobId)
+    .order("route_attempt", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 function dimensions(job: SourceMediaJob) {
   return job.pricing_dimensions &&
     typeof job.pricing_dimensions === "object" &&
@@ -73,16 +92,11 @@ export async function queueNextDirectOpenRouterImageFallback(input: {
 }): Promise<DirectImageFallbackResult> {
   const admin = createAdminSupabaseClient();
 
-  const { data: existingActive, error: activeError } = await admin
-    .from("media_generation_jobs")
-    .select("id,model")
-    .eq("request_root_job_id", input.sourceJob.request_root_job_id)
-    .in("status", ["queued", "running"])
-    .neq("id", input.sourceJob.id)
-    .order("route_attempt", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (activeError) throw activeError;
+  const existingActive = await activeAttemptForRoot(
+    admin,
+    input.sourceJob.request_root_job_id,
+    input.sourceJob.id,
+  );
   if (existingActive) {
     return {
       kind: "already-active",
@@ -285,7 +299,29 @@ export async function queueNextDirectOpenRouterImageFallback(input: {
         route_attempt: Math.min(50, Math.max(1, Number(input.sourceJob.route_attempt || 1) + 1)),
         execution_mode: "direct-provider",
       });
-    if (insertError) throw insertError;
+    if (insertError) {
+      await releaseAiProfileFunds({
+        reservationId,
+        metadata: {
+          reason: "media-ledger-active-attempt-race",
+          jobId: pendingJobId,
+        },
+      }).catch(() => undefined);
+
+      const active = await activeAttemptForRoot(
+        admin,
+        input.sourceJob.request_root_job_id,
+        input.sourceJob.id,
+      );
+      if (active) {
+        return {
+          kind: "already-active",
+          jobId: active.id,
+          model: active.model,
+        };
+      }
+      throw insertError;
+    }
 
     return {
       kind: "queued",
@@ -335,7 +371,21 @@ export async function queueNextDirectOpenRouterImageFallback(input: {
         route_attempt: Math.min(50, Math.max(1, Number(input.sourceJob.route_attempt || 1) + 1)),
         execution_mode: "direct-provider",
       });
-  if (insertError) throw insertError;
+  if (insertError) {
+    const active = await activeAttemptForRoot(
+      admin,
+      input.sourceJob.request_root_job_id,
+      input.sourceJob.id,
+    );
+    if (active) {
+      return {
+        kind: "already-active",
+        jobId: active.id,
+        model: active.model,
+      };
+    }
+    throw insertError;
+  }
 
   return {
     kind: "queued",
