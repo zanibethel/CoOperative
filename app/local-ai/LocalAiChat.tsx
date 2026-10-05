@@ -17,6 +17,7 @@ import {
 
 type Profile = "fast" | "quality";
 type NodeRouting = "default" | "prefer-owned" | "require-node";
+type WebAccessMode = "off" | "auto" | "always";
 
 type OwnedNode = {
   id: string;
@@ -118,6 +119,14 @@ type AiBalanceSummary = {
 type BusinessResult = {
   businesses?: BusinessSummary[];
   aiBalance?: AiBalanceSummary;
+  error?: string;
+  detail?: string;
+};
+
+type ProfileSettingsResult = {
+  settings?: {
+    webAccessMode?: WebAccessMode;
+  };
   error?: string;
   detail?: string;
 };
@@ -1944,6 +1953,7 @@ export default function LocalAiChat() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
   const [aiBalance, setAiBalance] = useState<AiBalanceSummary | null>(null);
+  const [webAccessMode, setWebAccessMode] = useState<WebAccessMode>("off");
   const [ownedNodes, setOwnedNodes] = useState<OwnedNode[]>([]);
   const [nodeRouting, setNodeRouting] = useState<NodeRouting>("prefer-owned");
   const [requiredNodeId, setRequiredNodeId] = useState("");
@@ -1990,6 +2000,43 @@ export default function LocalAiChat() {
     );
     return items;
   }, []);
+
+  const refreshProfileSettings = useCallback(async () => {
+    const response = await fetch("/api/personal-ai/settings", { cache: "no-store" });
+    const result = (await response.json()) as ProfileSettingsResult;
+    if (!response.ok || !result.settings) {
+      throw new Error(
+        result.detail || result.error || "Could not load profile web settings.",
+      );
+    }
+    const mode = result.settings.webAccessMode;
+    setWebAccessMode(
+      mode === "auto" || mode === "always" ? mode : "off",
+    );
+    return result.settings;
+  }, []);
+
+  const updateWebAccessMode = useCallback(async (mode: WebAccessMode) => {
+    setWebAccessMode(mode);
+    const response = await fetch("/api/personal-ai/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ webAccessMode: mode }),
+    });
+    const result = (await response.json()) as ProfileSettingsResult;
+    if (!response.ok || !result.settings) {
+      throw new Error(
+        result.detail || result.error || "Could not update Web access mode.",
+      );
+    }
+    setWebAccessMode(
+      result.settings.webAccessMode === "auto" ||
+        result.settings.webAccessMode === "always"
+        ? result.settings.webAccessMode
+        : "off",
+    );
+  }, []);
+
 
   const refreshBusinesses = useCallback(async () => {
     const response = await fetch("/api/local-ai/businesses", { cache: "no-store" });
@@ -2394,7 +2441,11 @@ export default function LocalAiChat() {
 
     async function initialize() {
       try {
-        await Promise.all([refreshBusinesses(), refreshOwnedNodes()]);
+        await Promise.all([
+          refreshBusinesses(),
+          refreshOwnedNodes(),
+          refreshProfileSettings(),
+        ]);
         const threads = await refreshConversations();
         const onboarding = await refreshOnboarding();
         const resumeFromQuery = new URLSearchParams(window.location.search).get(
@@ -2516,6 +2567,7 @@ export default function LocalAiChat() {
     refreshBusinesses,
     refreshConversations,
     refreshOwnedNodes,
+    refreshProfileSettings,
     startOrResumeOnboarding,
   ]);
 
@@ -2974,6 +3026,37 @@ export default function LocalAiChat() {
             ))}
           </select>
         </div>
+
+        <label className="field">
+          <span>Web access</span>
+          <select
+            value={webAccessMode}
+            disabled={busy}
+            onChange={(event) => {
+              const mode = event.target.value as WebAccessMode;
+              setError("");
+              void updateWebAccessMode(mode).catch((err) => {
+                setError(
+                  err instanceof Error
+                    ? err.message
+                    : "Could not update Web access mode.",
+                );
+                void refreshProfileSettings();
+              });
+            }}
+          >
+            <option value="off">Off</option>
+            <option value="auto">Auto when current info is needed</option>
+            <option value="always">Always</option>
+          </select>
+          <small>
+            {webAccessMode === "off"
+              ? "No external web access."
+              : webAccessMode === "auto"
+                ? "Code decides when current external information is needed."
+                : "Eligible turns may use public web access; URL safety rules still apply."}
+          </small>
+        </label>
 
         {activeBusiness ? (
           <div className="local-ai-context-metrics">
