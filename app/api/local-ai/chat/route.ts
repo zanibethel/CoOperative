@@ -5056,6 +5056,92 @@ export async function GET(request: Request) {
           : {};
 
       if (
+        mediaJob.status === "running" &&
+        mediaJob.provider === "openrouter" &&
+        mediaJob.kind === "image" &&
+        mediaPricingDimensions.directProvider === true
+      ) {
+        const deadline = mediaJob.deadline_at
+          ? Date.parse(mediaJob.deadline_at)
+          : Number.NaN;
+        const started = mediaJob.started_at
+          ? Date.parse(mediaJob.started_at)
+          : Number.NaN;
+        const reconciliationDeadline =
+          Number.isFinite(deadline)
+            ? deadline
+            : Number.isFinite(started)
+              ? started + 150_000
+              : Number.NaN;
+
+        if (
+          Number.isFinite(reconciliationDeadline) &&
+          Date.now() <= reconciliationDeadline
+        ) {
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "media",
+              status: "running",
+              conversationId: mediaJob.conversation_id,
+              capability: "image",
+              provider: mediaJob.provider,
+              model: mediaJob.model,
+              routeReason:
+                "The direct image-provider call is still inside its execution window. CoOperative is keeping this request ledger locked so another paid generation cannot start concurrently.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        const failedAt = new Date().toISOString();
+        const uncertainError =
+          "Direct image-provider execution passed its reconciliation deadline without a persisted provider response. The outcome is uncertain, so CoOperative will not submit another paid generation automatically.";
+        await admin
+          .from("media_generation_jobs")
+          .update({
+            status: "failed",
+            error: uncertainError,
+            completed_at: failedAt,
+            updated_at: failedAt,
+          })
+          .eq("id", mediaJob.id)
+          .eq("owner_ref", ownerRef)
+          .eq("status", "running");
+
+        const recovery = await startRecoveryForJob(ownerRef, mediaJob.id).catch(
+          (error) => {
+            console.error("Could not start direct media reconciliation recovery", {
+              jobId: mediaJob.id,
+              detail:
+                error instanceof Error ? error.message.slice(0, 800) : "unknown",
+            });
+            return null;
+          },
+        );
+
+        const assistantText =
+          "The direct provider call stopped reporting before CoOperative received a final response. Recovery Agent is reconciling that route in the background, but the router is intentionally not starting another paid image call because the first provider may already have processed it.";
+
+        return NextResponse.json(
+          {
+            jobId: mediaJob.id,
+            execution: "code",
+            status: "completed",
+            conversationId: mediaJob.conversation_id,
+            capability: "image",
+            provider: "code",
+            model: "direct-media-reconciliation",
+            text: assistantText,
+            recoveryIncidentId: recovery?.id || null,
+            routeReason:
+              "The request-level execution ledger prevented an uncertain direct-provider timeout from causing duplicate provider spend while Recovery Agent investigates independently.",
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      if (
         mediaJob.status === "queued" &&
         mediaJob.provider === "openrouter" &&
         mediaJob.kind === "image" &&
@@ -5344,7 +5430,10 @@ export async function GET(request: Request) {
             requestedClass: requestedAdultClass,
           });
 
-          if (fallback.kind === "queued") {
+          if (
+            fallback.kind === "queued" ||
+            fallback.kind === "already-active"
+          ) {
             return NextResponse.json(
               {
                 jobId: fallback.jobId,
@@ -5423,18 +5512,80 @@ export async function GET(request: Request) {
           );
         }
 
+        const safeTechnicalReroute =
+          direct.failureStage === "provider-response" &&
+          [404, 408, 409, 422, 424, 500, 502, 503, 504].includes(
+            direct.status,
+          );
+
+        const [recovery, technicalFallback] = await Promise.all([
+          startRecoveryForJob(ownerRef, mediaJob.id).catch((error) => {
+            console.error("Could not start technical media recovery", {
+              jobId: mediaJob.id,
+              detail:
+                error instanceof Error ? error.message.slice(0, 800) : "unknown",
+            });
+            return null;
+          }),
+          safeTechnicalReroute
+            ? queueNextDirectOpenRouterImageFallback({
+                ownerRef,
+                userId: owner.userId,
+                sourceJob: mediaJob,
+                requestedClass: requestedAdultClass,
+              }).catch((error) => {
+                console.error("Could not queue technical media fallback", {
+                  jobId: mediaJob.id,
+                  detail:
+                    error instanceof Error
+                      ? error.message.slice(0, 800)
+                      : "unknown",
+                });
+                return { kind: "none" as const };
+              })
+            : Promise.resolve({ kind: "none" as const }),
+        ]);
+
+        if (
+          technicalFallback.kind === "queued" ||
+          technicalFallback.kind === "already-active"
+        ) {
+          return NextResponse.json(
+            {
+              jobId: technicalFallback.jobId,
+              execution: "media",
+              status: "queued",
+              conversationId: mediaJob.conversation_id,
+              capability: "image",
+              provider: "openrouter",
+              model: technicalFallback.model,
+              recoveryIncidentId: recovery?.id || null,
+              routeReason:
+                "The provider returned a definite technical failure that is safe to route around. Recovery Agent is diagnosing the failed route in parallel while the request ledger moved execution to the next eligible image model without permitting duplicate active attempts.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        const assistantText =
+          direct.failureStage === "transport-uncertain" ||
+          direct.failureStage === "post-provider"
+            ? "The image route hit a technical failure after provider execution may have started or completed. Recovery Agent is investigating in the background, and CoOperative did not launch another paid generation because that could duplicate spend."
+            : "The image route hit a technical failure. Recovery Agent is diagnosing it in the background; no safe automatic provider fallback was available for this failure.";
+
         return NextResponse.json(
           {
             jobId: mediaJob.id,
-            execution: "media",
-            status: "failed",
+            execution: "code",
+            status: "completed",
             conversationId: mediaJob.conversation_id,
             capability: "image",
-            provider: mediaJob.provider,
-            model: mediaJob.model,
-            error: direct.error,
+            provider: "recovery",
+            model: "parallel-media-recovery",
+            text: assistantText,
+            recoveryIncidentId: recovery?.id || null,
             routeReason:
-              "The direct provider call failed for a technical/non-policy reason, so the normal Recovery Agent path may diagnose the execution failure.",
+              "Recovery and routing are independent: technical diagnosis continues in the background, while automatic rerouting occurs only when the provider response proves a second attempt will not create an uncertain duplicate charge.",
           },
           { headers: { "Cache-Control": "no-store" } },
         );
