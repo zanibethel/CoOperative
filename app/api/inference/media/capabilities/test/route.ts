@@ -59,12 +59,19 @@ function failureOutcome(value: string): MediaCapabilityTestOutcome {
     : "inconclusive";
 }
 
-async function liveImageRoutes() {
+async function liveImageRoutes(ownerRef: string) {
   await ensureMediaCapabilityRouteCatalog();
 
+  const openRouterService = await businessOwnedServiceCredentialForOwner(
+    ownerRef,
+    "openrouter-api",
+  );
   const [nous, openRouter] = await Promise.all([
     nousManagedMediaCatalog(),
-    openRouterMediaCatalog(true),
+    openRouterMediaCatalog(
+      true,
+      openRouterService?.credential || undefined,
+    ),
   ]);
 
   const routes = [
@@ -77,7 +84,9 @@ async function liveImageRoutes() {
       pricingSource: route.pricingSource,
       label: route.model.replace(/^fal-ai\//, ""),
     })),
-    ...openRouter.image.flatMap((route) => {
+    ...openRouter.image
+      .filter((route) => (route.minInputReferences ?? 0) === 0)
+      .flatMap((route) => {
       const estimatedCostUsd = estimateOpenRouterMediaCostUsd(route);
       if (estimatedCostUsd === null || !Number.isFinite(estimatedCostUsd)) {
         return [];
@@ -238,7 +247,7 @@ export async function GET(request: Request) {
 
     if (!jobId) {
       const [routes, benchmarkEvidence] = await Promise.all([
-        liveImageRoutes(),
+        liveImageRoutes(ownerRef),
         mediaBenchmarkEvidenceForOwner(ownerRef).catch(() => []),
       ]);
       const [
@@ -450,7 +459,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const routes = await liveImageRoutes();
+    const routes = await liveImageRoutes(ownerRef);
     const route = routes.find(
       (item) =>
         item.provider === input.provider &&
