@@ -165,6 +165,20 @@ type JobResult = {
     chargedUsd?: number;
     availableMicrousd?: number;
   } | null;
+  fundingRequired?: {
+    estimatedCostUsd?: number;
+    availableBalanceUsd?: number;
+    shortfallUsd?: number;
+    minimumRequiredBalanceUsd?: number;
+    topUpOption?: {
+      id: string;
+      label?: string;
+      amountMicrousd?: number;
+      amountUsd: number;
+      currency?: string;
+    } | null;
+  } | null;
+  sourceJobId?: string | null;
   error?: string | null;
   detail?: string | null;
   modelMixerUpdate?: {
@@ -220,6 +234,7 @@ type RecoveryResult = {
 };
 
 const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
+const PENDING_PAID_RESUME_KEY = "cooperative.local-ai.pending-paid-resume-job";
 const ACTIVE_BUSINESS_KEY = "cooperative.local-ai.active-business";
 const MAX_ATTACHMENTS = 4;
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
@@ -374,6 +389,438 @@ function recoveryStatusDirective(content: string) {
   return {
     incidentId: match[1],
     text: content.replace(match[0], "").trim(),
+  };
+}
+
+function fundingRequiredDirective(content: string) {
+  const job = content.match(
+    /(?:^|\n)AI_FUNDING_REQUIRED:([0-9a-f]{8}-[0-9a-f-]{27,})\s*$/im,
+  );
+  if (!job) return null;
+
+  const value = (name: string) => {
+    const match = content.match(
+      new RegExp(`(?:^|\\n)${name}:([^\\n]+)\\s*"use client";
+
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import ModelMixer, {
+  DEFAULT_MODEL_MIXER_SETTINGS,
+  ModelMixerTrigger,
+  type ModelMixerSettings,
+} from "./ModelMixer";
+import MediaFullscreenViewer, {
+  type FullscreenMedia,
+} from "./MediaFullscreenViewer";
+import MediaCloudPicker from "./MediaCloudPicker";
+import {
+  serviceConnectorByKey,
+  serviceConnectorDisplayName,
+} from "@/lib/runtime/service-connector-registry";
+
+type Profile = "fast" | "quality";
+type NodeRouting = "default" | "prefer-owned" | "require-node";
+
+type OwnedNode = {
+  id: string;
+  displayName: string;
+  state: string;
+  workerVersion?: string | null;
+  lastSeenAt?: string | null;
+  fresh: boolean;
+  textCapable: boolean;
+  availableForText: boolean;
+};
+
+type NodesResult = {
+  nodes?: OwnedNode[];
+  error?: string;
+  detail?: string;
+};
+
+type BusinessSummary = {
+  id: string;
+  name: string;
+  industry?: string | null;
+  monthlyConnectedServiceCostCents: number;
+  reportedMonthlyTechnologySpendCents?: number | null;
+  monthlyTechnologyBudgetCents?: number | null;
+  maxCooperativeManagedSpendCents?: number | null;
+  targetSavingsPercent?: number | null;
+  connectedServicesCount: number;
+  connectedAiCount: number;
+};
+
+type ImageAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  previewUrl: string;
+};
+
+type ChatMessage = {
+  id?: string;
+  role: "user" | "assistant";
+  content: string;
+  attachments?: ImageAttachment[];
+  jobId?: string | null;
+  createdAt?: string;
+};
+
+type ConversationSummary = {
+  id: string;
+  title: string;
+  profile: Profile;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type ConversationResult = {
+  conversation?: ConversationSummary;
+  conversations?: ConversationSummary[];
+  messages?: ChatMessage[];
+  error?: string;
+  detail?: string;
+};
+
+type OnboardingState = {
+  status: "not_started" | "in_progress" | "completed" | "dismissed" | "paused";
+  currentBatch: number;
+  conversationId: string | null;
+  totalBatches: number;
+  mode?: "choose" | "personal" | "business";
+  phase?: string;
+  businessId?: string | null;
+  pausedReason?: string | null;
+  fields?: Array<{
+    field_key: string;
+    category: string;
+    label: string;
+    value_text: string | null;
+    status: "known" | "unknown" | "deferred";
+    updated_at: string;
+  }>;
+};
+
+type OnboardingResult = {
+  state?: OnboardingState;
+  handled?: boolean;
+  assistantText?: string;
+  error?: string;
+  detail?: string;
+};
+
+type AiBalanceSummary = {
+  availableMicrousd: number;
+  availableUsd: number;
+  funded: boolean;
+  paidAiEligible: boolean;
+};
+
+type BusinessResult = {
+  businesses?: BusinessSummary[];
+  aiBalance?: AiBalanceSummary;
+  error?: string;
+  detail?: string;
+};
+
+type AttachmentResult = {
+  attachment?: ImageAttachment;
+  error?: string;
+  detail?: string;
+};
+
+type JobResult = {
+  jobId?: string;
+  execution?:
+    | "code"
+    | "local-ai"
+    | "community-ai"
+    | "paid-ai"
+    | "free-cloud-vision"
+    | "free-cloud-text"
+    | "media";
+  status?: string;
+  profile?: Profile;
+  capability?: "text" | "vision" | "image" | "video";
+  provider?: string | null;
+  conversationId?: string | null;
+  conversationTitle?: string | null;
+  businessId?: string | null;
+  businessScopeSource?: "selected" | "explicit-message" | "none";
+  messages?: unknown;
+  partialText?: string | null;
+  text?: string | null;
+  mediaUrl?: string | null;
+  model?: string | null;
+  firstTokenMs?: number | null;
+  latencyMs?: number | null;
+  promptTokens?: number | null;
+  outputTokens?: number | null;
+  workerId?: string | null;
+  routingPreference?: NodeRouting;
+  preferredNodeId?: string | null;
+  targetNodeId?: string | null;
+  routeReason?: string | null;
+  paidFallbackAllowed?: boolean;
+  funding?: {
+    chargedUsd?: number;
+    availableMicrousd?: number;
+  } | null;
+  fundingRequired?: {
+    estimatedCostUsd?: number;
+    availableBalanceUsd?: number;
+    shortfallUsd?: number;
+    minimumRequiredBalanceUsd?: number;
+    topUpOption?: {
+      id: string;
+      label?: string;
+      amountMicrousd?: number;
+      amountUsd: number;
+      currency?: string;
+    } | null;
+  } | null;
+  sourceJobId?: string | null;
+  error?: string | null;
+  detail?: string | null;
+  modelMixerUpdate?: {
+    maxSpendUsd?: number;
+  } | null;
+};
+
+type RecoveryEvent = {
+  id: string | number;
+  kind: string;
+  message: string;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string;
+};
+
+type RecoveryIncident = {
+  id: string;
+  status:
+    | "diagnosing"
+    | "repairing"
+    | "waiting_user"
+    | "retrying"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  error_class: string;
+  current_message: string;
+  continuation_prompt?: string | null;
+  requires_user_action: boolean;
+  automatic_retry: boolean;
+  resolution_summary?: string | null;
+  updated_at?: string;
+};
+
+type RecoveryExecutor = {
+  agent?: string | null;
+  taskStatus?: string | null;
+  workerId?: string | null;
+  deviceName?: string | null;
+  requestedProfile?: string | null;
+  executor?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  waitingForWorker?: boolean;
+};
+
+type RecoveryResult = {
+  incident?: RecoveryIncident;
+  executor?: RecoveryExecutor;
+  events?: RecoveryEvent[];
+  error?: string;
+  detail?: string;
+};
+
+const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
+const PENDING_PAID_RESUME_KEY = "cooperative.local-ai.pending-paid-resume-job";
+const ACTIVE_BUSINESS_KEY = "cooperative.local-ai.active-business";
+const MAX_ATTACHMENTS = 4;
+const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
+const MAX_IMAGE_EDGE = 1800;
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readMessages(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.filter((message): message is ChatMessage => {
+    if (!message || typeof message !== "object") return false;
+    const candidate = message as { role?: unknown; content?: unknown };
+    return (
+      (candidate.role === "user" || candidate.role === "assistant") &&
+      typeof candidate.content === "string"
+    );
+  });
+}
+
+function resultMeta(result: JobResult) {
+  const details = [
+    result.provider,
+    result.model,
+    result.capability === "vision" ? "vision" : "text",
+    result.workerId ? `worker ${result.workerId}` : null,
+    typeof result.firstTokenMs === "number"
+      ? `${(result.firstTokenMs / 1000).toFixed(1)}s first token`
+      : null,
+    typeof result.latencyMs === "number"
+      ? `${(result.latencyMs / 1000).toFixed(1)}s total`
+      : null,
+    typeof result.promptTokens === "number" && typeof result.outputTokens === "number"
+      ? `${result.promptTokens} in / ${result.outputTokens} out`
+      : null,
+    typeof result.funding?.chargedUsd === "number"
+      ? `${result.funding.chargedUsd.toFixed(6)} charged`
+      : null,
+  ].filter(Boolean);
+
+  return details.join(" · ");
+}
+
+function executionStep(
+  status: string,
+  capability?: "text" | "vision" | "image" | "video",
+  streaming = false,
+) {
+  if (streaming) return "Responding…";
+  if (status === "Preparing context…") return status;
+  if (status === "Selecting an execution path…") return status;
+  if (status === "Waiting for local capacity…") return status;
+  if (status === "Using local vision…") return status;
+  if (status === "Using free cloud vision…") return status;
+  if (status === "Using free cloud reasoning…") return status;
+  if (status === "Checking local vision capacity…") return status;
+  if (status === "Checking local reasoning capacity…") return status;
+  if (status === "Using local AI…") return status;
+  if (status === "Using funded high-quality AI…") return status;
+  if (status === "Generating image…") return status;
+  if (status === "Generating video…") return status;
+  if (status === "Recovery running in background…") return status;
+  if (status === "Stopping…") return status;
+  if (status === "Copied") return status;
+  if (status === "Ready") return "Ready";
+  if (capability === "image") return "Generating image…";
+  if (capability === "video") return "Generating video…";
+  return capability === "vision" ? "Using local vision…" : "Using local AI…";
+}
+
+function repairGeneratedMediaUrl(raw: string) {
+  const cleaned = raw.replace(/[)\]}>.,]+$/, "");
+  try {
+    const parsed = new URL(cleaned);
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+    if (parsed.hostname.endsWith(".b") && pathParts[0]?.endsWith(".media")) {
+      parsed.hostname =
+        parsed.hostname.replace(".", "") + "." + pathParts.shift();
+      parsed.pathname = "/" + pathParts.join("/");
+      return parsed.toString();
+    }
+  } catch {
+    return cleaned;
+  }
+  return cleaned;
+}
+
+function generatedMedia(content: string) {
+  const match = content.match(/MEDIA_(IMAGE|VIDEO):(https?:\/\/\S+)/i);
+  if (!match) return null;
+
+  return {
+    kind: match[1].toLowerCase() as "image" | "video",
+    url: repairGeneratedMediaUrl(match[2]),
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+
+function serviceConnectDirective(content: string) {
+  const match = content.match(/SECURE_SERVICE_CONNECT:([a-z0-9-]+)/i);
+  if (!match) return null;
+
+  return {
+    providerKey: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+function oauthServiceConnectDirective(content: string) {
+  const match = content.match(/OAUTH_SERVICE_CONNECT:([a-z0-9-]+)/i);
+  if (!match) return null;
+
+  return {
+    providerKey: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+function sandboxCodeTaskDirective(content: string) {
+  const match = content.match(
+    /SANDBOX_CODE_TASK:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
+  );
+  if (!match) return null;
+
+  return {
+    taskId: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+function connectorBuildDirective(content: string) {
+  const match = content.match(
+    /CONNECTOR_BUILD_STATUS:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
+  );
+  if (!match) return null;
+
+  return {
+    taskId: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+function recoveryStatusDirective(content: string) {
+  const match = content.match(
+    /RECOVERY_STATUS:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
+  );
+  if (!match) return null;
+
+  return {
+    incidentId: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
+, "im"),
+    );
+    return match?.[1]?.trim() || "";
+  };
+  const amount = (name: string) => {
+    const parsed = Number(value(name));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const optionId = value("TOPUP_OPTION");
+
+  const text = content
+    .replace(/(?:^|\n)AI_FUNDING_REQUIRED:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)ESTIMATED_USD:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)AVAILABLE_USD:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)SHORTFALL_USD:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)TOPUP_OPTION:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)TOPUP_USD:[^\n]+\s*$/gim, "")
+    .trim();
+
+  return {
+    sourceJobId: job[1],
+    estimatedCostUsd: amount("ESTIMATED_USD"),
+    availableBalanceUsd: amount("AVAILABLE_USD"),
+    shortfallUsd: amount("SHORTFALL_USD"),
+    topUpOptionId: optionId && optionId !== "none" ? optionId : null,
+    topUpUsd: amount("TOPUP_USD"),
+    text,
   };
 }
 
@@ -1372,6 +1819,160 @@ function SandboxCodeTaskCard({ taskId }: { taskId: string }) {
   );
 }
 
+type FundingRequiredCardProps = {
+  sourceJobId: string;
+  estimatedCostUsd: number;
+  availableBalanceUsd: number;
+  shortfallUsd: number;
+  topUpOptionId: string | null;
+  topUpUsd: number;
+  onCompleted: (conversationId?: string | null) => Promise<void>;
+};
+
+function FundingRequiredCard({
+  sourceJobId,
+  estimatedCostUsd,
+  availableBalanceUsd,
+  shortfallUsd,
+  topUpOptionId,
+  topUpUsd,
+  onCompleted,
+}: FundingRequiredCardProps) {
+  const [working, setWorking] = useState(false);
+  const [cardError, setCardError] = useState("");
+  const [currentBalanceUsd, setCurrentBalanceUsd] = useState(availableBalanceUsd);
+
+  const enoughBalance = currentBalanceUsd + 1e-9 >= estimatedCostUsd;
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/profile/ai-balance", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          availableUsd?: number;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Could not check AI balance.");
+        if (!cancelled && typeof payload.availableUsd === "number") {
+          setCurrentBalanceUsd(payload.availableUsd);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function addBalance() {
+    if (!topUpOptionId || working) return;
+    setWorking(true);
+    setCardError("");
+
+    try {
+      const response = await fetch("/api/profile/ai-balance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topUpOptionId }),
+      });
+      const payload = (await response.json()) as {
+        checkoutUrl?: string;
+        error?: string;
+        detail?: string;
+      };
+      if (!response.ok || !payload.checkoutUrl) {
+        throw new Error(
+          payload.detail || payload.error || "Could not start secure balance top-up.",
+        );
+      }
+
+      window.localStorage.setItem(PENDING_PAID_RESUME_KEY, sourceJobId);
+      window.location.assign(payload.checkoutUrl);
+    } catch (err) {
+      setCardError(
+        err instanceof Error ? err.message : "Could not start secure balance top-up.",
+      );
+      setWorking(false);
+    }
+  }
+
+  async function continueRequest() {
+    if (working) return;
+    setWorking(true);
+    setCardError("");
+    try {
+      const response = await fetch("/api/local-ai/chat/paid-fallback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: sourceJobId }),
+      });
+      const payload = (await response.json()) as JobResult;
+      if (response.status === 402 && payload.fundingRequired) {
+        if (typeof payload.fundingRequired.availableBalanceUsd === "number") {
+          setCurrentBalanceUsd(payload.fundingRequired.availableBalanceUsd);
+        }
+        throw new Error(
+          `Additional balance is still required (${Number(
+            payload.fundingRequired.shortfallUsd || 0,
+          ).toFixed(4)} short).`,
+        );
+      }
+      if (!response.ok || payload.status !== "completed") {
+        throw new Error(
+          payload.detail || payload.error || "Paid AI could not resume this request.",
+        );
+      }
+      window.localStorage.removeItem(PENDING_PAID_RESUME_KEY);
+      await onCompleted(payload.conversationId);
+    } catch (err) {
+      setCardError(
+        err instanceof Error ? err.message : "Paid AI could not resume this request.",
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <div className="secure-service-card">
+      <div className="secure-service-head">
+        <span className="secure-service-lock" aria-hidden="true">$</span>
+        <div>
+          <strong>Stronger AI available</strong>
+          <small>
+            Free/local routes were exhausted. CoOperative will not use a paid model
+            until the profile balance covers this request.
+          </small>
+        </div>
+      </div>
+      <div className="secure-service-status">
+        Estimated request: <strong>${estimatedCostUsd.toFixed(4)}</strong>
+      </div>
+      <div className="secure-service-status">
+        Available balance: <strong>${currentBalanceUsd.toFixed(4)}</strong>
+      </div>
+      {!enoughBalance ? (
+        <div className="secure-service-status">
+          Minimum additional balance needed: <strong>${Math.max(0, shortfallUsd).toFixed(4)}</strong>
+        </div>
+      ) : null}
+      <div className="secure-service-actions">
+        {enoughBalance ? (
+          <button type="button" disabled={working} onClick={() => void continueRequest()}>
+            {working ? "Continuing…" : "Continue with stronger AI"}
+          </button>
+        ) : topUpOptionId ? (
+          <button type="button" disabled={working} onClick={() => void addBalance()}>
+            {working
+              ? "Opening secure checkout…"
+              : `Add ${topUpUsd.toFixed(2)} balance`}
+          </button>
+        ) : null}
+      </div>
+      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+    </div>
+  );
+}
+
 type ConnectorBuildStatus = {
   taskId?: string;
   status?: string;
@@ -2089,6 +2690,17 @@ export default function LocalAiChat() {
             });
             const paid = (await paidResponse.json()) as JobResult;
 
+            if (paidResponse.status === 402 && paid.fundingRequired) {
+              setStreamingText("");
+              setStatus("Ready");
+              window.localStorage.removeItem(ACTIVE_JOB_KEY);
+              if (paid.conversationId) {
+                await loadConversation(paid.conversationId);
+              }
+              await Promise.all([refreshConversations(), refreshBusinesses()]);
+              break;
+            }
+
             if (!paidResponse.ok) {
               throw new Error(
                 paid.detail ||
@@ -2180,6 +2792,44 @@ export default function LocalAiChat() {
         await Promise.all([refreshBusinesses(), refreshOwnedNodes()]);
         const threads = await refreshConversations();
         const onboarding = await refreshOnboarding();
+        const resumeFromQuery = new URLSearchParams(window.location.search).get(
+          "resumePaidJob",
+        );
+        const pendingPaidResume =
+          resumeFromQuery ||
+          window.localStorage.getItem(PENDING_PAID_RESUME_KEY);
+
+        if (pendingPaidResume) {
+          setStatus("Resuming funded high-quality AI…");
+          const paidResponse = await fetch("/api/local-ai/chat/paid-fallback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId: pendingPaidResume }),
+          });
+          const paid = (await paidResponse.json()) as JobResult;
+
+          if (paidResponse.ok && paid.status === "completed") {
+            window.localStorage.removeItem(PENDING_PAID_RESUME_KEY);
+            window.history.replaceState(null, "", window.location.pathname);
+            if (paid.conversationId) {
+              await loadConversation(paid.conversationId);
+            }
+            await Promise.all([refreshConversations(), refreshBusinesses()]);
+            setMeta(resultMeta(paid));
+            setStatus("Ready");
+            return;
+          }
+
+          if (paidResponse.status === 402) {
+            if (paid.conversationId) {
+              await loadConversation(paid.conversationId);
+            }
+            setStatus("Ready");
+          } else {
+            window.localStorage.removeItem(PENDING_PAID_RESUME_KEY);
+          }
+        }
+
         const savedJobId = window.localStorage.getItem(ACTIVE_JOB_KEY);
 
         if (savedJobId) {
@@ -2971,6 +3621,34 @@ export default function LocalAiChat() {
                               await loadConversation(conversationId);
                               await refreshConversations();
                             }
+                          }}
+                        />
+                      </>
+                    );
+                  }
+
+                  const fundingRequired = fundingRequiredDirective(message.content);
+                  if (fundingRequired) {
+                    return (
+                      <>
+                        {fundingRequired.text ? <div>{fundingRequired.text}</div> : null}
+                        <FundingRequiredCard
+                          sourceJobId={fundingRequired.sourceJobId}
+                          estimatedCostUsd={fundingRequired.estimatedCostUsd}
+                          availableBalanceUsd={fundingRequired.availableBalanceUsd}
+                          shortfallUsd={fundingRequired.shortfallUsd}
+                          topUpOptionId={fundingRequired.topUpOptionId}
+                          topUpUsd={fundingRequired.topUpUsd}
+                          onCompleted={async (targetConversationId) => {
+                            if (targetConversationId) {
+                              await loadConversation(targetConversationId);
+                            } else if (conversationId) {
+                              await loadConversation(conversationId);
+                            }
+                            await Promise.all([
+                              refreshConversations(),
+                              refreshBusinesses(),
+                            ]);
                           }}
                         />
                       </>
