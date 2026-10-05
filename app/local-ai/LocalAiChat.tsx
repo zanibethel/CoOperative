@@ -1608,7 +1608,7 @@ function FundingRequiredCard({
       </div>
       {!enoughBalance ? (
         <div className="secure-service-status">
-          Minimum additional balance needed: <strong>${Math.max(0, estimatedCostUsd - currentBalanceUsd).toFixed(4)}</strong>
+          Minimum additional balance needed:{" "}\n          <strong>{"$" + Math.max(0, minimumBalanceUsd - currentBalanceUsd).toFixed(4)}</strong>
         </div>
       ) : null}
       <div className="secure-service-actions">
@@ -3367,14 +3367,16 @@ export default function LocalAiChat() {
                       <>
                         {fundingRequired.text ? <div>{fundingRequired.text}</div> : null}
                         <FundingRequiredCard
+                          resumeKind={fundingRequired.resumeKind}
                           sourceJobId={fundingRequired.sourceJobId}
                           estimatedCostUsd={fundingRequired.estimatedCostUsd}
+                          minimumBalanceUsd={fundingRequired.minimumBalanceUsd}
                           availableBalanceUsd={fundingRequired.availableBalanceUsd}
                           topUpOptionId={fundingRequired.topUpOptionId}
                           topUpUsd={fundingRequired.topUpUsd}
-                          onCompleted={async (targetConversationId) => {
-                            if (targetConversationId) {
-                              await loadConversation(targetConversationId);
+                          onResumed={async (payload) => {
+                            if (payload.conversationId) {
+                              await loadConversation(payload.conversationId);
                             } else if (conversationId) {
                               await loadConversation(conversationId);
                             }
@@ -3382,6 +3384,21 @@ export default function LocalAiChat() {
                               refreshConversations(),
                               refreshBusinesses(),
                             ]);
+                            if (
+                              fundingRequired.resumeKind === "media" &&
+                              payload.jobId &&
+                              (payload.status === "running" ||
+                                payload.status === "queued")
+                            ) {
+                              window.localStorage.setItem(
+                                ACTIVE_JOB_KEY,
+                                payload.jobId,
+                              );
+                              await pollJob(payload.jobId, []);
+                            } else {
+                              setMeta(resultMeta(payload));
+                              setStatus("Ready");
+                            }
                           }}
                         />
                       </>
