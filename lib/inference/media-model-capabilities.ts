@@ -421,6 +421,70 @@ export async function evaluateMediaExecutionContentGate(input: {
   };
 }
 
+export async function mediaVerifiedAllowedRouteKeys(input: {
+  ownerRef: string;
+  requestedClass: MediaAdultContentClass;
+}) {
+  if (input.requestedClass === "sfw") return new Set<string>();
+
+  const admin = createAdminSupabaseClient();
+  const [
+    { data: capabilities, error: capabilityError },
+    { data: tests, error: testError },
+  ] = await Promise.all([
+    admin
+      .from("media_model_capabilities")
+      .select(
+        "provider,model,endpoint,adult_content_policy,adult_non_explicit_policy,adult_explicit_policy",
+      ),
+    admin
+      .from("media_model_capability_tests")
+      .select("provider,model,endpoint,outcome,prompt_classification,tested_at")
+      .eq("owner_ref", input.ownerRef)
+      .eq("test_type", "adult_content")
+      .order("tested_at", { ascending: false })
+      .limit(500),
+  ]);
+
+  if (capabilityError) throw capabilityError;
+  if (testError) throw testError;
+
+  const verified = new Set<string>();
+
+  for (const row of capabilities || []) {
+    const scopedPolicy =
+      input.requestedClass === "adult_explicit"
+        ? row.adult_explicit_policy
+        : row.adult_non_explicit_policy;
+    const effectivePolicy =
+      scopedPolicy === "allowed" || scopedPolicy === "disallowed"
+        ? scopedPolicy
+        : row.adult_content_policy;
+
+    if (effectivePolicy === "allowed") {
+      verified.add([row.provider, row.model, row.endpoint || ""].join("|"));
+    }
+  }
+
+  const seenTests = new Set<string>();
+  for (const test of tests || []) {
+    const key = [test.provider, test.model, test.endpoint || ""].join("|");
+    if (seenTests.has(key)) continue;
+    seenTests.add(key);
+
+    const applies =
+      test.prompt_classification === "adult_explicit_boundary" ||
+      (test.prompt_classification === "adult_non_explicit_boundary" &&
+        input.requestedClass === "adult_non_explicit");
+
+    if (!applies) continue;
+    if (test.outcome === "supported") verified.add(key);
+    if (test.outcome === "blocked") verified.delete(key);
+  }
+
+  return verified;
+}
+
 export async function mediaKnownBlockedRouteKeys(input: {
   ownerRef: string;
   requestedClass: MediaAdultContentClass;
