@@ -5377,10 +5377,20 @@ export async function GET(request: Request) {
                     controls.audio,
                   )
               : null;
+            const freeRoute = Boolean(freeBackup);
+            const backupSellQuote =
+              !freeRoute &&
+              backupEstimate !== null &&
+              backupEstimate > 0
+                ? paidAiPriceQuote(backupEstimate)
+                : null;
+            const backupUserQuoteUsd =
+              backupSellQuote?.userQuoteUsd ?? backupEstimate;
             const affordable =
               backupModel &&
               backupEstimate !== null &&
-              backupEstimate <= remainingCapUsd;
+              backupUserQuoteUsd !== null &&
+              backupUserQuoteUsd <= remainingCapUsd;
 
             if (affordable && backupModel) {
               const openRouterService =
@@ -5390,7 +5400,6 @@ export async function GET(request: Request) {
                 );
               const cooperativeOpenRouterCredential =
                 process.env.OPENROUTER_API_KEY?.trim() || undefined;
-              const freeRoute = Boolean(freeBackup);
               const openRouterCredential = freeRoute
                 ? openRouterService?.credential ||
                   cooperativeOpenRouterCredential ||
@@ -5495,9 +5504,18 @@ export async function GET(request: Request) {
                     ),
                     estimated_user_charge_microusd: freeRoute
                       ? 0
-                      : Math.round(backupEstimate * 1_000_000),
+                      : Math.round(
+                          Number(backupUserQuoteUsd || 0) * 1_000_000,
+                        ),
                     estimated_infrastructure_cost_microusd: null,
-                    estimated_margin_microusd: null,
+                    estimated_margin_microusd: freeRoute
+                      ? null
+                      : Math.round(
+                          Math.max(
+                            0,
+                            Number(backupUserQuoteUsd || 0) - backupEstimate,
+                          ) * 1_000_000,
+                        ),
                     billing_mode: freeRoute
                       ? null
                       : "cooperative-balance",
@@ -5511,6 +5529,11 @@ export async function GET(request: Request) {
                       audio: controls.audio,
                       mediaLevel,
                       freeRoute,
+                      quotedUserPriceUsd: freeRoute
+                        ? 0
+                        : backupUserQuoteUsd,
+                      providerCostEstimateUsd: backupEstimate,
+                      markupPercent: backupSellQuote?.markupPercent || 0,
                     },
                     pricing_source: catalog.source,
                     fallback_from_job_id: mediaJob.id,
@@ -5521,7 +5544,7 @@ export async function GET(request: Request) {
                 if (!freeRoute) {
                   const quote = await fundingQuoteForUser({
                     userId: owner.userId,
-                    estimatedCostUsd: backupEstimate,
+                    estimatedCostUsd: Number(backupUserQuoteUsd || 0),
                     maxSpendUsd: remainingCapUsd,
                   });
 
@@ -5532,7 +5555,7 @@ export async function GET(request: Request) {
                       quote,
                     });
                     const assistantText = [
-                      `The free/local fallback routes were exhausted. The next paid ${mediaJob.kind} route is estimated at ${backupEstimate.toFixed(4)}.`,
+                      `The free/local fallback routes were exhausted. The next paid ${mediaJob.kind} route has a quoted CoOperative price of ${Number(backupUserQuoteUsd || 0).toFixed(4)}.`,
                       `Your available CoOperative AI balance is ${quote.availableBalanceUsd.toFixed(4)}. The safe reservation requires ${quote.minimumRequiredBalanceUsd.toFixed(4)}, so you need ${quote.shortfallUsd.toFixed(4)} more.`,
                       quote.topUpOption
                         ? `The smallest configured Stripe top-up that covers it is ${quote.topUpOption.amountUsd.toFixed(2)}.`
@@ -5571,7 +5594,7 @@ export async function GET(request: Request) {
 
                   const reservation = await reserveAiProfileFunds({
                     profileRef: cooperativeProfileRef(owner.userId),
-                    estimatedCostUsd: backupEstimate,
+                    estimatedCostUsd: Number(backupUserQuoteUsd || 0),
                     source: "media-generation",
                     referenceId: backupJobId,
                     metadata: {
@@ -5579,6 +5602,11 @@ export async function GET(request: Request) {
                       model: backupModel.id,
                       kind: mediaJob.kind,
                       fallbackFromJobId: mediaJob.id,
+                      quotedUserPriceUsd: backupUserQuoteUsd,
+                      providerCostEstimateUsd: backupEstimate,
+                      markupPercent: backupSellQuote?.markupPercent || 0,
+                      estimatedMarginUsd:
+                        Number(backupUserQuoteUsd || 0) - backupEstimate,
                     },
                   });
                   if (!reservation) {
@@ -5694,6 +5722,9 @@ export async function GET(request: Request) {
                       ? "Nous failed, no owned local route was available for this media request, and CoOperative selected a live free OpenRouter route before any paid backup."
                       : `Nous failed and no local/free route was available. CoOperative verified live OpenRouter capacity, reserved the paid backup against the profile's Stripe-funded balance, and started one backup estimated at \${backupEstimate.toFixed(3)} within the remaining \${remainingCapUsd.toFixed(3)} request cap.`,
                     estimatedProviderCostUsd: backupEstimate,
+                    quotedUserPriceUsd: freeRoute
+                      ? null
+                      : backupUserQuoteUsd,
                   },
                   { headers: { "Cache-Control": "no-store" } },
                 );
