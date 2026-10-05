@@ -20,16 +20,51 @@ export type UrlAccessDecision = {
   hostname: string | null;
 };
 
-const KNOWN_CONNECTOR_HOSTS = new Set([
+const AUTH_ONLY_HOSTS = new Set([
   "accounts.google.com",
-  "console.anthropic.com",
-  "aistudio.google.com",
-  "platform.openai.com",
-  "openrouter.ai",
-  "app.quickbooks.intuit.com",
   "accounts.intuit.com",
-  "admin.shopify.com",
   "connect.squareup.com",
+]);
+
+function connectorManagedUrl(parsed: URL) {
+  const hostname = parsed.hostname.toLowerCase();
+  const path = parsed.pathname.toLowerCase();
+
+  if (AUTH_ONLY_HOSTS.has(hostname)) return true;
+  if (hostname === "platform.openai.com" && /\/api-?keys?\b/.test(path)) {
+    return true;
+  }
+  if (hostname === "openrouter.ai" && /\/settings\/keys?\b/.test(path)) {
+    return true;
+  }
+  if (
+    hostname === "console.anthropic.com" &&
+    /\/(?:settings\/)?keys?\b/.test(path)
+  ) {
+    return true;
+  }
+  if (
+    hostname === "aistudio.google.com" &&
+    /\/(?:app\/)?apikey\b/.test(path)
+  ) {
+    return true;
+  }
+  if (hostname === "admin.shopify.com") return true;
+  return false;
+}
+
+const SENSITIVE_QUERY_KEYS = new Set([
+  "access_token",
+  "api_key",
+  "apikey",
+  "authorization",
+  "code",
+  "credential",
+  "key",
+  "password",
+  "refresh_token",
+  "secret",
+  "token",
 ]);
 
 const EXECUTABLE_EXTENSIONS = new Set([
@@ -136,6 +171,23 @@ export function classifyUrlAccess(rawUrl: string): UrlAccessDecision {
     };
   }
 
+  const sensitiveQuery = Array.from(parsed.searchParams.keys()).some((key) =>
+    SENSITIVE_QUERY_KEYS.has(key.toLowerCase()),
+  );
+  const sensitiveFragment =
+    /(?:access_token|api_key|apikey|authorization|code|credential|password|refresh_token|secret|token)=/i.test(
+      parsed.hash,
+    );
+  if (sensitiveQuery || sensitiveFragment) {
+    return {
+      allowed: false,
+      classification: "credential-bearing",
+      reason:
+        "URLs carrying tokens, authorization codes, API keys, or other credentials are blocked from ordinary web access.",
+      hostname,
+    };
+  }
+
   if (localHostname(hostname)) {
     return {
       allowed: false,
@@ -156,7 +208,7 @@ export function classifyUrlAccess(rawUrl: string): UrlAccessDecision {
     };
   }
 
-  if (KNOWN_CONNECTOR_HOSTS.has(hostname)) {
+  if (connectorManagedUrl(parsed)) {
     return {
       allowed: false,
       classification: "known-connector",
