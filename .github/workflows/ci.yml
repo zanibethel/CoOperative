@@ -25,6 +25,7 @@ jobs:
           python3 -m py_compile workers/repo-agent-worker.py
           python3 -m py_compile workers/windows-local-chat.py
           python3 -m py_compile workers/windows-local-web-search.py
+          python3 -m py_compile workers/windows-text-worker.py
 
       - name: Lint
         run: npm run lint
