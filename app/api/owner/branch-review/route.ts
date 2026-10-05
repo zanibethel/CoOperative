@@ -49,6 +49,10 @@ function stringArray(value: unknown) {
 function candidateFromTask(task: Record<string, unknown>) {
   const result = resultObject(task.result);
   const sandbox = sandboxObject(result);
+  const governance =
+    result.governance && typeof result.governance === "object"
+      ? (result.governance as Record<string, unknown>)
+      : {};
   return {
     taskId: String(task.id || ""),
     repoKey: String(task.repo_key || ""),
@@ -80,6 +84,11 @@ function candidateFromTask(task: Record<string, unknown>) {
     uiDefaultFlowPreservedRequired:
       sandbox.uiDefaultFlowPreservedRequired === true,
     userInvokedCapability: sandbox.userInvokedCapability === true,
+    ownerAuthoritative: governance.ownerAuthoritative === true,
+    governanceAuthority:
+      typeof governance.authority === "string"
+        ? governance.authority
+        : "standard-user",
     mergeAllowed: sandbox.mergeAllowed === true,
     createdAt: task.created_at || null,
     updatedAt: task.updated_at || null,
@@ -170,7 +179,13 @@ export async function GET() {
 
     const pending = candidates.filter(
       (candidate) =>
+        !candidate.ownerAuthoritative &&
         candidate.promotionState !== "approved-for-merge" &&
+        candidate.promotionState !== "rejected",
+    );
+    const ownerAuthoritativeTesting = candidates.filter(
+      (candidate) =>
+        candidate.ownerAuthoritative &&
         candidate.promotionState !== "rejected",
     );
 
@@ -181,6 +196,7 @@ export async function GET() {
         mergePolicy: "owner-review-only",
         totalSandboxBranches: candidates.length,
         pendingReview: pending.length,
+        ownerAuthoritativeTesting: ownerAuthoritativeTesting.length,
         successfulTested: pending.filter(
           (candidate) => candidate.checksPassed && candidate.pushed,
         ).length,
