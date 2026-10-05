@@ -1161,7 +1161,7 @@ def handle_task(task):
             "minimalChangeRequired": True,
             "portableForOtherUsersRequired": True,
             "scope": _sandbox_scope(objective),
-            "uiDefaultFlowPreservedRequired": _sandbox_scope(objective) == "ui-opt-in",
+            "uiDefaultFlowPreservedRequired": _sandbox_scope(objective) == "ui-opt-in" and not owner_authoritative,
             "userInvokedCapability": _is_user_invoked_capability(_sandbox_scope(objective)),
         } if mode == "prepare_change" else None,
     })
