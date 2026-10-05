@@ -83,6 +83,7 @@ import {
   type MediaAdultCapabilityEvidence,
   type MediaContentPreference,
 } from "@/lib/inference/media-recommendations";
+import { prepareMediaExecutionWithReasoning } from "@/lib/inference/media-preflight-reasoning";
 import {
   businessOwnedServiceCredentialForOwner,
   connectedServiceStatusesForOwner,
@@ -2429,7 +2430,7 @@ export async function POST(request: Request) {
       });
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const recommendationsOnly = asksForMediaRecommendationsOnly(input.message);
-      const selectedRecommendation = recommendationTier
+      let selectedRecommendation = recommendationTier
         ? recommendationSet.options.find(
             (option) => option.tier === recommendationTier,
           ) || null
@@ -2537,6 +2538,67 @@ export async function POST(request: Request) {
           },
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
+      }
+
+      let mediaPreparationSource:
+        | "deterministic"
+        | "local"
+        | "free-cloud" = "deterministic";
+      let mediaPreparationReason =
+        "Deterministic media routing had enough information to proceed.";
+      let mediaPreparationSignals: string[] = [];
+      let preparedMediaPrompt: string | null = null;
+
+      if (
+        selectedRecommendation &&
+        selectedRecommendation.executionReady === true
+      ) {
+        const deterministicPrompt = mediaPromptWithResolvedControls(
+          effectiveMediaRequestText,
+          mediaPlan,
+        );
+        const preparation = await prepareMediaExecutionWithReasoning({
+          admin,
+          ownerRef,
+          userId: owner.userId,
+          userRequest: effectiveMediaRequestText,
+          deterministicPrompt,
+          plan: mediaPlan,
+          selected: selectedRecommendation,
+          options: recommendationSet.options,
+          requestCapUsd,
+          requiresReferenceImage,
+          explicitTierSelected: Boolean(recommendationTier),
+        });
+
+        const preparedAdultClass = adultMediaContentClass(preparation.prompt);
+        const preparedPromptPreservesContentScope =
+          preparedAdultClass === adultContentClass;
+
+        if (preparation.model !== selectedRecommendation.model) {
+          const reasonedSelection = recommendationSet.options.find(
+            (option) =>
+              option.executionReady === true &&
+              option.capUsd <= requestCapUsd + 0.000001 &&
+              option.model === preparation.model,
+          );
+          if (reasonedSelection) {
+            selectedRecommendation = reasonedSelection;
+          }
+        }
+
+        mediaPreparationSource = preparation.source;
+        mediaPreparationReason = preparation.reason;
+        mediaPreparationSignals = preparation.signals;
+        preparedMediaPrompt = preparedPromptPreservesContentScope
+          ? mediaPromptWithResolvedControls(preparation.prompt, mediaPlan)
+          : deterministicPrompt;
+
+        if (!preparedPromptPreservesContentScope && preparation.usedReasoning) {
+          mediaPreparationSource = "deterministic";
+          mediaPreparationReason =
+            "Local/free preparation changed the detected adult-content scope, so CoOperative rejected the rewrite and preserved the deterministic prompt.";
+        }
       }
 
       const selectedReferenceVerification =
@@ -2741,10 +2803,12 @@ export async function POST(request: Request) {
         }
 
         const localJobId = crypto.randomUUID();
-        const generationPrompt = mediaPromptWithResolvedControls(
-          effectiveMediaRequestText,
-          mediaPlan,
-        );
+        const generationPrompt =
+          preparedMediaPrompt ||
+          mediaPromptWithResolvedControls(
+            effectiveMediaRequestText,
+            mediaPlan,
+          );
         const referencePaths = await stageLocalImageReferences(
           admin,
           ownerRef,
@@ -3055,10 +3119,12 @@ export async function POST(request: Request) {
       }
 
       const jobId = crypto.randomUUID();
-      let generationPrompt = mediaPromptWithResolvedControls(
-        effectiveMediaRequestText,
-        mediaPlan,
-      );
+      let generationPrompt =
+        preparedMediaPrompt ||
+        mediaPromptWithResolvedControls(
+          effectiveMediaRequestText,
+          mediaPlan,
+        );
       if (
         selectedProvider === "nous" &&
         mediaPlan.kind === "video" &&
@@ -3142,6 +3208,9 @@ export async function POST(request: Request) {
             referenceAttachmentCount: cloudReferenceRoute
               ? effectiveMediaAttachmentIds.length
               : 0,
+            preparationSource: mediaPreparationSource,
+            preparationReason: mediaPreparationReason,
+            preparationSignals: mediaPreparationSignals,
           },
           pricing_source: pricingSource,
         });
@@ -3386,7 +3455,7 @@ export async function POST(request: Request) {
                 ? `The selected premium reference route was already verified by a successful prior generation on this profile. CoOperative passed the current reference image through a fresh short-lived server-side URL to ${selectedRecommendation.editEndpoint}, enforced the quoted cap, and started the verified route normally.`
                 : cloudReferenceRoute
                   ? `CoOperative selected the reference-capable ${selectedModel} route and passed ${effectiveMediaAttachmentIds.length} attached reference image${effectiveMediaAttachmentIds.length === 1 ? "" : "s"} through short-lived server-side URLs. The request remains bounded by the Model Mixer spend cap, and CoOperative will not fall back to a route that could ignore the reference.`
-                  : `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} Free/cheap Hermes reasoning refines the prompt before the single media-generation call, and the request remains bounded by the Model Mixer spend cap.`,
+                  : `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} ${mediaPreparationSource === "deterministic" ? "Deterministic preparation was sufficient, so no extra AI planning call was needed." : `Deterministic preparation was not sufficient, so ${mediaPreparationSource === "local" ? "owned/local" : "strict-free"} reasoning refined the eligible model choice and provider-ready prompt before the single media-generation call.`} The request remains bounded by the Model Mixer spend cap.`,
             estimatedProviderCostUsd,
             quotedUserPriceUsd: cooperativeFundedPaidRoute
               ? selectedUserQuoteUsd
