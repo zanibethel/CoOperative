@@ -162,15 +162,13 @@ export async function resolveProfileExecutionPlan(
 
   const requestedNodeId = input.requiredNodeId || null;
   const savedPreferredNodeId = settingsResult.data?.preferred_node_id || null;
-  const selected =
-    (requestedNodeId
-      ? candidates.find((node) => node.id === requestedNodeId)
-      : null) ||
-    (savedPreferredNodeId
-      ? candidates.find((node) => node.id === savedPreferredNodeId)
-      : null) ||
-    candidates[0] ||
-    null;
+  const selected = requestedNodeId
+    ? candidates.find((node) => node.id === requestedNodeId) || null
+    : (savedPreferredNodeId
+        ? candidates.find((node) => node.id === savedPreferredNodeId)
+        : null) ||
+      candidates[0] ||
+      null;
 
   const requiresNode = nodeRouting === "require-node" || input.requireProfileNode === true;
   const requiredNodeUnavailable = requiresNode && !selected;
