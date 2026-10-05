@@ -42,6 +42,7 @@ type Settings = {
   improvementOptIn: boolean;
   remoteEnabled: boolean;
   preferredNodeId?: string | null;
+  webAccessMode?: "off" | "auto" | "always";
 };
 
 type RecoveryEvent = {
@@ -737,6 +738,42 @@ export default function PersonalAiMobile() {
               <option value="heavy">Heavy</option>
             </select>
           </label>
+
+          <label className="field">
+            <span>Web access</span>
+            <select
+              value={settings?.webAccessMode || "off"}
+              onChange={(event) => {
+                const mode = event.target.value as
+                  | "off"
+                  | "auto"
+                  | "always";
+                setSettings((current) =>
+                  current ? { ...current, webAccessMode: mode } : current,
+                );
+                void updateSettings({ webAccessMode: mode }).catch((err) =>
+                  setError(
+                    err instanceof Error
+                      ? err.message
+                      : "Could not update Web access mode.",
+                  ),
+                );
+              }}
+              disabled={busy}
+            >
+              <option value="off">Off</option>
+              <option value="auto">Auto when current info is needed</option>
+              <option value="always">Always</option>
+            </select>
+            <small>
+              {(settings?.webAccessMode || "off") === "off"
+                ? "No external web access."
+                : (settings?.webAccessMode || "off") === "auto"
+                  ? "Code authorizes public web access only when current information is needed."
+                  : "Eligible turns may use public web access; URL safety rules still apply."}
+            </small>
+          </label>
+
 
           <label className="personal-chat-setting-row">
             <input
