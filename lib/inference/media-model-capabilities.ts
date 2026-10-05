@@ -44,6 +44,28 @@ export type MediaExecutionContentGateResult = {
   latestTestOutcome: MediaCapabilityTestOutcome | null;
 };
 
+export type MediaPolicyRefusalOrigin =
+  | "none"
+  | "orchestrator"
+  | "provider";
+
+export function mediaPolicyRefusalOrigin(
+  detail: string,
+  requestedClass: MediaAdultContentClass,
+): MediaPolicyRefusalOrigin {
+  if (!mediaPolicyRefusalDetected(detail, requestedClass)) return "none";
+
+  if (
+    /\b0 tool calls?\b|\bno tool call\b|\bnot calling (?:the )?(?:image )?tool\b|\bwon't call (?:the )?(?:image )?tool\b/i.test(
+      detail,
+    )
+  ) {
+    return "orchestrator";
+  }
+
+  return "provider";
+}
+
 export function mediaPolicyRefusalDetected(
   detail: string,
   requestedClass: MediaAdultContentClass,
@@ -69,11 +91,20 @@ export async function recordMediaRuntimePolicyRefusal(input: {
   requestedClass: MediaAdultContentClass;
   detail: string;
 }) {
-  if (
-    input.requestedClass === "sfw" ||
-    !mediaPolicyRefusalDetected(input.detail, input.requestedClass)
-  ) {
-    return { recorded: false as const };
+  const origin = mediaPolicyRefusalOrigin(
+    input.detail,
+    input.requestedClass,
+  );
+  if (input.requestedClass === "sfw" || origin === "none") {
+    return { recorded: false as const, origin };
+  }
+  if (origin === "orchestrator") {
+    return {
+      recorded: false as const,
+      origin,
+      note:
+        "The orchestration layer refused before the provider/model was called, so no model capability evidence was recorded.",
+    };
   }
 
   const admin = createAdminSupabaseClient();
@@ -145,6 +176,7 @@ export async function recordMediaRuntimePolicyRefusal(input: {
 
   return {
     recorded: true as const,
+    origin: "provider" as const,
     provider: input.provider,
     model: input.model,
     endpoint,
