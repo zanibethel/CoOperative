@@ -248,7 +248,8 @@ export async function POST(request: Request) {
       const minimumCoveringOption =
         options.find(
           (option) =>
-            option.amountUsd + profileBalance.availableUsd >= estimatedCostUsd,
+            option.amountUsd + profileBalance.availableUsd >=
+            fundingRequirement.minimumRequiredBalanceUsd,
         ) ||
         options[options.length - 1] ||
         null;
