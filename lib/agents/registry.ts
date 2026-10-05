@@ -1,7 +1,7 @@
 export type AgentKey = "repo-engineer" | "project-memory" | "debugger" | "verifier";
 export type AgentTaskMode = "inspect" | "prepare_change" | "update_memory" | "verify";
 
-export const AGENT_REGISTRY_REVISION = "2026-10-04.5";
+export const AGENT_REGISTRY_REVISION = "2026-10-04.6";
 
 export const AGENT_REGISTRY = {
   "repo-engineer": {
@@ -128,10 +128,13 @@ export function publicAgentRegistry() {
       sandboxBranchPush: "allowed-for-testing",
       sandboxBranchContinuation: true,
       branchChanges: "minimal-and-portable",
-      generalUiChanges: "opt-in-toggle-default-off",
-      defaultUserFlow: "preserve-for-unrelated-users",
+      ownerDirection: "authoritative-product-default",
+      ownerUiChanges: "may-change-default-without-toggle",
+      nonOwnerGeneralUiChanges: "opt-in-toggle-default-off",
+      nonOwnerDefaultUserFlow: "preserve-for-unrelated-users",
       allowedUserInvokedSandboxScopes: ["auth-connections", "report-viewing"],
-      mergeToDefaultBranch: "owner-review-only",
+      nonOwnerMergePromotion: "owner-review-required",
+      mergeToDefaultBranch: "explicit-owner-action-only",
       ownerReviewCadenceDays: 7,
       productionPush: "human-approval-required",
       productionDeploy: "human-approval-required",
