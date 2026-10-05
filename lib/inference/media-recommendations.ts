@@ -822,9 +822,11 @@ export async function buildMediaRecommendationOptions(input: {
 
   const preferenceEligible = !adultOutputRequested
     ? enriched
-    : contentPreference === "require_adult_capable"
+    : adultContentClass === "adult_explicit"
       ? enriched.filter((candidate) => candidate.adultCapability === "verified")
-      : enriched.filter((candidate) => candidate.adultCapability !== "blocked");
+      : contentPreference === "require_adult_capable"
+        ? enriched.filter((candidate) => candidate.adultCapability === "verified")
+        : enriched.filter((candidate) => candidate.adultCapability !== "blocked");
 
   const deduped = [
     ...new Map(
@@ -846,8 +848,7 @@ export async function buildMediaRecommendationOptions(input: {
       requirementBlocked:
         adultOutputRequested && contentPreference === "require_adult_capable",
       explicitVerificationBlocked:
-        adultContentClass === "adult_explicit" &&
-        contentPreference === "require_adult_capable",
+        adultContentClass === "adult_explicit",
       sfwConflict: false,
     };
   }
