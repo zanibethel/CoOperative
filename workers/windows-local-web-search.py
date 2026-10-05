@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import re
 import sys
 from urllib.parse import urlparse
 
@@ -66,12 +67,40 @@ def public_result_url(value: str) -> bool:
     return True
 
 
+SENSITIVE_QUERY_PATTERNS = (
+    re.compile(
+        r"(?i)\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|authorization|"
+        r"bearer|password|secret|credential)\b\s*[:=]?\s*\S+"
+    ),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{16,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b"),
+)
+
+
+def query_is_safe_for_external_search(query: str) -> bool:
+    return not any(pattern.search(query) for pattern in SENSITIVE_QUERY_PATTERNS)
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         raise SystemExit("Usage: windows-local-web-search.py <query>")
     query = " ".join(sys.argv[1:]).strip()
     if not query:
         raise RuntimeError("Search query is empty.")
+    if not query_is_safe_for_external_search(query):
+        print(
+            json.dumps(
+                {
+                    "query": "",
+                    "results": [],
+                    "blocked": True,
+                    "reason": "credential-like-content",
+                }
+            )
+        )
+        return
 
     rows = []
     ddgs = DDGS(timeout=10)
