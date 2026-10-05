@@ -6,13 +6,17 @@ import {
   usdToMicrousd,
 } from "@/lib/billing/ai-profile-balance";
 
-const DEFAULT_MARKUP_PERCENT = 20;
-const MAX_MARKUP_PERCENT = 200;
+const MIN_MARKUP_PERCENT = 50;
+const DEFAULT_MARKUP_PERCENT = 50;
+const MAX_MARKUP_PERCENT = 300;
 
 function configuredMarkupPercent() {
   const raw = Number(process.env.COOPERATIVE_PAID_AI_MARKUP_PERCENT ?? "");
   if (!Number.isFinite(raw)) return DEFAULT_MARKUP_PERCENT;
-  return Math.min(MAX_MARKUP_PERCENT, Math.max(0, raw));
+  return Math.min(
+    MAX_MARKUP_PERCENT,
+    Math.max(MIN_MARKUP_PERCENT, raw),
+  );
 }
 
 export type PaidAiPriceQuote = {
