@@ -5823,6 +5823,7 @@ export async function GET(request: Request) {
                         : usingOpenRouterByok
                           ? "user-connected-byok"
                           : "cooperative-balance",
+                      directProvider: mediaJob.kind === "image",
                     },
                     pricing_source: catalog.source,
                     fallback_from_job_id: mediaJob.id,
@@ -5924,6 +5925,30 @@ export async function GET(request: Request) {
                     }).catch(() => undefined);
                     throw backupReservationError;
                   }
+                }
+
+                if (mediaJob.kind === "image") {
+                  return NextResponse.json(
+                    {
+                      jobId: backupJobId,
+                      execution: "media",
+                      status: "queued",
+                      conversationId: mediaJob.conversation_id,
+                      capability: "image",
+                      provider: "openrouter",
+                      model: backupModel.id,
+                      routeReason: policyRefusal
+                        ? mustPreserveReference
+                          ? "The previous provider/model refused this request class. CoOperative recorded that evidence, preserved the same reference attachment, and queued the next eligible image model for a direct OpenRouter call."
+                          : "The previous provider/model refused this request class. CoOperative recorded that evidence and queued the next eligible image model for a direct OpenRouter call."
+                        : "The previous provider route failed. CoOperative queued the next eligible OpenRouter image route for direct provider execution.",
+                      estimatedProviderCostUsd: backupEstimate,
+                      quotedUserPriceUsd: freeRoute
+                        ? null
+                        : effectiveBackupUserQuoteUsd,
+                    },
+                    { headers: { "Cache-Control": "no-store" } },
+                  );
                 }
 
                 const backupReferenceExecution = mustPreserveReference
