@@ -44,6 +44,114 @@ export type MediaExecutionContentGateResult = {
   latestTestOutcome: MediaCapabilityTestOutcome | null;
 };
 
+export function mediaPolicyRefusalDetected(
+  detail: string,
+  requestedClass: MediaAdultContentClass,
+) {
+  if (requestedClass === "sfw") return false;
+
+  const refusalSignal =
+    /(?:can't|cannot|won't|unable to|refus(?:e|ed|al)|reject(?:ed|ion)?|block(?:ed|ing)?|filter(?:ed|ing)?|prohibit(?:s|ed)?|not allowed|disallow(?:ed|s)?|policy|moderation|safety)/i;
+  const adultSignal =
+    requestedClass === "adult_explicit"
+      ? /(?:sexual|sexually explicit|explicit nudity|nudity|nsfw|porn|breasts?|nipples?|genitals?|penis|vagina|vulva|anus)/i
+      : /(?:adult|nudity|nude|nsfw|sexual|erotic)/i;
+
+  return refusalSignal.test(detail) && adultSignal.test(detail);
+}
+
+export async function recordMediaRuntimePolicyRefusal(input: {
+  ownerRef: string;
+  provider: string;
+  model: string;
+  endpoint?: string | null;
+  sourceJobId: string;
+  requestedClass: MediaAdultContentClass;
+  detail: string;
+}) {
+  if (
+    input.requestedClass === "sfw" ||
+    !mediaPolicyRefusalDetected(input.detail, input.requestedClass)
+  ) {
+    return { recorded: false as const };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const endpoint = input.endpoint || "";
+  const now = new Date().toISOString();
+  const source = `runtime-policy-refusal:${input.sourceJobId}`;
+  const promptClassification =
+    input.requestedClass === "adult_explicit"
+      ? "adult_explicit_boundary"
+      : "adult_non_explicit_boundary";
+
+  await recordMediaModelCapabilityTest({
+    ownerRef: input.ownerRef,
+    provider: input.provider,
+    model: input.model,
+    endpoint,
+    testType: "adult_content",
+    outcome: "blocked",
+    sourceJobId: input.sourceJobId,
+    promptClassification,
+    notes:
+      `Runtime provider/model refusal observed for ${input.requestedClass}. ` +
+      input.detail.slice(0, 1200),
+  });
+
+  const scopedPatch =
+    input.requestedClass === "adult_explicit"
+      ? {
+          adult_explicit_policy: "disallowed",
+          adult_explicit_policy_source: source,
+          adult_explicit_policy_checked_at: now,
+        }
+      : {
+          adult_non_explicit_policy: "disallowed",
+          adult_non_explicit_policy_source: source,
+          adult_non_explicit_policy_checked_at: now,
+        };
+
+  const { data: updated, error: updateError } = await admin
+    .from("media_model_capabilities")
+    .update({
+      ...scopedPatch,
+      notes:
+        `Observed runtime policy refusal for ${input.requestedClass}; future routing excludes this exact route for that scope.`,
+      updated_at: now,
+    })
+    .eq("provider", input.provider)
+    .eq("model", input.model)
+    .eq("endpoint", endpoint)
+    .select("provider,model,endpoint")
+    .maybeSingle();
+
+  if (updateError) throw updateError;
+
+  if (!updated) {
+    const { error: insertError } = await admin
+      .from("media_model_capabilities")
+      .insert({
+        provider: input.provider,
+        model: input.model,
+        endpoint,
+        ...scopedPatch,
+        notes:
+          `Observed runtime policy refusal for ${input.requestedClass}; future routing excludes this exact route for that scope.`,
+        updated_at: now,
+      });
+    if (insertError) throw insertError;
+  }
+
+  return {
+    recorded: true as const,
+    provider: input.provider,
+    model: input.model,
+    endpoint,
+    requestedClass: input.requestedClass,
+  };
+}
+
 function effectiveContentPreference(
   value: unknown,
   adultContentAcknowledgedAt: string | null | undefined,
@@ -252,19 +360,6 @@ export async function evaluateMediaExecutionContentGate(input: {
     };
   }
 
-  if (requestedClass === "adult_explicit" && state !== "verified") {
-    return {
-      allowed: false,
-      preference,
-      adultCapability: state,
-      reason: "adult_explicit_unverified",
-      note:
-        "Sexually explicit output requires exact-route evidence that actually covers that scope. A non-explicit adult/nudity test is not enough.",
-      policySource,
-      latestTestOutcome,
-    };
-  }
-
   if (preference === "require_adult_capable" && state !== "verified") {
     return {
       allowed: false,
@@ -286,7 +381,9 @@ export async function evaluateMediaExecutionContentGate(input: {
     note:
       state === "verified"
         ? "The current preference and capability evidence allow this adult-output route."
-        : "Adult output is allowed for this profile and this route is not currently known to block it; capability remains unverified.",
+        : requestedClass === "adult_explicit"
+          ? "Explicit adult output is enabled for this profile. This exact route is not currently known to block it, so CoOperative may try it and will learn from any provider policy refusal."
+          : "Adult output is allowed for this profile and this route is not currently known to block it; capability remains unverified.",
     policySource,
     latestTestOutcome,
   };
