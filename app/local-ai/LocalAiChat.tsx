@@ -1437,7 +1437,6 @@ type FundingRequiredCardProps = {
   sourceJobId: string;
   estimatedCostUsd: number;
   availableBalanceUsd: number;
-  shortfallUsd: number;
   topUpOptionId: string | null;
   topUpUsd: number;
   onCompleted: (conversationId?: string | null) => Promise<void>;
@@ -1447,7 +1446,6 @@ function FundingRequiredCard({
   sourceJobId,
   estimatedCostUsd,
   availableBalanceUsd,
-  shortfallUsd,
   topUpOptionId,
   topUpUsd,
   onCompleted,
@@ -3324,7 +3322,6 @@ export default function LocalAiChat() {
                           sourceJobId={fundingRequired.sourceJobId}
                           estimatedCostUsd={fundingRequired.estimatedCostUsd}
                           availableBalanceUsd={fundingRequired.availableBalanceUsd}
-                          shortfallUsd={fundingRequired.shortfallUsd}
                           topUpOptionId={fundingRequired.topUpOptionId}
                           topUpUsd={fundingRequired.topUpUsd}
                           onCompleted={async (targetConversationId) => {
