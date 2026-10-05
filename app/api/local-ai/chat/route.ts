@@ -188,6 +188,18 @@ function asksMaxSpendPerPrompt(message: string) {
   );
 }
 
+function asksForSandboxBranchReport(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\b(?:sandbox|code) branches?\b/.test(value) &&
+    /\b(?:review|report|pending|waiting|status|show|list)\b/.test(value)
+  ) || (
+    /\bwhat (?:code|changes?) (?:is|are) waiting for review\b/.test(value)
+  ) || (
+    /\bwhat branches? need review\b/.test(value)
+  );
+}
+
 function asksAboutRecentFailure(message: string) {
   const value = message.toLowerCase().replace(/\s+/g, " ").trim();
   return (
@@ -851,6 +863,139 @@ export async function POST(request: Request) {
               serviceConnectIntent.type === "available"
                 ? "available"
                 : "build-required",
+          },
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    if (
+      input.attachmentIds.length === 0 &&
+      asksForSandboxBranchReport(input.message)
+    ) {
+      const { data: branchRows, error: branchError } = await admin
+        .from("agent_tasks")
+        .select("id,branch_name,status,objective,result,updated_at")
+        .eq("repo_key", "cooperative")
+        .eq("mode", "prepare_change")
+        .not("branch_name", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(100);
+      if (branchError) throw branchError;
+
+      const branches = (branchRows || [])
+        .filter(
+          (row) =>
+            typeof row.branch_name === "string" &&
+            row.branch_name.startsWith("sandbox/"),
+        )
+        .map((row) => {
+          const result =
+            row.result && typeof row.result === "object"
+              ? (row.result as Record<string, unknown>)
+              : {};
+          const sandbox =
+            result.sandbox && typeof result.sandbox === "object"
+              ? (result.sandbox as Record<string, unknown>)
+              : {};
+          return {
+            taskId: row.id,
+            branchName: row.branch_name as string,
+            status: row.status,
+            summary:
+              typeof result.summary === "string"
+                ? result.summary.slice(0, 500)
+                : typeof row.objective === "string"
+                  ? row.objective.slice(0, 500)
+                  : "Prepared code change",
+            checksPassed: result.checksPassed === true,
+            pushed: sandbox.pushed === true,
+            promotionState:
+              typeof sandbox.promotionState === "string"
+                ? sandbox.promotionState
+                : "testing",
+            changedFiles: Array.isArray(result.changedFiles)
+              ? result.changedFiles.filter(
+                  (value): value is string => typeof value === "string",
+                )
+              : [],
+          };
+        });
+
+      const pending = branches.filter(
+        (branch) =>
+          branch.promotionState !== "approved-for-merge" &&
+          branch.promotionState !== "rejected",
+      );
+      const successful = pending.filter(
+        (branch) => branch.checksPassed && branch.pushed,
+      );
+      const lines = pending.slice(0, 10).map((branch, index) => {
+        const state = branch.checksPassed
+          ? branch.pushed
+            ? "tests/checks passed; pushed for testing"
+            : "checks passed; push unavailable"
+          : "still testing or checks incomplete";
+        const files = branch.changedFiles.length
+          ? ` Files: ${branch.changedFiles.slice(0, 4).join(", ")}${branch.changedFiles.length > 4 ? "…" : ""}`
+          : "";
+        return `${index + 1}. ${branch.branchName} — ${state}. ${branch.summary}${files}`;
+      });
+
+      const assistantText = [
+        `Sandbox branch review: ${pending.length} branch${pending.length === 1 ? "" : "es"} currently need review; ${successful.length} have passed recorded checks and were pushed for testing.`,
+        "",
+        ...(lines.length
+          ? lines
+          : ["There are no sandbox branches currently waiting for owner review."]),
+        "",
+        "Passing checks does not permit an automatic merge. A branch must be explicitly reviewed and marked approved-for-merge first; the actual merge remains a separate owner action.",
+      ].join("\n");
+
+      const { error: branchMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: assistantText,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (branchMessageError) throw branchMessageError;
+
+      await admin
+        .from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "project.change",
+          conversationId,
+          conversationTitle,
+          text: assistantText,
+          provider: "code",
+          model: "owner-sandbox-branch-report",
+          routeReason:
+            "CoOperative read persisted sandbox branch/test state directly and produced the owner review report without invoking AI.",
+          branchReview: {
+            pending: pending.length,
+            successfulTested: successful.length,
+            branches: pending.slice(0, 25),
           },
         },
         { status: 200, headers: { "Cache-Control": "no-store" } },
