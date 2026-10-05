@@ -5239,13 +5239,46 @@ export async function GET(request: Request) {
         const referenceVerifiedRoute =
           referencePricingDimensions?.referenceVerifiedRoute === true;
         const referenceRoute = referenceSmokeTest || referenceVerifiedRoute;
+        const requestedAdultClass = adultMediaContentClass(
+          String(mediaJob.prompt || ""),
+        );
+        const referenceEditEndpoint =
+          typeof referencePricingDimensions?.referenceEditEndpoint === "string"
+            ? referencePricingDimensions.referenceEditEndpoint
+            : null;
+        const policyRefusal = mediaPolicyRefusalDetected(
+          failure,
+          requestedAdultClass,
+        );
+
+        if (policyRefusal) {
+          try {
+            await recordMediaRuntimePolicyRefusal({
+              ownerRef,
+              provider: mediaJob.provider,
+              model: mediaJob.model,
+              endpoint: referenceEditEndpoint,
+              sourceJobId: mediaJob.id,
+              requestedClass: requestedAdultClass,
+              detail: failure,
+            });
+          } catch (refusalEvidenceError) {
+            console.error("Could not persist learned media policy refusal", {
+              jobId: mediaJob.id,
+              provider: mediaJob.provider,
+              model: mediaJob.model,
+              detail:
+                refusalEvidenceError instanceof Error
+                  ? refusalEvidenceError.message.slice(0, 800)
+                  : "Unknown refusal-evidence error",
+            });
+          }
+        }
 
         if (referenceRoute) {
-          const referenceEditEndpoint =
-            referencePricingDimensions?.referenceEditEndpoint;
           if (
+            !policyRefusal &&
             mediaJob.provider === "nous" &&
-            typeof referenceEditEndpoint === "string" &&
             referenceEditEndpoint
           ) {
             await recordMediaReferenceModelVerification({
@@ -5294,7 +5327,7 @@ export async function GET(request: Request) {
           }
         }
 
-        if (mediaJob.provider === "nous") {
+        if (mediaJob.provider === "nous" || policyRefusal) {
           const referenceAttachmentIds =
             referenceVerifiedRoute &&
             Array.isArray(referencePricingDimensions?.referenceAttachmentIds)
