@@ -822,8 +822,7 @@ export async function buildMediaRecommendationOptions(input: {
 
   const preferenceEligible = !adultOutputRequested
     ? enriched
-    : adultContentClass === "adult_explicit" ||
-        contentPreference === "require_adult_capable"
+    : contentPreference === "require_adult_capable"
       ? enriched.filter((candidate) => candidate.adultCapability === "verified")
       : enriched.filter((candidate) => candidate.adultCapability !== "blocked");
 
@@ -847,7 +846,8 @@ export async function buildMediaRecommendationOptions(input: {
       requirementBlocked:
         adultOutputRequested && contentPreference === "require_adult_capable",
       explicitVerificationBlocked:
-        adultContentClass === "adult_explicit",
+        adultContentClass === "adult_explicit" &&
+        contentPreference === "require_adult_capable",
       sfwConflict: false,
     };
   }
