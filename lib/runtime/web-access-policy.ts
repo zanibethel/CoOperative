@@ -86,22 +86,34 @@ const EXECUTABLE_EXTENSIONS = new Set([
 
 function isPrivateIpv4(hostname: string) {
   const octets = hostname.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value))) {
+  if (
+    octets.length !== 4 ||
+    octets.some(
+      (value) => !Number.isInteger(value) || value < 0 || value > 255,
+    )
+  ) {
     return false;
   }
   const [a, b] = octets;
   return (
+    a === 0 ||
     a === 10 ||
     a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) ||
     (a === 192 && b === 168) ||
-    a === 0
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
   );
 }
 
 function isPrivateIpv6(hostname: string) {
-  const value = hostname.toLowerCase();
+  const value = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const mappedV4 = value.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mappedV4) return isPrivateIpv4(mappedV4[1]);
+
   return (
     value === "::1" ||
     value === "::" ||
@@ -110,7 +122,8 @@ function isPrivateIpv6(hostname: string) {
     value.startsWith("fe8") ||
     value.startsWith("fe9") ||
     value.startsWith("fea") ||
-    value.startsWith("feb")
+    value.startsWith("feb") ||
+    value.startsWith("ff")
   );
 }
 
