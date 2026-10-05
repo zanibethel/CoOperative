@@ -157,6 +157,10 @@ export async function POST(request: Request) {
       taskResult.executorApproval && typeof taskResult.executorApproval === "object"
         ? (taskResult.executorApproval as Record<string, unknown>)
         : null;
+    const governance =
+      taskResult.governance && typeof taskResult.governance === "object"
+        ? (taskResult.governance as Record<string, unknown>)
+        : null;
     const sandbox =
       taskResult.sandbox && typeof taskResult.sandbox === "object"
         ? (taskResult.sandbox as Record<string, unknown>)
@@ -175,6 +179,10 @@ export async function POST(request: Request) {
         workerId,
         deniedExamplesLoaded: learningContext.length,
         paidExecutorApproved: Boolean(executorApproval),
+        governanceAuthority:
+          governance && typeof governance.authority === "string"
+            ? governance.authority
+            : "standard-user",
         sandboxBaseBranch,
         reusableSandboxCandidates: sandboxCandidates.length,
         workerAuthMode: authorization.mode,
@@ -194,6 +202,7 @@ export async function POST(request: Request) {
       repository,
       learningContext,
       executorApproval,
+      governance,
       sandbox,
       sandboxBaseBranch,
       sandboxCandidates,
