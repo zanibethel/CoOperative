@@ -18,6 +18,8 @@ type CompletionBody = {
   promptTokens?: unknown;
   outputTokens?: unknown;
   latencyMs?: unknown;
+  webSearchUsed?: unknown;
+  webAccessMode?: unknown;
   error?: unknown;
 };
 
@@ -119,7 +121,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("text_inference_jobs")
-      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id,messages,capability,routing_preference,business_id")
+      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id,messages,capability,routing_preference,route_reason,business_id")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -203,6 +205,12 @@ export async function POST(request: Request) {
         : "cooperative-local-text-worker";
     const resultModel = body.model.slice(0, 300);
 
+    const webSearchUsed = body.webSearchUsed === true;
+    const webAccessMode =
+      body.webAccessMode === "auto" || body.webAccessMode === "always"
+        ? body.webAccessMode
+        : "off";
+
     const jobUpdate: Record<string, unknown> = {
       status: "completed",
       partial_text: job.personal_use ? null : body.text,
@@ -215,6 +223,11 @@ export async function POST(request: Request) {
       error: null,
       completed_at: completedAt,
       updated_at: completedAt,
+      ...(webSearchUsed
+        ? {
+            route_reason: `${job.route_reason || ""} Profile Web ${webAccessMode} authorized a public search on the selected node; model inference remained local.`.trim(),
+          }
+        : {}),
     };
     if (job.personal_use) {
       jobUpdate.messages = [
@@ -250,6 +263,8 @@ export async function POST(request: Request) {
             outputTokens: asCount(body.outputTokens),
             latencyMs,
             workerId,
+            webSearchUsed,
+            webAccessMode,
           },
         },
       );
