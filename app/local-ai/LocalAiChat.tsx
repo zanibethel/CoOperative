@@ -2850,6 +2850,20 @@ export default function LocalAiChat() {
     }
   }
 
+  function openLocalReferencePicker() {
+    const picker = fileInputRef.current;
+    if (!picker) {
+      setError("The local photo/file picker is not available yet.");
+      return;
+    }
+
+    setError("");
+    // Keep this synchronous with the user's tap. iOS can block a file picker
+    // if the triggering element is unmounted or the click is deferred.
+    picker.click();
+    window.setTimeout(() => setAttachmentMenuOpen(false), 0);
+  }
+
   async function uploadImages(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || []);
     event.target.value = "";
@@ -3754,20 +3768,13 @@ export default function LocalAiChat() {
 
           {attachmentMenuOpen ? (
             <div className="attachment-source-menu">
-              <label
-                className="attachment-source-file-label"
-                htmlFor="cooperative-reference-image-input"
-                aria-disabled={busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS}
-                onClick={(event) => {
-                  if (busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS) {
-                    event.preventDefault();
-                    return;
-                  }
-                  setAttachmentMenuOpen(false);
-                }}
+              <button
+                type="button"
+                onClick={openLocalReferencePicker}
+                disabled={busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS}
               >
-                Choose reference image
-              </label>
+                Photos / Files
+              </button>
               <button
                 type="button"
                 onClick={() => {
