@@ -4752,6 +4752,16 @@ export async function GET(request: Request) {
       const { data: mediaJob, error: mediaError } = await mediaQuery.maybeSingle();
       if (mediaError) throw mediaError;
 
+      if (
+        mediaJob &&
+        !jobId &&
+        mediaJob.status === "queued" &&
+        mediaJob.billing_mode === "cooperative-balance" &&
+        !mediaJob.ai_balance_reservation_id
+      ) {
+        return new Response(null, { status: 204 });
+      }
+
       if (!mediaJob) {
         let localImageQuery = admin
           .from("inference_jobs")
@@ -5562,7 +5572,9 @@ export async function GET(request: Request) {
                   }
                 }
 
-                let started;
+                let started: Awaited<
+                  ReturnType<typeof startHermesMediaTask>
+                >;
                 try {
                   started = await startHermesMediaTask({
                   jobId: backupJobId,
@@ -5607,7 +5619,30 @@ export async function GET(request: Request) {
                   })
                   .eq("id", backupJobId)
                   .eq("owner_ref", ownerRef);
-                if (backupStartError) throw backupStartError;
+                if (backupStartError) {
+                  if (backupReservationId) {
+                    await releaseAiProfileFunds({
+                      reservationId: backupReservationId,
+                      metadata: {
+                        reason: "paid-media-fallback-state-update-failed",
+                        jobId: backupJobId,
+                      },
+                    }).catch(() => undefined);
+                    await admin
+                      .from("media_generation_jobs")
+                      .update({
+                        status: "failed",
+                        ai_balance_reservation_id: null,
+                        actual_user_charge_microusd: 0,
+                        error: backupStartError.message.slice(0, 1200),
+                        completed_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString(),
+                      })
+                      .eq("id", backupJobId)
+                      .eq("owner_ref", ownerRef);
+                  }
+                  throw backupStartError;
+                }
 
                 return NextResponse.json(
                   {
