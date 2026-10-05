@@ -44,6 +44,42 @@ Live database lookups are intent-gated. CoOperative only reads business/profile/
 
 Repeated reliable behaviors should continue moving into this deterministic layer instead of becoming new prompt instructions.
 
+## Target unified routing order
+
+The end-state main chat, mobile chat, and profile-with-node chat use the same logical router.
+
+After deterministic code, prefer qualified execution in this order:
+
+1. the signed-in profile's authorized capable personal/business node;
+2. other authorized owned/platform zero-marginal-cost compute;
+3. eligible strict-free/community execution;
+4. paid execution only when it is materially needed, the profile has sufficient funded balance, and the request's spend policy permits it.
+
+Installing a node adds an execution target to the same CoOperative profile/chat. It must not create a separate routing product or bypass the code-first layer.
+
+A node is preferred only for capabilities it actually advertises and while it is healthy/available. If it cannot perform the request, routing may continue to the next allowed zero-cost/free option.
+
+If only a paid qualified route can satisfy the unresolved portion:
+
+- estimate the request cost before execution;
+- compare it with available funded profile balance and the request spend ceiling;
+- if underfunded, do not execute the paid model;
+- return the estimated minimum balance shortfall;
+- offer a secure Stripe funding action;
+- preserve enough request state to resume after confirmed funding.
+
+No balance means paid models are unavailable, not that CoOperative chat itself is unavailable. Deterministic code and qualified local/free capabilities should continue to work.
+
+## Unified web/URL access policy
+
+Web settings should belong to the CoOperative profile and behave consistently across browser/mobile/node-assisted chat:
+
+- **Off**: no external web search;
+- **Auto**: deterministic routing may search when current external information is needed;
+- **Always**: eligible turns may search automatically.
+
+A second code-enforced URL/domain permission layer controls what may be accessed. Known provider/OAuth domains use registered connectors; private/authenticated resources require authorization; elevated-risk/local-network/download URLs follow explicit policy rather than model discretion.
+
 ## Escalation contract
 
 The general code-first responder returns either:
