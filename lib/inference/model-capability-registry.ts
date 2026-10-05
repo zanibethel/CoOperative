@@ -140,6 +140,9 @@ function inferEvidenceRouteKind(row: ExistingPolicyRow) {
     return "video";
   }
   if (endpoint) return "image-edit";
+  if (/image|flux|banana|grok|seedream|z-image/i.test(row.model)) {
+    return "image";
+  }
   return "image";
 }
 
@@ -205,6 +208,106 @@ async function loadEvidenceMaps() {
   }
 
   return { policyMap, runtimeMap, policyRows: (policies || []) as ExistingPolicyRow[] };
+}
+
+async function openRouterTextCatalog() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
+    const credential = process.env.OPENROUTER_API_KEY?.trim();
+    if (credential) headers.Authorization = `Bearer ${credential}`;
+
+    const response = await fetch("https://openrouter.ai/api/v1/models", {
+      headers,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(
+        `OpenRouter text catalog returned HTTP ${response.status}.`,
+      );
+    }
+
+    const payload = (await response.json()) as {
+      data?: Array<Record<string, unknown>>;
+    };
+
+    return (payload.data || []).flatMap((row) => {
+      const id = typeof row.id === "string" ? row.id : "";
+      if (!id) return [];
+
+      const architecture =
+        row.architecture &&
+        typeof row.architecture === "object" &&
+        !Array.isArray(row.architecture)
+          ? (row.architecture as JsonMap)
+          : {};
+      const inputModalities = Array.isArray(architecture.input_modalities)
+        ? architecture.input_modalities.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : ["text"];
+      const outputModalities = Array.isArray(architecture.output_modalities)
+        ? architecture.output_modalities.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : ["text"];
+
+      // Dedicated image/video output routes are represented by the media
+      // catalogs. Keep this route only when it can produce text.
+      if (
+        outputModalities.length > 0 &&
+        !outputModalities.some(
+          (value) => value.toLowerCase() === "text",
+        )
+      ) {
+        return [];
+      }
+
+      const pricing =
+        row.pricing &&
+        typeof row.pricing === "object" &&
+        !Array.isArray(row.pricing)
+          ? (row.pricing as JsonMap)
+          : {};
+      const supportedParameters = Array.isArray(row.supported_parameters)
+        ? row.supported_parameters.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [];
+      const contextLength =
+        typeof row.context_length === "number"
+          ? row.context_length
+          : Number(row.context_length);
+
+      return [
+        {
+          id,
+          name:
+            typeof row.name === "string" && row.name
+              ? row.name
+              : id,
+          inputModalities,
+          outputModalities,
+          contextLength:
+            Number.isFinite(contextLength) && contextLength > 0
+              ? contextLength
+              : null,
+          pricing,
+          supportedParameters,
+          free:
+            id.endsWith(":free") ||
+            (Number(pricing.prompt) === 0 &&
+              Number(pricing.completion) === 0),
+        },
+      ];
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function localRegistrySnapshots(
@@ -453,10 +556,12 @@ export async function scanModelCapabilities(input: {
     const sources: ScanSourceResult[] = [];
     const successfulProviders = new Set<string>();
 
-    const [openRouterResult, nousResult] = await Promise.allSettled([
-      openRouterMediaCatalog(true),
-      nousManagedMediaCatalog(),
-    ]);
+    const [openRouterResult, openRouterTextResult, nousResult] =
+      await Promise.allSettled([
+        openRouterMediaCatalog(true),
+        openRouterTextCatalog(),
+        nousManagedMediaCatalog(),
+      ]);
 
     if (openRouterResult.status === "fulfilled") {
       const catalog = openRouterResult.value;
@@ -586,6 +691,84 @@ export async function scanModelCapabilities(input: {
       });
     }
 
+    if (openRouterTextResult.status === "fulfilled") {
+      successfulProviders.add("openrouter");
+      for (const model of openRouterTextResult.value) {
+        routes.push({
+          provider: "openrouter",
+          model: model.id,
+          endpoint: "",
+          routeKind:
+            model.inputModalities.some(
+              (value) => value.toLowerCase() === "image",
+            )
+              ? "multimodal-text"
+              : "text",
+          displayName: model.name,
+          source: "openrouter-models-live",
+          status: "active",
+          free: model.free,
+          recommended: false,
+          executionReady: true,
+          inputModalities: model.inputModalities,
+          outputModalities: model.outputModalities,
+          capabilitySummary: {
+            textGeneration: true,
+            vision:
+              model.inputModalities.some(
+                (value) => value.toLowerCase() === "image",
+              ),
+            toolCalling:
+              model.supportedParameters.includes("tools") ||
+              model.supportedParameters.includes("tool_choice"),
+            structuredOutput:
+              model.supportedParameters.includes("response_format") ||
+              model.supportedParameters.includes("structured_outputs"),
+            reasoning:
+              model.supportedParameters.includes("reasoning") ||
+              model.supportedParameters.includes("include_reasoning"),
+            supportedParameters: model.supportedParameters,
+          },
+          pricing: {
+            free: model.free,
+            promptTokenUsd: model.pricing.prompt ?? null,
+            completionTokenUsd: model.pricing.completion ?? null,
+            raw: model.pricing,
+          },
+          limits: {
+            contextLength: model.contextLength,
+          },
+          policySummary: policySummary(
+            policyMap.get(policyKey("openrouter", model.id)),
+          ),
+          benchmarkSummary: {},
+          runtimeSummary:
+            runtimeMap.get(policyKey("openrouter", model.id)) || {},
+          metadata: {
+            catalogFetchedAt: new Date().toISOString(),
+          },
+        });
+      }
+
+      sources.push({
+        source: "openrouter-models-live",
+        provider: "openrouter",
+        ok: true,
+        count: openRouterTextResult.value.length,
+      });
+    } else {
+      sources.push({
+        source: "openrouter-models-live",
+        provider: "openrouter",
+        ok: false,
+        count: 0,
+        detail:
+          openRouterTextResult.reason instanceof Error
+            ? openRouterTextResult.reason.message.slice(0, 500)
+            : "OpenRouter text catalog scan failed.",
+      });
+    }
+
     if (nousResult.status === "fulfilled") {
       const catalog = nousResult.value;
       successfulProviders.add("nous");
@@ -699,7 +882,6 @@ export async function scanModelCapabilities(input: {
     // Preserve specialized exact routes, such as edit/reference endpoints, even
     // when they are not exposed as standalone entries in the current live catalog.
     for (const row of policyRows) {
-      if (!row.endpoint) continue;
       const kind = inferEvidenceRouteKind(row);
       const key = routeKey({
         provider: row.provider,
