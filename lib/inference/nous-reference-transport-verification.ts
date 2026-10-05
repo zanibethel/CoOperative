@@ -241,7 +241,7 @@ async function verifyAttachments(
   };
 }
 
-export async function createNousReferenceImageExecutionUrls(input: {
+export async function createReferenceImageExecutionUrls(input: {
   ownerRef: string;
   attachmentIds: string[];
 }) {
@@ -291,6 +291,10 @@ export async function createNousReferenceImageExecutionUrls(input: {
     ttlSeconds: EXECUTION_SIGNED_URL_TTL_SECONDS,
   };
 }
+
+// Backward-compatible alias for the original Nous-only reference path.
+export const createNousReferenceImageExecutionUrls =
+  createReferenceImageExecutionUrls;
 
 export async function verifyNousReferenceImageTransport(input: {
   ownerRef: string;
