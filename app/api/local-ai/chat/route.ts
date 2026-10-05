@@ -942,7 +942,9 @@ export async function POST(request: Request) {
       const taskId = crypto.randomUUID();
       const objective = [
         "Prepare the smallest safe, reusable CoOperative code change for this owner-chat request.",
-        "Use a sandbox branch for testing; never merge or deploy to the default branch.",
+        "This request comes from the authenticated platform owner and is authoritative product direction.",
+        "Owner direction may intentionally change the default product experience and does not require an opt-in UI toggle.",
+        "Use a sandbox branch for implementation/testing safety; never merge or deploy to the default branch from the worker.",
         "Prefer a solution that generalizes to other users when the underlying issue is shared.",
         sandboxBaseBranch
           ? `Continue the existing sandbox branch ${sandboxBaseBranch} and preserve prior tested work unless evidence requires changing it.`
@@ -965,13 +967,19 @@ export async function POST(request: Request) {
           status: "queued",
           result: {
             kind: "owner_chat_sandbox_change",
+            governance: {
+              authority: "platform-owner",
+              ownerAuthoritative: true,
+              uiToggleRequired: false,
+              ownerReviewRequired: false,
+            },
             sandbox: {
               baseBranch: sandboxBaseBranch,
               continuationOfTaskId,
               requestedFrom: "owner-chat",
               promotionState: "queued",
               mergeAllowed: false,
-              ownerReviewRequired: true,
+              ownerReviewRequired: false,
               reviewCadenceDays: 7,
             },
           },
@@ -991,6 +999,8 @@ export async function POST(request: Request) {
           sandboxBaseBranch,
           continuationOfTaskId,
           mergeAllowed: false,
+          governanceAuthority: "platform-owner",
+          uiToggleRequired: false,
         },
       });
 
@@ -998,7 +1008,7 @@ export async function POST(request: Request) {
         sandboxBaseBranch
           ? `I queued a Quality Repo Engineer revision on the existing sandbox branch ${sandboxBaseBranch}.`
           : "I queued this as a Quality Repo Engineer sandbox change.",
-        "It will make the smallest reusable change it can, run deterministic checks, and push only the sandbox branch for testing. Main stays untouched.",
+        "It will make the smallest reusable change it can, run deterministic checks, and push only the implementation branch for testing. Because this is owner direction, it may change the default product behavior without adding a user toggle. Main stays untouched until the verified change is explicitly merged.",
         "If the Quality coding path cannot produce a verified safe change, I’ll record a stronger-model recommendation rather than silently spending on a paid model.",
         "",
         `SANDBOX_CODE_TASK:${taskId}`,
