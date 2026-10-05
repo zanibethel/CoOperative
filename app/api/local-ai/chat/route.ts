@@ -5995,8 +5995,73 @@ export async function GET(request: Request) {
             .eq("owner_ref", ownerRef)
             .eq("status", "running");
 
+          const referenceAttachmentIds =
+            Array.isArray(referencePricingDimensions?.referenceAttachmentIds)
+              ? referencePricingDimensions.referenceAttachmentIds.filter(
+                  (value): value is string =>
+                    typeof value === "string" && value.length > 0,
+                )
+              : [];
+          const requestShape =
+            mediaJob.kind === "video"
+              ? "video-text"
+              : referenceAttachmentIds.length > 0
+                ? "image-reference"
+                : "image-text";
+
+          await recordMediaRouteOutcome({
+            ownerRef,
+            sourceJobId: mediaJob.id,
+            provider: mediaJob.provider,
+            model: mediaJob.model,
+            endpoint: referenceEditEndpoint,
+            executionMode: mediaJob.execution_mode,
+            requestShape,
+            outcomeKind: "executor-policy",
+            detail: failure,
+            blocksRoute: false,
+          }).catch(() => undefined);
+
+          if (mediaJob.kind === "image") {
+            const fallback = await queueNextDirectOpenRouterImageFallback({
+              ownerRef,
+              userId: owner.userId,
+              sourceJob: mediaJob,
+              requestedClass: requestedAdultClass,
+            }).catch((error) => {
+              console.error("Could not queue direct route after executor stop", {
+                jobId: mediaJob.id,
+                detail:
+                  error instanceof Error
+                    ? error.message.slice(0, 800)
+                    : "unknown",
+              });
+              return { kind: "none" as const };
+            });
+
+            if (
+              fallback.kind === "queued" ||
+              fallback.kind === "already-active"
+            ) {
+              return NextResponse.json(
+                {
+                  jobId: fallback.jobId,
+                  execution: "media",
+                  status: "queued",
+                  conversationId: mediaJob.conversation_id,
+                  capability: "image",
+                  provider: "openrouter",
+                  model: fallback.model,
+                  routeReason:
+                    "The executor stopped before the selected image model was called. CoOperative recorded the executor-layer outcome and moved the request to the next eligible direct image route without blaming the underlying model.",
+                },
+                { headers: { "Cache-Control": "no-store" } },
+              );
+            }
+          }
+
           const assistantText =
-            "The current media executor stopped this request before the selected image model was actually called. CoOperative did not mark that model as a proven blocker and did not keep cycling through additional models under the same executor path.";
+            "The media executor stopped before the selected provider call completed, and no alternate direct route is currently available inside the request constraints.";
 
           if (mediaJob.conversation_id) {
             await admin.from("local_ai_messages").insert({
@@ -6017,10 +6082,10 @@ export async function GET(request: Request) {
               conversationId: mediaJob.conversation_id,
               capability: mediaJob.kind,
               provider: "code",
-              model: "media-executor-policy-boundary",
+              model: "media-executor-route-handoff",
               text: assistantText,
               routeReason:
-                "The orchestration layer refused before provider invocation. No provider/model capability evidence was recorded, no Recovery Agent was started, and no further same-executor model retries were attempted.",
+                "Executor-layer stops are kept separate from provider/model capability evidence. CoOperative attempts a direct handoff when one is available.",
             },
             { headers: { "Cache-Control": "no-store" } },
           );
