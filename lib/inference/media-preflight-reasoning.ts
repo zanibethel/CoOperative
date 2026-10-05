@@ -2,12 +2,7 @@ import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
-import {
-  cancelHermesTextTask,
-  pollHermesTextTask,
-  startHermesTextTask,
-  type HermesTextContextMessage,
-} from "@/lib/inference/hermes-text-cloud";
+import type { HermesTextContextMessage } from "@/lib/inference/hermes-text-cloud";
 import type {
   MediaRecommendationOption,
 } from "@/lib/inference/media-recommendations";
@@ -27,10 +22,10 @@ export type MediaPreparationResult = {
   signals: string[];
 };
 
-const LOCAL_QUEUE_GRACE_MS = 8_000;
-const LOCAL_TOTAL_WAIT_MS = 16_000;
-const FREE_TOTAL_WAIT_MS = 55_000;
-const FREE_WORKER_ID = "cooperative-hermes-free-media-planner";
+const LOCAL_QUEUE_GRACE_MS = 4_000;
+const LOCAL_TOTAL_WAIT_MS = 8_000;
+const FREE_TOTAL_WAIT_MS = 10_000;
+const FREE_WORKER_ID = "cooperative-openrouter-free-media-planner";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -276,7 +271,7 @@ async function runFreePreparation(input: {
       routing_mode: "free-cloud",
       task_class: "media-planning",
       route_reason:
-        "Deterministic media preparation lacked enough confidence and owned/local planning did not complete in the bounded window, so CoOperative used strict-free reasoning before any paid media call.",
+        "Deterministic media preparation lacked enough confidence and owned/local planning did not complete in the bounded window, so CoOperative used the connected OpenRouter strict-free router directly before any paid media call.",
       allow_paid_fallback: false,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
@@ -292,103 +287,116 @@ async function runFreePreparation(input: {
     });
   if (insertError) throw insertError;
 
-  let started;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FREE_TOTAL_WAIT_MS);
+
   try {
-    started = await startHermesTextTask({
-      jobId: fallbackId,
-      messages: input.messages,
-      openRouterCredential: credential,
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${credential}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://co-operative-mu.vercel.app",
+        "X-Title": "CoOperative",
+      },
+      body: JSON.stringify({
+        model: "openrouter/free",
+        messages: input.messages,
+        max_tokens: 1000,
+        temperature: 0.1,
+      }),
+      cache: "no-store",
+      signal: controller.signal,
     });
+
+    const raw = await response.text();
+    let payload: any = null;
+    try {
+      payload = raw ? JSON.parse(raw) : null;
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok || !payload) {
+      const detail =
+        payload?.error?.message ||
+        raw.slice(0, 800) ||
+        `OpenRouter strict-free planning returned HTTP ${response.status}.`;
+      throw new Error(detail);
+    }
+
+    const content = payload?.choices?.[0]?.message?.content;
+    const text =
+      typeof content === "string"
+        ? content.trim()
+        : Array.isArray(content)
+          ? content
+              .map((part: any) =>
+                typeof part?.text === "string" ? part.text : "",
+              )
+              .filter(Boolean)
+              .join("\n")
+              .trim()
+          : "";
+
+    if (!text) {
+      throw new Error("OpenRouter strict-free planning returned no usable text.");
+    }
+
+    const completedAt = new Date().toISOString();
+    await input.admin
+      .from("text_inference_jobs")
+      .update({
+        status: "completed",
+        result_text: text,
+        partial_text: text,
+        result_model:
+          typeof payload.model === "string" && payload.model
+            ? payload.model
+            : "openrouter/free",
+        result_provider: "openrouter-free",
+        prompt_tokens:
+          typeof payload?.usage?.prompt_tokens === "number"
+            ? Math.max(0, Math.round(payload.usage.prompt_tokens))
+            : null,
+        output_tokens:
+          typeof payload?.usage?.completion_tokens === "number"
+            ? Math.max(0, Math.round(payload.usage.completion_tokens))
+            : null,
+        fallback_usage:
+          payload?.usage && typeof payload.usage === "object"
+            ? payload.usage
+            : null,
+        error: null,
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq("id", fallbackId);
+
+    return text;
   } catch (error) {
+    const failedAt = new Date().toISOString();
+    const detail =
+      error instanceof Error
+        ? error.name === "AbortError"
+          ? "Strict-free media planning exceeded the 10-second total API window."
+          : error.message
+        : "Strict-free media planning failed.";
+
     await input.admin
       .from("text_inference_jobs")
       .update({
         status: "failed",
-        error:
-          error instanceof Error
-            ? error.message.slice(0, 1200)
-            : "Strict-free media planning could not start.",
-        completed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        error: detail.slice(0, 1200),
+        completed_at: failedAt,
+        updated_at: failedAt,
       })
       .eq("id", fallbackId);
+
     return null;
+  } finally {
+    clearTimeout(timer);
   }
-
-  await input.admin
-    .from("text_inference_jobs")
-    .update({
-      fallback_provider: started.provider,
-      fallback_model: started.model,
-      fallback_sandbox_name: started.sandboxName,
-      fallback_deadline_at: started.deadlineAt,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", fallbackId);
-
-  const waitUntil = Math.min(
-    Date.parse(started.deadlineAt),
-    Date.now() + FREE_TOTAL_WAIT_MS,
-  );
-  while (Date.now() < waitUntil) {
-    const polled = await pollHermesTextTask({
-      sandboxName: started.sandboxName,
-      deadlineAt: started.deadlineAt,
-    });
-
-    if (polled.state === "completed" && polled.text) {
-      const completedAt = new Date().toISOString();
-      await input.admin
-        .from("text_inference_jobs")
-        .update({
-          status: "completed",
-          result_text: polled.text,
-          partial_text: polled.text,
-          result_model: started.model,
-          result_provider: "openrouter-free",
-          fallback_usage: polled.usage,
-          error: null,
-          completed_at: completedAt,
-          updated_at: completedAt,
-        })
-        .eq("id", fallbackId);
-      return polled.text;
-    }
-
-    if (polled.state === "failed") {
-      const failedAt = new Date().toISOString();
-      await input.admin
-        .from("text_inference_jobs")
-        .update({
-          status: "failed",
-          error: (polled.error || "Strict-free media planning failed.").slice(
-            0,
-            1200,
-          ),
-          fallback_usage: polled.usage,
-          completed_at: failedAt,
-          updated_at: failedAt,
-        })
-        .eq("id", fallbackId);
-      return null;
-    }
-
-    await sleep(750);
-  }
-
-  await cancelHermesTextTask(started.sandboxName).catch(() => false);
-  const failedAt = new Date().toISOString();
-  await input.admin
-    .from("text_inference_jobs")
-    .update({
-      status: "failed",
-      error:
-        "Strict-free media planning exceeded CoOperative's bounded preparation window.",
-      completed_at: failedAt,
-      updated_at: failedAt,
-    })
-    .eq("id", fallbackId);
-  return null;
 }
 
 export async function prepareMediaExecutionWithReasoning(input: {
