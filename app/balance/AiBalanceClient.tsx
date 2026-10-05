@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type TopUpOption = {
   id: string;
@@ -40,6 +41,7 @@ function money(value: number) {
 const PENDING_PAID_RESUME_KEY = "cooperative.local-ai.pending-paid-resume-job";
 
 export default function AiBalanceClient() {
+  const router = useRouter();
   const [balance, setBalance] = useState<BalanceResponse | null>(null);
   const [busyOption, setBusyOption] = useState("");
   const [error, setError] = useState("");
@@ -73,7 +75,7 @@ export default function AiBalanceClient() {
 
           const resumeJobId = window.localStorage.getItem(PENDING_PAID_RESUME_KEY);
           if (resumeJobId) {
-            window.location.assign(
+            router.push(
               `/local-ai?resumePaidJob=${encodeURIComponent(resumeJobId)}`,
             );
             return;
@@ -91,7 +93,7 @@ export default function AiBalanceClient() {
     return () => {
       cancelled = true;
     };
-  }, [refresh]);
+  }, [refresh, router]);
 
   const reservedUsd = useMemo(
     () => (balance?.reservedMicrousd || 0) / 1_000_000,
