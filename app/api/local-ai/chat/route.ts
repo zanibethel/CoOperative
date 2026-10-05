@@ -4738,7 +4738,7 @@ export async function GET(request: Request) {
       let mediaQuery = admin
         .from("media_generation_jobs")
         .select(
-          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_dimensions,pricing_source,fallback_from_job_id,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
+          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,estimated_user_charge_microusd,actual_user_charge_microusd,ai_balance_reservation_id,billing_mode,provider_cost_bearer,pricing_dimensions,pricing_source,fallback_from_job_id,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
         )
         .eq("owner_ref", ownerRef);
 
@@ -4899,6 +4899,61 @@ export async function GET(request: Request) {
             .maybeSingle();
           if (claimError) throw claimError;
 
+          let billedMicrousd: number | null = null;
+          if (
+            claimed &&
+            mediaJob.billing_mode === "cooperative-balance" &&
+            mediaJob.ai_balance_reservation_id
+          ) {
+            const quotedChargeMicrousd = Math.max(
+              0,
+              Number(mediaJob.estimated_user_charge_microusd || 0),
+            );
+            try {
+              await settleAiProfileFunds({
+                reservationId: mediaJob.ai_balance_reservation_id,
+                actualCostUsd: quotedChargeMicrousd / 1_000_000,
+                metadata: {
+                  jobId: mediaJob.id,
+                  outcome: "completed",
+                  provider: mediaJob.provider,
+                  model: mediaJob.model,
+                  kind: mediaJob.kind,
+                },
+              });
+              billedMicrousd = quotedChargeMicrousd;
+              await admin
+                .from("media_generation_jobs")
+                .update({
+                  billed_microusd: quotedChargeMicrousd,
+                  actual_user_charge_microusd: quotedChargeMicrousd,
+                  actual_provider_cost_microusd: Math.max(
+                    0,
+                    Number(mediaJob.estimated_provider_cost_microusd || 0),
+                  ),
+                  actual_margin_microusd: Math.max(
+                    0,
+                    quotedChargeMicrousd -
+                      Math.max(
+                        0,
+                        Number(mediaJob.estimated_provider_cost_microusd || 0),
+                      ),
+                  ),
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", mediaJob.id)
+                .eq("owner_ref", ownerRef);
+            } catch (billingError) {
+              console.error("Could not settle completed paid media reservation", {
+                jobId: mediaJob.id,
+                detail:
+                  billingError instanceof Error
+                    ? billingError.message.slice(0, 800)
+                    : "Unknown media billing error",
+              });
+            }
+          }
+
           const referenceEditEndpoint =
             mediaJob.pricing_dimensions &&
             typeof mediaJob.pricing_dimensions === "object" &&
@@ -4954,6 +5009,12 @@ export async function GET(request: Request) {
               model: mediaJob.model,
               text: resultText,
               mediaUrl: polled.mediaUrl,
+              funding:
+                billedMicrousd !== null
+                  ? {
+                      chargedUsd: billedMicrousd / 1_000_000,
+                    }
+                  : null,
               routeReason:
                 mediaJob.pricing_dimensions &&
                 typeof mediaJob.pricing_dimensions === "object" &&
@@ -4973,6 +5034,42 @@ export async function GET(request: Request) {
 
         const failure = polled.error || "Hermes media generation failed.";
         const completedAt = new Date().toISOString();
+
+        if (
+          mediaJob.billing_mode === "cooperative-balance" &&
+          mediaJob.ai_balance_reservation_id
+        ) {
+          try {
+            await releaseAiProfileFunds({
+              reservationId: mediaJob.ai_balance_reservation_id,
+              metadata: {
+                jobId: mediaJob.id,
+                outcome: "failed",
+                provider: mediaJob.provider,
+                model: mediaJob.model,
+                kind: mediaJob.kind,
+              },
+            });
+            await admin
+              .from("media_generation_jobs")
+              .update({
+                ai_balance_reservation_id: null,
+                billed_microusd: 0,
+                actual_user_charge_microusd: 0,
+                updated_at: completedAt,
+              })
+              .eq("id", mediaJob.id)
+              .eq("owner_ref", ownerRef);
+          } catch (billingError) {
+            console.error("Could not release failed paid media reservation", {
+              jobId: mediaJob.id,
+              detail:
+                billingError instanceof Error
+                  ? billingError.message.slice(0, 800)
+                  : "Unknown media billing error",
+            });
+          }
+        }
 
         const referencePricingDimensions =
           mediaJob.pricing_dimensions &&
