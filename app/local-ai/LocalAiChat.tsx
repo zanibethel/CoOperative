@@ -3709,9 +3709,12 @@ export default function LocalAiChat() {
         <div className="local-ai-composer">
           {attachments.length > 0 ? (
             <div className="pending-attachments">
-              {attachments.map((attachment) => (
+              {attachments.map((attachment, index) => (
                 <div className="pending-attachment" key={attachment.id}>
                   <img src={attachment.previewUrl} alt={attachment.fileName} />
+                  <span className="pending-attachment-reference">
+                    Reference {index + 1}
+                  </span>
                   <button
                     type="button"
                     onClick={() => void removeAttachment(attachment)}
@@ -3738,10 +3741,12 @@ export default function LocalAiChat() {
           />
 
           <input
+            id="cooperative-reference-image-input"
             ref={fileInputRef}
             className="visually-hidden"
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/*"
+            aria-label="Choose reference images"
             multiple
             onChange={(event) => void uploadImages(event)}
             disabled={busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS}
@@ -3749,16 +3754,20 @@ export default function LocalAiChat() {
 
           {attachmentMenuOpen ? (
             <div className="attachment-source-menu">
-              <button
-                type="button"
-                onClick={() => {
+              <label
+                className="attachment-source-file-label"
+                htmlFor="cooperative-reference-image-input"
+                aria-disabled={busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS}
+                onClick={(event) => {
+                  if (busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS) {
+                    event.preventDefault();
+                    return;
+                  }
                   setAttachmentMenuOpen(false);
-                  fileInputRef.current?.click();
                 }}
-                disabled={busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS}
               >
-                Photo Library / Files
-              </button>
+                Choose reference image
+              </label>
               <button
                 type="button"
                 onClick={() => {
@@ -3802,7 +3811,7 @@ export default function LocalAiChat() {
               disabled={busy || uploadingImages || attachments.length >= MAX_ATTACHMENTS}
               aria-expanded={attachmentMenuOpen}
             >
-              {uploadingImages ? "Uploading…" : "＋ Image"}
+              {uploadingImages ? "Uploading…" : "＋ Reference"}
             </button>
             <ModelMixerTrigger
               active={modelMixerOpen}
@@ -3818,7 +3827,7 @@ export default function LocalAiChat() {
             </button>
           </div>
           <small className="local-ai-attachment-note">
-            Up to 4 images. Large photos are compressed on your device before upload.
+            Up to 4 reference images. For image creation/editing, CoOperative passes them to a reference-capable model; for normal chat, they are vision attachments. Large photos are compressed on your device first.
           </small>
         </div>
 
