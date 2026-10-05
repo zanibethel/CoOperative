@@ -293,10 +293,18 @@ export async function startHermesMediaTask(
   const deadlineAt = new Date(startedAt.getTime() + timeoutMs);
   const sandboxName = `cooperative-media-${spec.jobId.toLowerCase()}`;
 
+  const mediaSnapshotId = process.env.HERMES_MEDIA_SNAPSHOT_ID?.trim();
   const sandbox = await Sandbox.create({
     name: sandboxName,
     persistent: true,
-    runtime: "node24",
+    ...(mediaSnapshotId
+      ? {
+          source: {
+            type: "snapshot" as const,
+            snapshotId: mediaSnapshotId,
+          },
+        }
+      : { runtime: "node24" as const }),
     timeout: timeoutMs,
     env,
   });
@@ -304,7 +312,28 @@ export async function startHermesMediaTask(
   let installSucceeded = false;
   const installErrors: string[] = [];
 
-  for (const installer of HERMES_INSTALLERS) {
+  if (mediaSnapshotId) {
+    const verify = await sandbox.runCommand({
+      cmd: "bash",
+      args: [
+        "-lc",
+        [
+          'HERMES_BIN="$HOME/.local/bin/hermes"',
+          '[ -x "$HERMES_BIN" ] || HERMES_BIN="/usr/local/bin/hermes"',
+          '"$HERMES_BIN" --version >/dev/null 2>&1',
+        ].join(" && "),
+      ],
+    });
+    if (verify.exitCode === 0) {
+      installSucceeded = true;
+    } else {
+      installErrors.push(
+        "Configured Hermes media snapshot did not contain a usable Hermes binary.",
+      );
+    }
+  }
+
+  for (const installer of installSucceeded ? [] : HERMES_INSTALLERS) {
     const install = await sandbox.runCommand({
       cmd: "bash",
       args: [
