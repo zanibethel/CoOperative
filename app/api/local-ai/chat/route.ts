@@ -78,6 +78,7 @@ import {
   recommendedForRequest,
   type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
+import { executeOpenRouterImageDirect } from "@/lib/inference/openrouter-direct-image";
 import {
   affordableVideoSuggestion,
 } from "@/lib/inference/nous-managed-media";
@@ -3221,6 +3222,8 @@ export async function POST(request: Request) {
             preparationSource: mediaPreparationSource,
             preparationReason: mediaPreparationReason,
             preparationSignals: mediaPreparationSignals,
+            directProvider:
+              selectedProvider === "openrouter" && mediaPlan.kind === "image",
           },
           pricing_source: pricingSource,
         });
