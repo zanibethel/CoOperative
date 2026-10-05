@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "models:scan": "node scripts/scan-model-capabilities.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",
