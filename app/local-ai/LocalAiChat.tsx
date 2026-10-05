@@ -1566,7 +1566,7 @@ function FundingRequiredCard({
       </div>
       {!enoughBalance ? (
         <div className="secure-service-status">
-          Minimum additional balance needed: <strong>${Math.max(0, shortfallUsd).toFixed(4)}</strong>
+          Minimum additional balance needed: <strong>${Math.max(0, estimatedCostUsd - currentBalanceUsd).toFixed(4)}</strong>
         </div>
       ) : null}
       <div className="secure-service-actions">
