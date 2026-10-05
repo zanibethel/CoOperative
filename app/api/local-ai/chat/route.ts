@@ -3162,7 +3162,12 @@ export async function POST(request: Request) {
           // through the media job id, so do not put a media UUID into this FK-backed field.
           job_id: null,
         });
-      if (mediaUserMessageError) throw mediaUserMessageError;
+      if (mediaUserMessageError) {
+        await admin.from("media_generation_jobs").delete().eq("id", jobId);
+        throw new Error(
+          mediaUserMessageError.message || "Could not save media request to chat.",
+        );
+      }
 
       let mediaBalanceReservationId: string | null = null;
       if (
@@ -3975,7 +3980,17 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     const detail =
-      error instanceof Error ? error.message : "Could not queue local AI chat.";
+      error instanceof Error
+        ? error.message
+        : error &&
+            typeof error === "object" &&
+            "message" in error &&
+            typeof error.message === "string"
+          ? error.message
+          : "Could not queue local AI chat.";
+    console.error("Local AI chat queue failed", {
+      detail: detail.slice(0, 800),
+    });
     return NextResponse.json(
       { error: "Could not queue local AI chat.", detail: detail.slice(0, 800) },
       { status: 502, headers: { "Cache-Control": "no-store" } },
