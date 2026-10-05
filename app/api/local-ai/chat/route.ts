@@ -5289,6 +5289,19 @@ export async function GET(request: Request) {
         }
 
         if (mediaJob.provider === "nous") {
+          const referenceAttachmentIds =
+            referenceVerifiedRoute &&
+            Array.isArray(referencePricingDimensions?.referenceAttachmentIds)
+              ? (referencePricingDimensions.referenceAttachmentIds as unknown[])
+                  .filter(
+                    (value): value is string =>
+                      typeof value === "string" && value.length > 0,
+                  )
+                  .slice(0, 16)
+              : [];
+          const mustPreserveReference =
+            referenceVerifiedRoute && referenceAttachmentIds.length > 0;
+
           const requestCapUsd =
             typeof mediaJob.request_max_spend_microusd === "number"
               ? mediaJob.request_max_spend_microusd / 1_000_000
@@ -5319,7 +5332,7 @@ export async function GET(request: Request) {
           const controls = videoControlsFromPrompt(String(mediaJob.prompt || ""));
 
           // Nous -> owned local image before any paid OpenRouter fallback.
-          if (mediaJob.kind === "image") {
+          if (mediaJob.kind === "image" && !mustPreserveReference) {
             const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
             if (authorizedNodeIds.length > 0) {
               const { data: imageNodes } = await admin
@@ -5450,7 +5463,17 @@ export async function GET(request: Request) {
           try {
             const catalog = await openRouterMediaCatalog(true);
             const pool =
-              mediaJob.kind === "video" ? catalog.video : catalog.image;
+              mediaJob.kind === "video"
+                ? catalog.video
+                : mustPreserveReference
+                  ? catalog.image.filter(
+                      (model) =>
+                        (model.minInputReferences ?? 0) > 0 ||
+                        model.inputModalities.some(
+                          (modality) => modality.toLowerCase() === "image",
+                        ),
+                    )
+                  : catalog.image;
             const requestShape = {
               durationSeconds,
               aspectRatio,
@@ -5633,6 +5656,13 @@ export async function GET(request: Request) {
                       audio: controls.audio,
                       mediaLevel,
                       freeRoute,
+                      referenceVerifiedRoute: mustPreserveReference,
+                      referenceAttachmentCount: mustPreserveReference
+                        ? referenceAttachmentIds.length
+                        : 0,
+                      referenceAttachmentIds: mustPreserveReference
+                        ? referenceAttachmentIds
+                        : [],
                       quotedUserPriceUsd: freeRoute
                         ? 0
                         : backupUserQuoteUsd,
@@ -5741,19 +5771,27 @@ export async function GET(request: Request) {
                   }
                 }
 
+                const backupReferenceExecution = mustPreserveReference
+                  ? await createReferenceImageExecutionUrls({
+                      ownerRef,
+                      attachmentIds: referenceAttachmentIds,
+                    })
+                  : null;
+
                 let started: Awaited<
                   ReturnType<typeof startHermesMediaTask>
                 >;
                 try {
                   started = await startHermesMediaTask({
-                  jobId: backupJobId,
-                  kind: mediaJob.kind,
-                  userRequest: mediaJob.prompt,
-                  provider: "openrouter",
-                  model: backupModel.id,
-                  providerCredential: openRouterCredential,
-                  orchestratorProvider: "openrouter",
-                  orchestratorModel: "openrouter/free",
+                    jobId: backupJobId,
+                    kind: mediaJob.kind,
+                    userRequest: mediaJob.prompt,
+                    provider: "openrouter",
+                    model: backupModel.id,
+                    providerCredential: openRouterCredential,
+                    orchestratorProvider: "openrouter",
+                    orchestratorModel: "openrouter/free",
+                    referenceImageUrls: backupReferenceExecution?.urls,
                   });
                 } catch (backupStartFailure) {
                   if (backupReservationId) {
