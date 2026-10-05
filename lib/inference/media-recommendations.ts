@@ -410,6 +410,8 @@ function asOption(
     model: candidate.model,
     modelName: candidate.modelName,
     estimatedCostUsd: candidate.estimatedCostUsd,
+    providerCostEstimateUsd: candidate.providerCostEstimateUsd,
+    markupPercent: candidate.markupPercent,
     capUsd: candidate.capUsd,
     increaseNeededUsd: Math.max(0, nextCent(candidate.capUsd - currentCapUsd)),
     summary: summarize(candidate, plan),
