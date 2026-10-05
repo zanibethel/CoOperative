@@ -474,6 +474,25 @@ export async function recordModelCapabilityEvidence(input: {
   return data;
 }
 
+async function backfillEvidenceRouteId(input: {
+  routeId: string;
+  provider: string;
+  model: string;
+  endpoint: string;
+  routeKind: string;
+}) {
+  const admin = createAdminSupabaseClient();
+  const { error } = await admin
+    .from("ai_model_capability_evidence")
+    .update({ registry_route_id: input.routeId })
+    .is("registry_route_id", null)
+    .eq("provider", input.provider)
+    .eq("model", input.model)
+    .eq("endpoint", input.endpoint)
+    .eq("route_kind", input.routeKind);
+  if (error) throw error;
+}
+
 async function persistSpecializedPolicyEvidence(
   routeId: string,
   route: RouteSnapshot,
@@ -537,6 +556,39 @@ export async function scanModelCapabilities(input: {
   const scanId = crypto.randomUUID();
   const triggerSource = input.triggerSource || "manual";
   const startedAt = new Date().toISOString();
+
+  const staleCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  await admin
+    .from("ai_model_scan_runs")
+    .update({
+      status: "failed",
+      error: "Scanner run exceeded the 15-minute stale-run guard.",
+      completed_at: startedAt,
+    })
+    .eq("status", "running")
+    .lt("started_at", staleCutoff);
+
+  const { data: activeRun, error: activeRunError } = await admin
+    .from("ai_model_scan_runs")
+    .select("id,scanner_version,trigger_source,status,started_at")
+    .eq("status", "running")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (activeRunError) throw activeRunError;
+  if (activeRun) {
+    return {
+      scanId: activeRun.id,
+      scannerVersion: activeRun.scanner_version,
+      status: "already-running" as const,
+      discoveredCount: 0,
+      newCount: 0,
+      changedCount: 0,
+      missingCount: 0,
+      sources: [] as ScanSourceResult[],
+      completedAt: null,
+    };
+  }
 
   const { error: runInsertError } = await admin
     .from("ai_model_scan_runs")
@@ -1017,6 +1069,13 @@ export async function scanModelCapabilities(input: {
           after_summary: summary,
         });
 
+        await backfillEvidenceRouteId({
+          routeId: inserted.id,
+          provider: route.provider,
+          model: route.model,
+          endpoint: route.endpoint,
+          routeKind: route.routeKind,
+        });
         await persistSpecializedPolicyEvidence(
           inserted.id,
           route,
@@ -1071,6 +1130,14 @@ export async function scanModelCapabilities(input: {
         })
         .eq("id", current.id);
       if (updateError) throw updateError;
+
+      await backfillEvidenceRouteId({
+        routeId: current.id,
+        provider: route.provider,
+        model: route.model,
+        endpoint: route.endpoint,
+        routeKind: route.routeKind,
+      });
 
       if (changed) {
         const fields = changedFields(before, summary);
