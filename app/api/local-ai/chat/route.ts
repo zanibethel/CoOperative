@@ -89,7 +89,7 @@ import {
 } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
 import {
-  createNousReferenceImageExecutionUrls,
+  createReferenceImageExecutionUrls,
   verifyNousReferenceImageTransport,
 } from "@/lib/inference/nous-reference-transport-verification";
 import {
@@ -2566,6 +2566,10 @@ export async function POST(request: Request) {
         Boolean(selectedRecommendation.editEndpoint) &&
         selectedRecommendation.executionReady === true &&
         referenceVerification?.readyForApprovedSmokeTest === true;
+      const cloudReferenceRoute =
+        requiresReferenceImage &&
+        selectedRecommendation?.provider !== "cooperative-local" &&
+        selectedRecommendation?.executionReady === true;
 
       if (!selectedRecommendation) {
         const message = recommendationText();
@@ -2678,9 +2682,9 @@ export async function POST(request: Request) {
             ? 2
             : 1;
 
-      const premiumReferenceExecution =
-        premiumReferenceRoute
-          ? await createNousReferenceImageExecutionUrls({
+      const referenceImageExecution =
+        cloudReferenceRoute
+          ? await createReferenceImageExecutionUrls({
               ownerRef,
               attachmentIds: effectiveMediaAttachmentIds,
             })
@@ -3135,7 +3139,7 @@ export async function POST(request: Request) {
             referenceEditEndpoint: premiumReferenceRoute
               ? selectedRecommendation.editEndpoint
               : null,
-            referenceAttachmentCount: premiumReferenceRoute
+            referenceAttachmentCount: cloudReferenceRoute
               ? effectiveMediaAttachmentIds.length
               : 0,
           },
@@ -3150,7 +3154,7 @@ export async function POST(request: Request) {
           owner_ref: ownerRef,
           role: "user",
           content: visibleUserText,
-          attachment_ids: premiumReferenceRoute
+          attachment_ids: requiresReferenceImage
             ? effectiveMediaAttachmentIds
             : [],
           job_id: jobId,
@@ -3335,7 +3339,7 @@ export async function POST(request: Request) {
           model: selectedModel,
           providerCredential,
           nousAuthJson: nousRuntimeAuth?.sandboxAuthJson,
-          referenceImageUrls: premiumReferenceExecution?.urls,
+          referenceImageUrls: referenceImageExecution?.urls,
           referenceSmokeTest: premiumReferenceSmokeTest,
         });
 
@@ -3372,7 +3376,9 @@ export async function POST(request: Request) {
               ? `The user explicitly selected an approved one-shot premium reference smoke-test route. CoOperative passed the current reference image through a short-lived server-side URL to ${selectedRecommendation.editEndpoint}, enforced the quoted cap before submission, and will not retry or fall back automatically.`
               : premiumReferenceVerified
                 ? `The selected premium reference route was already verified by a successful prior generation on this profile. CoOperative passed the current reference image through a fresh short-lived server-side URL to ${selectedRecommendation.editEndpoint}, enforced the quoted cap, and started the verified route normally.`
-                : `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} Free/cheap Hermes reasoning refines the prompt before the single media-generation call, and the request remains bounded by the Model Mixer spend cap.`,
+                : cloudReferenceRoute
+                  ? `CoOperative selected the reference-capable ${selectedModel} route and passed ${effectiveMediaAttachmentIds.length} attached reference image${effectiveMediaAttachmentIds.length === 1 ? "" : "s"} through short-lived server-side URLs. The request remains bounded by the Model Mixer spend cap, and CoOperative will not fall back to a route that could ignore the reference.`
+                  : `CoOperative selected ${selectedModel} from live pricing at Media level ${mediaLevel}. ${selectedProvider === "nous" ? "Nous Portal entitlement is first." : selectedFree ? "A zero-provider-cost hosted route was selected before paid OpenRouter." : "Paid OpenRouter is the final connected backup."} Free/cheap Hermes reasoning refines the prompt before the single media-generation call, and the request remains bounded by the Model Mixer spend cap.`,
             estimatedProviderCostUsd,
             quotedUserPriceUsd: cooperativeFundedPaidRoute
               ? selectedUserQuoteUsd
@@ -3406,8 +3412,9 @@ export async function POST(request: Request) {
           .eq("id", jobId)
           .eq("owner_ref", ownerRef);
 
-        if (premiumReferenceRoute) {
+        if (cloudReferenceRoute) {
           if (
+            premiumReferenceRoute &&
             premiumReferenceSmokeTest &&
             selectedRecommendation.editEndpoint
           ) {
@@ -3430,11 +3437,11 @@ export async function POST(request: Request) {
               conversationId,
               conversationTitle,
               error: detail,
-              provider: "nous",
+              provider: selectedRecommendation.provider,
               model: selectedRecommendation.model,
               routeReason: premiumReferenceSmokeTest
                 ? "The one-shot premium reference smoke test could not start. CoOperative recorded the failure and did not retry, fall back, or launch Recovery Agent."
-                : "The verified premium reference route could not start. CoOperative preserved the reference-image boundary and did not retry or fall back to a route that might ignore the attachment.",
+                : "The reference-image route could not start. CoOperative preserved the reference-image boundary and did not retry or fall back to a route that might ignore the attachment.",
             },
             { status: 200, headers: { "Cache-Control": "no-store" } },
           );
