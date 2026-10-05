@@ -7,7 +7,7 @@ export type MediaCatalogModel = {
   name: string;
   kind: MediaCatalogKind;
   free: boolean;
-  unit: "image" | "second" | "megapixel" | "unknown";
+  unit: "image" | "second" | "megapixel" | "token" | "unknown";
   minUnitCostUsd: number | null;
   maxUnitCostUsd: number | null;
   costLabel: string;
@@ -17,6 +17,8 @@ export type MediaCatalogModel = {
   resolutions: string[];
   audioSupported: boolean;
   pricingSkus: Record<string, number>;
+  recommended?: boolean;
+  minInputReferences?: number;
 };
 
 export type MediaCatalog = {
@@ -66,19 +68,20 @@ function costLabel(min: number | null, max: number | null, unit: MediaCatalogMod
   const suffix =
     unit === "second" ? "/sec" :
     unit === "image" ? "/image" :
-    unit === "megapixel" ? "/MP" : "";
+    unit === "megapixel" ? "/MP" :
+    unit === "token" ? "/1K image est." : "";
   if (max !== null && Math.abs(max - min) > 0.000001) {
     return `$${min.toFixed(min < 0.01 ? 4 : 3)}–$${max.toFixed(max < 0.01 ? 4 : 3)}${suffix}`;
   }
   return `$${min.toFixed(min < 0.01 ? 4 : 3)}${suffix}`;
 }
 
-async function fetchJson(url: string) {
+async function fetchJson(url: string, credential?: string) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const headers: Record<string, string> = { Accept: "application/json" };
-    const key = process.env.OPENROUTER_API_KEY?.trim();
+    const key = credential?.trim() || process.env.OPENROUTER_API_KEY?.trim();
     if (key) headers.Authorization = `Bearer ${key}`;
     const response = await fetch(url, { headers, cache: "no-store", signal: controller.signal });
     if (!response.ok) throw new Error(`OpenRouter catalog returned ${response.status} for ${url}.`);
@@ -122,10 +125,31 @@ function videoPricing(pricing: unknown) {
   };
 }
 
-async function imageEndpointPricing(path: string | null) {
-  if (!path) return { min: null, max: null, unit: "unknown" as const };
+function rangeMinimum(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  return numberValue((value as { min?: unknown }).min);
+}
+
+function defaultImageOutputTokens(modelId: string, resolution?: string | null) {
+  const normalized = (resolution || "").toLowerCase();
+  if (modelId === "google/gemini-3.1-flash-image") {
+    if (normalized.includes("4k")) return 2520;
+    if (normalized.includes("2k")) return 1680;
+    if (normalized.includes("0.5k") || normalized.includes("512")) return 747;
+    return 1120;
+  }
+  if (modelId === "google/gemini-3.1-flash-lite-image") return 1120;
+  if (modelId === "google/gemini-3-pro-image") return 1120;
+  // Other token-metered image models vary by quality and provider. Use a
+  // conservative 1K-image planning allowance so they remain selectable without
+  // pretending the exact charge is known before generation.
+  return 1120;
+}
+
+async function imageEndpointPricing(path: string | null, modelId: string, credential?: string) {
+  if (!path) return { min: null, max: null, unit: "unknown" as const, skus: {} as Record<string, number> };
   try {
-    const payload = await fetchJson(path.startsWith("http") ? path : ROOT + path);
+    const payload = await fetchJson(path.startsWith("http") ? path : ROOT + path, credential);
     const endpoints =
       payload && typeof payload === "object" && Array.isArray((payload as { endpoints?: unknown }).endpoints)
         ? ((payload as { endpoints: unknown[] }).endpoints)
@@ -137,6 +161,7 @@ async function imageEndpointPricing(path: string | null) {
     });
     const imageCosts: number[] = [];
     const megapixelCosts: number[] = [];
+    const outputImageTokenRates: number[] = [];
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;
       const unit = String((row as { unit?: unknown }).unit || "");
@@ -144,25 +169,50 @@ async function imageEndpointPricing(path: string | null) {
       const cost = numberValue((row as { cost_usd?: unknown }).cost_usd);
       if (cost === null) continue;
       if (cost <= 0) continue;
-      if (unit === "image" || billable === "output_image") imageCosts.push(cost);
+      if (unit === "image") imageCosts.push(cost);
       else if (unit.includes("megapixel")) megapixelCosts.push(cost);
+      else if (unit === "token" && billable === "output_image") outputImageTokenRates.push(cost);
     }
-    const values = imageCosts.length ? imageCosts : megapixelCosts;
-    if (!values.length) return { min: null, max: null, unit: "unknown" as const };
-    return {
-      min: Math.min(...values),
-      max: Math.max(...values),
-      unit: imageCosts.length ? ("image" as const) : ("megapixel" as const),
-    };
+    if (imageCosts.length) {
+      return {
+        min: Math.min(...imageCosts),
+        max: Math.max(...imageCosts),
+        unit: "image" as const,
+        skus: {} as Record<string, number>,
+      };
+    }
+    if (megapixelCosts.length) {
+      return {
+        min: Math.min(...megapixelCosts),
+        max: Math.max(...megapixelCosts),
+        unit: "megapixel" as const,
+        skus: {} as Record<string, number>,
+      };
+    }
+    if (outputImageTokenRates.length) {
+      const tokens = defaultImageOutputTokens(modelId);
+      const minRate = Math.min(...outputImageTokenRates);
+      const maxRate = Math.max(...outputImageTokenRates);
+      return {
+        min: minRate * tokens,
+        max: maxRate * tokens,
+        unit: "token" as const,
+        skus: {
+          output_image_token_min: minRate,
+          output_image_token_max: maxRate,
+        },
+      };
+    }
+    return { min: null, max: null, unit: "unknown" as const, skus: {} as Record<string, number> };
   } catch {
-    return { min: null, max: null, unit: "unknown" as const };
+    return { min: null, max: null, unit: "unknown" as const, skus: {} as Record<string, number> };
   }
 }
 
-async function buildCatalog(): Promise<MediaCatalog> {
+async function buildCatalog(credential?: string): Promise<MediaCatalog> {
   const [imagePayload, videoPayload] = await Promise.all([
-    fetchJson(`${API}/images/models`),
-    fetchJson(`${API}/videos/models`),
+    fetchJson(`${API}/images/models`, credential),
+    fetchJson(`${API}/videos/models`, credential),
   ]);
 
   const rawImages =
@@ -174,10 +224,12 @@ async function buildCatalog(): Promise<MediaCatalog> {
       ? ((videoPayload as { data: unknown[] }).data)
       : [];
 
+  // Keep the live OpenRouter image catalog selectable. The curated set below
+  // remains the automatic-routing pool, but newly added paid models no longer
+  // disappear simply because they are not yet on our recommendation shortlist.
   const imageCandidates = rawImages.filter((entry) => {
     if (!entry || typeof entry !== "object") return false;
-    const id = String((entry as { id?: unknown }).id || "");
-    return RECOMMENDED_IMAGE_IDS.has(id) || id.endsWith(":free");
+    return Boolean(String((entry as { id?: unknown }).id || ""));
   });
 
   const imageRows = await Promise.all(
@@ -190,7 +242,11 @@ async function buildCatalog(): Promise<MediaCatalog> {
       const architecture = row.architecture && typeof row.architecture === "object"
         ? (row.architecture as Record<string, unknown>)
         : {};
-      const pricing = await imageEndpointPricing(typeof row.endpoints === "string" ? row.endpoints : null);
+      const pricing = await imageEndpointPricing(
+        typeof row.endpoints === "string" ? row.endpoints : null,
+        id,
+        credential,
+      );
       // OpenRouter currently requires funded credit for Image API requests even
       // when an endpoint reports zero-looking catalog pricing. Do not classify
       // image generation as free from a zero price field alone.
@@ -211,7 +267,9 @@ async function buildCatalog(): Promise<MediaCatalog> {
         durations: [],
         resolutions: enumValues(supported.resolution),
         audioSupported: false,
-        pricingSkus: {},
+        pricingSkus: pricing.skus,
+        recommended: RECOMMENDED_IMAGE_IDS.has(id) || id.endsWith(":free"),
+        minInputReferences: rangeMinimum(supported.input_references) ?? 0,
       };
     }),
   );
@@ -264,12 +322,12 @@ async function buildCatalog(): Promise<MediaCatalog> {
   };
 }
 
-export async function openRouterMediaCatalog(force = false) {
+export async function openRouterMediaCatalog(force = false, credential?: string) {
   const now = Date.now();
   if (!force && cached && now - cached.at < CACHE_MS) return cached.value;
   if (!force && inflight) return inflight;
 
-  inflight = buildCatalog()
+  inflight = buildCatalog(credential)
     .then((value) => {
       cached = { at: Date.now(), value };
       return value;
@@ -302,20 +360,23 @@ export function mediaLevelBands(models: MediaCatalogModel[]) {
 }
 
 export function recommendedForLevel(models: MediaCatalogModel[], level: 0 | 1 | 2 | 3 | 4) {
-  const free = models.filter((model) => model.free);
+  const curated = models.some((model) => model.recommended)
+    ? models.filter((model) => model.recommended)
+    : models;
+  const free = curated.filter((model) => model.free);
   if (level === 0) return free[0] || null;
 
-  const bands = mediaLevelBands(models);
+  const bands = mediaLevelBands(curated);
   const floor =
     level <= 1 ? 0 :
     bands[(level - 1) as 1 | 2 | 3].ceilingUsd ?? 0;
   const ceiling = bands[level].ceilingUsd;
 
-  const candidates = models.filter((model) => {
+  const candidates = curated.filter((model) => {
     const cost = model.minUnitCostUsd;
     return cost !== null && cost > floor && (ceiling === null || cost <= ceiling);
   });
-  return candidates[0] || free[0] || models.find((model) => model.minUnitCostUsd !== null) || null;
+  return candidates[0] || free[0] || curated.find((model) => model.minUnitCostUsd !== null) || null;
 }
 
 
@@ -418,6 +479,12 @@ export function estimateOpenRouterMediaCostUsd(
   if (model.unit === "image") return model.minUnitCostUsd;
   if (model.unit === "megapixel") {
     return model.minUnitCostUsd * Math.max(1, request.megapixels || 1);
+  }
+  if (model.unit === "token") {
+    const rate = model.pricingSkus.output_image_token_min;
+    return rate
+      ? rate * defaultImageOutputTokens(model.id, request.resolution)
+      : model.minUnitCostUsd;
   }
   return null;
 }
