@@ -52,6 +52,11 @@ export async function POST(request: Request) {
       body.result && typeof body.result === "object"
         ? (body.result as Record<string, unknown>)
         : {};
+    const governance =
+      priorResult.governance && typeof priorResult.governance === "object"
+        ? (priorResult.governance as Record<string, unknown>)
+        : {};
+    const ownerAuthoritative = governance.ownerAuthoritative === true;
     const branchName =
       typeof body.branchName === "string" && body.branchName.trim()
         ? body.branchName.trim().slice(0, 240)
@@ -78,8 +83,12 @@ export async function POST(request: Request) {
         branchName,
         mergeAllowed: false,
         promotionState:
-          status === "needs_approval" ? "awaiting_owner_review" : "testing",
-        ownerReviewRequired: true,
+          status === "needs_approval"
+            ? ownerAuthoritative
+              ? "owner-authoritative-tested"
+              : "awaiting_owner_review"
+            : "testing",
+        ownerReviewRequired: !ownerAuthoritative,
         reviewCadenceDays: 7,
       };
     }
@@ -135,14 +144,18 @@ export async function POST(request: Request) {
       await admin.from("agent_task_events").insert({
         task_id: taskId,
         owner_ref: task.owner_ref,
-        kind: "owner_branch_review_needed",
-        message:
-          "A sandbox branch is ready for testing and owner review. Merge remains blocked until explicit owner review.",
+        kind: ownerAuthoritative
+          ? "owner_authoritative_branch_tested"
+          : "owner_branch_review_needed",
+        message: ownerAuthoritative
+          ? "Owner-authoritative branch passed into the tested state. It may intentionally change defaults; merge remains a separate explicit action."
+          : "A sandbox branch is ready for testing and owner review. Merge remains blocked until explicit owner review.",
         metadata: {
           branchName,
           repoKey: task.repo_key,
           reviewCadenceDays: 7,
           mergeAllowed: false,
+          ownerAuthoritative,
         },
       });
     }
