@@ -5500,8 +5500,12 @@ export async function GET(request: Request) {
           }
 
           try {
+            const blockedRouteKeys = await mediaKnownBlockedRouteKeys({
+              ownerRef,
+              requestedClass: requestedAdultClass,
+            });
             const catalog = await openRouterMediaCatalog(true);
-            const pool =
+            const rawPool =
               mediaJob.kind === "video"
                 ? catalog.video
                 : mustPreserveReference
@@ -5513,6 +5517,13 @@ export async function GET(request: Request) {
                         ),
                     )
                   : catalog.image;
+            const pool = rawPool.filter((model) => {
+              const routeKey = ["openrouter", model.id, ""].join("|");
+              const isCurrentRoute =
+                mediaJob.provider === "openrouter" &&
+                mediaJob.model === model.id;
+              return !isCurrentRoute && !blockedRouteKeys.has(routeKey);
+            });
             const requestShape = {
               durationSeconds,
               aspectRatio,
