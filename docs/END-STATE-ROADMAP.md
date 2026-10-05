@@ -359,9 +359,9 @@ Build:
 - add a deterministic URL/domain permission registry for public, connector-owned, authenticated/private, local-network, downloadable, and blocked URL classes;
 - retain explicit privacy status in the UI showing where inference ran and whether web access was used;
 - use the existing profile AI balance as the hard paid-model eligibility gate;
-- estimate paid-request cost before execution and compute the balance shortfall;
+- estimate paid-request cost before execution and compute the balance shortfall for text and CoOperative-managed media;
 - when insufficient, return an in-chat funding card with the minimum amount required (or the smallest configured Stripe top-up that satisfies it);
-- after Stripe confirms funding, make the original request resumable without requiring the user to reconstruct it;
+- after Stripe confirms funding, make the original text/image/video request resumable without requiring the user to reconstruct it;
 - never silently switch from a user's node/free route to a paid route.
 
 **Current foundation already implemented:**
