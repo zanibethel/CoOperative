@@ -3157,7 +3157,10 @@ export async function POST(request: Request) {
           attachment_ids: requiresReferenceImage
             ? effectiveMediaAttachmentIds
             : [],
-          job_id: jobId,
+          // local_ai_messages.job_id is intentionally reserved for text_inference_jobs.
+          // Media requests are tracked in media_generation_jobs and returned to the client
+          // through the media job id, so do not put a media UUID into this FK-backed field.
+          job_id: null,
         });
       if (mediaUserMessageError) throw mediaUserMessageError;
 
@@ -5041,7 +5044,9 @@ export async function GET(request: Request) {
                 role: "assistant",
                 content: resultText,
                 attachment_ids: [],
-                job_id: mediaJob.id,
+                // This column references text_inference_jobs only. The media job remains
+                // linked through media_generation_jobs.conversation_id.
+                job_id: null,
               });
             if (resultMessageError) throw resultMessageError;
 
