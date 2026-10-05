@@ -296,6 +296,65 @@ export function decideWebAccess(input: {
   };
 }
 
+const EXTERNAL_QUERY_SECRET_PATTERNS = [
+  /\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|authorization|bearer|password|secret|credential)\b\s*[:=]?\s*\S+/i,
+  /\bsk-[A-Za-z0-9_-]{16,}\b/,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{16,}\b/,
+  /\bAIza[0-9A-Za-z_-]{20,}\b/,
+];
+
+export function externalSearchQuerySafe(query: string) {
+  const value = query.trim();
+  if (!value) return false;
+  return !EXTERNAL_QUERY_SECRET_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+export function needsCurrentExternalInfo(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!value) return false;
+
+  const triggers = [
+    "search the web",
+    "search online",
+    "look online",
+    "look this up",
+    "latest",
+    "today",
+    "current ",
+    "currently",
+    "right now",
+    "news",
+    "weather",
+    "price",
+    "prices",
+    "score",
+    "scores",
+    "schedule",
+    "release",
+    "released",
+    "version",
+    "update",
+    "updates",
+    "this week",
+    "this month",
+    "recent",
+    "available now",
+    "in stock",
+    "open now",
+    "hours today",
+  ];
+
+  return triggers.some((trigger) => value.includes(trigger));
+}
+
+export function explicitPublicUrlReadIntent(message: string) {
+  if (!/https?:\/\/\S+/i.test(message)) return false;
+  return /\b(?:open|read|review|check|inspect|visit|summarize|analyse|analyze|look at|what(?:'s| is) on|from this|use this (?:link|url|page|site))\b/i.test(
+    message,
+  );
+}
+
 export function parseWebAccessModeCommand(message: string) {
   const value = message.toLowerCase().replace(/\s+/g, " ").trim();
   const asksStatus =
