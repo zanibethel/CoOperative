@@ -33,6 +33,7 @@ import {
   resolveBusinessScope,
   resumeOnboarding,
 } from "@/lib/ai/user-profile-onboarding";
+import { resolveProfileExecutionPlan } from "@/lib/runtime/profile-execution-router";
 import { activeNodeIds } from "@/lib/unison/node-access";
 import {
   pollHermesMediaTask,
@@ -942,7 +943,9 @@ export async function POST(request: Request) {
       const taskId = crypto.randomUUID();
       const objective = [
         "Prepare the smallest safe, reusable CoOperative code change for this owner-chat request.",
-        "Use a sandbox branch for testing; never merge or deploy to the default branch.",
+        "This request comes from the authenticated platform owner and is authoritative product direction.",
+        "Owner direction may intentionally change the default product experience and does not require an opt-in UI toggle.",
+        "Use a sandbox branch for implementation/testing safety; never merge or deploy to the default branch from the worker.",
         "Prefer a solution that generalizes to other users when the underlying issue is shared.",
         sandboxBaseBranch
           ? `Continue the existing sandbox branch ${sandboxBaseBranch} and preserve prior tested work unless evidence requires changing it.`
@@ -965,13 +968,19 @@ export async function POST(request: Request) {
           status: "queued",
           result: {
             kind: "owner_chat_sandbox_change",
+            governance: {
+              authority: "platform-owner",
+              ownerAuthoritative: true,
+              uiToggleRequired: false,
+              ownerReviewRequired: false,
+            },
             sandbox: {
               baseBranch: sandboxBaseBranch,
               continuationOfTaskId,
               requestedFrom: "owner-chat",
               promotionState: "queued",
               mergeAllowed: false,
-              ownerReviewRequired: true,
+              ownerReviewRequired: false,
               reviewCadenceDays: 7,
             },
           },
@@ -991,6 +1000,8 @@ export async function POST(request: Request) {
           sandboxBaseBranch,
           continuationOfTaskId,
           mergeAllowed: false,
+          governanceAuthority: "platform-owner",
+          uiToggleRequired: false,
         },
       });
 
@@ -998,7 +1009,7 @@ export async function POST(request: Request) {
         sandboxBaseBranch
           ? `I queued a Quality Repo Engineer revision on the existing sandbox branch ${sandboxBaseBranch}.`
           : "I queued this as a Quality Repo Engineer sandbox change.",
-        "It will make the smallest reusable change it can, run deterministic checks, and push only the sandbox branch for testing. Main stays untouched.",
+        "It will make the smallest reusable change it can, run deterministic checks, and push only the implementation branch for testing. Because this is owner direction, it may change the default product behavior without adding a user toggle. Main stays untouched until the verified change is explicitly merged.",
         "If the Quality coding path cannot produce a verified safe change, I’ll record a stronger-model recommendation rather than silently spending on a paid model.",
         "",
         `SANDBOX_CODE_TASK:${taskId}`,
@@ -1083,6 +1094,10 @@ export async function POST(request: Request) {
             result.sandbox && typeof result.sandbox === "object"
               ? (result.sandbox as Record<string, unknown>)
               : {};
+          const governance =
+            result.governance && typeof result.governance === "object"
+              ? (result.governance as Record<string, unknown>)
+              : {};
           return {
             taskId: row.id,
             branchName: row.branch_name as string,
@@ -1099,6 +1114,7 @@ export async function POST(request: Request) {
               typeof sandbox.promotionState === "string"
                 ? sandbox.promotionState
                 : "testing",
+            ownerAuthoritative: governance.ownerAuthoritative === true,
             scope:
               typeof sandbox.scope === "string" ? sandbox.scope : "code-fix",
             changedFiles: Array.isArray(result.changedFiles)
@@ -1111,7 +1127,13 @@ export async function POST(request: Request) {
 
       const pending = branches.filter(
         (branch) =>
+          !branch.ownerAuthoritative &&
           branch.promotionState !== "approved-for-merge" &&
+          branch.promotionState !== "rejected",
+      );
+      const ownerAuthoritative = branches.filter(
+        (branch) =>
+          branch.ownerAuthoritative &&
           branch.promotionState !== "rejected",
       );
       const successful = pending.filter(
@@ -1130,7 +1152,7 @@ export async function POST(request: Request) {
       });
 
       const assistantText = [
-        `Sandbox branch review: ${pending.length} branch${pending.length === 1 ? "" : "es"} currently need review; ${successful.length} have passed recorded checks and were pushed for testing.`,
+        `Sandbox branch review: ${pending.length} non-owner branch${pending.length === 1 ? "" : "es"} currently need owner review; ${successful.length} have passed recorded checks and were pushed for testing. ${ownerAuthoritative.length} owner-authoritative branch${ownerAuthoritative.length === 1 ? "" : "es"} are tracked separately for verification.`,
         "",
         ...(lines.length
           ? lines
@@ -1181,8 +1203,10 @@ export async function POST(request: Request) {
             "CoOperative read persisted sandbox branch/test state directly and produced the owner review report without invoking AI.",
           branchReview: {
             pending: pending.length,
+            ownerAuthoritativeTesting: ownerAuthoritative.length,
             successfulTested: successful.length,
             branches: pending.slice(0, 25),
+            ownerAuthoritativeBranches: ownerAuthoritative.slice(0, 25),
           },
         },
         { status: 200, headers: { "Cache-Control": "no-store" } },
@@ -3350,77 +3374,51 @@ export async function POST(request: Request) {
     let preferredNodeId: string | null = null;
     let targetNodeId: string | null = null;
     let nodeRouteNote = "";
+    let profileExecutionPlan:
+      | Awaited<ReturnType<typeof resolveProfileExecutionPlan>>
+      | null = null;
 
-    if (input.nodeRouting !== "default") {
-      if (requestedCapability !== "text") {
-        if (input.nodeRouting === "require-node") {
-          return NextResponse.json(
-            { error: "The selected Unison node route does not support image-understanding chat yet." },
-            { status: 409 },
-          );
-        }
-      } else {
-        const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
-        const { data: ownedNodes, error: nodesError } =
-          authorizedNodeIds.length > 0
-            ? await admin
-                .from("unison_nodes")
-                .select("id,display_name,state,capabilities,policy,last_seen_at")
-                .in("id", authorizedNodeIds)
-                .order("last_seen_at", { ascending: false })
-            : { data: [], error: null };
+    if (requestedCapability !== "text" && input.nodeRouting === "require-node") {
+      return NextResponse.json(
+        {
+          error:
+            "The selected Unison node route does not support image-understanding chat yet.",
+        },
+        { status: 409 },
+      );
+    }
 
-        if (nodesError) throw nodesError;
-
-        const freshAfter = Date.now() - 90_000;
-        const textNodes = (ownedNodes || []).filter((node) => {
-          const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
-          const policy =
-            node.policy && typeof node.policy === "object"
-              ? (node.policy as { allowText?: unknown })
-              : {};
-          const seenAt = Date.parse(node.last_seen_at || "");
-          return (
-            capabilities.includes("text_generation") &&
-            policy.allowText !== false &&
-            Number.isFinite(seenAt) &&
-            seenAt >= freshAfter &&
-            node.state !== "paused"
-          );
-        });
-
-        if (input.nodeRouting === "require-node") {
-          if (!input.requiredNodeId) {
-            return NextResponse.json(
-              { error: "Choose an authorized Unison node to require." },
-              { status: 400 },
-            );
-          }
-
-          const selected = textNodes.find((node) => node.id === input.requiredNodeId);
-          if (!selected) {
-            return NextResponse.json(
-              { error: "That authorized Unison node is not currently available for text generation." },
-              { status: 409 },
-            );
-          }
-
-          targetNodeId = selected.id;
-          nodeRouteNote = ` Required authorized node ${selected.display_name || selected.id}.`;
-        } else {
-          const statePriority: Record<string, number> = { idle: 0, online: 1, busy: 2 };
-          const selected = [...textNodes].sort(
-            (a, b) => (statePriority[a.state] ?? 9) - (statePriority[b.state] ?? 9),
-          )[0];
-          if (selected) {
-            preferredNodeId = selected.id;
-            nodeRouteNote =
-              ` Preferred authorized node ${selected.display_name || selected.id} for the first 15 seconds.`;
-          } else {
-            nodeRouteNote = " No fresh owned text node was available, so normal local routing remains eligible.";
-          }
-        }
+    if (requestedCapability === "text") {
+      if (input.nodeRouting === "require-node" && !input.requiredNodeId) {
+        return NextResponse.json(
+          { error: "Choose an authorized Unison node to require." },
+          { status: 400 },
+        );
       }
+
+      profileExecutionPlan = await resolveProfileExecutionPlan({
+        admin,
+        userId: owner.userId,
+        capability: "text",
+        nodeRouting: input.nodeRouting,
+        requiredNodeId: input.requiredNodeId || null,
+        fundedBalanceUsd: profileBalance.availableUsd,
+        maxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
+      });
+
+      if (profileExecutionPlan.requiredNodeUnavailable) {
+        return NextResponse.json(
+          {
+            error:
+              "That authorized Unison node is not currently available for text generation.",
+          },
+          { status: 409 },
+        );
+      }
+
+      preferredNodeId = profileExecutionPlan.preferredNodeId;
+      targetNodeId = profileExecutionPlan.targetNodeId;
+      nodeRouteNote = ` ${profileExecutionPlan.routeReason}`;
     }
 
 
@@ -3535,8 +3533,7 @@ export async function POST(request: Request) {
         ` Code-first preflight: ${codeFirstDecision.routeReason}`,
       allow_paid_fallback:
         requestedCapability === "text" &&
-        input.nodeRouting !== "require-node" &&
-        profileBalance.funded,
+        (profileExecutionPlan?.paidEligible ?? false),
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
@@ -3590,8 +3587,7 @@ export async function POST(request: Request) {
         targetNodeId,
         paidAiEligible:
           requestedCapability === "text" &&
-          input.nodeRouting !== "require-node" &&
-          profileBalance.funded,
+          (profileExecutionPlan?.paidEligible ?? false),
         availableAiBalanceUsd: profileBalance.availableUsd,
         modelMixer: input.modelMixer || null,
         requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { AGENT_REGISTRY, AGENT_REPOSITORIES } from "@/lib/agents/registry";
 import { currentAgentOwnerRef } from "@/lib/agents/server";
+import { canAccessMainCooperative } from "@/lib/ai/main-cooperative-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -35,6 +36,11 @@ export async function POST(request: Request) {
     const requestedProfile = input.profile || agent.preferredProfile;
     const admin = createAdminSupabaseClient();
     const taskId = crypto.randomUUID();
+    const ownerUserId = ownerRef.startsWith("coop-user:")
+      ? ownerRef.slice("coop-user:".length)
+      : "";
+    const ownerAuthoritative =
+      Boolean(ownerUserId) && (await canAccessMainCooperative(ownerUserId));
 
     let sandboxResult: Record<string, unknown> | null = null;
     if (input.continueTaskId) {
@@ -77,6 +83,16 @@ export async function POST(request: Request) {
       };
     }
 
+    const initialResult = {
+      ...(sandboxResult || {}),
+      governance: {
+        authority: ownerAuthoritative ? "platform-owner" : "standard-user",
+        ownerAuthoritative,
+        uiToggleRequired: !ownerAuthoritative,
+        ownerReviewRequired: !ownerAuthoritative,
+      },
+    };
+
     const { error } = await admin.from("agent_tasks").insert({
       id: taskId,
       owner_ref: ownerRef,
@@ -86,7 +102,7 @@ export async function POST(request: Request) {
       objective: input.objective.trim(),
       requested_profile: requestedProfile,
       status: "queued",
-      result: sandboxResult,
+      result: initialResult,
     });
     if (error) throw error;
 
@@ -107,6 +123,8 @@ export async function POST(request: Request) {
           sandboxResult.sandbox
             ? (sandboxResult.sandbox as { baseBranch?: string }).baseBranch || null
             : null,
+        governanceAuthority: ownerAuthoritative ? "platform-owner" : "standard-user",
+        uiToggleRequired: !ownerAuthoritative,
       },
     });
 

@@ -48,13 +48,27 @@ Repo Engineer is instructed to prefer a shared abstraction over a one-user worka
 Existing deterministic scope guards still limit write scope and reject broad or unsafe changes before files are written.
 
 
+## Authority boundary
+
+Platform-owner direction is authoritative product direction.
+
+When a code-change request is authenticated as coming from the platform owner:
+
+- it may intentionally change the default product behavior;
+- a general UI change does **not** require an opt-in/default-off toggle unless the owner asks for one;
+- the previous default does not need to be preserved merely because other users will see the change;
+- implementation still uses bounded engineering, build/test verification, secret/security protections, and explicit merge/deploy actions;
+- owner authority does not bypass destructive-action, billing, credential, authentication/security, or verification safeguards.
+
+For **non-owner** user requests and suggestions, the sandbox/toggle/review rules below remain mandatory.
+
 ## Allowed sandbox scopes
 
-Sandbox code changes are intentionally scoped.
+Non-owner sandbox code changes are intentionally scoped.
 
-### General UI changes
+### General UI changes from non-owner users
 
-New UI/layout/navigation/interaction behavior must preserve the existing default experience for unrelated users.
+New non-owner UI/layout/navigation/interaction behavior must preserve the existing default experience for unrelated users.
 
 The default rule is:
 
@@ -151,4 +165,6 @@ not:
 
 No Repo Engineer, Debugger, connector builder, user chat, or background review process may automatically merge a sandbox branch into the repository default branch.
 
-A merge is acceptable only after an explicit owner review has marked the chosen implementation `approved-for-merge`.
+For non-owner work, a merge is acceptable only after explicit owner review has marked the chosen implementation `approved-for-merge`.
+
+For owner-authoritative work, the owner's instruction already establishes product intent. The implementation must still be verified, and the actual merge remains a separate explicit owner-controlled action, but an additional toggle or owner-review approval step is not required.

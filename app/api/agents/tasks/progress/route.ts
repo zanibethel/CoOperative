@@ -80,6 +80,11 @@ export async function POST(request: Request) {
           priorResult.sandbox && typeof priorResult.sandbox === "object"
             ? (priorResult.sandbox as Record<string, unknown>)
             : {};
+        const governance =
+          priorResult.governance && typeof priorResult.governance === "object"
+            ? (priorResult.governance as Record<string, unknown>)
+            : {};
+        const ownerAuthoritative = governance.ownerAuthoritative === true;
         update.result = {
           ...priorResult,
           sandbox: {
@@ -87,7 +92,7 @@ export async function POST(request: Request) {
             branchName,
             promotionState: "testing",
             mergeAllowed: false,
-            ownerReviewRequired: true,
+            ownerReviewRequired: !ownerAuthoritative,
             reviewCadenceDays: 7,
           },
         };
@@ -96,18 +101,34 @@ export async function POST(request: Request) {
     await admin.from("agent_tasks").update(update).eq("id", taskId);
 
     if (sandboxBranchCreated) {
+      const taskResult =
+        update.result && typeof update.result === "object"
+          ? (update.result as Record<string, unknown>)
+          : task.result && typeof task.result === "object"
+            ? (task.result as Record<string, unknown>)
+            : {};
+      const governance =
+        taskResult.governance && typeof taskResult.governance === "object"
+          ? (taskResult.governance as Record<string, unknown>)
+          : {};
+      const ownerAuthoritative = governance.ownerAuthoritative === true;
+
       await admin.from("agent_task_events").insert({
         task_id: taskId,
         owner_ref: task.owner_ref,
-        kind: "owner_branch_created",
-        message:
-          "A new sandbox code branch was created for user testing. It cannot merge until owner review.",
+        kind: ownerAuthoritative
+          ? "owner_authoritative_branch_created"
+          : "owner_branch_created",
+        message: ownerAuthoritative
+          ? "An owner-authoritative implementation branch was created for verification. Default behavior may change as directed by the owner."
+          : "A new sandbox code branch was created for user testing. It cannot merge until owner review.",
         metadata: {
           branchName,
           repoKey: task.repo_key,
           mode: task.mode,
           mergeAllowed: false,
           reviewCadenceDays: 7,
+          ownerAuthoritative,
         },
       });
     }
