@@ -554,7 +554,7 @@ export async function scanModelCapabilities(input: {
     const { policyMap, runtimeMap, policyRows } = await loadEvidenceMaps();
     const routes: RouteSnapshot[] = [];
     const sources: ScanSourceResult[] = [];
-    const successfulProviders = new Set<string>();
+    const successfulCoverage = new Set<string>();
 
     const [openRouterResult, openRouterTextResult, nousResult] =
       await Promise.allSettled([
@@ -565,7 +565,8 @@ export async function scanModelCapabilities(input: {
 
     if (openRouterResult.status === "fulfilled") {
       const catalog = openRouterResult.value;
-      successfulProviders.add("openrouter");
+      successfulCoverage.add("openrouter:image");
+      successfulCoverage.add("openrouter:video");
 
       for (const model of catalog.image) {
         routes.push({
@@ -692,7 +693,8 @@ export async function scanModelCapabilities(input: {
     }
 
     if (openRouterTextResult.status === "fulfilled") {
-      successfulProviders.add("openrouter");
+      successfulCoverage.add("openrouter:text");
+      successfulCoverage.add("openrouter:multimodal-text");
       for (const model of openRouterTextResult.value) {
         routes.push({
           provider: "openrouter",
@@ -771,7 +773,8 @@ export async function scanModelCapabilities(input: {
 
     if (nousResult.status === "fulfilled") {
       const catalog = nousResult.value;
-      successfulProviders.add("nous");
+      successfulCoverage.add("nous:image");
+      successfulCoverage.add("nous:video");
 
       for (const model of catalog.image) {
         routes.push({
@@ -869,7 +872,9 @@ export async function scanModelCapabilities(input: {
       });
     }
 
-    successfulProviders.add("cooperative-local");
+    successfulCoverage.add("cooperative-local:text");
+    successfulCoverage.add("cooperative-local:vision");
+    successfulCoverage.add("cooperative-local:text-runtime");
     const localRoutes = localRegistrySnapshots(policyMap, runtimeMap);
     routes.push(...localRoutes);
     sources.push({
@@ -1104,7 +1109,13 @@ export async function scanModelCapabilities(input: {
         routeKind: current.route_kind,
       });
       if (seen.has(key)) continue;
-      if (!successfulProviders.has(current.provider)) continue;
+      if (
+        !successfulCoverage.has(
+          `${current.provider}:${current.route_kind}`,
+        )
+      ) {
+        continue;
+      }
       if (current.status === "missing") continue;
 
       const previousSummary: JsonMap = {
@@ -1155,7 +1166,7 @@ export async function scanModelCapabilities(input: {
         missing_count: missingCount,
         completed_at: completedAt,
         metadata: {
-          successfulProviders: [...successfulProviders],
+          successfulCoverage: [...successfulCoverage],
         },
       })
       .eq("id", scanId);
