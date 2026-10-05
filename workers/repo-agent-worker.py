@@ -385,6 +385,12 @@ def system_prompt(agent, mode):
         "Preserve working architecture and make the smallest justified change. "
         "Code changes must be portable and reusable for other users whenever possible; do not hard-code one user's identity, "
         "account, business, branch, or temporary workaround when a shared abstraction can solve the same issue safely. "
+        "For general UI/layout/navigation/interaction changes, preserve the existing default user flow. New UI behavior must be "
+        "implemented as an opt-in/toggleable feature that is default-off unless the objective explicitly requires otherwise. "
+        "Use an existing preference/feature-flag pattern when one exists. In the RAW PLAN summary for a general UI change, include "
+        "'UI_TOGGLE: <name>; DEFAULT: off; EXISTING_FLOW: preserved'. "
+        "New authentication-connection surfaces and report-viewing capabilities are allowed sandbox scopes when they are user-invoked "
+        "and do not silently replace the default flow for unrelated users. "
     )
     if mode in {"prepare_change","update_memory"}:
         return common + (
@@ -525,12 +531,29 @@ def _test_path(relative):
         or ".spec." in name
     )
 
+def _sandbox_scope(objective):
+    value = objective.lower()
+    if re.search(r"\b(oauth|auth(?:entication)?|authorize|sign[ -]?in|connect(?:ion)?|provider|integration)\b", value):
+        return "auth-connection"
+    if re.search(r"\b(report|reports|reporting|review report|branch report|view report|analytics view|audit view)\b", value):
+        return "report-view"
+    if re.search(
+        r"\b(ui|ux|layout|design|screen|page|panel|modal|drawer|card|button|menu|nav|navigation|toolbar|sidebar|chat bubble|mobile view|responsive|styling|css)\b",
+        value,
+    ):
+        return "ui-opt-in"
+    return "code-fix"
+
+def _is_user_invoked_capability(scope):
+    return scope in {"auth-connection", "report-view"}
+
 def evaluate_plan_scope(repo, objective, plan):
     files = plan.get("files")
     if not isinstance(files, list):
         return {"blocking": True, "signals": ["Plan has no valid files array."], "metrics": []}
 
     summary = str(plan.get("summary") or "")
+    sandbox_scope = _sandbox_scope(objective)
     narrow_request = bool(
         re.search(
             r"\b(smallest|minimal|narrow|bounded|surgical|fix|bug|error|regression)\b",
@@ -578,6 +601,49 @@ def evaluate_plan_scope(repo, objective, plan):
                 "which exceeds the scope guard for a surgical fix."
             )
 
+    if sandbox_scope == "ui-opt-in":
+        summary_value = summary.lower()
+        has_toggle_contract = (
+            "ui_toggle:" in summary_value
+            and "default: off" in summary_value
+            and "existing_flow: preserved" in summary_value
+        )
+        if not has_toggle_contract:
+            blocking.append(
+                "General UI sandbox changes must declare an opt-in toggle contract in the summary: "
+                "UI_TOGGLE: <name>; DEFAULT: off; EXISTING_FLOW: preserved."
+            )
+
+        combined_content = "\n".join(
+            item.get("content", "")
+            for item in files
+            if isinstance(item, dict) and isinstance(item.get("content"), str)
+        ).lower()
+        toggle_evidence = any(
+            token in combined_content
+            for token in [
+                "feature flag",
+                "featureflag",
+                "toggle",
+                "enabled",
+                "default false",
+                "default: false",
+                "opt-in",
+                "opt in",
+                "preferences",
+                "settings",
+            ]
+        )
+        if not toggle_evidence:
+            blocking.append(
+                "General UI sandbox change has no implementation evidence for an opt-in toggle or saved preference."
+            )
+
+    if _is_user_invoked_capability(sandbox_scope):
+        warnings.append(
+            f"{sandbox_scope} is an allowed user-invoked sandbox capability; preserve the existing default flow for unrelated users."
+        )
+
     if re.search(r"\b(test|tests|tested|testing)\b", summary, re.IGNORECASE):
         changed_paths = [
             item.get("path")
@@ -600,6 +666,8 @@ def evaluate_plan_scope(repo, objective, plan):
         "warnings": warnings,
         "metrics": metrics,
         "narrowRequest": narrow_request,
+        "sandboxScope": sandbox_scope,
+        "userInvokedCapability": _is_user_invoked_capability(sandbox_scope),
     }
 
 def run_static_file_checks(repo, changed):
@@ -1080,6 +1148,9 @@ def handle_task(task):
             "ownerReviewRequired": True,
             "minimalChangeRequired": True,
             "portableForOtherUsersRequired": True,
+            "scope": _sandbox_scope(objective),
+            "uiDefaultFlowPreservedRequired": _sandbox_scope(objective) == "ui-opt-in",
+            "userInvokedCapability": _is_user_invoked_capability(_sandbox_scope(objective)),
         } if mode == "prepare_change" else None,
     })
 
