@@ -247,6 +247,7 @@ type RecoveryResult = {
 
 const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
 const PENDING_PAID_RESUME_KEY = "cooperative.local-ai.pending-paid-resume-job";
+const PENDING_MEDIA_RESUME_KEY = "cooperative.local-ai.pending-media-resume-job";
 const ACTIVE_BUSINESS_KEY = "cooperative.local-ai.active-business";
 const MAX_ATTACHMENTS = 4;
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
@@ -413,7 +414,7 @@ function recoveryStatusDirective(content: string) {
 
 function fundingRequiredDirective(content: string) {
   const job = content.match(
-    /(?:^|\n)AI_FUNDING_REQUIRED:([0-9a-f]{8}-[0-9a-f-]{27,})\s*$/im,
+    /(?:^|\n)(AI_MEDIA_FUNDING_REQUIRED|AI_FUNDING_REQUIRED):([0-9a-f]{8}-[0-9a-f-]{27,})\s*$/im,
   );
   if (!job) return null;
 
@@ -427,19 +428,27 @@ function fundingRequiredDirective(content: string) {
     return Number.isFinite(parsed) ? parsed : 0;
   };
   const optionId = value("TOPUP_OPTION");
+  const estimatedCostUsd = amount("ESTIMATED_USD");
+  const minimumBalanceUsd = amount("MINIMUM_BALANCE_USD") || estimatedCostUsd;
 
   const text = content
-    .replace(/(?:^|\n)AI_FUNDING_REQUIRED:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)AI_(?:MEDIA_)?FUNDING_REQUIRED:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)ESTIMATED_USD:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)AVAILABLE_USD:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)MINIMUM_BALANCE_USD:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)SHORTFALL_USD:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)TOPUP_OPTION:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)TOPUP_USD:[^\n]+\s*$/gim, "")
     .trim();
 
   return {
-    sourceJobId: job[1],
-    estimatedCostUsd: amount("ESTIMATED_USD"),
+    resumeKind:
+      job[1].toUpperCase() === "AI_MEDIA_FUNDING_REQUIRED"
+        ? ("media" as const)
+        : ("text" as const),
+    sourceJobId: job[2],
+    estimatedCostUsd,
+    minimumBalanceUsd,
     availableBalanceUsd: amount("AVAILABLE_USD"),
     shortfallUsd: amount("SHORTFALL_USD"),
     topUpOptionId: optionId && optionId !== "none" ? optionId : null,
@@ -447,7 +456,6 @@ function fundingRequiredDirective(content: string) {
     text,
   };
 }
-
 function budgetFollowupDirective(content: string) {
   const marker = /(?:^|\n)BUDGET_FOLLOWUPS(?::([0-9]+(?:\.[0-9]+)?))?\s*$/im;
   const match = content.match(marker);
