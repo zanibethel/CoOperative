@@ -3,7 +3,7 @@ import "server-only";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 export const MICRO_USD_PER_USD = 1_000_000;
-const RESERVATION_BUFFER = 1.2;
+export const AI_RESERVATION_BUFFER = 1.2;
 
 export type AiProfileBalance = {
   profileRef: string;
@@ -49,6 +49,19 @@ export function usdToMicrousd(value: number) {
 
 export function microusdToUsd(value: number) {
   return safeInteger(value) / MICRO_USD_PER_USD;
+}
+
+export function aiReservationRequirementMicrousd(estimatedCostUsd: number) {
+  const estimatedMicrousd = usdToMicrousd(estimatedCostUsd);
+  if (!estimatedMicrousd) return 0;
+  return Math.max(
+    estimatedMicrousd,
+    Math.ceil(estimatedMicrousd * AI_RESERVATION_BUFFER),
+  );
+}
+
+export function aiReservationRequirementUsd(estimatedCostUsd: number) {
+  return microusdToUsd(aiReservationRequirementMicrousd(estimatedCostUsd));
 }
 
 export async function aiProfileBalanceForProfileRef(
@@ -113,11 +126,10 @@ export async function reserveAiProfileFunds(input: {
   const estimatedMicrousd = usdToMicrousd(input.estimatedCostUsd);
   if (!estimatedMicrousd) return null;
 
-  // Reserve a small safety buffer for token-estimation drift. Only actual
-  // measured usage is settled; the unused reserve is released atomically.
-  const reservedMicrousd = Math.max(
-    estimatedMicrousd,
-    Math.ceil(estimatedMicrousd * RESERVATION_BUFFER),
+  // Reserve a small safety buffer for estimation drift. Only actual measured
+  // or quoted usage is settled; the unused reserve is released atomically.
+  const reservedMicrousd = aiReservationRequirementMicrousd(
+    input.estimatedCostUsd,
   );
 
   const admin = createAdminSupabaseClient();

@@ -39,6 +39,7 @@ function money(value: number) {
 }
 
 const PENDING_PAID_RESUME_KEY = "cooperative.local-ai.pending-paid-resume-job";
+const PENDING_MEDIA_RESUME_KEY = "cooperative.local-ai.pending-media-resume-job";
 
 export default function AiBalanceClient() {
   const router = useRouter();
@@ -73,7 +74,17 @@ export default function AiBalanceClient() {
             if (updated.availableUsd > next.availableUsd) break;
           }
 
-          const resumeJobId = window.localStorage.getItem(PENDING_PAID_RESUME_KEY);
+          const resumeMediaJobId =
+            window.localStorage.getItem(PENDING_MEDIA_RESUME_KEY);
+          if (resumeMediaJobId) {
+            router.push(
+              `/local-ai?resumeMediaJob=${encodeURIComponent(resumeMediaJobId)}`,
+            );
+            return;
+          }
+
+          const resumeJobId =
+            window.localStorage.getItem(PENDING_PAID_RESUME_KEY);
           if (resumeJobId) {
             router.push(
               `/local-ai?resumePaidJob=${encodeURIComponent(resumeJobId)}`,

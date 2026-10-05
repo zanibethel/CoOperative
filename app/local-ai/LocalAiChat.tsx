@@ -247,6 +247,7 @@ type RecoveryResult = {
 
 const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
 const PENDING_PAID_RESUME_KEY = "cooperative.local-ai.pending-paid-resume-job";
+const PENDING_MEDIA_RESUME_KEY = "cooperative.local-ai.pending-media-resume-job";
 const ACTIVE_BUSINESS_KEY = "cooperative.local-ai.active-business";
 const MAX_ATTACHMENTS = 4;
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
@@ -413,7 +414,7 @@ function recoveryStatusDirective(content: string) {
 
 function fundingRequiredDirective(content: string) {
   const job = content.match(
-    /(?:^|\n)AI_FUNDING_REQUIRED:([0-9a-f]{8}-[0-9a-f-]{27,})\s*$/im,
+    /(?:^|\n)(AI_MEDIA_FUNDING_REQUIRED|AI_FUNDING_REQUIRED):([0-9a-f]{8}-[0-9a-f-]{27,})\s*$/im,
   );
   if (!job) return null;
 
@@ -427,19 +428,27 @@ function fundingRequiredDirective(content: string) {
     return Number.isFinite(parsed) ? parsed : 0;
   };
   const optionId = value("TOPUP_OPTION");
+  const estimatedCostUsd = amount("ESTIMATED_USD");
+  const minimumBalanceUsd = amount("MINIMUM_BALANCE_USD") || estimatedCostUsd;
 
   const text = content
-    .replace(/(?:^|\n)AI_FUNDING_REQUIRED:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)AI_(?:MEDIA_)?FUNDING_REQUIRED:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)ESTIMATED_USD:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)AVAILABLE_USD:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)MINIMUM_BALANCE_USD:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)SHORTFALL_USD:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)TOPUP_OPTION:[^\n]+\s*$/gim, "")
     .replace(/(?:^|\n)TOPUP_USD:[^\n]+\s*$/gim, "")
     .trim();
 
   return {
-    sourceJobId: job[1],
-    estimatedCostUsd: amount("ESTIMATED_USD"),
+    resumeKind:
+      job[1].toUpperCase() === "AI_MEDIA_FUNDING_REQUIRED"
+        ? ("media" as const)
+        : ("text" as const),
+    sourceJobId: job[2],
+    estimatedCostUsd,
+    minimumBalanceUsd,
     availableBalanceUsd: amount("AVAILABLE_USD"),
     shortfallUsd: amount("SHORTFALL_USD"),
     topUpOptionId: optionId && optionId !== "none" ? optionId : null,
@@ -447,7 +456,6 @@ function fundingRequiredDirective(content: string) {
     text,
   };
 }
-
 function budgetFollowupDirective(content: string) {
   const marker = /(?:^|\n)BUDGET_FOLLOWUPS(?::([0-9]+(?:\.[0-9]+)?))?\s*$/im;
   const match = content.match(marker);
@@ -1444,27 +1452,31 @@ function SandboxCodeTaskCard({ taskId }: { taskId: string }) {
 }
 
 type FundingRequiredCardProps = {
+  resumeKind: "text" | "media";
   sourceJobId: string;
   estimatedCostUsd: number;
+  minimumBalanceUsd: number;
   availableBalanceUsd: number;
   topUpOptionId: string | null;
   topUpUsd: number;
-  onCompleted: (conversationId?: string | null) => Promise<void>;
+  onResumed: (payload: JobResult) => Promise<void>;
 };
 
 function FundingRequiredCard({
+  resumeKind,
   sourceJobId,
   estimatedCostUsd,
+  minimumBalanceUsd,
   availableBalanceUsd,
   topUpOptionId,
   topUpUsd,
-  onCompleted,
+  onResumed,
 }: FundingRequiredCardProps) {
   const [working, setWorking] = useState(false);
   const [cardError, setCardError] = useState("");
   const [currentBalanceUsd, setCurrentBalanceUsd] = useState(availableBalanceUsd);
 
-  const enoughBalance = currentBalanceUsd + 1e-9 >= estimatedCostUsd;
+  const enoughBalance = currentBalanceUsd + 1e-9 >= minimumBalanceUsd;
 
   useEffect(() => {
     let cancelled = false;
@@ -1507,7 +1519,11 @@ function FundingRequiredCard({
         );
       }
 
-      window.localStorage.setItem(PENDING_PAID_RESUME_KEY, sourceJobId);
+      const pendingKey =
+        resumeKind === "media"
+          ? PENDING_MEDIA_RESUME_KEY
+          : PENDING_PAID_RESUME_KEY;
+      window.localStorage.setItem(pendingKey, sourceJobId);
       window.location.assign(payload.checkoutUrl);
     } catch (err) {
       setCardError(
@@ -1522,11 +1538,16 @@ function FundingRequiredCard({
     setWorking(true);
     setCardError("");
     try {
-      const response = await fetch("/api/local-ai/chat/paid-fallback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: sourceJobId }),
-      });
+      const response = await fetch(
+        resumeKind === "media"
+          ? "/api/local-ai/chat/media-resume"
+          : "/api/local-ai/chat/paid-fallback",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jobId: sourceJobId }),
+        },
+      );
       const payload = (await response.json()) as JobResult;
       if (response.status === 402 && payload.fundingRequired) {
         if (typeof payload.fundingRequired.availableBalanceUsd === "number") {
@@ -1538,13 +1559,21 @@ function FundingRequiredCard({
           ).toFixed(4)} short).`,
         );
       }
-      if (!response.ok || payload.status !== "completed") {
+      const resumed =
+        payload.status === "completed" ||
+        payload.status === "running" ||
+        payload.status === "queued";
+      if (!response.ok || !resumed) {
         throw new Error(
           payload.detail || payload.error || "Paid AI could not resume this request.",
         );
       }
-      window.localStorage.removeItem(PENDING_PAID_RESUME_KEY);
-      await onCompleted(payload.conversationId);
+      window.localStorage.removeItem(
+        resumeKind === "media"
+          ? PENDING_MEDIA_RESUME_KEY
+          : PENDING_PAID_RESUME_KEY,
+      );
+      await onResumed(payload);
     } catch (err) {
       setCardError(
         err instanceof Error ? err.message : "Paid AI could not resume this request.",
@@ -1559,10 +1588,15 @@ function FundingRequiredCard({
       <div className="secure-service-head">
         <span className="secure-service-lock" aria-hidden="true">$</span>
         <div>
-          <strong>Stronger AI available</strong>
+          <strong>
+            {resumeKind === "media"
+              ? "Funded media available"
+              : "Stronger AI available"}
+          </strong>
           <small>
-            Free/local routes were exhausted. CoOperative will not use a paid model
-            until the profile balance covers this request.
+            CoOperative will not start the paid{" "}
+            {resumeKind === "media" ? "media provider call" : "model"} until the
+            profile balance safely covers this request.
           </small>
         </div>
       </div>
@@ -1574,13 +1608,17 @@ function FundingRequiredCard({
       </div>
       {!enoughBalance ? (
         <div className="secure-service-status">
-          Minimum additional balance needed: <strong>${Math.max(0, estimatedCostUsd - currentBalanceUsd).toFixed(4)}</strong>
+          Minimum additional balance needed:{" "}\n          <strong>{"$" + Math.max(0, minimumBalanceUsd - currentBalanceUsd).toFixed(4)}</strong>
         </div>
       ) : null}
       <div className="secure-service-actions">
         {enoughBalance ? (
           <button type="button" disabled={working} onClick={() => void continueRequest()}>
-            {working ? "Continuing…" : "Continue with stronger AI"}
+            {working
+              ? "Continuing…"
+              : resumeKind === "media"
+                ? "Continue media generation"
+                : "Continue with stronger AI"}
           </button>
         ) : topUpOptionId ? (
           <button type="button" disabled={working} onClick={() => void addBalance()}>
@@ -2456,7 +2494,59 @@ export default function LocalAiChat() {
         ]);
         const threads = await refreshConversations();
         const onboarding = await refreshOnboarding();
-        const resumeFromQuery = new URLSearchParams(window.location.search).get(
+        const params = new URLSearchParams(window.location.search);
+        const resumeMediaFromQuery = params.get("resumeMediaJob");
+        const pendingMediaResume =
+          resumeMediaFromQuery ||
+          window.localStorage.getItem(PENDING_MEDIA_RESUME_KEY);
+
+        if (pendingMediaResume) {
+          setStatus("Resuming funded media generation…");
+          const mediaResponse = await fetch("/api/local-ai/chat/media-resume", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId: pendingMediaResume }),
+          });
+          const media = (await mediaResponse.json()) as JobResult;
+
+          if (
+            mediaResponse.ok &&
+            media.jobId &&
+            (media.status === "running" || media.status === "queued")
+          ) {
+            window.localStorage.removeItem(PENDING_MEDIA_RESUME_KEY);
+            window.history.replaceState(null, "", window.location.pathname);
+            if (media.conversationId) {
+              await loadConversation(media.conversationId);
+            }
+            window.localStorage.setItem(ACTIVE_JOB_KEY, media.jobId);
+            await pollJob(media.jobId, []);
+            return;
+          }
+
+          if (mediaResponse.ok && media.status === "completed") {
+            window.localStorage.removeItem(PENDING_MEDIA_RESUME_KEY);
+            window.history.replaceState(null, "", window.location.pathname);
+            if (media.conversationId) {
+              await loadConversation(media.conversationId);
+            }
+            await Promise.all([refreshConversations(), refreshBusinesses()]);
+            setMeta(resultMeta(media));
+            setStatus("Ready");
+            return;
+          }
+
+          if (mediaResponse.status === 402) {
+            if (media.conversationId) {
+              await loadConversation(media.conversationId);
+            }
+            setStatus("Ready");
+          } else {
+            window.localStorage.removeItem(PENDING_MEDIA_RESUME_KEY);
+          }
+        }
+
+        const resumeFromQuery = params.get(
           "resumePaidJob",
         );
         const pendingPaidResume =
@@ -3329,14 +3419,16 @@ export default function LocalAiChat() {
                       <>
                         {fundingRequired.text ? <div>{fundingRequired.text}</div> : null}
                         <FundingRequiredCard
+                          resumeKind={fundingRequired.resumeKind}
                           sourceJobId={fundingRequired.sourceJobId}
                           estimatedCostUsd={fundingRequired.estimatedCostUsd}
+                          minimumBalanceUsd={fundingRequired.minimumBalanceUsd}
                           availableBalanceUsd={fundingRequired.availableBalanceUsd}
                           topUpOptionId={fundingRequired.topUpOptionId}
                           topUpUsd={fundingRequired.topUpUsd}
-                          onCompleted={async (targetConversationId) => {
-                            if (targetConversationId) {
-                              await loadConversation(targetConversationId);
+                          onResumed={async (payload) => {
+                            if (payload.conversationId) {
+                              await loadConversation(payload.conversationId);
                             } else if (conversationId) {
                               await loadConversation(conversationId);
                             }
@@ -3344,6 +3436,21 @@ export default function LocalAiChat() {
                               refreshConversations(),
                               refreshBusinesses(),
                             ]);
+                            if (
+                              fundingRequired.resumeKind === "media" &&
+                              payload.jobId &&
+                              (payload.status === "running" ||
+                                payload.status === "queued")
+                            ) {
+                              window.localStorage.setItem(
+                                ACTIVE_JOB_KEY,
+                                payload.jobId,
+                              );
+                              await pollJob(payload.jobId, []);
+                            } else {
+                              setMeta(resultMeta(payload));
+                              setStatus("Ready");
+                            }
                           }}
                         />
                       </>

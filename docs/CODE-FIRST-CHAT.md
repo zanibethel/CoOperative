@@ -73,6 +73,11 @@ No balance means paid models are unavailable, not that CoOperative chat itself i
 
 **Implemented funding handoff:** when local/free text execution fails and a qualified paid executor exists, CoOperative now evaluates that paid route even when the profile balance is empty. It quotes the estimated request cost, calculates the exact balance shortfall, chooses the smallest configured Stripe top-up that covers it, and persists a resumable funding card in the conversation. No paid execution occurs until the balance is sufficient. After Stripe confirms funding, the original failed job can resume through the same bounded paid-fallback endpoint.
 
+
+**Paid media uses the same funded handoff:** CoOperative-managed paid OpenRouter image/video routes now create one resumable media job, quote the live provider estimate, require enough profile balance for the reservation buffer, and reserve funds atomically before any provider call. If the balance is short, the conversation shows the same Stripe funding card and the original media job resumes after funding rather than creating a duplicate generation. Successful usable media settles the quoted user charge; failed generations release the reservation and do not debit the user.
+
+User-connected provider accounts remain economically separate: Nous subscription routes and OpenRouter BYOK routes continue to use the user's own provider entitlement/account and are labeled as such rather than also debiting the CoOperative balance. When a CoOperative-managed OpenRouter credential is available, paid OpenRouter fallback prefers that managed route so Stripe-funded balance can pay for it.
+
 ## Unified web/URL access policy
 
 Web settings should belong to the CoOperative profile and behave consistently across browser/mobile/node-assisted chat:

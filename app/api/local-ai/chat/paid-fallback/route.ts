@@ -248,7 +248,8 @@ export async function POST(request: Request) {
       const minimumCoveringOption =
         options.find(
           (option) =>
-            option.amountUsd + profileBalance.availableUsd >= estimatedCostUsd,
+            option.amountUsd + profileBalance.availableUsd >=
+            fundingRequirement.minimumRequiredBalanceUsd,
         ) ||
         options[options.length - 1] ||
         null;
@@ -257,6 +258,7 @@ export async function POST(request: Request) {
         `AI_FUNDING_REQUIRED:${sourceJob.id}`,
         `ESTIMATED_USD:${estimatedCostUsd.toFixed(6)}`,
         `AVAILABLE_USD:${profileBalance.availableUsd.toFixed(6)}`,
+        `MINIMUM_BALANCE_USD:${fundingRequirement.minimumRequiredBalanceUsd.toFixed(6)}`,
         `SHORTFALL_USD:${fundingRequirement.shortfallUsd.toFixed(6)}`,
         minimumCoveringOption
           ? `TOPUP_OPTION:${minimumCoveringOption.id}`
