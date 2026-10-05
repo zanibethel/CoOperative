@@ -56,6 +56,10 @@ type MediaRecoveryJob = {
   media_level: number | null;
   estimated_provider_cost_microusd: number | null;
   pricing_source: string | null;
+  pricing_dimensions: unknown;
+  request_root_job_id: string | null;
+  route_attempt: number | null;
+  execution_mode: string | null;
   error: string | null;
 };
 
@@ -174,7 +178,7 @@ async function readFailedSource(
   const { data: mediaJob, error: mediaError } = await admin
     .from("media_generation_jobs")
     .select(
-      "id,status,owner_ref,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_source,error",
+      "id,status,owner_ref,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,pricing_source,pricing_dimensions,request_root_job_id,route_attempt,execution_mode,error",
     )
     .eq("id", sourceJobId)
     .eq("owner_ref", ownerRef)
@@ -216,6 +220,9 @@ async function queueDebuggerTask(
       : "Prefer deterministic fixes and existing routing patterns. Preserve owned/local and free/included execution before paid escalation.",
     "Do not read or modify secrets. Do not broaden permissions, spending limits, or auth scopes.",
     "Relevant areas commonly include app/api/local-ai, lib/inference, lib/integrations, lib/recovery, workers, and the chat UI.",
+    source.kind === "media" && source.job.request_root_job_id
+      ? "This media request uses the request-level execution ledger. Routing owns provider fallbacks; do not create or start another media retry from Recovery Agent. Diagnose/repair the failed route only while the router is allowed to continue independently."
+      : "Legacy jobs may still use Recovery Agent retry behavior when the existing bounded rules permit it.",
     "If the failure is external/transient and no code change is justified, return a no-change summary explaining the safe retry condition.",
   ].join("\n");
 
@@ -414,6 +421,22 @@ async function retryFreeMediaJob(
   source: Extract<FailedSource, { kind: "media" }>,
 ) {
   const job = source.job;
+
+  if (job.request_root_job_id) {
+    await addEvent(
+      admin,
+      incidentId,
+      ownerRef,
+      "router_owns_retry",
+      "Recovery Agent did not create a duplicate media retry because the request-level execution ledger owns fallback/reroute decisions.",
+      {
+        requestRootJobId: job.request_root_job_id,
+        routeAttempt: job.route_attempt,
+        executionMode: job.execution_mode,
+      },
+    );
+    return null;
+  }
   const estimatedCost = Number(job.estimated_provider_cost_microusd || 0);
   if (job.status !== "failed" || estimatedCost > 0) return null;
 
