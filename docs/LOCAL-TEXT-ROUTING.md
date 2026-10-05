@@ -12,8 +12,10 @@ CoOperative AI routes text work above the existing persistent local queue. The q
   - requests above 12,000 estimated input characters -> Quality
   - otherwise -> Fast
 - `allowPaidFallback` is a permission input to the governed escalation layer.
+- Repo/connector agents use a bounded owned/local reasoning window. If that path is unavailable, fails, or stalls, CoOperative tries strict-free Hermes/OpenRouter before paid AI is considered.
+- Free fallback runs as a separate child inference job after the stale local job is cancelled, preventing a late local completion from overwriting the chosen fallback result.
 - CoOperative now has a deterministic escalation evaluator that can decide whether a stronger business-owned or paid executor is justified.
-- The current router still does not execute an external paid model automatically because no paid executor connector is wired into this text path yet.
+- Paid AI is never the first fallback. When free reasoning is insufficient, the governed escalation layer can recommend a stronger model; paid execution still requires the applicable explicit approval, quoted spend policy, and funded balance.
 - `humanApprovalRequired` is preserved as an execution-governance flag. It does not prevent the local model from analyzing or drafting a proposed action.
 
 ## Registry
