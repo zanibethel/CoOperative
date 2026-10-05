@@ -3420,6 +3420,37 @@ export async function POST(request: Request) {
         }
       }
 
+      if (selectedProvider === "openrouter" && mediaPlan.kind === "image") {
+        await admin
+          .from("local_ai_conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversationId)
+          .eq("owner_ref", ownerRef);
+
+        return NextResponse.json(
+          {
+            jobId,
+            status: "queued",
+            execution: "media",
+            capability: "image",
+            conversationId,
+            conversationTitle,
+            provider: selectedProvider,
+            model: selectedModel,
+            routeReason: cloudReferenceRoute
+              ? "CoOperative finalized the prompt/model choice first, then queued a direct OpenRouter image call with the same reference attachment. No text-model orchestrator sits between routing and the image provider."
+              : "CoOperative finalized the prompt/model choice first, then queued a direct OpenRouter image call. No text-model orchestrator sits between routing and the image provider.",
+            estimatedProviderCostUsd,
+            quotedUserPriceUsd: cooperativeFundedPaidRoute
+              ? selectedUserQuoteUsd
+              : null,
+            modelMixer: input.modelMixer || null,
+            requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
+          },
+          { status: 202, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
       try {
         const started = await startHermesMediaTask({
           jobId,
