@@ -83,15 +83,21 @@ function isPublicAddress(address: string) {
       a === 0 ||
       a === 10 ||
       a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
       (a === 169 && b === 254) ||
       (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 0) ||
       (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
       a >= 224
     );
   }
 
   if (version === 6) {
     const value = address.toLowerCase();
+    const mappedV4 = value.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mappedV4) return isPublicAddress(mappedV4[1]);
+
     return !(
       value === "::" ||
       value === "::1" ||
@@ -224,7 +230,10 @@ function duckDuckGoTarget(rawHref: string) {
         ? new URL(href, "https://duckduckgo.com").toString()
         : href;
     const parsed = new URL(normalized);
-    if (parsed.hostname.endsWith("duckduckgo.com")) {
+    if (
+      parsed.hostname === "duckduckgo.com" ||
+      parsed.hostname.endsWith(".duckduckgo.com")
+    ) {
       const target = parsed.searchParams.get("uddg");
       if (target) return target;
     }
