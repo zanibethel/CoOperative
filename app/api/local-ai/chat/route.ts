@@ -80,6 +80,11 @@ import {
 } from "@/lib/inference/openrouter-media-catalog";
 import { executeOpenRouterImageDirect } from "@/lib/inference/openrouter-direct-image";
 import { queueNextDirectOpenRouterImageFallback } from "@/lib/inference/openrouter-direct-image-routing";
+import { classifyMediaRouteOutcome } from "@/lib/inference/media-route-outcome";
+import {
+  knownCapabilityBlockedMediaRoutes,
+  recordMediaRouteOutcome,
+} from "@/lib/inference/media-route-evidence";
 import {
   affordableVideoSuggestion,
 } from "@/lib/inference/nous-managed-media";
@@ -2240,6 +2245,24 @@ export async function POST(request: Request) {
 
       const requiresReferenceImage =
         mediaPlan.kind === "image" && effectiveMediaAttachmentIds.length > 0;
+      const mediaRequestShape =
+        mediaPlan.kind === "video"
+          ? "video-text"
+          : requiresReferenceImage
+            ? "image-reference"
+            : "image-text";
+      const capabilityBlockedRoutes =
+        await knownCapabilityBlockedMediaRoutes({
+          ownerRef,
+          requestShape: mediaRequestShape,
+        }).catch((error) => {
+          console.warn("Media capability-route evidence unavailable.", {
+            ownerRef,
+            detail:
+              error instanceof Error ? error.message.slice(0, 500) : "unknown",
+          });
+          return new Set<string>();
+        });
       const referenceVerification = requiresReferenceImage
         ? await verifyNousReferenceImageTransport({
             ownerRef,
@@ -2439,25 +2462,31 @@ export async function POST(request: Request) {
           process.env.OPENROUTER_API_KEY?.trim(),
         ),
       });
+      const eligibleRecommendationOptions = recommendationSet.options.filter(
+        (option) =>
+          !capabilityBlockedRoutes.has(
+            [option.provider, option.model, option.editEndpoint || ""].join("|"),
+          ),
+      );
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const recommendationsOnly = asksForMediaRecommendationsOnly(input.message);
       let selectedRecommendation = recommendationTier
-        ? recommendationSet.options.find(
+        ? eligibleRecommendationOptions.find(
             (option) => option.tier === recommendationTier,
           ) || null
         : recommendationsOnly
           ? null
           : bestMediaRecommendationWithinCap(
-              recommendationSet.options,
+              eligibleRecommendationOptions,
               requestCapUsd,
             );
 
       const recommendationMarker =
-        recommendationSet.options.length > 0
+        eligibleRecommendationOptions.length > 0
           ? `MEDIA_RECOMMENDATIONS:${encodeURIComponent(
               JSON.stringify({
                 currentCapUsd: requestCapUsd,
-                options: recommendationSet.options.map(
+                options: eligibleRecommendationOptions.map(
                   ({ providerCostEstimateUsd, markupPercent, ...option }) => {
                     void providerCostEstimateUsd;
                     void markupPercent;
@@ -2469,7 +2498,7 @@ export async function POST(request: Request) {
           : "";
 
       const recommendationText = () => {
-        if (!recommendationSet.options.length) {
+        if (!eligibleRecommendationOptions.length) {
           if (recommendationSet.sfwConflict) {
             return (
               "This request asks for adult media output, but NSFW output is currently off in Model Mixer. I kept the SFW output constraint and did not start a generation. Enable NSFW if you want adult-output recommendations for this request."
@@ -2490,7 +2519,7 @@ export async function POST(request: Request) {
           );
         }
 
-        const hasDiscoveryOnlyOption = recommendationSet.options.some(
+        const hasDiscoveryOnlyOption = eligibleRecommendationOptions.some(
           (option) => option.executionReady === false,
         );
         return (
@@ -2576,7 +2605,7 @@ export async function POST(request: Request) {
           deterministicPrompt,
           plan: mediaPlan,
           selected: selectedRecommendation,
-          options: recommendationSet.options,
+          options: eligibleRecommendationOptions,
           requestCapUsd,
           requiresReferenceImage,
           explicitTierSelected: Boolean(recommendationTier),
@@ -2587,7 +2616,7 @@ export async function POST(request: Request) {
           preparedAdultClass === adultContentClass;
 
         if (preparation.model !== selectedRecommendation.model) {
-          const reasonedSelection = recommendationSet.options.find(
+          const reasonedSelection = eligibleRecommendationOptions.find(
             (option) =>
               option.executionReady === true &&
               option.capUsd <= requestCapUsd + 0.000001 &&
