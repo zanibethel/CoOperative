@@ -581,7 +581,13 @@ export async function buildMediaRecommendationOptions(input: {
     plan.kind === "video"
       ? openRouterCatalog?.video || []
       : input.requiresReferenceImage
-        ? []
+        ? (openRouterCatalog?.image || []).filter(
+            (model) =>
+              (model.minInputReferences ?? 0) > 0 ||
+              model.inputModalities.some(
+                (modality) => modality.toLowerCase() === "image",
+              ),
+          )
         : openRouterCatalog?.image || [];
   const exactOpenRouter = openRouterPool.filter((model) =>
     supportsExactRequest(model, plan),
@@ -623,8 +629,12 @@ export async function buildMediaRecommendationOptions(input: {
       audio: plan.kind === "video" ? plan.audio : null,
       qualityLevel: openRouterQualityByModel.get(model.id) ?? (model.free ? 0 : 2),
       executionReady: true,
-      referenceBehavior: null,
-      verificationNote: null,
+      referenceBehavior: input.requiresReferenceImage
+        ? "Uses the attached reference image through OpenRouter image editing (input references)."
+        : null,
+      verificationNote: input.requiresReferenceImage
+        ? "OpenRouter reports image input support for this generation model; CoOperative passes the attachment through a short-lived signed URL."
+        : null,
       editEndpoint: null,
     });
   }
