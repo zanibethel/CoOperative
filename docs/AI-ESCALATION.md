@@ -15,27 +15,29 @@ A stronger paid model is an escalation resource, not the default.
 ```text
 deterministic code / playbook
         ↓
-Local Fast
+owned/local Fast or Quality
         ↓
-Local Quality
+bounded wait + verification
         ↓
-verification / deterministic guardrails
-        ↓
-capability miss?
+local unavailable / stalled / failed?
    ┌────┴────┐
    no        yes
    ↓          ↓
-accept     evaluate stronger executors
+accept     strict-free cloud route
                ↓
-      business-owned / AWS / paid API
-               ↓
-        qualified for this task?
-               ↓
-       cost known + policy allows?
+         usable verified result?
           ┌────┴────┐
           yes       no
           ↓          ↓
-       escalate   ask owner approval
+       continue   evaluate stronger executors
+                     ↓
+            qualified paid/business-owned model?
+                     ↓
+             quote + policy + balance
+                ┌────┴────┐
+                preapproved  approval needed
+                    ↓            ↓
+                 execute      suggest + ask approval
 ```
 
 ## What counts as evidence that local AI may be insufficient
@@ -146,6 +148,9 @@ The goal is to reduce paid escalation over time for recurring work.
 ## Current implementation
 
 Implemented in the first escalation layer:
+
+- agent/repo reasoning now uses a bounded owned/local attempt and then a strict-free Hermes/OpenRouter route before paid escalation is suggested;
+- stalled agent reasoning is cancelled before the free child job starts so a late local completion cannot overwrite the selected fallback result;
 
 - `lib/inference/escalation-evaluator.ts`
 - authenticated evaluator endpoint at `/api/inference/text/escalation`
