@@ -42,7 +42,10 @@ function extensionFor(mimeType: string) {
 async function imageBytesFromResponseEntry(entry: any) {
   if (typeof entry?.b64_json === "string" && entry.b64_json.trim()) {
     const raw = entry.b64_json.trim();
-    const mimeType = mimeFromDataUrl(raw) || "image/png";
+    const mimeType =
+      (typeof entry?.media_type === "string" && entry.media_type.trim()) ||
+      mimeFromDataUrl(raw) ||
+      "image/png";
     return {
       bytes: Buffer.from(normalizeBase64(raw), "base64"),
       mimeType,
@@ -86,7 +89,12 @@ export async function executeOpenRouterImageDirect(input: {
   };
 
   const references = (input.referenceImageUrls || []).filter(Boolean);
-  if (references.length) body.input_references = references;
+  if (references.length) {
+    body.input_references = references.map((url) => ({
+      type: "image_url",
+      image_url: { url },
+    }));
+  }
 
   let response: Response;
   try {
