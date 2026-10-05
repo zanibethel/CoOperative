@@ -5413,12 +5413,35 @@ export async function GET(request: Request) {
         }
 
         const requestedAdultClass = adultMediaContentClass(mediaJob.prompt);
-        const refusalOrigin = mediaPolicyRefusalOrigin(
-          direct.error,
-          requestedAdultClass,
+        const directRequestShape =
+          referenceAttachmentIds.length > 0
+            ? "image-reference"
+            : "image-text";
+        const normalizedOutcome = classifyMediaRouteOutcome({
+          detail: direct.error,
+          status: direct.status,
+          failureStage: direct.failureStage,
+        });
+
+        await recordMediaRouteOutcome({
+          ownerRef,
+          sourceJobId: mediaJob.id,
+          provider: mediaJob.provider,
+          model: mediaJob.model,
+          executionMode: mediaJob.execution_mode,
+          requestShape: directRequestShape,
+          outcomeKind: normalizedOutcome.kind,
+          detail: direct.error,
+          blocksRoute: normalizedOutcome.kind === "capability-refusal",
+        }).catch((error) =>
+          console.error("Could not persist media route outcome", {
+            jobId: mediaJob.id,
+            detail:
+              error instanceof Error ? error.message.slice(0, 800) : "unknown",
+          }),
         );
 
-        if (refusalOrigin === "provider") {
+        if (normalizedOutcome.kind === "provider-policy") {
           await recordMediaRuntimePolicyRefusal({
             ownerRef,
             provider: mediaJob.provider,
@@ -5427,13 +5450,7 @@ export async function GET(request: Request) {
             sourceJobId: mediaJob.id,
             requestedClass: requestedAdultClass,
             detail: direct.error,
-          }).catch((error) =>
-            console.error("Could not persist direct provider refusal", {
-              jobId: mediaJob.id,
-              detail:
-                error instanceof Error ? error.message.slice(0, 800) : "unknown",
-            }),
-          );
+          }).catch(() => undefined);
         }
 
         await admin
@@ -5451,12 +5468,54 @@ export async function GET(request: Request) {
           .eq("owner_ref", ownerRef)
           .eq("status", "running");
 
-        if (refusalOrigin === "provider") {
+        if (normalizedOutcome.kind === "provider-policy") {
+          const assistantText =
+            "The selected image provider returned a content-policy decision. CoOperative recorded the outcome and ended this provider attempt cleanly instead of treating it as a code failure.";
+
+          if (mediaJob.conversation_id) {
+            await admin.from("local_ai_messages").insert({
+              conversation_id: mediaJob.conversation_id,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: assistantText,
+              attachment_ids: [],
+              job_id: null,
+            });
+          }
+
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "code",
+              status: "completed",
+              conversationId: mediaJob.conversation_id,
+              capability: "image",
+              provider: "code",
+              model: "direct-media-provider-policy",
+              text: assistantText,
+              routeReason:
+                "Provider-policy outcomes are recorded for diagnostics and are not sent to Recovery Agent as code defects.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        if (
+          normalizedOutcome.kind === "capability-refusal" ||
+          normalizedOutcome.kind === "executor-policy"
+        ) {
           const fallback = await queueNextDirectOpenRouterImageFallback({
             ownerRef,
             userId: owner.userId,
             sourceJob: mediaJob,
             requestedClass: requestedAdultClass,
+          }).catch((error) => {
+            console.error("Could not queue capability media fallback", {
+              jobId: mediaJob.id,
+              detail:
+                error instanceof Error ? error.message.slice(0, 800) : "unknown",
+            });
+            return { kind: "none" as const };
           });
 
           if (
@@ -5473,15 +5532,9 @@ export async function GET(request: Request) {
                 provider: "openrouter",
                 model: fallback.model,
                 routeReason:
-                  "The image provider refused this request class. CoOperative recorded the exact route as blocked for that scope and queued the next eligible direct image model within the remaining request budget.",
-                estimatedProviderCostUsd:
-                  fallback.kind === "queued"
-                    ? fallback.estimatedProviderCostUsd
-                    : null,
-                quotedUserPriceUsd:
-                  fallback.kind === "queued"
-                    ? fallback.quotedUserPriceUsd
-                    : null,
+                  normalizedOutcome.kind === "capability-refusal"
+                    ? "The selected route could not handle the required input shape. CoOperative learned that capability mismatch and moved the same request to the next eligible route."
+                    : "The execution layer stopped before the selected image model could complete. CoOperative moved the request to the next eligible direct route without marking the underlying image model as incapable.",
               },
               { headers: { "Cache-Control": "no-store" } },
             );
@@ -5489,7 +5542,7 @@ export async function GET(request: Request) {
 
           if (fallback.kind === "funding-required") {
             const assistantText =
-              `The last image provider refused this request class. I recorded that route as blocked, but the next eligible direct image route needs more CoOperative AI balance. Shortfall: $${fallback.shortfallUsd.toFixed(4)}.`;
+              `The current route could not handle this request, and the next eligible route needs additional CoOperative AI balance. Shortfall: $${fallback.shortfallUsd.toFixed(4)}.`;
             if (mediaJob.conversation_id) {
               await admin.from("local_ai_messages").insert({
                 conversation_id: mediaJob.conversation_id,
@@ -5508,17 +5561,15 @@ export async function GET(request: Request) {
                 conversationId: mediaJob.conversation_id,
                 capability: "image",
                 provider: "code",
-                model: "direct-media-funding-gate",
+                model: "media-capability-funding-gate",
                 text: assistantText,
-                routeReason:
-                  "The proven-refusal route was excluded, but the next eligible direct image model could not be funded inside the current profile balance.",
               },
               { headers: { "Cache-Control": "no-store" } },
             );
           }
 
           const assistantText =
-            "The selected image provider refused this request class, and no other currently eligible direct image route remains inside the approved budget and reference requirements.";
+            "The current route could not handle this request shape, and no other eligible route is available inside the current budget and reference requirements.";
           if (mediaJob.conversation_id) {
             await admin.from("local_ai_messages").insert({
               conversation_id: mediaJob.conversation_id,
@@ -5537,20 +5588,44 @@ export async function GET(request: Request) {
               conversationId: mediaJob.conversation_id,
               capability: "image",
               provider: "code",
-              model: "direct-media-no-eligible-route",
+              model: "media-no-capable-route",
               text: assistantText,
-              routeReason:
-                "CoOperative learned the provider refusal and exhausted the remaining eligible direct image routes without starting Recovery Agent.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        if (normalizedOutcome.kind === "fatal-configuration") {
+          const assistantText =
+            "The media route cannot continue automatically because its provider configuration or authorization needs attention.";
+          if (mediaJob.conversation_id) {
+            await admin.from("local_ai_messages").insert({
+              conversation_id: mediaJob.conversation_id,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: assistantText,
+              attachment_ids: [],
+              job_id: null,
+            });
+          }
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "code",
+              status: "completed",
+              conversationId: mediaJob.conversation_id,
+              capability: "image",
+              provider: "code",
+              model: "media-provider-configuration-gate",
+              text: assistantText,
+              error: direct.error,
             },
             { headers: { "Cache-Control": "no-store" } },
           );
         }
 
         const safeTechnicalReroute =
-          direct.failureStage === "provider-response" &&
-          [404, 408, 409, 422, 424, 500, 502, 503, 504].includes(
-            direct.status,
-          );
+          normalizedOutcome.kind === "retryable-technical";
 
         const [recovery, technicalFallback] = await Promise.all([
           startRecoveryForJob(ownerRef, mediaJob.id).catch((error) => {
