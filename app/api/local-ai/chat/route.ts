@@ -101,6 +101,7 @@ import {
 } from "@/lib/runtime/service-connector-build";
 import { startRecoveryForJob } from "@/lib/recovery/server";
 import { parseWebAccessModeCommand } from "@/lib/runtime/web-access-policy";
+import { buildHostedWebResearch } from "@/lib/inference/public-web-research";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -528,6 +529,48 @@ function hermesTextContextMessages(
         },
       ];
 }
+
+function freeCloudWebMetadata(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const cooperativeWeb = (value as { cooperativeWeb?: unknown }).cooperativeWeb;
+  if (
+    !cooperativeWeb ||
+    typeof cooperativeWeb !== "object" ||
+    Array.isArray(cooperativeWeb)
+  ) {
+    return null;
+  }
+
+  const row = cooperativeWeb as {
+    mode?: unknown;
+    used?: unknown;
+    provider?: unknown;
+    sourceCount?: unknown;
+    searchUsed?: unknown;
+    directPageReads?: unknown;
+    reason?: unknown;
+  };
+  const mode =
+    row.mode === "auto" || row.mode === "always" ? row.mode : "off";
+
+  return {
+    mode,
+    used: row.used === true,
+    provider: typeof row.provider === "string" ? row.provider : null,
+    sourceCount:
+      typeof row.sourceCount === "number" && Number.isFinite(row.sourceCount)
+        ? Math.max(0, Math.round(row.sourceCount))
+        : 0,
+    searchUsed: row.searchUsed === true,
+    directPageReads:
+      typeof row.directPageReads === "number" &&
+      Number.isFinite(row.directPageReads)
+        ? Math.max(0, Math.round(row.directPageReads))
+        : 0,
+    reason: typeof row.reason === "string" ? row.reason : "",
+  };
+}
+
 
 export async function POST(request: Request) {
   const owner = await currentOwner();
@@ -4112,11 +4155,37 @@ export async function GET(request: Request) {
         if (cloudClaimError) throw cloudClaimError;
 
         if (cloudClaim) {
+          let effectiveCloudRouteReason = cloudRouteReason;
           try {
+            const { data: webSettings, error: webSettingsError } = await admin
+              .from("personal_ai_settings")
+              .select("web_access_mode")
+              .eq("user_id", owner.userId)
+              .maybeSingle();
+            if (webSettingsError) throw webSettingsError;
+
+            const webAccessMode =
+              webSettings?.web_access_mode === "auto" ||
+              webSettings?.web_access_mode === "always"
+                ? webSettings.web_access_mode
+                : "off";
+            const webResearch = await buildHostedWebResearch({
+              query: latestUserRequest(cloudClaim.messages),
+              mode: webAccessMode,
+            });
+
+            effectiveCloudRouteReason = [
+              cloudRouteReason,
+              webResearch.used
+                ? `Profile Web ${webResearch.mode} authorized deterministic public research before free-cloud reasoning (${webResearch.sources.length} source${webResearch.sources.length === 1 ? "" : "s"}; provider ${webResearch.provider || "direct-public-page"}). Hermes itself remained tool-free.`
+                : `Profile Web ${webResearch.mode} did not add public research: ${webResearch.reason}`,
+            ].join(" ");
+
             const started = await startHermesTextTask({
               jobId: cloudClaim.id,
               messages: hermesTextContextMessages(cloudClaim.messages),
               openRouterCredential,
+              webContext: webResearch.context || null,
             });
 
             const { error: cloudStartError } = await admin
@@ -4126,6 +4195,18 @@ export async function GET(request: Request) {
                 fallback_model: started.model,
                 fallback_sandbox_name: started.sandboxName,
                 fallback_deadline_at: started.deadlineAt,
+                fallback_usage: {
+                  cooperativeWeb: {
+                    mode: webResearch.mode,
+                    used: webResearch.used,
+                    provider: webResearch.provider,
+                    sourceCount: webResearch.sources.length,
+                    searchUsed: webResearch.searchUsed,
+                    directPageReads: webResearch.directPageReads,
+                    reason: webResearch.reason,
+                  },
+                },
+                route_reason: effectiveCloudRouteReason,
                 updated_at: new Date().toISOString(),
               })
               .eq("id", cloudClaim.id)
@@ -4145,7 +4226,10 @@ export async function GET(request: Request) {
                 provider: started.provider,
                 model: started.model,
                 workerId: FREE_TEXT_WORKER_ID,
-                routeReason: cloudRouteReason,
+                routeReason: effectiveCloudRouteReason,
+                webSearchUsed: webResearch.used,
+                webAccessMode: webResearch.mode,
+                webSourceCount: webResearch.sources.length,
                 paidFallbackAllowed: job.allow_paid_fallback === true,
               },
               { headers: { "Cache-Control": "no-store" } },
@@ -4157,7 +4241,7 @@ export async function GET(request: Request) {
                 : "Free cloud text could not start.";
             const failedAt = new Date().toISOString();
             const failedReason =
-              `${cloudRouteReason} The strict-free cloud text attempt could not start (${detail.slice(
+              `${effectiveCloudRouteReason} The strict-free cloud text attempt could not start (${detail.slice(
                 0,
                 400,
               )}). CoOperative will only continue to funded premium AI if this job is eligible under the existing spend and balance rules.`.trim();
@@ -4232,6 +4316,8 @@ export async function GET(request: Request) {
         deadlineAt: job.fallback_deadline_at,
       });
 
+      const webMetadata = freeCloudWebMetadata(job.fallback_usage);
+
       if (polled.state === "running") {
         return NextResponse.json(
           {
@@ -4245,6 +4331,9 @@ export async function GET(request: Request) {
             model: job.fallback_model || "openrouter/free",
             workerId: FREE_TEXT_WORKER_ID,
             routeReason: job.route_reason,
+            webSearchUsed: webMetadata?.used === true,
+            webAccessMode: webMetadata?.mode || "off",
+            webSourceCount: webMetadata?.sourceCount || 0,
             paidFallbackAllowed: job.allow_paid_fallback === true,
           },
           { headers: { "Cache-Control": "no-store" } },
@@ -4267,7 +4356,14 @@ export async function GET(request: Request) {
             result_model: job.fallback_model || "openrouter/free",
             result_provider: "openrouter-free",
             latency_ms: latencyMs,
-            fallback_usage: polled.usage,
+            fallback_usage: {
+              ...(job.fallback_usage &&
+              typeof job.fallback_usage === "object" &&
+              !Array.isArray(job.fallback_usage)
+                ? job.fallback_usage
+                : {}),
+              ...(polled.usage || {}),
+            },
             error: null,
             completed_at: completedAt,
             updated_at: completedAt,
@@ -4366,6 +4462,9 @@ export async function GET(request: Request) {
             latencyMs,
             workerId: FREE_TEXT_WORKER_ID,
             routeReason: job.route_reason,
+            webSearchUsed: webMetadata?.used === true,
+            webAccessMode: webMetadata?.mode || "off",
+            webSourceCount: webMetadata?.sourceCount || 0,
             paidFallbackAllowed: job.allow_paid_fallback === true,
           },
           { headers: { "Cache-Control": "no-store" } },
@@ -4385,7 +4484,14 @@ export async function GET(request: Request) {
         .from("text_inference_jobs")
         .update({
           status: "failed",
-          fallback_usage: polled.usage,
+          fallback_usage: {
+            ...(job.fallback_usage &&
+            typeof job.fallback_usage === "object" &&
+            !Array.isArray(job.fallback_usage)
+              ? job.fallback_usage
+              : {}),
+            ...(polled.usage || {}),
+          },
           route_reason: failedReason,
           error: failureDetail.slice(0, 1200),
           completed_at: failedAt,

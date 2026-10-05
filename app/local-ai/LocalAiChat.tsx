@@ -170,6 +170,9 @@ type JobResult = {
   targetNodeId?: string | null;
   routeReason?: string | null;
   paidFallbackAllowed?: boolean;
+  webSearchUsed?: boolean;
+  webAccessMode?: WebAccessMode;
+  webSourceCount?: number;
   funding?: {
     chargedUsd?: number;
     availableMicrousd?: number;
@@ -280,6 +283,13 @@ function resultMeta(result: JobResult) {
       : null,
     typeof result.promptTokens === "number" && typeof result.outputTokens === "number"
       ? `${result.promptTokens} in / ${result.outputTokens} out`
+      : null,
+    result.webSearchUsed
+      ? `web ${result.webAccessMode || "on"}${
+          typeof result.webSourceCount === "number"
+            ? ` · ${result.webSourceCount} source${result.webSourceCount === 1 ? "" : "s"}`
+            : ""
+        }`
       : null,
     typeof result.funding?.chargedUsd === "number"
       ? `${result.funding.chargedUsd.toFixed(6)} charged`

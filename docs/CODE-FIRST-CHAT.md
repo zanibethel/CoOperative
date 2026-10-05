@@ -88,6 +88,9 @@ A second code-enforced URL/domain permission layer controls what may be accessed
 
 For profile-matched Windows text-node execution, the claim API supplies the current Web mode to the node. Auto searches only when deterministic current-info triggers match; Always permits eligible public search. Search results are provided as untrusted current context to the local model, so inference remains on the user's PC.
 
+
+The strict-free hosted text fallback now follows the same policy when owned/local capacity is not claimed. CoOperative code reads the profile Web mode and, when permitted, performs bounded public search or explicit public-page reads before starting Hermes. Credential-like queries are never submitted externally. Direct URL reads are restricted to HTTP(S), revalidated across redirects, checked against public DNS resolution, bounded by content type and response size, and rejected for private/local, connector-managed, credential-bearing, or executable targets. Hermes stays reasoning-only with all tools disabled and receives only code-fetched excerpts as untrusted context.
+
 ## Escalation contract
 
 The general code-first responder returns either:

@@ -86,22 +86,34 @@ const EXECUTABLE_EXTENSIONS = new Set([
 
 function isPrivateIpv4(hostname: string) {
   const octets = hostname.split(".").map(Number);
-  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value))) {
+  if (
+    octets.length !== 4 ||
+    octets.some(
+      (value) => !Number.isInteger(value) || value < 0 || value > 255,
+    )
+  ) {
     return false;
   }
   const [a, b] = octets;
   return (
+    a === 0 ||
     a === 10 ||
     a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
     (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0) ||
     (a === 192 && b === 168) ||
-    a === 0
+    (a === 198 && (b === 18 || b === 19)) ||
+    a >= 224
   );
 }
 
 function isPrivateIpv6(hostname: string) {
-  const value = hostname.toLowerCase();
+  const value = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const mappedV4 = value.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mappedV4) return isPrivateIpv4(mappedV4[1]);
+
   return (
     value === "::1" ||
     value === "::" ||
@@ -110,7 +122,8 @@ function isPrivateIpv6(hostname: string) {
     value.startsWith("fe8") ||
     value.startsWith("fe9") ||
     value.startsWith("fea") ||
-    value.startsWith("feb")
+    value.startsWith("feb") ||
+    value.startsWith("ff")
   );
 }
 
@@ -294,6 +307,65 @@ export function decideWebAccess(input: {
         : "Profile Web mode is Auto and current external information is required.",
     hostname: null,
   };
+}
+
+const EXTERNAL_QUERY_SECRET_PATTERNS = [
+  /\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|authorization|bearer|password|secret|credential)\b\s*[:=]?\s*\S+/i,
+  /\bsk-[A-Za-z0-9_-]{16,}\b/,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/,
+  /\bxox[baprs]-[A-Za-z0-9-]{16,}\b/,
+  /\bAIza[0-9A-Za-z_-]{20,}\b/,
+];
+
+export function externalSearchQuerySafe(query: string) {
+  const value = query.trim();
+  if (!value) return false;
+  return !EXTERNAL_QUERY_SECRET_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+export function needsCurrentExternalInfo(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!value) return false;
+
+  const triggers = [
+    "search the web",
+    "search online",
+    "look online",
+    "look this up",
+    "latest",
+    "today",
+    "current ",
+    "currently",
+    "right now",
+    "news",
+    "weather",
+    "price",
+    "prices",
+    "score",
+    "scores",
+    "schedule",
+    "release",
+    "released",
+    "version",
+    "update",
+    "updates",
+    "this week",
+    "this month",
+    "recent",
+    "available now",
+    "in stock",
+    "open now",
+    "hours today",
+  ];
+
+  return triggers.some((trigger) => value.includes(trigger));
+}
+
+export function explicitPublicUrlReadIntent(message: string) {
+  if (!/https?:\/\/\S+/i.test(message)) return false;
+  return /\b(?:open|read|review|check|inspect|visit|summarize|analyse|analyze|look at|what(?:'s| is) on|from this|use this (?:link|url|page|site))\b/i.test(
+    message,
+  );
 }
 
 export function parseWebAccessModeCommand(message: string) {
