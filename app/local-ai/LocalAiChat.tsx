@@ -1640,6 +1640,21 @@ type ConnectorBuildStatus = {
   error?: string | null;
   providerKey?: string | null;
   providerName?: string | null;
+  reasoning?: {
+    status?: string | null;
+    workerId?: string | null;
+    provider?: string | null;
+    model?: string | null;
+    routeReason?: string | null;
+    error?: string | null;
+    freeFallback?: boolean;
+  } | null;
+  strongerModelRecommendation?: {
+    recommended?: boolean;
+    reason?: string;
+    requiresUserApproval?: boolean;
+    nextStep?: string;
+  } | null;
 };
 
 function ConnectorBuildStatusCard({ taskId }: { taskId: string }) {
@@ -1670,7 +1685,8 @@ function ConnectorBuildStatusCard({ taskId }: { taskId: string }) {
         if (
           payload.status === "queued" ||
           payload.status === "claimed" ||
-          payload.status === "running"
+          payload.status === "running" ||
+          payload.status === "waiting_llm"
         ) {
           timer = window.setTimeout(refresh, 3000);
         }
@@ -1696,8 +1712,34 @@ function ConnectorBuildStatusCard({ taskId }: { taskId: string }) {
 
   const status = state?.status || "queued";
   const providerName = state?.providerName || "Third-party";
+  const reasoning = state?.reasoning;
+  const recommendation = state?.strongerModelRecommendation;
   const active =
-    status === "queued" || status === "claimed" || status === "running";
+    status === "queued" ||
+    status === "claimed" ||
+    status === "running" ||
+    status === "waiting_llm";
+
+  let statusText = `Builder status: ${status}.`;
+  if (status === "waiting_llm" && reasoning?.freeFallback) {
+    statusText =
+      reasoning.status === "running"
+        ? "Local/owned AI did not finish in the bounded window. Trying the next available free cloud model now…"
+        : reasoning.status === "completed"
+          ? "Free cloud reasoning completed. The builder is continuing with the connector plan…"
+          : "The free cloud reasoning attempt ended. Checking whether another safe path is available…";
+  } else if (status === "waiting_llm") {
+    statusText = "Researching and planning the connector with local/owned AI…";
+  } else if (active) {
+    statusText = "Preparing a reusable connector for review…";
+  } else if (status === "completed") {
+    statusText = "Connector preparation completed and is ready for review.";
+  } else if (status === "needs_approval") {
+    statusText = "Connector preparation is ready for owner review.";
+  } else if (status === "failed" && recommendation?.recommended) {
+    statusText =
+      "The free reasoning path could not produce a sufficiently reliable connector plan. A stronger paid model is recommended.";
+  }
 
   return (
     <div className="secure-service-card">
@@ -1712,22 +1754,38 @@ function ConnectorBuildStatusCard({ taskId }: { taskId: string }) {
         </div>
       </div>
 
-      <div className="secure-service-status">
-        {active
-          ? `Builder status: ${status}. Preparing a reusable connector for review…`
-          : status === "completed"
-            ? "Connector preparation completed and is ready for review."
-            : status === "needs_approval"
-              ? "Connector preparation is waiting for owner approval."
-              : `Builder status: ${status}.`}
-      </div>
+      <div className="secure-service-status">{statusText}</div>
 
-      {state?.branchName ? (
+      {reasoning?.freeFallback ? (
         <div className="secure-service-status">
-          Prepared branch: <strong>{state.branchName}</strong>
+          Free fallback:{" "}
+          <strong>
+            {reasoning.provider || "OpenRouter free"}
+            {reasoning.model ? ` · ${reasoning.model}` : ""}
+          </strong>
         </div>
       ) : null}
 
+      {recommendation?.recommended ? (
+        <div className="secure-service-status">
+          <strong>Stronger AI suggested.</strong>{" "}
+          {recommendation.requiresUserApproval
+            ? "Paid AI will not run unless you explicitly approve a quoted request."
+            : "CoOperative will keep the lower-cost path first."}
+        </div>
+      ) : null}
+
+      {state?.branchName ? (
+        <div className="secure-service-status">
+          Local build branch: <strong>{state.branchName}</strong>
+        </div>
+      ) : null}
+
+      {reasoning?.error && status === "waiting_llm" ? (
+        <div className="secure-service-status">
+          Latest reasoning issue: {reasoning.error}
+        </div>
+      ) : null}
       {state?.error ? (
         <div className="secure-service-error">{state.error}</div>
       ) : null}
