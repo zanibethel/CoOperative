@@ -60,7 +60,12 @@ import {
   mediaPromptWithResolvedControls,
   planMediaRequest,
 } from "@/lib/inference/media-request";
-import { evaluateMediaExecutionContentGate } from "@/lib/inference/media-model-capabilities";
+import {
+  evaluateMediaExecutionContentGate,
+  mediaKnownBlockedRouteKeys,
+  mediaPolicyRefusalDetected,
+  recordMediaRuntimePolicyRefusal,
+} from "@/lib/inference/media-model-capabilities";
 import {
   mediaBenchmarkEvidenceForOwner,
   type MediaBenchmarkEvidence,
