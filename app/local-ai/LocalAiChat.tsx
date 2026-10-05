@@ -1601,7 +1601,7 @@ function FundingRequiredCard({
         </div>
       </div>
       <div className="secure-service-status">
-        Estimated request: <strong>${estimatedCostUsd.toFixed(4)}</strong>
+        Quoted request price: <strong>${estimatedCostUsd.toFixed(4)}</strong>
       </div>
       <div className="secure-service-status">
         Available balance: <strong>${currentBalanceUsd.toFixed(4)}</strong>
