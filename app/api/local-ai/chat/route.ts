@@ -3208,6 +3208,9 @@ export async function POST(request: Request) {
             referenceAttachmentCount: cloudReferenceRoute
               ? effectiveMediaAttachmentIds.length
               : 0,
+            referenceAttachmentIds: cloudReferenceRoute
+              ? effectiveMediaAttachmentIds
+              : [],
             preparationSource: mediaPreparationSource,
             preparationReason: mediaPreparationReason,
             preparationSignals: mediaPreparationSignals,
@@ -5222,6 +5225,7 @@ export async function GET(request: Request) {
                 referenceSmokeTest?: unknown;
                 referenceVerifiedRoute?: unknown;
                 referenceEditEndpoint?: unknown;
+                referenceAttachmentIds?: unknown;
               })
             : null;
         const referenceSmokeTest =
@@ -5249,35 +5253,39 @@ export async function GET(request: Request) {
             });
           }
 
-          await admin
-            .from("media_generation_jobs")
-            .update({
-              status: "failed",
-              usage: polled.usage,
-              error: failure.slice(0, 1200),
-              completed_at: completedAt,
-              updated_at: completedAt,
-            })
-            .eq("id", mediaJob.id)
-            .eq("owner_ref", ownerRef)
-            .eq("status", "running");
+          // Exact-route smoke tests remain one-shot. Normal verified reference
+          // requests may continue only to another route that can preserve the
+          // same reference image.
+          if (referenceSmokeTest) {
+            await admin
+              .from("media_generation_jobs")
+              .update({
+                status: "failed",
+                usage: polled.usage,
+                error: failure.slice(0, 1200),
+                completed_at: completedAt,
+                updated_at: completedAt,
+              })
+              .eq("id", mediaJob.id)
+              .eq("owner_ref", ownerRef)
+              .eq("status", "running");
 
-          return NextResponse.json(
-            {
-              jobId: mediaJob.id,
-              execution: "media",
-              status: "failed",
-              conversationId: mediaJob.conversation_id,
-              capability: mediaJob.kind,
-              provider: mediaJob.provider,
-              model: mediaJob.model,
-              error: failure,
-              routeReason: referenceSmokeTest
-                ? "The one-shot premium reference smoke test failed. The exact endpoint and failure are recorded on this job; CoOperative did not retry or fall back automatically."
-                : "The verified premium reference route failed. CoOperative recorded the attempt but kept the previously verified endpoint status and did not fall back to a route that might ignore the reference image.",
-            },
-            { headers: { "Cache-Control": "no-store" } },
-          );
+            return NextResponse.json(
+              {
+                jobId: mediaJob.id,
+                execution: "media",
+                status: "failed",
+                conversationId: mediaJob.conversation_id,
+                capability: mediaJob.kind,
+                provider: mediaJob.provider,
+                model: mediaJob.model,
+                error: failure,
+                routeReason:
+                  "The one-shot premium reference smoke test failed. The exact endpoint and failure are recorded on this job; CoOperative did not retry or fall back automatically.",
+              },
+              { headers: { "Cache-Control": "no-store" } },
+            );
+          }
         }
 
         if (mediaJob.provider === "nous") {
