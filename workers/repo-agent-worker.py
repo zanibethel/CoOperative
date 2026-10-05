@@ -376,7 +376,7 @@ def run_reasoning(task_id, profile, messages, max_tokens, executor_approval=None
     result["executor"] = "local"
     return result
 
-def system_prompt(agent, mode):
+def system_prompt(agent, mode, owner_authoritative=False):
     common = (
         "You are a bounded CoOperative local repo agent. Use supplied repository evidence only. "
         "Do not invent files or state. Prefer deterministic code and existing project patterns. "
@@ -385,13 +385,23 @@ def system_prompt(agent, mode):
         "Preserve working architecture and make the smallest justified change. "
         "Code changes must be portable and reusable for other users whenever possible; do not hard-code one user's identity, "
         "account, business, branch, or temporary workaround when a shared abstraction can solve the same issue safely. "
-        "For general UI/layout/navigation/interaction changes, preserve the existing default user flow. New UI behavior must be "
-        "implemented as an opt-in/toggleable feature that is default-off unless the objective explicitly requires otherwise. "
-        "Use an existing preference/feature-flag pattern when one exists. In the RAW PLAN summary for a general UI change, include "
-        "'UI_TOGGLE: <name>; DEFAULT: off; EXISTING_FLOW: preserved'. "
-        "New authentication-connection surfaces and report-viewing capabilities are allowed sandbox scopes when they are user-invoked "
-        "and do not silently replace the default flow for unrelated users. "
     )
+    if owner_authoritative:
+        common += (
+            "This task comes from the authenticated platform owner. Owner product direction is authoritative and may intentionally "
+            "change the default UI, routing, or product behavior. Do not require a feature toggle or preserve the previous default "
+            "merely because the change affects other users. Still keep the change bounded, reusable, verified, and safe; never bypass "
+            "security, secrets, destructive-action, billing, deployment, or verification safeguards. "
+        )
+    else:
+        common += (
+            "For general UI/layout/navigation/interaction changes, preserve the existing default user flow. New UI behavior must be "
+            "implemented as an opt-in/toggleable feature that is default-off unless the objective explicitly requires otherwise. "
+            "Use an existing preference/feature-flag pattern when one exists. In the RAW PLAN summary for a general UI change, include "
+            "'UI_TOGGLE: <name>; DEFAULT: off; EXISTING_FLOW: preserved'. "
+            "New authentication-connection surfaces and report-viewing capabilities are allowed sandbox scopes when they are user-invoked "
+            "and do not silently replace the default flow for unrelated users. "
+        )
     if mode in {"prepare_change","update_memory"}:
         return common + (
             "Return ONLY a RAW PLAN using the required delimiters. Do not use JSON or Markdown fences. "
@@ -547,7 +557,7 @@ def _sandbox_scope(objective):
 def _is_user_invoked_capability(scope):
     return scope in {"auth-connection", "report-view"}
 
-def evaluate_plan_scope(repo, objective, plan):
+def evaluate_plan_scope(repo, objective, plan, owner_authoritative=False):
     files = plan.get("files")
     if not isinstance(files, list):
         return {"blocking": True, "signals": ["Plan has no valid files array."], "metrics": []}
@@ -601,7 +611,7 @@ def evaluate_plan_scope(repo, objective, plan):
                 "which exceeds the scope guard for a surgical fix."
             )
 
-    if sandbox_scope == "ui-opt-in":
+    if sandbox_scope == "ui-opt-in" and not owner_authoritative:
         summary_value = summary.lower()
         has_toggle_contract = (
             "ui_toggle:" in summary_value
@@ -813,6 +823,8 @@ def handle_task(task):
     executor_approval = task.get("executorApproval")
     use_paid_executor = isinstance(executor_approval, dict)
     sandbox_base_branch = task.get("sandboxBaseBranch")
+    governance = task.get("governance") if isinstance(task.get("governance"), dict) else {}
+    owner_authoritative = bool(governance.get("ownerAuthoritative"))
 
     source = ensure_repo(repository)
     progress(task_id, f"Approved repo resolved at {source}.", metadata={"githubRepo":repository["githubRepo"]})
@@ -835,7 +847,7 @@ def handle_task(task):
             metadata={
                 "sandboxBaseBranch": sandbox_base_branch,
                 "mergeAllowed": False,
-                "ownerReviewRequired": True,
+                "ownerReviewRequired": not owner_authoritative,
             },
         )
     else:
@@ -913,7 +925,7 @@ def handle_task(task):
         learning_text = "\n".join(learning_lines)[:6000]
 
     messages = [
-        {"role":"system","content":system_prompt(agent,mode)},
+        {"role":"system","content":system_prompt(agent,mode,owner_authoritative)},
         {"role":"user","content":(f"AGENT: {agent['name']}\nMODE: {mode}\nREPOSITORY: {repository['githubRepo']}\nOBJECTIVE:\n{objective}\n\nREPOSITORY EVIDENCE:\n{evidence[:14000]}")[:16000]},
     ]
     if learning_text:
@@ -982,7 +994,7 @@ def handle_task(task):
         executor_approval=executor_approval,
     )
     plan = materialize_plan(target, raw_plan)
-    guard = evaluate_plan_scope(target, objective, plan)
+    guard = evaluate_plan_scope(target, objective, plan, owner_authoritative=owner_authoritative)
     if guard["blocking"]:
         progress(
             task_id,
@@ -1030,7 +1042,7 @@ def handle_task(task):
         )
         format_recovered = format_recovered or scope_format_recovered
         plan = materialize_plan(target, raw_plan)
-        guard = evaluate_plan_scope(target, objective, plan)
+        guard = evaluate_plan_scope(target, objective, plan, owner_authoritative=owner_authoritative)
         progress(
             task_id,
             "Local AI correction completed.",
@@ -1145,7 +1157,7 @@ def handle_task(task):
             "commitSha": sandbox_push.get("commitSha"),
             "pushReason": sandbox_push.get("reason"),
             "mergeAllowed": False,
-            "ownerReviewRequired": True,
+            "ownerReviewRequired": not owner_authoritative,
             "minimalChangeRequired": True,
             "portableForOtherUsersRequired": True,
             "scope": _sandbox_scope(objective),
