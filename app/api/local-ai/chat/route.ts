@@ -79,6 +79,7 @@ import {
   type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
 import { executeOpenRouterImageDirect } from "@/lib/inference/openrouter-direct-image";
+import { queueNextDirectOpenRouterImageFallback } from "@/lib/inference/openrouter-direct-image-routing";
 import {
   affordableVideoSuggestion,
 } from "@/lib/inference/nous-managed-media";
@@ -5028,6 +5029,403 @@ export async function GET(request: Request) {
                 : "Owned local image generation is handling the request without increasing provider spend.",
             createdAt: localImageJob.created_at,
             completedAt: localImageJob.completed_at,
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      const mediaPricingDimensions =
+        mediaJob.pricing_dimensions &&
+        typeof mediaJob.pricing_dimensions === "object" &&
+        !Array.isArray(mediaJob.pricing_dimensions)
+          ? (mediaJob.pricing_dimensions as {
+              directProvider?: unknown;
+              referenceAttachmentIds?: unknown;
+              generatedStoragePath?: unknown;
+              generatedMimeType?: unknown;
+            })
+          : {};
+
+      if (
+        mediaJob.status === "queued" &&
+        mediaJob.provider === "openrouter" &&
+        mediaJob.kind === "image" &&
+        mediaPricingDimensions.directProvider === true
+      ) {
+        const startedAt = new Date().toISOString();
+        const deadlineAt = new Date(Date.now() + 120_000).toISOString();
+        const { data: claimed, error: claimError } = await admin
+          .from("media_generation_jobs")
+          .update({
+            status: "running",
+            started_at: startedAt,
+            deadline_at: deadlineAt,
+            updated_at: startedAt,
+          })
+          .eq("id", mediaJob.id)
+          .eq("owner_ref", ownerRef)
+          .eq("status", "queued")
+          .select("id")
+          .maybeSingle();
+        if (claimError) throw claimError;
+
+        if (!claimed) {
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "media",
+              status: "running",
+              conversationId: mediaJob.conversation_id,
+              capability: "image",
+              provider: mediaJob.provider,
+              model: mediaJob.model,
+              routeReason:
+                "Direct provider image execution has already been claimed by another status request.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        const service = await businessOwnedServiceCredentialForOwner(
+          ownerRef,
+          "openrouter-api",
+        );
+        const credential =
+          service?.credential?.trim() ||
+          process.env.OPENROUTER_API_KEY?.trim() ||
+          undefined;
+
+        if (!credential) {
+          const failedAt = new Date().toISOString();
+          await admin
+            .from("media_generation_jobs")
+            .update({
+              status: "failed",
+              error: "OpenRouter credential is unavailable for direct image execution.",
+              completed_at: failedAt,
+              updated_at: failedAt,
+            })
+            .eq("id", mediaJob.id)
+            .eq("owner_ref", ownerRef)
+            .eq("status", "running");
+
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "media",
+              status: "failed",
+              conversationId: mediaJob.conversation_id,
+              capability: "image",
+              provider: mediaJob.provider,
+              model: mediaJob.model,
+              error: "OpenRouter credential is unavailable for direct image execution.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        const referenceAttachmentIds = Array.isArray(
+          mediaPricingDimensions.referenceAttachmentIds,
+        )
+          ? mediaPricingDimensions.referenceAttachmentIds.filter(
+              (value): value is string =>
+                typeof value === "string" && value.length > 0,
+            )
+          : [];
+        const referenceExecution = referenceAttachmentIds.length
+          ? await createReferenceImageExecutionUrls({
+              ownerRef,
+              attachmentIds: referenceAttachmentIds,
+            })
+          : null;
+
+        const direct = await executeOpenRouterImageDirect({
+          jobId: mediaJob.id,
+          ownerRef,
+          model: mediaJob.model,
+          prompt: mediaJob.prompt,
+          credential,
+          referenceImageUrls: referenceExecution?.urls,
+        });
+
+        if (direct.ok) {
+          const completedAt = new Date().toISOString();
+          const mediaUrl =
+            `/api/local-ai/media-output?jobId=${encodeURIComponent(mediaJob.id)}`;
+          const resultText =
+            `Generated image with ${mediaJob.model}.\nMEDIA_IMAGE:${mediaUrl}`;
+          const mergedPricingDimensions = {
+            ...mediaPricingDimensions,
+            directProvider: true,
+            generatedStoragePath: direct.storagePath,
+            generatedMimeType: direct.mimeType,
+          };
+
+          const { data: completedJob, error: completeError } = await admin
+            .from("media_generation_jobs")
+            .update({
+              status: "completed",
+              result_url: mediaUrl,
+              result_text: resultText,
+              usage: direct.usage,
+              pricing_dimensions: mergedPricingDimensions,
+              error: null,
+              completed_at: completedAt,
+              updated_at: completedAt,
+            })
+            .eq("id", mediaJob.id)
+            .eq("owner_ref", ownerRef)
+            .eq("status", "running")
+            .select("id")
+            .maybeSingle();
+          if (completeError) throw completeError;
+
+          let billedMicrousd: number | null = null;
+          if (
+            completedJob &&
+            mediaJob.billing_mode === "cooperative-balance" &&
+            mediaJob.ai_balance_reservation_id
+          ) {
+            const quotedChargeMicrousd = Math.max(
+              0,
+              Number(mediaJob.estimated_user_charge_microusd || 0),
+            );
+            try {
+              await settleAiProfileFunds({
+                reservationId: mediaJob.ai_balance_reservation_id,
+                actualCostUsd: quotedChargeMicrousd / 1_000_000,
+                metadata: {
+                  jobId: mediaJob.id,
+                  outcome: "completed",
+                  provider: mediaJob.provider,
+                  model: mediaJob.model,
+                  kind: "image",
+                  execution: "direct-provider",
+                },
+              });
+              billedMicrousd = quotedChargeMicrousd;
+              await admin
+                .from("media_generation_jobs")
+                .update({
+                  billed_microusd: quotedChargeMicrousd,
+                  actual_user_charge_microusd: quotedChargeMicrousd,
+                  actual_provider_cost_microusd: Math.max(
+                    0,
+                    Number(mediaJob.estimated_provider_cost_microusd || 0),
+                  ),
+                  actual_margin_microusd: Math.max(
+                    0,
+                    quotedChargeMicrousd -
+                      Math.max(
+                        0,
+                        Number(mediaJob.estimated_provider_cost_microusd || 0),
+                      ),
+                  ),
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", mediaJob.id)
+                .eq("owner_ref", ownerRef);
+            } catch (billingError) {
+              console.error("Could not settle direct paid media reservation", {
+                jobId: mediaJob.id,
+                detail:
+                  billingError instanceof Error
+                    ? billingError.message.slice(0, 800)
+                    : "Unknown direct media billing error",
+              });
+            }
+          }
+
+          if (completedJob && mediaJob.conversation_id) {
+            await admin.from("local_ai_messages").insert({
+              conversation_id: mediaJob.conversation_id,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: resultText,
+              attachment_ids: [],
+              job_id: null,
+            });
+            await admin
+              .from("local_ai_conversations")
+              .update({ updated_at: completedAt })
+              .eq("id", mediaJob.conversation_id)
+              .eq("owner_ref", ownerRef);
+          }
+
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "media",
+              status: "completed",
+              conversationId: mediaJob.conversation_id,
+              capability: "image",
+              provider: "openrouter",
+              model: mediaJob.model,
+              text: resultText,
+              mediaUrl,
+              funding:
+                billedMicrousd !== null
+                  ? { chargedUsd: billedMicrousd / 1_000_000 }
+                  : null,
+              routeReason:
+                "CoOperative called the selected OpenRouter image model directly after planning. No text-model orchestrator sat between routing and image generation.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        const completedAt = new Date().toISOString();
+        if (
+          mediaJob.billing_mode === "cooperative-balance" &&
+          mediaJob.ai_balance_reservation_id
+        ) {
+          await releaseAiProfileFunds({
+            reservationId: mediaJob.ai_balance_reservation_id,
+            metadata: {
+              reason: "direct-media-provider-failed",
+              jobId: mediaJob.id,
+            },
+          }).catch(() => undefined);
+        }
+
+        const requestedAdultClass = adultMediaContentClass(mediaJob.prompt);
+        const refusalOrigin = mediaPolicyRefusalOrigin(
+          direct.error,
+          requestedAdultClass,
+        );
+
+        if (refusalOrigin === "provider") {
+          await recordMediaRuntimePolicyRefusal({
+            ownerRef,
+            provider: mediaJob.provider,
+            model: mediaJob.model,
+            endpoint: null,
+            sourceJobId: mediaJob.id,
+            requestedClass: requestedAdultClass,
+            detail: direct.error,
+          }).catch((error) =>
+            console.error("Could not persist direct provider refusal", {
+              jobId: mediaJob.id,
+              detail:
+                error instanceof Error ? error.message.slice(0, 800) : "unknown",
+            }),
+          );
+        }
+
+        await admin
+          .from("media_generation_jobs")
+          .update({
+            status: "failed",
+            usage: direct.usage,
+            error: direct.error.slice(0, 1200),
+            ai_balance_reservation_id: null,
+            actual_user_charge_microusd: 0,
+            completed_at: completedAt,
+            updated_at: completedAt,
+          })
+          .eq("id", mediaJob.id)
+          .eq("owner_ref", ownerRef)
+          .eq("status", "running");
+
+        if (refusalOrigin === "provider") {
+          const fallback = await queueNextDirectOpenRouterImageFallback({
+            ownerRef,
+            userId: owner.userId,
+            sourceJob: mediaJob,
+            requestedClass: requestedAdultClass,
+          });
+
+          if (fallback.kind === "queued") {
+            return NextResponse.json(
+              {
+                jobId: fallback.jobId,
+                execution: "media",
+                status: "queued",
+                conversationId: mediaJob.conversation_id,
+                capability: "image",
+                provider: "openrouter",
+                model: fallback.model,
+                routeReason:
+                  "The image provider refused this request class. CoOperative recorded the exact route as blocked for that scope and queued the next eligible direct image model within the remaining request budget.",
+                estimatedProviderCostUsd:
+                  fallback.estimatedProviderCostUsd,
+                quotedUserPriceUsd: fallback.quotedUserPriceUsd,
+              },
+              { headers: { "Cache-Control": "no-store" } },
+            );
+          }
+
+          if (fallback.kind === "funding-required") {
+            const assistantText =
+              `The last image provider refused this request class. I recorded that route as blocked, but the next eligible direct image route needs more CoOperative AI balance. Shortfall: $${fallback.shortfallUsd.toFixed(4)}.`;
+            if (mediaJob.conversation_id) {
+              await admin.from("local_ai_messages").insert({
+                conversation_id: mediaJob.conversation_id,
+                owner_ref: ownerRef,
+                role: "assistant",
+                content: assistantText,
+                attachment_ids: [],
+                job_id: null,
+              });
+            }
+            return NextResponse.json(
+              {
+                jobId: mediaJob.id,
+                execution: "code",
+                status: "completed",
+                conversationId: mediaJob.conversation_id,
+                capability: "image",
+                provider: "code",
+                model: "direct-media-funding-gate",
+                text: assistantText,
+                routeReason:
+                  "The proven-refusal route was excluded, but the next eligible direct image model could not be funded inside the current profile balance.",
+              },
+              { headers: { "Cache-Control": "no-store" } },
+            );
+          }
+
+          const assistantText =
+            "The selected image provider refused this request class, and no other currently eligible direct image route remains inside the approved budget and reference requirements.";
+          if (mediaJob.conversation_id) {
+            await admin.from("local_ai_messages").insert({
+              conversation_id: mediaJob.conversation_id,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: assistantText,
+              attachment_ids: [],
+              job_id: null,
+            });
+          }
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "code",
+              status: "completed",
+              conversationId: mediaJob.conversation_id,
+              capability: "image",
+              provider: "code",
+              model: "direct-media-no-eligible-route",
+              text: assistantText,
+              routeReason:
+                "CoOperative learned the provider refusal and exhausted the remaining eligible direct image routes without starting Recovery Agent.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        return NextResponse.json(
+          {
+            jobId: mediaJob.id,
+            execution: "media",
+            status: "failed",
+            conversationId: mediaJob.conversation_id,
+            capability: "image",
+            provider: mediaJob.provider,
+            model: mediaJob.model,
+            error: direct.error,
+            routeReason:
+              "The direct provider call failed for a technical/non-policy reason, so the normal Recovery Agent path may diagnose the execution failure.",
           },
           { headers: { "Cache-Control": "no-store" } },
         );
