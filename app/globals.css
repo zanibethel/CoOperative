@@ -3129,8 +3129,8 @@ b { color: var(--text); }
 }
 
 .local-ai-chat-dock .local-ai-composer {
-  position: static;
-  z-index: auto;
+  position: relative;
+  z-index: 2;
   left: auto;
   right: auto;
   bottom: auto;
@@ -3844,7 +3844,12 @@ b { color: var(--text); }
   }
 
   .attachment-source-menu {
-    left: 70px;
+    left: 8px;
+    right: 8px;
+    bottom: calc(100% + 8px);
+    width: auto;
+    max-width: none;
+    z-index: 20;
   }
 
   .cloud-media-picker-backdrop {
