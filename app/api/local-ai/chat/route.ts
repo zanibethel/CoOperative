@@ -3533,7 +3533,8 @@ export async function POST(request: Request) {
         ` Code-first preflight: ${codeFirstDecision.routeReason}`,
       allow_paid_fallback:
         requestedCapability === "text" &&
-        (profileExecutionPlan?.paidEligible ?? false),
+        input.nodeRouting !== "require-node" &&
+        (requestMaxSpendMicrousd === null || requestMaxSpendMicrousd > 0),
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
