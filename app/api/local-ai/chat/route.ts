@@ -2446,11 +2446,11 @@ export async function POST(request: Request) {
               JSON.stringify({
                 currentCapUsd: requestCapUsd,
                 options: recommendationSet.options.map(
-                  ({
-                    providerCostEstimateUsd: _providerCostEstimateUsd,
-                    markupPercent: _markupPercent,
-                    ...option
-                  }) => option,
+                  ({ providerCostEstimateUsd, markupPercent, ...option }) => {
+                    void providerCostEstimateUsd;
+                    void markupPercent;
+                    return option;
+                  },
                 ),
               }),
             )}`
