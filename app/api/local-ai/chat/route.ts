@@ -5341,13 +5341,16 @@ export async function GET(request: Request) {
                   ownerRef,
                   "openrouter-api",
                 );
-              const openRouterCredential =
-                openRouterService?.credential ||
-                process.env.OPENROUTER_API_KEY?.trim() ||
-                undefined;
+              const cooperativeOpenRouterCredential =
+                process.env.OPENROUTER_API_KEY?.trim() || undefined;
+              const freeRoute = Boolean(freeBackup);
+              const openRouterCredential = freeRoute
+                ? openRouterService?.credential ||
+                  cooperativeOpenRouterCredential ||
+                  undefined
+                : cooperativeOpenRouterCredential;
 
               if (openRouterCredential) {
-                const freeRoute = Boolean(freeBackup);
                 if (!freeRoute) {
                   const spendStatus =
                     await openRouterKeySpendStatus(openRouterCredential);
@@ -5443,12 +5446,17 @@ export async function GET(request: Request) {
                     estimated_provider_cost_microusd: Math.round(
                       backupEstimate * 1_000_000,
                     ),
-                    estimated_user_charge_microusd: 0,
+                    estimated_user_charge_microusd: freeRoute
+                      ? 0
+                      : Math.round(backupEstimate * 1_000_000),
                     estimated_infrastructure_cost_microusd: null,
                     estimated_margin_microusd: null,
+                    billing_mode: freeRoute
+                      ? null
+                      : "cooperative-balance",
                     provider_cost_bearer: freeRoute
                       ? "free"
-                      : "user-connected",
+                      : "cooperative",
                     pricing_dimensions: {
                       durationSeconds,
                       aspectRatio,
@@ -5462,7 +5470,101 @@ export async function GET(request: Request) {
                   });
                 if (backupInsertError) throw backupInsertError;
 
-                const started = await startHermesMediaTask({
+                let backupReservationId: string | null = null;
+                if (!freeRoute) {
+                  const quote = await fundingQuoteForUser({
+                    userId: owner.userId,
+                    estimatedCostUsd: backupEstimate,
+                    maxSpendUsd: remainingCapUsd,
+                  });
+
+                  if (!quote.sufficientBalance) {
+                    const directive = fundingDirective({
+                      kind: "media",
+                      jobId: backupJobId,
+                      quote,
+                    });
+                    const assistantText = [
+                      `The free/local fallback routes were exhausted. The next paid ${mediaJob.kind} route is estimated at ${backupEstimate.toFixed(4)}.`,
+                      `Your available CoOperative AI balance is ${quote.availableBalanceUsd.toFixed(4)}. The safe reservation requires ${quote.minimumRequiredBalanceUsd.toFixed(4)}, so you need ${quote.shortfallUsd.toFixed(4)} more.`,
+                      quote.topUpOption
+                        ? `The smallest configured Stripe top-up that covers it is ${quote.topUpOption.amountUsd.toFixed(2)}.`
+                        : "No Stripe balance top-up option is currently configured.",
+                      "I did not start the paid backup.",
+                      "",
+                      directive,
+                    ].join("\n");
+
+                    if (mediaJob.conversation_id) {
+                      await admin.from("local_ai_messages").insert({
+                        conversation_id: mediaJob.conversation_id,
+                        owner_ref: ownerRef,
+                        role: "assistant",
+                        content: assistantText,
+                        attachment_ids: [],
+                        job_id: null,
+                      });
+                    }
+
+                    return NextResponse.json(
+                      {
+                        status: "completed",
+                        execution: "code",
+                        capability: mediaJob.kind,
+                        conversationId: mediaJob.conversation_id,
+                        text: assistantText,
+                        provider: "code",
+                        model: "media-profile-balance-fallback-gate",
+                        mediaFundingJobId: backupJobId,
+                        fundingRequired: quote,
+                      },
+                      { headers: { "Cache-Control": "no-store" } },
+                    );
+                  }
+
+                  const reservation = await reserveAiProfileFunds({
+                    profileRef: cooperativeProfileRef(owner.userId),
+                    estimatedCostUsd: backupEstimate,
+                    source: "media-generation",
+                    referenceId: backupJobId,
+                    metadata: {
+                      provider: "openrouter",
+                      model: backupModel.id,
+                      kind: mediaJob.kind,
+                      fallbackFromJobId: mediaJob.id,
+                    },
+                  });
+                  if (!reservation) {
+                    throw new Error(
+                      "Profile balance changed before the paid media fallback could be reserved.",
+                    );
+                  }
+                  backupReservationId = reservation.id;
+
+                  const { error: backupReservationError } = await admin
+                    .from("media_generation_jobs")
+                    .update({
+                      ai_balance_reservation_id: reservation.id,
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", backupJobId)
+                    .eq("owner_ref", ownerRef)
+                    .eq("status", "queued");
+                  if (backupReservationError) {
+                    await releaseAiProfileFunds({
+                      reservationId: reservation.id,
+                      metadata: {
+                        reason: "media-fallback-reservation-link-failed",
+                        jobId: backupJobId,
+                      },
+                    }).catch(() => undefined);
+                    throw backupReservationError;
+                  }
+                }
+
+                let started;
+                try {
+                  started = await startHermesMediaTask({
                   jobId: backupJobId,
                   kind: mediaJob.kind,
                   userRequest: mediaJob.prompt,
@@ -5471,7 +5573,28 @@ export async function GET(request: Request) {
                   providerCredential: openRouterCredential,
                   orchestratorProvider: "openrouter",
                   orchestratorModel: "openrouter/free",
-                });
+                  });
+                } catch (backupStartFailure) {
+                  if (backupReservationId) {
+                    await releaseAiProfileFunds({
+                      reservationId: backupReservationId,
+                      metadata: {
+                        reason: "paid-media-fallback-did-not-start",
+                        jobId: backupJobId,
+                      },
+                    }).catch(() => undefined);
+                    await admin
+                      .from("media_generation_jobs")
+                      .update({
+                        ai_balance_reservation_id: null,
+                        actual_user_charge_microusd: 0,
+                        updated_at: new Date().toISOString(),
+                      })
+                      .eq("id", backupJobId)
+                      .eq("owner_ref", ownerRef);
+                  }
+                  throw backupStartFailure;
+                }
 
                 const { error: backupStartError } = await admin
                   .from("media_generation_jobs")
@@ -5497,7 +5620,7 @@ export async function GET(request: Request) {
                     model: backupModel.id,
                     routeReason: freeRoute
                       ? "Nous failed, no owned local route was available for this media request, and CoOperative selected a live free OpenRouter route before any paid backup."
-                      : `Nous failed and no local/free route was available. CoOperative conservatively reserved \$${sourceEstimateUsd.toFixed(3)} from the original \$${requestCapUsd.toFixed(2)} ceiling, verified OpenRouter spend eligibility, and started one backup estimated at \$${backupEstimate.toFixed(3)} within the remaining \$${remainingCapUsd.toFixed(3)}.`,
+                      : `Nous failed and no local/free route was available. CoOperative verified live OpenRouter capacity, reserved the paid backup against the profile's Stripe-funded balance, and started one backup estimated at \${backupEstimate.toFixed(3)} within the remaining \${remainingCapUsd.toFixed(3)} request cap.`,
                     estimatedProviderCostUsd: backupEstimate,
                   },
                   { headers: { "Cache-Control": "no-store" } },
