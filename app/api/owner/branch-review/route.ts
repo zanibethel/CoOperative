@@ -75,6 +75,11 @@ function candidateFromTask(task: Record<string, unknown>) {
       typeof sandbox.promotionState === "string"
         ? sandbox.promotionState
         : "testing",
+    scope:
+      typeof sandbox.scope === "string" ? sandbox.scope : "code-fix",
+    uiDefaultFlowPreservedRequired:
+      sandbox.uiDefaultFlowPreservedRequired === true,
+    userInvokedCapability: sandbox.userInvokedCapability === true,
     mergeAllowed: sandbox.mergeAllowed === true,
     createdAt: task.created_at || null,
     updatedAt: task.updated_at || null,
