@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { recordModelCapabilityEvidence } from "@/lib/inference/model-capability-registry";
 import type { MediaAdultContentClass } from "@/lib/inference/media-request";
 
 export type MediaContentPreference =
@@ -572,6 +573,52 @@ export async function recordMediaModelCapabilityTest(input: {
     .single();
 
   if (error) throw error;
+
+  const routeKind = (input.endpoint || "").trim()
+    ? "image-edit"
+    : "image";
+  const state =
+    input.outcome === "supported"
+      ? "supported"
+      : input.outcome === "blocked"
+        ? "unsupported"
+        : input.outcome;
+
+  await recordModelCapabilityEvidence({
+    ownerRef: input.ownerRef,
+    provider: input.provider,
+    model: input.model,
+    endpoint: input.endpoint || "",
+    routeKind,
+    capabilityKey:
+      input.testType === "adult_content"
+        ? "adult-content"
+        : input.testType.replace(/_/g, "-"),
+    scope: input.promptClassification || input.testType,
+    state,
+    sourceType: "controlled-test",
+    sourceRef: input.sourceJobId || data.id,
+    confidence:
+      input.outcome === "supported" || input.outcome === "blocked"
+        ? 0.95
+        : input.outcome === "partial"
+          ? 0.7
+          : 0.4,
+    observedAt: data.tested_at,
+    evidence: {
+      testId: data.id,
+      testType: input.testType,
+      outcome: input.outcome,
+      promptClassification: input.promptClassification || null,
+      notes: input.notes?.slice(0, 1200) || null,
+    },
+  }).catch((e) => {
+    console.error("Could not mirror media capability test into model evidence", {
+      testId: data.id,
+      detail: e instanceof Error ? e.message.slice(0, 600) : "unknown",
+    });
+  });
+
   return data;
 }
 
