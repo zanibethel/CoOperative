@@ -341,6 +341,18 @@ function oauthServiceConnectDirective(content: string) {
   };
 }
 
+function sandboxCodeTaskDirective(content: string) {
+  const match = content.match(
+    /SANDBOX_CODE_TASK:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
+  );
+  if (!match) return null;
+
+  return {
+    taskId: match[1],
+    text: content.replace(match[0], "").trim(),
+  };
+}
+
 function connectorBuildDirective(content: string) {
   const match = content.match(
     /CONNECTOR_BUILD_STATUS:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
@@ -1220,6 +1232,145 @@ function OAuthServiceConnectCard({
   );
 }
 
+
+type SandboxCodeTaskResult = {
+  summary?: string;
+  checksPassed?: boolean;
+  changedFiles?: string[];
+  strongerModelRecommendation?: {
+    recommended?: boolean;
+    nextStep?: string;
+    requiresUserApproval?: boolean;
+    reason?: string;
+  };
+  sandbox?: {
+    pushed?: boolean;
+    commitSha?: string | null;
+    promotionState?: string;
+    mergeAllowed?: boolean;
+  };
+};
+
+type SandboxCodeTaskState = {
+  task?: {
+    id?: string;
+    status?: string;
+    branch_name?: string | null;
+    error?: string | null;
+    result?: SandboxCodeTaskResult | null;
+  };
+  error?: string;
+  detail?: string;
+};
+
+function SandboxCodeTaskCard({ taskId }: { taskId: string }) {
+  const [state, setState] = useState<SandboxCodeTaskState | null>(null);
+  const [cardError, setCardError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+
+    async function refresh() {
+      try {
+        const response = await fetch(
+          `/api/agents/tasks?id=${encodeURIComponent(taskId)}`,
+          { cache: "no-store" },
+        );
+        const payload = (await response.json()) as SandboxCodeTaskState;
+        if (!response.ok || !payload.task) {
+          throw new Error(
+            payload.detail || payload.error || "Could not read sandbox task.",
+          );
+        }
+        if (cancelled) return;
+
+        setState(payload);
+        setCardError("");
+        if (
+          payload.task.status === "queued" ||
+          payload.task.status === "running" ||
+          payload.task.status === "waiting_llm"
+        ) {
+          timer = window.setTimeout(refresh, 2500);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCardError(
+            err instanceof Error ? err.message : "Could not read sandbox task.",
+          );
+          timer = window.setTimeout(refresh, 5000);
+        }
+      }
+    }
+
+    void refresh();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [taskId]);
+
+  const task = state?.task;
+  const result = task?.result || {};
+  const sandbox = result.sandbox || {};
+  const recommendation = result.strongerModelRecommendation;
+
+  return (
+    <div className="secure-service-card">
+      <div className="secure-service-head">
+        <span className="secure-service-lock" aria-hidden="true">⑂</span>
+        <div>
+          <strong>Sandbox code change</strong>
+          <small>
+            Main is protected. This task can only prepare and push a sandbox branch
+            until owner review explicitly approves it for merge.
+          </small>
+        </div>
+      </div>
+
+      <div className="secure-service-status">
+        Status: <strong>{task?.status || "queued"}</strong>
+      </div>
+
+      {task?.branch_name ? (
+        <div className="secure-service-status">
+          Test branch: <strong>{task.branch_name}</strong>
+          {sandbox.pushed ? " · pushed for preview/testing" : ""}
+        </div>
+      ) : null}
+
+      {result.summary ? (
+        <div className="secure-service-status">{result.summary}</div>
+      ) : null}
+
+      {typeof result.checksPassed === "boolean" ? (
+        <div className="secure-service-status">
+          Checks: <strong>{result.checksPassed ? "passed" : "not all passed"}</strong>
+        </div>
+      ) : null}
+
+      {sandbox.promotionState ? (
+        <div className="secure-service-status">
+          Promotion: <strong>{sandbox.promotionState}</strong>
+        </div>
+      ) : null}
+
+      {recommendation?.recommended ? (
+        <div className="secure-service-status">
+          Stronger model suggested: {recommendation.reason ||
+            "The current coding model needs help."}
+          {recommendation.requiresUserApproval
+            ? " A paid coding model requires your explicit approval."
+            : ""}
+        </div>
+      ) : null}
+
+      {task?.error ? <div className="secure-service-error">{task.error}</div> : null}
+      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+    </div>
+  );
+}
 
 type ConnectorBuildStatus = {
   taskId?: string;
@@ -2822,6 +2973,16 @@ export default function LocalAiChat() {
                             }
                           }}
                         />
+                      </>
+                    );
+                  }
+
+                  const sandboxCodeTask = sandboxCodeTaskDirective(message.content);
+                  if (sandboxCodeTask) {
+                    return (
+                      <>
+                        {sandboxCodeTask.text ? <div>{sandboxCodeTask.text}</div> : null}
+                        <SandboxCodeTaskCard taskId={sandboxCodeTask.taskId} />
                       </>
                     );
                   }
