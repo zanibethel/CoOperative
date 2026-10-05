@@ -186,6 +186,23 @@ b { color: var(--text); }
   background: var(--panel-2);
 }
 
+.pending-attachment-reference {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  max-width: calc(100% - 12px);
+  padding: 3px 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #090c12d9;
+  color: #fff;
+  font-size: .58rem;
+  font-weight: 800;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pending-attachment button {
   position: absolute;
   top: -7px;
@@ -3649,7 +3666,8 @@ b { color: var(--text); }
   box-shadow: 0 16px 38px #0009;
 }
 
-.attachment-source-menu button {
+.attachment-source-menu button,
+.attachment-source-file-label {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -3660,6 +3678,14 @@ b { color: var(--text); }
   font-size: .75rem;
   font-weight: 800;
   text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.attachment-source-file-label[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .5;
+  pointer-events: none;
 }
 
 .cloud-media-picker-backdrop {
