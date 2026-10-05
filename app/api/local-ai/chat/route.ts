@@ -3959,7 +3959,14 @@ export async function GET(request: Request) {
             result_model: job.fallback_model || "openrouter/free",
             result_provider: "openrouter-free",
             latency_ms: latencyMs,
-            fallback_usage: polled.usage,
+            fallback_usage: {
+              ...(job.fallback_usage &&
+              typeof job.fallback_usage === "object" &&
+              !Array.isArray(job.fallback_usage)
+                ? job.fallback_usage
+                : {}),
+              ...(polled.usage || {}),
+            },
             error: null,
             completed_at: completedAt,
             updated_at: completedAt,
@@ -4316,6 +4323,8 @@ export async function GET(request: Request) {
         deadlineAt: job.fallback_deadline_at,
       });
 
+      const webMetadata = freeCloudWebMetadata(job.fallback_usage);
+
       if (polled.state === "running") {
         return NextResponse.json(
           {
@@ -4329,6 +4338,9 @@ export async function GET(request: Request) {
             model: job.fallback_model || "openrouter/free",
             workerId: FREE_TEXT_WORKER_ID,
             routeReason: job.route_reason,
+            webSearchUsed: webMetadata?.used === true,
+            webAccessMode: webMetadata?.mode || "off",
+            webSourceCount: webMetadata?.sourceCount || 0,
             paidFallbackAllowed: job.allow_paid_fallback === true,
           },
           { headers: { "Cache-Control": "no-store" } },
@@ -4450,6 +4462,9 @@ export async function GET(request: Request) {
             latencyMs,
             workerId: FREE_TEXT_WORKER_ID,
             routeReason: job.route_reason,
+            webSearchUsed: webMetadata?.used === true,
+            webAccessMode: webMetadata?.mode || "off",
+            webSourceCount: webMetadata?.sourceCount || 0,
             paidFallbackAllowed: job.allow_paid_fallback === true,
           },
           { headers: { "Cache-Control": "no-store" } },
@@ -4469,7 +4484,14 @@ export async function GET(request: Request) {
         .from("text_inference_jobs")
         .update({
           status: "failed",
-          fallback_usage: polled.usage,
+          fallback_usage: {
+            ...(job.fallback_usage &&
+            typeof job.fallback_usage === "object" &&
+            !Array.isArray(job.fallback_usage)
+              ? job.fallback_usage
+              : {}),
+            ...(polled.usage || {}),
+          },
           route_reason: failedReason,
           error: failureDetail.slice(0, 1200),
           completed_at: failedAt,
