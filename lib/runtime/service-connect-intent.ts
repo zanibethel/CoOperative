@@ -29,7 +29,7 @@ function cleanedProviderCandidate(message: string) {
   const compact = message.replace(/\s+/g, " ").trim();
 
   const patterns = [
-    /\b(?:connect|link|authorize|integrate)\s+(?:to\s+|with\s+|my\s+|our\s+|the\s+)?(.{2,80}?)(?:[?.!]|$)/i,
+    /\b(?:connect|link|authorize|integrate)\s+(?:to\s+|with\s+)?(?:my\s+|our\s+|the\s+)?(.{2,80}?)(?:[?.!]|$)/i,
     /\b(?:sign\s*in|log\s*in|login)\s+(?:to\s+|with\s+)?(.{2,80}?)(?:[?.!]|$)/i,
     /\b(?:setup|set up|configure)\s+(?:my\s+|our\s+|the\s+)?(.{2,80}?)(?:\s+(?:connection|integration|account))?(?:[?.!]|$)/i,
   ];
@@ -37,7 +37,7 @@ function cleanedProviderCandidate(message: string) {
   for (const pattern of patterns) {
     const match = compact.match(pattern);
     const raw = match?.[1]
-      ?.replace(/\b(?:account|service|provider|integration|connection)\b$/i, "")
+      ?.replace(/\b(?:account|profile|service|provider|integration|connection)\b$/i, "")
       .trim();
     if (!raw) continue;
 
