@@ -6,6 +6,11 @@ import {
   pollHermesMediaTask,
   startHermesMediaTask,
 } from "@/lib/inference/hermes-media-cloud";
+import {
+  pollHermesTextTask,
+  startHermesTextTask,
+  type HermesTextContextMessage,
+} from "@/lib/inference/hermes-text-cloud";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
 import { classifyRecoveryFailure } from "@/lib/recovery/classifier";
@@ -92,6 +97,9 @@ type FailedSource =
     };
 
 type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
+
+const RECOVERY_FREE_REASONING_GRACE_MS = 8_000;
+const RECOVERY_FREE_REASONING_WORKER_ID = "cooperative-hermes-free-recovery-text";
 
 function nowIso() {
   return new Date().toISOString();
@@ -1069,6 +1077,289 @@ async function finalizeMediaRetry(
   return incident;
 }
 
+async function recoveryFreeReasoningJob(
+  admin: AdminClient,
+  incident: RecoveryIncidentRow,
+) {
+  if (!incident.agent_task_id) return null;
+  const { data, error } = await admin
+    .from("text_inference_jobs")
+    .select(
+      "id,status,result_text,error,worker_id,fallback_model,fallback_sandbox_name,fallback_deadline_at,claimed_at,created_at",
+    )
+    .eq("agent_task_id", incident.agent_task_id)
+    .eq("client_owner_ref", `recovery:${incident.id}`)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function startRecoveryFreeReasoning(
+  admin: AdminClient,
+  incident: RecoveryIncidentRow,
+) {
+  if (!incident.agent_task_id) return null;
+
+  const existing = await recoveryFreeReasoningJob(admin, incident);
+  if (existing) return existing;
+
+  const connected = await businessOwnedServiceCredentialForOwner(
+    incident.owner_ref,
+    "openrouter-api",
+  );
+  const openRouterCredential =
+    connected?.credential || process.env.OPENROUTER_API_KEY?.trim() || null;
+  if (!openRouterCredential) return null;
+
+  const jobId = crypto.randomUUID();
+  const now = nowIso();
+  const messages: HermesTextContextMessage[] = [
+    {
+      role: "system",
+      content: [
+        "You are CoOperative Recovery Agent's strict-free reasoning fallback.",
+        "A local repo debugger worker did not claim the recovery task within the grace window.",
+        "Reason only from the supplied failure metadata. You do not have repository, terminal, browser, credential, or file access.",
+        "Do not claim that you inspected or changed code.",
+        "Classify the likely failure as transient/provider/bootstrap/routing/code-possible, explain the evidence briefly, and recommend the safest next diagnostic or retry step.",
+        "Do not propose paid AI. Do not broaden permissions or spending.",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: [
+        `Recovery incident: ${incident.id}`,
+        `Source kind: ${incident.source_kind}`,
+        `Source job: ${incident.source_job_id || "unknown"}`,
+        `Error class: ${incident.error_class}`,
+        `Failure excerpt: ${safeError(incident.error_excerpt)}`,
+      ].join("\n"),
+    },
+  ];
+
+  const { error: insertError } = await admin.from("text_inference_jobs").insert({
+    id: jobId,
+    status: "running",
+    client_owner_ref: `recovery:${incident.id}`,
+    agent_task_id: incident.agent_task_id,
+    messages,
+    profile: "fast",
+    max_tokens: 900,
+    temperature: 0.1,
+    routing_mode: "free-cloud",
+    task_class: "coding",
+    route_reason:
+      "Recovery repo worker was not claimed within 8 seconds, so CoOperative started strict-free reasoning-only diagnosis while leaving the local debugger queued for repo work.",
+    allow_paid_fallback: false,
+    human_approval_required: true,
+    model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
+    verification_status: "not_run",
+    capability: "text",
+    routing_preference: "default",
+    worker_id: RECOVERY_FREE_REASONING_WORKER_ID,
+    claimed_at: now,
+    fallback_attempted_at: now,
+    fallback_provider: "openrouter",
+    fallback_model: "openrouter/free",
+  });
+  if (insertError) throw insertError;
+
+  await addEvent(
+    admin,
+    incident.id,
+    incident.owner_ref,
+    "free_reasoning_started",
+    "Local recovery worker was not claimed in time, so Recovery Agent started a strict-free reasoning-only diagnosis while keeping the repo debugger queued.",
+    {
+      jobId,
+      provider: "openrouter",
+      model: "openrouter/free",
+      paidAuthorized: false,
+    },
+  );
+
+  try {
+    const started = await startHermesTextTask({
+      jobId,
+      messages,
+      openRouterCredential,
+    });
+    const { data: startedJob, error: updateError } = await admin
+      .from("text_inference_jobs")
+      .update({
+        fallback_provider: started.provider,
+        fallback_model: started.model,
+        fallback_sandbox_name: started.sandboxName,
+        fallback_deadline_at: started.deadlineAt,
+        updated_at: nowIso(),
+      })
+      .eq("id", jobId)
+      .select(
+        "id,status,result_text,error,worker_id,fallback_model,fallback_sandbox_name,fallback_deadline_at,claimed_at,created_at",
+      )
+      .single();
+    if (updateError) throw updateError;
+
+    await admin
+      .from("recovery_incidents")
+      .update({
+        current_message:
+          "Local debugger is still queued. Recovery Agent is also running a strict-free reasoning-only diagnosis now.",
+        updated_at: nowIso(),
+      })
+      .eq("id", incident.id)
+      .eq("owner_ref", incident.owner_ref);
+
+    return startedJob;
+  } catch (error) {
+    const detail =
+      error instanceof Error
+        ? error.message
+        : "Strict-free recovery reasoning could not start.";
+    const failedAt = nowIso();
+    await admin
+      .from("text_inference_jobs")
+      .update({
+        status: "failed",
+        error: detail.slice(0, 1200),
+        completed_at: failedAt,
+        updated_at: failedAt,
+      })
+      .eq("id", jobId);
+
+    await addEvent(
+      admin,
+      incident.id,
+      incident.owner_ref,
+      "free_reasoning_failed",
+      "Strict-free recovery reasoning could not start; the local repo debugger remains queued.",
+      { jobId, error: detail.slice(0, 800) },
+    );
+    return null;
+  }
+}
+
+async function pollRecoveryFreeReasoning(
+  admin: AdminClient,
+  incident: RecoveryIncidentRow,
+  job: any,
+) {
+  if (
+    !job ||
+    job.status !== "running" ||
+    job.worker_id !== RECOVERY_FREE_REASONING_WORKER_ID ||
+    !job.fallback_sandbox_name ||
+    !job.fallback_deadline_at
+  ) {
+    return job;
+  }
+
+  const polled = await pollHermesTextTask({
+    sandboxName: job.fallback_sandbox_name,
+    deadlineAt: job.fallback_deadline_at,
+  });
+
+  if (polled.state === "completed" && polled.text) {
+    const completedAt = nowIso();
+    const { data: completed, error } = await admin
+      .from("text_inference_jobs")
+      .update({
+        status: "completed",
+        result_text: polled.text,
+        partial_text: polled.text,
+        result_model: job.fallback_model || "openrouter/free",
+        result_provider: "openrouter-free",
+        fallback_usage: polled.usage,
+        error: null,
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq("id", job.id)
+      .eq("status", "running")
+      .select(
+        "id,status,result_text,error,worker_id,fallback_model,fallback_sandbox_name,fallback_deadline_at,claimed_at,created_at",
+      )
+      .maybeSingle();
+    if (error) throw error;
+
+    if (completed?.result_text) {
+      const diagnosis = completed.result_text.trim().slice(0, 900);
+      await addEvent(
+        admin,
+        incident.id,
+        incident.owner_ref,
+        "free_reasoning_completed",
+        "Strict-free recovery reasoning completed. Local repo debugging remains queued if a code change is needed.",
+        {
+          jobId: completed.id,
+          provider: "openrouter-free",
+          model: completed.fallback_model || "openrouter/free",
+          diagnosis,
+        },
+      );
+      await admin
+        .from("recovery_incidents")
+        .update({
+          current_message:
+            "Strict-free recovery reasoning completed while the local repo debugger remains queued. Open Recovery details for the preliminary diagnosis.",
+          updated_at: completedAt,
+        })
+        .eq("id", incident.id)
+        .eq("owner_ref", incident.owner_ref);
+
+      const { data: task } = await admin
+        .from("agent_tasks")
+        .select("id,status,objective")
+        .eq("id", incident.agent_task_id)
+        .maybeSingle();
+      if (task?.status === "queued" && typeof task.objective === "string") {
+        await admin
+          .from("agent_tasks")
+          .update({
+            objective:
+              (task.objective +
+                "\n\nPRELIMINARY STRICT-FREE DIAGNOSIS (reasoning-only; verify against repository evidence):\n" +
+                diagnosis).slice(0, 12000),
+            updated_at: completedAt,
+          })
+          .eq("id", task.id)
+          .eq("status", "queued");
+      }
+    }
+    return completed || job;
+  }
+
+  if (polled.state === "failed") {
+    const failedAt = nowIso();
+    const detail =
+      polled.error || "Strict-free recovery reasoning returned no usable result.";
+    await admin
+      .from("text_inference_jobs")
+      .update({
+        status: "failed",
+        error: detail.slice(0, 1200),
+        fallback_usage: polled.usage,
+        completed_at: failedAt,
+        updated_at: failedAt,
+      })
+      .eq("id", job.id)
+      .eq("status", "running");
+
+    await addEvent(
+      admin,
+      incident.id,
+      incident.owner_ref,
+      "free_reasoning_failed",
+      "Strict-free recovery reasoning failed; the local repo debugger remains queued.",
+      { jobId: job.id, error: detail.slice(0, 800) },
+    );
+  }
+
+  return job;
+}
+
 async function syncDebuggerStatus(
   admin: AdminClient,
   incident: RecoveryIncidentRow,
@@ -1077,7 +1368,7 @@ async function syncDebuggerStatus(
 
   const { data: task, error } = await admin
     .from("agent_tasks")
-    .select("id,status,result,error,branch_name,worker_id,requested_profile,updated_at,completed_at")
+    .select("id,status,result,error,branch_name,worker_id,requested_profile,created_at,updated_at,completed_at")
     .eq("id", incident.agent_task_id)
     .eq("owner_ref", incident.owner_ref)
     .maybeSingle();
@@ -1085,6 +1376,29 @@ async function syncDebuggerStatus(
   if (!task) return incident;
 
   if (task.status === "queued") {
+    const queuedAt = Date.parse(task.created_at || "");
+    let freeJob = await recoveryFreeReasoningJob(admin, incident);
+    if (
+      !freeJob &&
+      Number.isFinite(queuedAt) &&
+      Date.now() - queuedAt >= RECOVERY_FREE_REASONING_GRACE_MS
+    ) {
+      freeJob = await startRecoveryFreeReasoning(admin, incident);
+    }
+    if (freeJob) {
+      const polledFree = await pollRecoveryFreeReasoning(admin, incident, freeJob);
+      if (polledFree?.status === "running") {
+        const current =
+          "Local debugger is still queued. Recovery Agent is also running a strict-free reasoning-only diagnosis now.";
+        return { ...incident, current_message: current };
+      }
+      if (polledFree?.status === "completed") {
+        const current =
+          "Strict-free recovery reasoning completed while the local repo debugger remains queued. Open Recovery details for the preliminary diagnosis.";
+        return { ...incident, current_message: current };
+      }
+    }
+
     const current =
       "Recovery Agent is waiting for an available local debugger worker to claim this repair.";
     if (current !== incident.current_message) {
