@@ -2494,7 +2494,59 @@ export default function LocalAiChat() {
         ]);
         const threads = await refreshConversations();
         const onboarding = await refreshOnboarding();
-        const resumeFromQuery = new URLSearchParams(window.location.search).get(
+        const params = new URLSearchParams(window.location.search);
+        const resumeMediaFromQuery = params.get("resumeMediaJob");
+        const pendingMediaResume =
+          resumeMediaFromQuery ||
+          window.localStorage.getItem(PENDING_MEDIA_RESUME_KEY);
+
+        if (pendingMediaResume) {
+          setStatus("Resuming funded media generation…");
+          const mediaResponse = await fetch("/api/local-ai/chat/media-resume", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId: pendingMediaResume }),
+          });
+          const media = (await mediaResponse.json()) as JobResult;
+
+          if (
+            mediaResponse.ok &&
+            media.jobId &&
+            (media.status === "running" || media.status === "queued")
+          ) {
+            window.localStorage.removeItem(PENDING_MEDIA_RESUME_KEY);
+            window.history.replaceState(null, "", window.location.pathname);
+            if (media.conversationId) {
+              await loadConversation(media.conversationId);
+            }
+            window.localStorage.setItem(ACTIVE_JOB_KEY, media.jobId);
+            await pollJob(media.jobId, []);
+            return;
+          }
+
+          if (mediaResponse.ok && media.status === "completed") {
+            window.localStorage.removeItem(PENDING_MEDIA_RESUME_KEY);
+            window.history.replaceState(null, "", window.location.pathname);
+            if (media.conversationId) {
+              await loadConversation(media.conversationId);
+            }
+            await Promise.all([refreshConversations(), refreshBusinesses()]);
+            setMeta(resultMeta(media));
+            setStatus("Ready");
+            return;
+          }
+
+          if (mediaResponse.status === 402) {
+            if (media.conversationId) {
+              await loadConversation(media.conversationId);
+            }
+            setStatus("Ready");
+          } else {
+            window.localStorage.removeItem(PENDING_MEDIA_RESUME_KEY);
+          }
+        }
+
+        const resumeFromQuery = params.get(
           "resumePaidJob",
         );
         const pendingPaidResume =
