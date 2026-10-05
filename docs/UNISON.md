@@ -13,6 +13,21 @@ Prefer compute in this order when capability, policy, privacy, reliability, and 
 
 Commercial infrastructure remains a fallback. The purpose of Unison is to let people and businesses own more of the productive infrastructure instead of forcing every workload through a centralized cloud provider.
 
+
+For signed-in CoOperative chat, deterministic code remains above the compute hierarchy. The intended profile route is:
+
+```text
+CoOperative code/playbooks
+  -> matching authorized personal/business node
+  -> other qualified owned/free compute
+  -> eligible strict-free/community model
+  -> profile-funded paid model
+```
+
+An installed node is an **added capability of the same CoOperative chat/profile**. It should not create a separate primary chat product. When a profile is linked to a healthy capable node, that node becomes the preferred AI executor for that profile after deterministic code. The same browser/mobile conversation can therefore become faster, more private, and cheaper simply because the user's own hardware is available.
+
+If the node is offline or lacks a required capability, the conversation remains the same and the router may use the next allowed route. Paid fallback remains impossible unless the profile has sufficient funded balance and the request policy permits the spend.
+
 ## Alpha node protocol
 
 The first vertical slice reuses CoOperative's working asynchronous image queue.
@@ -98,6 +113,12 @@ Remote/mobile Personal AI uses the signed-in CoOperative user's node membership
 rather than the node's contributor owner. Conversations remain keyed to that
 user, so two people may use the same physical PC without sharing conversation
 history.
+
+
+The long-term product should converge this remote/mobile Personal AI behavior with
+the main CoOperative chat rather than maintaining a permanently separate Personal
+AI product surface. Node membership should become execution metadata on the same
+profile/conversation contract.
 
 Personal requests from any authorized user use the node's priority personal
 queue before community work. Community work remains tied to the physical node
