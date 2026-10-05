@@ -17,6 +17,7 @@ import {
 
 type Profile = "fast" | "quality";
 type NodeRouting = "default" | "prefer-owned" | "require-node";
+type WebAccessMode = "off" | "auto" | "always";
 
 type OwnedNode = {
   id: string;
@@ -122,6 +123,14 @@ type BusinessResult = {
   detail?: string;
 };
 
+type ProfileSettingsResult = {
+  settings?: {
+    webAccessMode?: WebAccessMode;
+  };
+  error?: string;
+  detail?: string;
+};
+
 type AttachmentResult = {
   attachment?: ImageAttachment;
   error?: string;
@@ -165,6 +174,20 @@ type JobResult = {
     chargedUsd?: number;
     availableMicrousd?: number;
   } | null;
+  fundingRequired?: {
+    estimatedCostUsd?: number;
+    availableBalanceUsd?: number;
+    shortfallUsd?: number;
+    minimumRequiredBalanceUsd?: number;
+    topUpOption?: {
+      id: string;
+      label?: string;
+      amountMicrousd?: number;
+      amountUsd: number;
+      currency?: string;
+    } | null;
+  } | null;
+  sourceJobId?: string | null;
   error?: string | null;
   detail?: string | null;
   modelMixerUpdate?: {
@@ -220,6 +243,7 @@ type RecoveryResult = {
 };
 
 const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
+const PENDING_PAID_RESUME_KEY = "cooperative.local-ai.pending-paid-resume-job";
 const ACTIVE_BUSINESS_KEY = "cooperative.local-ai.active-business";
 const MAX_ATTACHMENTS = 4;
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
@@ -374,6 +398,43 @@ function recoveryStatusDirective(content: string) {
   return {
     incidentId: match[1],
     text: content.replace(match[0], "").trim(),
+  };
+}
+
+function fundingRequiredDirective(content: string) {
+  const job = content.match(
+    /(?:^|\n)AI_FUNDING_REQUIRED:([0-9a-f]{8}-[0-9a-f-]{27,})\s*$/im,
+  );
+  if (!job) return null;
+
+  const value = (name: string) => {
+    const pattern = "(?:^|\\n)" + name + ":([^\\n]+)\\s*$";
+    const match = content.match(new RegExp(pattern, "im"));
+    return match?.[1]?.trim() || "";
+  };
+  const amount = (name: string) => {
+    const parsed = Number(value(name));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  const optionId = value("TOPUP_OPTION");
+
+  const text = content
+    .replace(/(?:^|\n)AI_FUNDING_REQUIRED:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)ESTIMATED_USD:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)AVAILABLE_USD:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)SHORTFALL_USD:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)TOPUP_OPTION:[^\n]+\s*$/gim, "")
+    .replace(/(?:^|\n)TOPUP_USD:[^\n]+\s*$/gim, "")
+    .trim();
+
+  return {
+    sourceJobId: job[1],
+    estimatedCostUsd: amount("ESTIMATED_USD"),
+    availableBalanceUsd: amount("AVAILABLE_USD"),
+    shortfallUsd: amount("SHORTFALL_USD"),
+    topUpOptionId: optionId && optionId !== "none" ? optionId : null,
+    topUpUsd: amount("TOPUP_USD"),
+    text,
   };
 }
 
@@ -1372,6 +1433,158 @@ function SandboxCodeTaskCard({ taskId }: { taskId: string }) {
   );
 }
 
+type FundingRequiredCardProps = {
+  sourceJobId: string;
+  estimatedCostUsd: number;
+  availableBalanceUsd: number;
+  topUpOptionId: string | null;
+  topUpUsd: number;
+  onCompleted: (conversationId?: string | null) => Promise<void>;
+};
+
+function FundingRequiredCard({
+  sourceJobId,
+  estimatedCostUsd,
+  availableBalanceUsd,
+  topUpOptionId,
+  topUpUsd,
+  onCompleted,
+}: FundingRequiredCardProps) {
+  const [working, setWorking] = useState(false);
+  const [cardError, setCardError] = useState("");
+  const [currentBalanceUsd, setCurrentBalanceUsd] = useState(availableBalanceUsd);
+
+  const enoughBalance = currentBalanceUsd + 1e-9 >= estimatedCostUsd;
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/profile/ai-balance", { cache: "no-store" })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          availableUsd?: number;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(payload.error || "Could not check AI balance.");
+        if (!cancelled && typeof payload.availableUsd === "number") {
+          setCurrentBalanceUsd(payload.availableUsd);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function addBalance() {
+    if (!topUpOptionId || working) return;
+    setWorking(true);
+    setCardError("");
+
+    try {
+      const response = await fetch("/api/profile/ai-balance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topUpOptionId }),
+      });
+      const payload = (await response.json()) as {
+        checkoutUrl?: string;
+        error?: string;
+        detail?: string;
+      };
+      if (!response.ok || !payload.checkoutUrl) {
+        throw new Error(
+          payload.detail || payload.error || "Could not start secure balance top-up.",
+        );
+      }
+
+      window.localStorage.setItem(PENDING_PAID_RESUME_KEY, sourceJobId);
+      window.location.assign(payload.checkoutUrl);
+    } catch (err) {
+      setCardError(
+        err instanceof Error ? err.message : "Could not start secure balance top-up.",
+      );
+      setWorking(false);
+    }
+  }
+
+  async function continueRequest() {
+    if (working) return;
+    setWorking(true);
+    setCardError("");
+    try {
+      const response = await fetch("/api/local-ai/chat/paid-fallback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId: sourceJobId }),
+      });
+      const payload = (await response.json()) as JobResult;
+      if (response.status === 402 && payload.fundingRequired) {
+        if (typeof payload.fundingRequired.availableBalanceUsd === "number") {
+          setCurrentBalanceUsd(payload.fundingRequired.availableBalanceUsd);
+        }
+        throw new Error(
+          `Additional balance is still required (${Number(
+            payload.fundingRequired.shortfallUsd || 0,
+          ).toFixed(4)} short).`,
+        );
+      }
+      if (!response.ok || payload.status !== "completed") {
+        throw new Error(
+          payload.detail || payload.error || "Paid AI could not resume this request.",
+        );
+      }
+      window.localStorage.removeItem(PENDING_PAID_RESUME_KEY);
+      await onCompleted(payload.conversationId);
+    } catch (err) {
+      setCardError(
+        err instanceof Error ? err.message : "Paid AI could not resume this request.",
+      );
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <div className="secure-service-card">
+      <div className="secure-service-head">
+        <span className="secure-service-lock" aria-hidden="true">$</span>
+        <div>
+          <strong>Stronger AI available</strong>
+          <small>
+            Free/local routes were exhausted. CoOperative will not use a paid model
+            until the profile balance covers this request.
+          </small>
+        </div>
+      </div>
+      <div className="secure-service-status">
+        Estimated request: <strong>${estimatedCostUsd.toFixed(4)}</strong>
+      </div>
+      <div className="secure-service-status">
+        Available balance: <strong>${currentBalanceUsd.toFixed(4)}</strong>
+      </div>
+      {!enoughBalance ? (
+        <div className="secure-service-status">
+          Minimum additional balance needed: <strong>${Math.max(0, estimatedCostUsd - currentBalanceUsd).toFixed(4)}</strong>
+        </div>
+      ) : null}
+      <div className="secure-service-actions">
+        {enoughBalance ? (
+          <button type="button" disabled={working} onClick={() => void continueRequest()}>
+            {working ? "Continuing…" : "Continue with stronger AI"}
+          </button>
+        ) : topUpOptionId ? (
+          <button type="button" disabled={working} onClick={() => void addBalance()}>
+            {working
+              ? "Opening secure checkout…"
+              : "Add $" + topUpUsd.toFixed(2) + " balance"}
+          </button>
+        ) : null}
+      </div>
+      {cardError ? <div className="secure-service-error">{cardError}</div> : null}
+    </div>
+  );
+}
+
 type ConnectorBuildStatus = {
   taskId?: string;
   status?: string;
@@ -1738,6 +1951,7 @@ export default function LocalAiChat() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [businesses, setBusinesses] = useState<BusinessSummary[]>([]);
   const [aiBalance, setAiBalance] = useState<AiBalanceSummary | null>(null);
+  const [webAccessMode, setWebAccessMode] = useState<WebAccessMode>("off");
   const [ownedNodes, setOwnedNodes] = useState<OwnedNode[]>([]);
   const [nodeRouting, setNodeRouting] = useState<NodeRouting>("prefer-owned");
   const [requiredNodeId, setRequiredNodeId] = useState("");
@@ -1784,6 +1998,43 @@ export default function LocalAiChat() {
     );
     return items;
   }, []);
+
+  const refreshProfileSettings = useCallback(async () => {
+    const response = await fetch("/api/personal-ai/settings", { cache: "no-store" });
+    const result = (await response.json()) as ProfileSettingsResult;
+    if (!response.ok || !result.settings) {
+      throw new Error(
+        result.detail || result.error || "Could not load profile web settings.",
+      );
+    }
+    const mode = result.settings.webAccessMode;
+    setWebAccessMode(
+      mode === "auto" || mode === "always" ? mode : "off",
+    );
+    return result.settings;
+  }, []);
+
+  const updateWebAccessMode = useCallback(async (mode: WebAccessMode) => {
+    setWebAccessMode(mode);
+    const response = await fetch("/api/personal-ai/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ webAccessMode: mode }),
+    });
+    const result = (await response.json()) as ProfileSettingsResult;
+    if (!response.ok || !result.settings) {
+      throw new Error(
+        result.detail || result.error || "Could not update Web access mode.",
+      );
+    }
+    setWebAccessMode(
+      result.settings.webAccessMode === "auto" ||
+        result.settings.webAccessMode === "always"
+        ? result.settings.webAccessMode
+        : "off",
+    );
+  }, []);
+
 
   const refreshBusinesses = useCallback(async () => {
     const response = await fetch("/api/local-ai/businesses", { cache: "no-store" });
@@ -2089,6 +2340,17 @@ export default function LocalAiChat() {
             });
             const paid = (await paidResponse.json()) as JobResult;
 
+            if (paidResponse.status === 402 && paid.fundingRequired) {
+              setStreamingText("");
+              setStatus("Ready");
+              window.localStorage.removeItem(ACTIVE_JOB_KEY);
+              if (paid.conversationId) {
+                await loadConversation(paid.conversationId);
+              }
+              await Promise.all([refreshConversations(), refreshBusinesses()]);
+              break;
+            }
+
             if (!paidResponse.ok) {
               throw new Error(
                 paid.detail ||
@@ -2177,9 +2439,51 @@ export default function LocalAiChat() {
 
     async function initialize() {
       try {
-        await Promise.all([refreshBusinesses(), refreshOwnedNodes()]);
+        await Promise.all([
+          refreshBusinesses(),
+          refreshOwnedNodes(),
+          refreshProfileSettings(),
+        ]);
         const threads = await refreshConversations();
         const onboarding = await refreshOnboarding();
+        const resumeFromQuery = new URLSearchParams(window.location.search).get(
+          "resumePaidJob",
+        );
+        const pendingPaidResume =
+          resumeFromQuery ||
+          window.localStorage.getItem(PENDING_PAID_RESUME_KEY);
+
+        if (pendingPaidResume) {
+          setStatus("Resuming funded high-quality AI…");
+          const paidResponse = await fetch("/api/local-ai/chat/paid-fallback", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobId: pendingPaidResume }),
+          });
+          const paid = (await paidResponse.json()) as JobResult;
+
+          if (paidResponse.ok && paid.status === "completed") {
+            window.localStorage.removeItem(PENDING_PAID_RESUME_KEY);
+            window.history.replaceState(null, "", window.location.pathname);
+            if (paid.conversationId) {
+              await loadConversation(paid.conversationId);
+            }
+            await Promise.all([refreshConversations(), refreshBusinesses()]);
+            setMeta(resultMeta(paid));
+            setStatus("Ready");
+            return;
+          }
+
+          if (paidResponse.status === 402) {
+            if (paid.conversationId) {
+              await loadConversation(paid.conversationId);
+            }
+            setStatus("Ready");
+          } else {
+            window.localStorage.removeItem(PENDING_PAID_RESUME_KEY);
+          }
+        }
+
         const savedJobId = window.localStorage.getItem(ACTIVE_JOB_KEY);
 
         if (savedJobId) {
@@ -2261,6 +2565,7 @@ export default function LocalAiChat() {
     refreshBusinesses,
     refreshConversations,
     refreshOwnedNodes,
+    refreshProfileSettings,
     startOrResumeOnboarding,
   ]);
 
@@ -2720,6 +3025,37 @@ export default function LocalAiChat() {
           </select>
         </div>
 
+        <label className="field">
+          <span>Web access</span>
+          <select
+            value={webAccessMode}
+            disabled={busy}
+            onChange={(event) => {
+              const mode = event.target.value as WebAccessMode;
+              setError("");
+              void updateWebAccessMode(mode).catch((err) => {
+                setError(
+                  err instanceof Error
+                    ? err.message
+                    : "Could not update Web access mode.",
+                );
+                void refreshProfileSettings();
+              });
+            }}
+          >
+            <option value="off">Off</option>
+            <option value="auto">Auto when current info is needed</option>
+            <option value="always">Always</option>
+          </select>
+          <small>
+            {webAccessMode === "off"
+              ? "No external web access."
+              : webAccessMode === "auto"
+                ? "Code decides when current external information is needed."
+                : "Eligible turns may use public web access; URL safety rules still apply."}
+          </small>
+        </label>
+
         {activeBusiness ? (
           <div className="local-ai-context-metrics">
             <span>
@@ -2971,6 +3307,33 @@ export default function LocalAiChat() {
                               await loadConversation(conversationId);
                               await refreshConversations();
                             }
+                          }}
+                        />
+                      </>
+                    );
+                  }
+
+                  const fundingRequired = fundingRequiredDirective(message.content);
+                  if (fundingRequired) {
+                    return (
+                      <>
+                        {fundingRequired.text ? <div>{fundingRequired.text}</div> : null}
+                        <FundingRequiredCard
+                          sourceJobId={fundingRequired.sourceJobId}
+                          estimatedCostUsd={fundingRequired.estimatedCostUsd}
+                          availableBalanceUsd={fundingRequired.availableBalanceUsd}
+                          topUpOptionId={fundingRequired.topUpOptionId}
+                          topUpUsd={fundingRequired.topUpUsd}
+                          onCompleted={async (targetConversationId) => {
+                            if (targetConversationId) {
+                              await loadConversation(targetConversationId);
+                            } else if (conversationId) {
+                              await loadConversation(conversationId);
+                            }
+                            await Promise.all([
+                              refreshConversations(),
+                              refreshBusinesses(),
+                            ]);
                           }}
                         />
                       </>

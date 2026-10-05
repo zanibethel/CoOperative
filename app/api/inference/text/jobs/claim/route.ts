@@ -38,6 +38,44 @@ export async function POST(request: Request) {
       return new Response(null, { status: 204 });
     }
 
+    const { data: ownership, error: ownershipError } = await supabase
+      .from("text_inference_jobs")
+      .select("client_owner_ref,personal_user_id")
+      .eq("id", job.id)
+      .maybeSingle();
+    if (ownershipError) throw ownershipError;
+
+    const ownerRef =
+      typeof ownership?.client_owner_ref === "string"
+        ? ownership.client_owner_ref
+        : "";
+    const ownerRefUserId =
+      ownerRef.startsWith("coop-user:")
+        ? ownerRef.slice("coop-user:".length)
+        : ownerRef.startsWith("personal-user:")
+          ? ownerRef.slice("personal-user:".length)
+          : null;
+    const profileUserId =
+      typeof ownership?.personal_user_id === "string"
+        ? ownership.personal_user_id
+        : ownerRefUserId;
+
+    let webAccessMode: "off" | "auto" | "always" = "off";
+    if (profileUserId) {
+      const { data: settings, error: settingsError } = await supabase
+        .from("personal_ai_settings")
+        .select("web_access_mode")
+        .eq("user_id", profileUserId)
+        .maybeSingle();
+      if (settingsError) throw settingsError;
+      if (
+        settings?.web_access_mode === "auto" ||
+        settings?.web_access_mode === "always"
+      ) {
+        webAccessMode = settings.web_access_mode;
+      }
+    }
+
     return NextResponse.json(
       {
         jobId: job.id,
@@ -52,6 +90,7 @@ export async function POST(request: Request) {
         targetNodeId: job.target_node_id || null,
         personalUse: Boolean(job.personal_use),
         personalConversationId: job.personal_conversation_id || null,
+        webAccessMode,
       },
       { headers: { "Cache-Control": "no-store" } },
     );

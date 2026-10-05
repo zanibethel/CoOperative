@@ -28,6 +28,9 @@ An installed node is an **added capability of the same CoOperative chat/profile*
 
 If the node is offline or lacks a required capability, the conversation remains the same and the router may use the next allowed route. Paid fallback remains impossible unless the profile has sufficient funded balance and the request policy permits the spend.
 
+
+Profile Web access is also shared with linked nodes. Off is the default. For Windows text jobs, Auto/Always can authorize the node's public web-search helper before local inference; only the search query/results leave the PC, while model inference stays local. Search queries containing credential-like material are blocked before external submission, and unsafe/private/executable result URLs are filtered.
+
 ## Alpha node protocol
 
 The first vertical slice reuses CoOperative's working asynchronous image queue.

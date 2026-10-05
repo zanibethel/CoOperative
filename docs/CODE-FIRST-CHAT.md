@@ -70,6 +70,9 @@ If only a paid qualified route can satisfy the unresolved portion:
 
 No balance means paid models are unavailable, not that CoOperative chat itself is unavailable. Deterministic code and qualified local/free capabilities should continue to work.
 
+
+**Implemented funding handoff:** when local/free text execution fails and a qualified paid executor exists, CoOperative now evaluates that paid route even when the profile balance is empty. It quotes the estimated request cost, calculates the exact balance shortfall, chooses the smallest configured Stripe top-up that covers it, and persists a resumable funding card in the conversation. No paid execution occurs until the balance is sufficient. After Stripe confirms funding, the original failed job can resume through the same bounded paid-fallback endpoint.
+
 ## Unified web/URL access policy
 
 Web settings should belong to the CoOperative profile and behave consistently across browser/mobile/node-assisted chat:
@@ -79,6 +82,11 @@ Web settings should belong to the CoOperative profile and behave consistently ac
 - **Always**: eligible turns may search automatically.
 
 A second code-enforced URL/domain permission layer controls what may be accessed. Known provider/OAuth domains use registered connectors; private/authenticated resources require authorization; elevated-risk/local-network/download URLs follow explicit policy rather than model discretion.
+
+
+**Implemented profile policy foundation:** `personal_ai_settings.web_access_mode` now stores Off / Auto / Always with Off as the default. Main chat, mobile Personal AI, and the authenticated Windows local chat read/write the same profile setting. A server URL classifier blocks unsafe schemes, local/private-network targets, credential-bearing URLs, executable/package downloads, and connector-managed auth/key URLs from ordinary browsing. The Windows web-search helper also filters unsafe result URLs and refuses to send credential-like prompts to an external search service.
+
+For profile-matched Windows text-node execution, the claim API supplies the current Web mode to the node. Auto searches only when deterministic current-info triggers match; Always permits eligible public search. Search results are provided as untrusted current context to the local model, so inference remains on the user's PC.
 
 ## Escalation contract
 

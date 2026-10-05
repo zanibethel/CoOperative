@@ -16,11 +16,13 @@ import {
   textTaskClassSchema,
 } from "@/lib/inference/contracts";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
+import { paidFundingRequirement } from "@/lib/runtime/profile-execution-router";
 import { paidHandoffMessages, persistResponseSupport } from "@/lib/ai/response-support";
 import { refreshRuntimeContextAfterOutcome } from "@/lib/ai/runtime-context-markdown";
 import {
   aiProfileBalanceForUser,
   cooperativeProfileRef,
+  microusdToUsd,
   releaseAiProfileFunds,
   reserveAiProfileFunds,
   settleAiProfileFunds,
@@ -135,31 +137,12 @@ export async function POST(request: Request) {
     );
 
     const profileBalance = await aiProfileBalanceForUser(userId);
-    if (!profileBalance.funded) {
-      return NextResponse.json(
-        {
-          error:
-            "A funded profile AI balance is required before high-quality paid AI can be used.",
-          profileBalance: {
-            availableMicrousd: profileBalance.availableMicrousd,
-            availableUsd: profileBalance.availableUsd,
-            funded: false,
-          },
-        },
-        { status: 409 },
-      );
-    }
 
     const requestSpendCapUsd =
       typeof sourceJob.request_max_spend_microusd === "number"
         ? sourceJob.request_max_spend_microusd / 1_000_000
         : null;
-    const effectivePaidBudgetUsd =
-      requestSpendCapUsd === null
-        ? profileBalance.availableUsd
-        : Math.min(profileBalance.availableUsd, requestSpendCapUsd);
-
-    if (effectivePaidBudgetUsd <= 0) {
+    if (requestSpendCapUsd !== null && requestSpendCapUsd <= 0) {
       return NextResponse.json(
         {
           error: "This request's Model Mixer spend cap does not allow paid AI usage.",
@@ -168,6 +151,11 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
+
+    const effectivePaidBudgetUsd =
+      requestSpendCapUsd === null
+        ? Math.max(profileBalance.availableUsd, 100)
+        : requestSpendCapUsd;
 
     const evidence: EscalationEvidence = {
       taskClass: parsedTaskClass.data,
@@ -193,15 +181,11 @@ export async function POST(request: Request) {
       candidate ? [candidate] : [],
     );
 
-    if (
-      decision.action !== "escalate" ||
-      !decision.candidate ||
-      decision.candidate.provider !== "openai"
-    ) {
+    if (!decision.candidate || decision.candidate.provider !== "openai") {
       return NextResponse.json(
         {
           error:
-            "No configured funded high-quality executor currently satisfies this failed local request.",
+            "No configured high-quality executor currently satisfies this failed local request.",
           decision,
         },
         { status: 409, headers: { "Cache-Control": "no-store" } },
@@ -233,8 +217,106 @@ export async function POST(request: Request) {
           error: "The selected paid model would exceed this request's Model Mixer spend cap.",
           requestSpendCapUsd,
           estimatedCostUsd,
+          suggestedMinimumCapUsd: estimatedCostUsd,
         },
         { status: 409 },
+      );
+    }
+
+    const fundingRequirement = paidFundingRequirement({
+      estimatedCostUsd,
+      availableBalanceUsd: profileBalance.availableUsd,
+      maxSpendUsd: requestSpendCapUsd,
+    });
+
+    if (!fundingRequirement.sufficientBalance) {
+      const { data: topUpOptions, error: topUpOptionsError } = await admin
+        .from("ai_balance_topup_options")
+        .select("id,label,amount_microusd,currency")
+        .eq("active", true)
+        .eq("livemode", true)
+        .order("amount_microusd", { ascending: true });
+      if (topUpOptionsError) throw topUpOptionsError;
+
+      const options = (topUpOptions || []).map((option) => ({
+        id: String(option.id),
+        label: String(option.label || "Add balance"),
+        amountMicrousd: Number(option.amount_microusd || 0),
+        amountUsd: microusdToUsd(Number(option.amount_microusd || 0)),
+        currency: String(option.currency || "usd"),
+      }));
+      const minimumCoveringOption =
+        options.find(
+          (option) =>
+            option.amountUsd + profileBalance.availableUsd >= estimatedCostUsd,
+        ) ||
+        options[options.length - 1] ||
+        null;
+
+      const directive = [
+        `AI_FUNDING_REQUIRED:${sourceJob.id}`,
+        `ESTIMATED_USD:${estimatedCostUsd.toFixed(6)}`,
+        `AVAILABLE_USD:${profileBalance.availableUsd.toFixed(6)}`,
+        `SHORTFALL_USD:${fundingRequirement.shortfallUsd.toFixed(6)}`,
+        minimumCoveringOption
+          ? `TOPUP_OPTION:${minimumCoveringOption.id}`
+          : "TOPUP_OPTION:none",
+        minimumCoveringOption
+          ? `TOPUP_USD:${minimumCoveringOption.amountUsd.toFixed(6)}`
+          : "TOPUP_USD:0",
+      ].join("\n");
+
+      const assistantText = [
+        `The free/local routes could not complete this request. A qualified paid model is available and is estimated to cost about ${estimatedCostUsd.toFixed(4)}.`,
+        `Your available CoOperative AI balance is ${profileBalance.availableUsd.toFixed(4)}, so you need at least ${fundingRequirement.shortfallUsd.toFixed(4)} more before I can use it.`,
+        minimumCoveringOption
+          ? `The smallest configured Stripe top-up that covers this request is ${minimumCoveringOption.amountUsd.toFixed(2)}.`
+          : "No Stripe balance top-up option is currently configured.",
+        "I did not spend anything.",
+        "",
+        directive,
+      ].join("\n");
+
+      await admin.from("local_ai_messages").upsert(
+        {
+          conversation_id: sourceJob.conversation_id,
+          owner_ref: ownerRef,
+          role: "assistant",
+          content: assistantText,
+          job_id: sourceJob.id,
+        },
+        { onConflict: "job_id,role" },
+      );
+
+      return NextResponse.json(
+        {
+          status: "funding-required",
+          execution: "code",
+          conversationId: sourceJob.conversation_id,
+          sourceJobId: sourceJob.id,
+          error: "Additional funded AI balance is required for this paid route.",
+          fundingRequired: {
+            estimatedCostUsd,
+            availableBalanceUsd: profileBalance.availableUsd,
+            shortfallUsd: fundingRequirement.shortfallUsd,
+            minimumRequiredBalanceUsd:
+              fundingRequirement.minimumRequiredBalanceUsd,
+            topUpOption: minimumCoveringOption,
+          },
+          decision,
+        },
+        { status: 402, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    if (decision.action !== "escalate") {
+      return NextResponse.json(
+        {
+          error:
+            "The stronger model is qualified, but current request policy does not authorize this paid execution.",
+          decision,
+        },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
       );
     }
 
@@ -346,12 +428,26 @@ export async function POST(request: Request) {
         });
       }
 
+      const latestBalance = await aiProfileBalanceForUser(userId);
+      const raceFunding = paidFundingRequirement({
+        estimatedCostUsd,
+        availableBalanceUsd: latestBalance.availableUsd,
+        maxSpendUsd: requestSpendCapUsd,
+      });
       return NextResponse.json(
         {
           error:
-            "The profile AI balance no longer has enough available funds for this high-quality request.",
+            "The profile AI balance changed before funds could be reserved.",
+          status: "funding-required",
+          sourceJobId: sourceJob.id,
+          fundingRequired: {
+            estimatedCostUsd,
+            availableBalanceUsd: latestBalance.availableUsd,
+            shortfallUsd: raceFunding.shortfallUsd,
+            minimumRequiredBalanceUsd: raceFunding.minimumRequiredBalanceUsd,
+          },
         },
-        { status: 409 },
+        { status: 402 },
       );
     }
 

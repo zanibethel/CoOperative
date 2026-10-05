@@ -100,6 +100,7 @@ import {
   queueConnectorBuild,
 } from "@/lib/runtime/service-connector-build";
 import { startRecoveryForJob } from "@/lib/recovery/server";
+import { parseWebAccessModeCommand } from "@/lib/runtime/web-access-policy";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -708,6 +709,96 @@ export async function POST(request: Request) {
           { status: 200, headers: { "Cache-Control": "no-store" } },
         );
       }
+    }
+
+    const webAccessCommand = parseWebAccessModeCommand(input.message);
+    if (input.attachmentIds.length === 0 && webAccessCommand) {
+      let mode: "off" | "auto" | "always";
+
+      if (webAccessCommand.action === "set") {
+        mode = webAccessCommand.mode;
+        const { error: webSettingError } = await admin
+          .from("personal_ai_settings")
+          .upsert(
+            {
+              user_id: owner.userId,
+              web_access_mode: mode,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id" },
+          );
+        if (webSettingError) throw webSettingError;
+      } else {
+        const { data: setting, error: webSettingError } = await admin
+          .from("personal_ai_settings")
+          .select("web_access_mode")
+          .eq("user_id", owner.userId)
+          .maybeSingle();
+        if (webSettingError) throw webSettingError;
+        mode =
+          setting?.web_access_mode === "auto" ||
+          setting?.web_access_mode === "always"
+            ? setting.web_access_mode
+            : "off";
+      }
+
+      const label =
+        mode === "off" ? "Off" : mode === "auto" ? "Auto" : "Always";
+      const explanation =
+        mode === "off"
+          ? "External web access is disabled."
+          : mode === "auto"
+            ? "CoOperative may use public web access only when deterministic routing identifies a need for current external information."
+            : "CoOperative may use eligible public web access on chat turns, subject to URL/domain safety policy.";
+
+      const assistantText =
+        webAccessCommand.action === "set"
+          ? `Web access is now ${label}. ${explanation}`
+          : `Your current Web access mode is ${label}. ${explanation}`;
+
+      await admin.from("local_ai_messages").insert([
+        {
+          conversation_id: conversationId,
+          owner_ref: ownerRef,
+          role: "user",
+          content: input.message.trim(),
+          attachment_ids: [],
+          job_id: null,
+        },
+        {
+          conversation_id: conversationId,
+          owner_ref: ownerRef,
+          role: "assistant",
+          content: assistantText,
+          attachment_ids: [],
+          job_id: null,
+        },
+      ]);
+
+      await admin
+        .from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "research.web",
+          conversationId,
+          conversationTitle,
+          text: assistantText,
+          provider: "code",
+          model: "profile-web-access-policy",
+          webAccessMode: mode,
+          routeReason:
+            webAccessCommand.action === "set"
+              ? "CoOperative updated the profile web-access mode deterministically before any model route."
+              : "CoOperative read the profile web-access mode deterministically before any model route.",
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
     }
 
     const requestedMaxSpendPerPrompt = maxSpendPerPromptCommand(input.message);
@@ -3533,7 +3624,8 @@ export async function POST(request: Request) {
         ` Code-first preflight: ${codeFirstDecision.routeReason}`,
       allow_paid_fallback:
         requestedCapability === "text" &&
-        (profileExecutionPlan?.paidEligible ?? false),
+        input.nodeRouting !== "require-node" &&
+        (requestMaxSpendMicrousd === null || requestMaxSpendMicrousd > 0),
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
