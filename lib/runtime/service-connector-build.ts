@@ -51,7 +51,7 @@ export async function queueConnectorBuild(input: {
     .eq("agent_key", "repo-engineer")
     .eq("mode", "prepare_change")
     .eq("objective", objective)
-    .in("status", ["queued", "claimed", "running", "needs_approval", "completed"])
+    .in("status", ["queued", "claimed", "running", "waiting_llm", "needs_approval", "completed"])
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
