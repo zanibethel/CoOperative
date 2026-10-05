@@ -33,7 +33,7 @@ import {
   resolveBusinessScope,
   resumeOnboarding,
 } from "@/lib/ai/user-profile-onboarding";
-import { activeNodeIds } from "@/lib/unison/node-access";
+import { resolveProfileExecutionPlan } from "@/lib/runtime/profile-execution-router";
 import {
   pollHermesMediaTask,
   startHermesMediaTask,
@@ -3350,77 +3350,51 @@ export async function POST(request: Request) {
     let preferredNodeId: string | null = null;
     let targetNodeId: string | null = null;
     let nodeRouteNote = "";
+    let profileExecutionPlan:
+      | Awaited<ReturnType<typeof resolveProfileExecutionPlan>>
+      | null = null;
 
-    if (input.nodeRouting !== "default") {
-      if (requestedCapability !== "text") {
-        if (input.nodeRouting === "require-node") {
-          return NextResponse.json(
-            { error: "The selected Unison node route does not support image-understanding chat yet." },
-            { status: 409 },
-          );
-        }
-      } else {
-        const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
-        const { data: ownedNodes, error: nodesError } =
-          authorizedNodeIds.length > 0
-            ? await admin
-                .from("unison_nodes")
-                .select("id,display_name,state,capabilities,policy,last_seen_at")
-                .in("id", authorizedNodeIds)
-                .order("last_seen_at", { ascending: false })
-            : { data: [], error: null };
+    if (requestedCapability !== "text" && input.nodeRouting === "require-node") {
+      return NextResponse.json(
+        {
+          error:
+            "The selected Unison node route does not support image-understanding chat yet.",
+        },
+        { status: 409 },
+      );
+    }
 
-        if (nodesError) throw nodesError;
-
-        const freshAfter = Date.now() - 90_000;
-        const textNodes = (ownedNodes || []).filter((node) => {
-          const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
-          const policy =
-            node.policy && typeof node.policy === "object"
-              ? (node.policy as { allowText?: unknown })
-              : {};
-          const seenAt = Date.parse(node.last_seen_at || "");
-          return (
-            capabilities.includes("text_generation") &&
-            policy.allowText !== false &&
-            Number.isFinite(seenAt) &&
-            seenAt >= freshAfter &&
-            node.state !== "paused"
-          );
-        });
-
-        if (input.nodeRouting === "require-node") {
-          if (!input.requiredNodeId) {
-            return NextResponse.json(
-              { error: "Choose an authorized Unison node to require." },
-              { status: 400 },
-            );
-          }
-
-          const selected = textNodes.find((node) => node.id === input.requiredNodeId);
-          if (!selected) {
-            return NextResponse.json(
-              { error: "That authorized Unison node is not currently available for text generation." },
-              { status: 409 },
-            );
-          }
-
-          targetNodeId = selected.id;
-          nodeRouteNote = ` Required authorized node ${selected.display_name || selected.id}.`;
-        } else {
-          const statePriority: Record<string, number> = { idle: 0, online: 1, busy: 2 };
-          const selected = [...textNodes].sort(
-            (a, b) => (statePriority[a.state] ?? 9) - (statePriority[b.state] ?? 9),
-          )[0];
-          if (selected) {
-            preferredNodeId = selected.id;
-            nodeRouteNote =
-              ` Preferred authorized node ${selected.display_name || selected.id} for the first 15 seconds.`;
-          } else {
-            nodeRouteNote = " No fresh owned text node was available, so normal local routing remains eligible.";
-          }
-        }
+    if (requestedCapability === "text") {
+      if (input.nodeRouting === "require-node" && !input.requiredNodeId) {
+        return NextResponse.json(
+          { error: "Choose an authorized Unison node to require." },
+          { status: 400 },
+        );
       }
+
+      profileExecutionPlan = await resolveProfileExecutionPlan({
+        admin,
+        userId: owner.userId,
+        capability: "text",
+        nodeRouting: input.nodeRouting,
+        requiredNodeId: input.requiredNodeId || null,
+        fundedBalanceUsd: profileBalance.availableUsd,
+        maxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
+      });
+
+      if (profileExecutionPlan.requiredNodeUnavailable) {
+        return NextResponse.json(
+          {
+            error:
+              "That authorized Unison node is not currently available for text generation.",
+          },
+          { status: 409 },
+        );
+      }
+
+      preferredNodeId = profileExecutionPlan.preferredNodeId;
+      targetNodeId = profileExecutionPlan.targetNodeId;
+      nodeRouteNote = ` ${profileExecutionPlan.routeReason}`;
     }
 
 
@@ -3535,8 +3509,7 @@ export async function POST(request: Request) {
         ` Code-first preflight: ${codeFirstDecision.routeReason}`,
       allow_paid_fallback:
         requestedCapability === "text" &&
-        input.nodeRouting !== "require-node" &&
-        profileBalance.funded,
+        (profileExecutionPlan?.paidEligible ?? false),
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
@@ -3590,8 +3563,7 @@ export async function POST(request: Request) {
         targetNodeId,
         paidAiEligible:
           requestedCapability === "text" &&
-          input.nodeRouting !== "require-node" &&
-          profileBalance.funded,
+          (profileExecutionPlan?.paidEligible ?? false),
         availableAiBalanceUsd: profileBalance.availableUsd,
         modelMixer: input.modelMixer || null,
         requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
