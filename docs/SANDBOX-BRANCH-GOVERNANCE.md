@@ -47,6 +47,34 @@ Repo Engineer is instructed to prefer a shared abstraction over a one-user worka
 
 Existing deterministic scope guards still limit write scope and reject broad or unsafe changes before files are written.
 
+
+## Allowed sandbox scopes
+
+Sandbox code changes are intentionally scoped.
+
+### General UI changes
+
+New UI/layout/navigation/interaction behavior must preserve the existing default experience for unrelated users.
+
+The default rule is:
+
+- new UI behavior is opt-in/toggleable;
+- the toggle defaults **off** unless the owner explicitly requests otherwise;
+- use an existing preference or feature-flag pattern when available;
+- do not silently replace the current global flow;
+- the plan must declare `UI_TOGGLE: <name>; DEFAULT: off; EXISTING_FLOW: preserved`;
+- the deterministic scope guard blocks a general UI sandbox plan that does not show toggle/preference implementation evidence.
+
+### User-invoked capabilities
+
+These are explicitly allowed sandbox scopes because they add a capability only when the user chooses to use it:
+
+- new OAuth/API/provider connection flows;
+- reconnect/status/authorization surfaces for third-party services;
+- report viewing, branch-review reports, analytics views, and audit/report readers.
+
+These capabilities do not require an additional feature toggle merely to exist, but they must remain user-invoked and must not silently redirect or replace unrelated users' existing flow.
+
 ## Reusing other sandbox work
 
 Before inventing another implementation, Repo Engineer receives a bounded list of successful unmerged sandbox candidates for the same repository.
