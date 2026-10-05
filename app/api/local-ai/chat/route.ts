@@ -5446,8 +5446,13 @@ export async function GET(request: Request) {
                 routeReason:
                   "The image provider refused this request class. CoOperative recorded the exact route as blocked for that scope and queued the next eligible direct image model within the remaining request budget.",
                 estimatedProviderCostUsd:
-                  fallback.estimatedProviderCostUsd,
-                quotedUserPriceUsd: fallback.quotedUserPriceUsd,
+                  fallback.kind === "queued"
+                    ? fallback.estimatedProviderCostUsd
+                    : null,
+                quotedUserPriceUsd:
+                  fallback.kind === "queued"
+                    ? fallback.quotedUserPriceUsd
+                    : null,
               },
               { headers: { "Cache-Control": "no-store" } },
             );
