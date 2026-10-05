@@ -46,8 +46,20 @@ def headers():
         value["X-Cooperative-Node-Id"] = NODE_ID
     return value
 
-def run(args, cwd, timeout=90, check=True):
-    result = subprocess.run(args, cwd=str(cwd), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, check=False)
+def run(args, cwd, timeout=90, check=True, env=None):
+    process_env = os.environ.copy()
+    if env:
+        process_env.update(env)
+    result = subprocess.run(
+        args,
+        cwd=str(cwd),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=timeout,
+        check=False,
+        env=process_env,
+    )
     if check and result.returncode != 0:
         command = " ".join(shlex.quote(arg) for arg in args)
         raise AgentError(f"Command failed ({result.returncode}): {command}\n{result.stdout[-5000:]}")
@@ -140,7 +152,35 @@ def safe_path(repo, relative, write=False, memory_only=False, memory_files=None)
     return resolved
 
 def update_remote(repo, branch):
-    run(["git","fetch","origin",branch], repo, timeout=180)
+    remote_ref = f"refs/remotes/origin/{branch}"
+    existing_remote = run(
+        ["git", "show-ref", "--verify", "--quiet", remote_ref],
+        repo,
+        timeout=20,
+        check=False,
+    ).returncode == 0
+
+    try:
+        run(
+            ["git", "-c", "credential.interactive=never", "fetch", "--no-tags", "origin", branch],
+            repo,
+            timeout=45,
+            env={
+                "GIT_TERMINAL_PROMPT": "0",
+                "GCM_INTERACTIVE": "Never",
+            },
+        )
+        return
+    except (AgentError, subprocess.TimeoutExpired) as exc:
+        if existing_remote:
+            print(
+                f"Git fetch for {branch} was unavailable; using the existing origin/{branch} snapshot. "
+                f"Reason: {str(exc)[:500]}"
+            )
+            return
+        raise AgentError(
+            f"Could not refresh origin/{branch}, and no existing remote snapshot is available: {str(exc)[:800]}"
+        )
 
 def _valid_sandbox_branch(branch):
     return (
@@ -830,6 +870,11 @@ def handle_task(task):
     progress(task_id, f"Approved repo resolved at {source}.", metadata={"githubRepo":repository["githubRepo"]})
     target, branch = source, None
     if mode in {"prepare_change","update_memory"}:
+        progress(
+            task_id,
+            "Preparing an isolated sandbox checkout. Remote sync is bounded and will reuse the last known origin snapshot if GitHub is temporarily unavailable.",
+            metadata={"phase":"sandbox_setup"},
+        )
         target, branch = create_worktree(
             source,
             repository,
