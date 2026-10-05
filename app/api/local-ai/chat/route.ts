@@ -2962,18 +2962,19 @@ export async function POST(request: Request) {
               "openrouter-api",
             )
           : null;
+      const userOwnedOpenRouterCredential =
+        openRouterService?.credential?.trim() || undefined;
       const cooperativeOpenRouterCredential =
         process.env.OPENROUTER_API_KEY?.trim() || undefined;
       const cooperativeFundedPaidRoute =
         selectedProvider === "openrouter" &&
         !selectedFree &&
+        !userOwnedOpenRouterCredential &&
         Boolean(cooperativeOpenRouterCredential);
       const providerCredential =
-        cooperativeFundedPaidRoute
-          ? cooperativeOpenRouterCredential
-          : openRouterService?.credential ||
-            cooperativeOpenRouterCredential ||
-            undefined;
+        userOwnedOpenRouterCredential ||
+        cooperativeOpenRouterCredential ||
+        undefined;
 
       if (
         selectedProvider === "openrouter" &&
@@ -5516,8 +5517,7 @@ export async function GET(request: Request) {
             const affordable =
               backupModel &&
               backupEstimate !== null &&
-              backupUserQuoteUsd !== null &&
-              backupUserQuoteUsd <= remainingCapUsd;
+              backupEstimate <= remainingCapUsd;
 
             if (affordable && backupModel) {
               const openRouterService =
@@ -5525,15 +5525,30 @@ export async function GET(request: Request) {
                   ownerRef,
                   "openrouter-api",
                 );
+              const userOwnedOpenRouterCredential =
+                openRouterService?.credential?.trim() || undefined;
               const cooperativeOpenRouterCredential =
                 process.env.OPENROUTER_API_KEY?.trim() || undefined;
-              const openRouterCredential = freeRoute
-                ? openRouterService?.credential ||
-                  cooperativeOpenRouterCredential ||
-                  undefined
-                : cooperativeOpenRouterCredential;
+              const usingOpenRouterByok = Boolean(userOwnedOpenRouterCredential);
+              const openRouterCredential =
+                userOwnedOpenRouterCredential ||
+                cooperativeOpenRouterCredential ||
+                undefined;
+              const effectiveBackupUserQuoteUsd = freeRoute
+                ? 0
+                : usingOpenRouterByok
+                  ? 0
+                  : Number(backupUserQuoteUsd || 0);
+              const effectiveBackupCapCostUsd = freeRoute
+                ? 0
+                : usingOpenRouterByok
+                  ? backupEstimate
+                  : Number(backupUserQuoteUsd || 0);
 
-              if (openRouterCredential) {
+              if (
+                openRouterCredential &&
+                effectiveBackupCapCostUsd <= remainingCapUsd
+              ) {
                 if (!freeRoute) {
                   const spendStatus =
                     await openRouterKeySpendStatus(openRouterCredential);
@@ -5629,26 +5644,29 @@ export async function GET(request: Request) {
                     estimated_provider_cost_microusd: Math.round(
                       backupEstimate * 1_000_000,
                     ),
-                    estimated_user_charge_microusd: freeRoute
-                      ? 0
-                      : Math.round(
-                          Number(backupUserQuoteUsd || 0) * 1_000_000,
-                        ),
+                    estimated_user_charge_microusd: Math.round(
+                      effectiveBackupUserQuoteUsd * 1_000_000,
+                    ),
                     estimated_infrastructure_cost_microusd: null,
-                    estimated_margin_microusd: freeRoute
-                      ? null
-                      : Math.round(
-                          Math.max(
-                            0,
-                            Number(backupUserQuoteUsd || 0) - backupEstimate,
-                          ) * 1_000_000,
-                        ),
+                    estimated_margin_microusd:
+                      freeRoute || usingOpenRouterByok
+                        ? null
+                        : Math.round(
+                            Math.max(
+                              0,
+                              effectiveBackupUserQuoteUsd - backupEstimate,
+                            ) * 1_000_000,
+                          ),
                     billing_mode: freeRoute
                       ? null
-                      : "cooperative-balance",
+                      : usingOpenRouterByok
+                        ? "openrouter-byok"
+                        : "cooperative-balance",
                     provider_cost_bearer: freeRoute
                       ? "free"
-                      : "cooperative",
+                      : usingOpenRouterByok
+                        ? "user-connected"
+                        : "cooperative",
                     pricing_dimensions: {
                       durationSeconds,
                       aspectRatio,
@@ -5663,11 +5681,17 @@ export async function GET(request: Request) {
                       referenceAttachmentIds: mustPreserveReference
                         ? referenceAttachmentIds
                         : [],
-                      quotedUserPriceUsd: freeRoute
-                        ? 0
-                        : backupUserQuoteUsd,
+                      quotedUserPriceUsd: effectiveBackupUserQuoteUsd,
                       providerCostEstimateUsd: backupEstimate,
-                      markupPercent: backupSellQuote?.markupPercent || 0,
+                      markupPercent:
+                        freeRoute || usingOpenRouterByok
+                          ? 0
+                          : backupSellQuote?.markupPercent || 0,
+                      openRouterBillingSource: freeRoute
+                        ? "free"
+                        : usingOpenRouterByok
+                          ? "user-connected-byok"
+                          : "cooperative-balance",
                     },
                     pricing_source: catalog.source,
                     fallback_from_job_id: mediaJob.id,
@@ -5675,7 +5699,7 @@ export async function GET(request: Request) {
                 if (backupInsertError) throw backupInsertError;
 
                 let backupReservationId: string | null = null;
-                if (!freeRoute) {
+                if (!freeRoute && !usingOpenRouterByok) {
                   const quote = await fundingQuoteForUser({
                     userId: owner.userId,
                     estimatedCostUsd: Number(backupUserQuoteUsd || 0),
