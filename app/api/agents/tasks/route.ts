@@ -13,6 +13,7 @@ const createTaskSchema = z.object({
   mode: z.enum(["inspect","prepare_change","update_memory","verify"]),
   objective: z.string().min(1).max(12000),
   profile: z.enum(["fast","quality"]).optional(),
+  continueTaskId: z.string().uuid().optional(),
 });
 
 export async function POST(request: Request) {
@@ -35,6 +36,47 @@ export async function POST(request: Request) {
     const admin = createAdminSupabaseClient();
     const taskId = crypto.randomUUID();
 
+    let sandboxResult: Record<string, unknown> | null = null;
+    if (input.continueTaskId) {
+      const { data: priorTask, error: priorTaskError } = await admin
+        .from("agent_tasks")
+        .select("id,repo_key,branch_name,status")
+        .eq("id", input.continueTaskId)
+        .eq("owner_ref", ownerRef)
+        .maybeSingle();
+      if (priorTaskError) throw priorTaskError;
+      if (!priorTask) {
+        return NextResponse.json(
+          { error: "Sandbox task to continue was not found." },
+          { status: 404 },
+        );
+      }
+      if (priorTask.repo_key !== input.repoKey) {
+        return NextResponse.json(
+          { error: "A sandbox branch can only continue in the same repository." },
+          { status: 409 },
+        );
+      }
+      if (
+        typeof priorTask.branch_name !== "string" ||
+        !priorTask.branch_name.startsWith("sandbox/")
+      ) {
+        return NextResponse.json(
+          { error: "That task does not have a reusable sandbox branch." },
+          { status: 409 },
+        );
+      }
+
+      sandboxResult = {
+        sandbox: {
+          continuationOfTaskId: priorTask.id,
+          baseBranch: priorTask.branch_name,
+          mergeAllowed: false,
+          promotionState: "testing",
+        },
+      };
+    }
+
     const { error } = await admin.from("agent_tasks").insert({
       id: taskId,
       owner_ref: ownerRef,
@@ -44,6 +86,7 @@ export async function POST(request: Request) {
       objective: input.objective.trim(),
       requested_profile: requestedProfile,
       status: "queued",
+      result: sandboxResult,
     });
     if (error) throw error;
 
@@ -57,11 +100,29 @@ export async function POST(request: Request) {
         githubRepo: repo.githubRepo,
         mode: input.mode,
         profile: requestedProfile,
+        continueTaskId: input.continueTaskId || null,
+        sandboxBaseBranch:
+          sandboxResult &&
+          typeof sandboxResult.sandbox === "object" &&
+          sandboxResult.sandbox
+            ? (sandboxResult.sandbox as { baseBranch?: string }).baseBranch || null
+            : null,
       },
     });
 
     return NextResponse.json(
-      { taskId, status: "queued", agent, repository: repo },
+      {
+        taskId,
+        status: "queued",
+        agent,
+        repository: repo,
+        sandboxBaseBranch:
+          sandboxResult &&
+          typeof sandboxResult.sandbox === "object" &&
+          sandboxResult.sandbox
+            ? (sandboxResult.sandbox as { baseBranch?: string }).baseBranch || null
+            : null,
+      },
       { status: 202, headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

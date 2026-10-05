@@ -188,6 +188,55 @@ function asksMaxSpendPerPrompt(message: string) {
   );
 }
 
+function explicitSandboxCodeChangeIntent(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  const action =
+    /\b(?:fix|patch|change|update|implement|add|remove|refactor|modify|repair)\b/.test(
+      value,
+    );
+  const platformTarget =
+    /\b(?:cooperative|co-operative|code ?base|repo(?:sitory)?|platform|this app|the app|local ai|chat ui|dashboard|api route|source code)\b/.test(
+      value,
+    );
+  const informational =
+    /\b(?:explain|teach|example|sample|what is|how does)\b/.test(value) &&
+    !/\b(?:fix|implement|patch|change|update)\b/.test(value);
+
+  return action && platformTarget && !informational;
+}
+
+function sandboxContinuationIntent(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\b(?:that|this|the) (?:branch|fix|change) (?:didn'?t|did not|doesn'?t|does not) work\b/.test(
+      value,
+    ) ||
+    /\b(?:still broken|still not working|update the branch|fix the branch|revise the branch|try the branch again)\b/.test(
+      value,
+    )
+  );
+}
+
+function sandboxTaskIdFromAssistant(content: string) {
+  return (
+    content.match(
+      /SANDBOX_CODE_TASK:([0-9a-f]{8}-[0-9a-f-]{27,})/i,
+    )?.[1] || null
+  );
+}
+
+function asksForSandboxBranchReport(message: string) {
+  const value = message.toLowerCase().replace(/\s+/g, " ").trim();
+  return (
+    /\b(?:sandbox|code) branches?\b/.test(value) &&
+    /\b(?:review|report|pending|waiting|status|show|list)\b/.test(value)
+  ) || (
+    /\bwhat (?:code|changes?) (?:is|are) waiting for review\b/.test(value)
+  ) || (
+    /\bwhat branches? need review\b/.test(value)
+  );
+}
+
 function asksAboutRecentFailure(message: string) {
   const value = message.toLowerCase().replace(/\s+/g, " ").trim();
   return (
@@ -851,6 +900,287 @@ export async function POST(request: Request) {
               serviceConnectIntent.type === "available"
                 ? "available"
                 : "build-required",
+          },
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const recentSandboxTaskId = (recentAssistantRows || [])
+      .map((row) => sandboxTaskIdFromAssistant(row.content || ""))
+      .find((value): value is string => Boolean(value)) || null;
+    const continueSandbox =
+      input.attachmentIds.length === 0 &&
+      sandboxContinuationIntent(input.message) &&
+      recentSandboxTaskId;
+
+    if (
+      input.attachmentIds.length === 0 &&
+      (explicitSandboxCodeChangeIntent(input.message) || continueSandbox)
+    ) {
+      let sandboxBaseBranch: string | null = null;
+      let continuationOfTaskId: string | null = null;
+
+      if (continueSandbox && recentSandboxTaskId) {
+        const { data: priorTask, error: priorTaskError } = await admin
+          .from("agent_tasks")
+          .select("id,repo_key,branch_name")
+          .eq("id", recentSandboxTaskId)
+          .eq("owner_ref", ownerRef)
+          .maybeSingle();
+        if (priorTaskError) throw priorTaskError;
+        if (
+          priorTask?.repo_key === "cooperative" &&
+          typeof priorTask.branch_name === "string" &&
+          priorTask.branch_name.startsWith("sandbox/")
+        ) {
+          sandboxBaseBranch = priorTask.branch_name;
+          continuationOfTaskId = priorTask.id;
+        }
+      }
+
+      const taskId = crypto.randomUUID();
+      const objective = [
+        "Prepare the smallest safe, reusable CoOperative code change for this owner-chat request.",
+        "Use a sandbox branch for testing; never merge or deploy to the default branch.",
+        "Prefer a solution that generalizes to other users when the underlying issue is shared.",
+        sandboxBaseBranch
+          ? `Continue the existing sandbox branch ${sandboxBaseBranch} and preserve prior tested work unless evidence requires changing it.`
+          : "Review successful unmerged sandbox candidates before inventing a duplicate implementation.",
+        "",
+        "OWNER CHAT REQUEST:",
+        input.message.trim(),
+      ].join("\n");
+
+      const { error: sandboxTaskError } = await admin
+        .from("agent_tasks")
+        .insert({
+          id: taskId,
+          owner_ref: ownerRef,
+          agent_key: "repo-engineer",
+          repo_key: "cooperative",
+          mode: "prepare_change",
+          objective,
+          requested_profile: "quality",
+          status: "queued",
+          result: {
+            kind: "owner_chat_sandbox_change",
+            sandbox: {
+              baseBranch: sandboxBaseBranch,
+              continuationOfTaskId,
+              requestedFrom: "owner-chat",
+              promotionState: "queued",
+              mergeAllowed: false,
+              ownerReviewRequired: true,
+              reviewCadenceDays: 7,
+            },
+          },
+        });
+      if (sandboxTaskError) throw sandboxTaskError;
+
+      await admin.from("agent_task_events").insert({
+        task_id: taskId,
+        owner_ref: ownerRef,
+        kind: "queued",
+        message: sandboxBaseBranch
+          ? "Owner chat queued a revision on an existing sandbox branch."
+          : "Owner chat queued a new sandbox code change.",
+        metadata: {
+          source: "owner-chat",
+          profile: "quality",
+          sandboxBaseBranch,
+          continuationOfTaskId,
+          mergeAllowed: false,
+        },
+      });
+
+      const assistantText = [
+        sandboxBaseBranch
+          ? `I queued a Quality Repo Engineer revision on the existing sandbox branch ${sandboxBaseBranch}.`
+          : "I queued this as a Quality Repo Engineer sandbox change.",
+        "It will make the smallest reusable change it can, run deterministic checks, and push only the sandbox branch for testing. Main stays untouched.",
+        "If the Quality coding path cannot produce a verified safe change, I’ll record a stronger-model recommendation rather than silently spending on a paid model.",
+        "",
+        `SANDBOX_CODE_TASK:${taskId}`,
+      ].join("\n");
+
+      const { error: sandboxMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: assistantText,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (sandboxMessageError) throw sandboxMessageError;
+
+      await admin
+        .from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "project.change",
+          conversationId,
+          conversationTitle,
+          text: assistantText,
+          provider: "code",
+          model: "sandbox-code-task-router",
+          routeReason:
+            "CoOperative mapped an explicit platform code-change request to the governed sandbox branch workflow without using general chat AI.",
+          aiNeeded: true,
+          aiPurpose: "bounded-code-generation",
+          sandboxTaskId: taskId,
+          sandboxBaseBranch,
+          mergeAllowed: false,
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    if (
+      input.attachmentIds.length === 0 &&
+      asksForSandboxBranchReport(input.message)
+    ) {
+      const { data: branchRows, error: branchError } = await admin
+        .from("agent_tasks")
+        .select("id,branch_name,status,objective,result,updated_at")
+        .eq("repo_key", "cooperative")
+        .eq("mode", "prepare_change")
+        .not("branch_name", "is", null)
+        .order("updated_at", { ascending: false })
+        .limit(100);
+      if (branchError) throw branchError;
+
+      const branches = (branchRows || [])
+        .filter(
+          (row) =>
+            typeof row.branch_name === "string" &&
+            row.branch_name.startsWith("sandbox/"),
+        )
+        .map((row) => {
+          const result =
+            row.result && typeof row.result === "object"
+              ? (row.result as Record<string, unknown>)
+              : {};
+          const sandbox =
+            result.sandbox && typeof result.sandbox === "object"
+              ? (result.sandbox as Record<string, unknown>)
+              : {};
+          return {
+            taskId: row.id,
+            branchName: row.branch_name as string,
+            status: row.status,
+            summary:
+              typeof result.summary === "string"
+                ? result.summary.slice(0, 500)
+                : typeof row.objective === "string"
+                  ? row.objective.slice(0, 500)
+                  : "Prepared code change",
+            checksPassed: result.checksPassed === true,
+            pushed: sandbox.pushed === true,
+            promotionState:
+              typeof sandbox.promotionState === "string"
+                ? sandbox.promotionState
+                : "testing",
+            changedFiles: Array.isArray(result.changedFiles)
+              ? result.changedFiles.filter(
+                  (value): value is string => typeof value === "string",
+                )
+              : [],
+          };
+        });
+
+      const pending = branches.filter(
+        (branch) =>
+          branch.promotionState !== "approved-for-merge" &&
+          branch.promotionState !== "rejected",
+      );
+      const successful = pending.filter(
+        (branch) => branch.checksPassed && branch.pushed,
+      );
+      const lines = pending.slice(0, 10).map((branch, index) => {
+        const state = branch.checksPassed
+          ? branch.pushed
+            ? "tests/checks passed; pushed for testing"
+            : "checks passed; push unavailable"
+          : "still testing or checks incomplete";
+        const files = branch.changedFiles.length
+          ? ` Files: ${branch.changedFiles.slice(0, 4).join(", ")}${branch.changedFiles.length > 4 ? "…" : ""}`
+          : "";
+        return `${index + 1}. ${branch.branchName} — ${state}. ${branch.summary}${files}`;
+      });
+
+      const assistantText = [
+        `Sandbox branch review: ${pending.length} branch${pending.length === 1 ? "" : "es"} currently need review; ${successful.length} have passed recorded checks and were pushed for testing.`,
+        "",
+        ...(lines.length
+          ? lines
+          : ["There are no sandbox branches currently waiting for owner review."]),
+        "",
+        "Passing checks does not permit an automatic merge. A branch must be explicitly reviewed and marked approved-for-merge first; the actual merge remains a separate owner action.",
+      ].join("\n");
+
+      const { error: branchMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: assistantText,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (branchMessageError) throw branchMessageError;
+
+      await admin
+        .from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "project.change",
+          conversationId,
+          conversationTitle,
+          text: assistantText,
+          provider: "code",
+          model: "owner-sandbox-branch-report",
+          routeReason:
+            "CoOperative read persisted sandbox branch/test state directly and produced the owner review report without invoking AI.",
+          branchReview: {
+            pending: pending.length,
+            successfulTested: successful.length,
+            branches: pending.slice(0, 25),
           },
         },
         { status: 200, headers: { "Cache-Control": "no-store" } },

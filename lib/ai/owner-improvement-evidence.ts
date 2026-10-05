@@ -41,6 +41,7 @@ export async function collectOwnerImprovementEvidence(userId: string) {
     { data: textJobs, error: textError },
     { data: agentTasks, error: agentError },
     { data: agentEvents, error: eventError },
+    { data: platformBranchTasks, error: platformBranchError },
     { data: conversations, error: conversationError },
     { data: messages, error: messageError },
     { data: nodes, error: nodeError },
@@ -56,7 +57,7 @@ export async function collectOwnerImprovementEvidence(userId: string) {
       .limit(500),
     admin
       .from("agent_tasks")
-      .select("agent_key,repo_key,mode,status,requested_profile,worker_id,created_at,completed_at")
+      .select("id,agent_key,repo_key,mode,status,requested_profile,worker_id,branch_name,objective,result,error,created_at,updated_at,completed_at")
       .eq("owner_ref", ownerRef)
       .order("created_at", { ascending: false })
       .limit(250),
@@ -66,6 +67,14 @@ export async function collectOwnerImprovementEvidence(userId: string) {
       .eq("owner_ref", ownerRef)
       .order("created_at", { ascending: false })
       .limit(1000),
+    admin
+      .from("agent_tasks")
+      .select("id,repo_key,mode,status,branch_name,objective,result,error,created_at,updated_at,completed_at")
+      .eq("repo_key", "cooperative")
+      .eq("mode", "prepare_change")
+      .not("branch_name", "is", null)
+      .order("updated_at", { ascending: false })
+      .limit(500),
     admin
       .from("local_ai_conversations")
       .select("id,created_at,updated_at")
@@ -91,6 +100,7 @@ export async function collectOwnerImprovementEvidence(userId: string) {
     textError ||
     agentError ||
     eventError ||
+    platformBranchError ||
     conversationError ||
     messageError ||
     nodeError ||
@@ -138,6 +148,77 @@ export async function collectOwnerImprovementEvidence(userId: string) {
   const usageRows = usage || [];
   const completedUsage = usageRows.filter((entry) => entry.status === "completed");
 
+  const branchCandidates = (platformBranchTasks || [])
+    .filter(
+      (task) =>
+        task.mode === "prepare_change" &&
+        typeof task.branch_name === "string" &&
+        task.branch_name.startsWith("sandbox/"),
+    )
+    .map((task) => {
+      const result =
+        task.result && typeof task.result === "object"
+          ? (task.result as Record<string, unknown>)
+          : {};
+      const sandbox =
+        result.sandbox && typeof result.sandbox === "object"
+          ? (result.sandbox as Record<string, unknown>)
+          : {};
+      const changedFiles = Array.isArray(result.changedFiles)
+        ? result.changedFiles
+            .filter((value): value is string => typeof value === "string")
+            .slice(0, 20)
+        : [];
+      return {
+        taskId: task.id,
+        repoKey: task.repo_key,
+        branchName: task.branch_name,
+        status: task.status,
+        objective:
+          typeof task.objective === "string"
+            ? task.objective.slice(0, 1200)
+            : "",
+        summary:
+          typeof result.summary === "string"
+            ? result.summary.slice(0, 1200)
+            : "",
+        changedFiles,
+        checksPassed: result.checksPassed === true,
+        diffStat:
+          typeof result.diffStat === "string"
+            ? result.diffStat.slice(0, 1500)
+            : "",
+        pushed: sandbox.pushed === true,
+        commitSha:
+          typeof sandbox.commitSha === "string" ? sandbox.commitSha : null,
+        continued: sandbox.continued === true,
+        baseBranch:
+          typeof sandbox.baseBranch === "string" ? sandbox.baseBranch : null,
+        promotionState:
+          typeof sandbox.promotionState === "string"
+            ? sandbox.promotionState
+            : task.status === "needs_approval"
+              ? "awaiting_owner_review"
+              : "testing",
+        mergeAllowed: sandbox.mergeAllowed === true,
+        model:
+          typeof result.model === "string" ? result.model : null,
+        provider:
+          typeof result.provider === "string" ? result.provider : null,
+        executor:
+          typeof result.executor === "string" ? result.executor : null,
+        strongerModelRecommendation:
+          result.strongerModelRecommendation &&
+          typeof result.strongerModelRecommendation === "object"
+            ? result.strongerModelRecommendation
+            : null,
+        createdAt: task.created_at,
+        updatedAt: task.updated_at,
+        completedAt: task.completed_at,
+      };
+    })
+    .slice(0, 80);
+
   const generatedAt = new Date();
 
   return {
@@ -150,7 +231,7 @@ export async function collectOwnerImprovementEvidence(userId: string) {
       rawTenantDocumentsIncluded: false,
       credentialsIncluded: false,
       note:
-        "This evidence pack contains aggregate operational metrics only. It excludes raw chat content, tenant documents, and credentials.",
+        "This evidence pack excludes requester identities, raw chat content, tenant documents, and credentials. For platform code governance it may include bounded sandbox-branch metadata, technical task objectives/summaries, changed-file lists, and check results needed for owner review.",
     },
     chat: {
       conversations: conversations?.length || 0,
@@ -185,6 +266,20 @@ export async function collectOwnerImprovementEvidence(userId: string) {
       byMode: countBy(agentTasks || [], (task) => task.mode),
       events: agentEvents?.length || 0,
       eventsByKind: countBy(agentEvents || [], (event) => event.kind),
+      branches: {
+        totalSandboxBranches: branchCandidates.length,
+        awaitingOwnerReview: branchCandidates.filter(
+          (branch) => branch.promotionState === "awaiting_owner_review",
+        ).length,
+        successfulTested: branchCandidates.filter(
+          (branch) => branch.checksPassed && branch.pushed,
+        ).length,
+        approvedForMerge: branchCandidates.filter(
+          (branch) => branch.promotionState === "approved-for-merge",
+        ).length,
+        byRepository: countBy(branchCandidates, (branch) => branch.repoKey),
+        candidates: branchCandidates,
+      },
     },
     unison: {
       nodes: nodeRows.length,
@@ -235,15 +330,21 @@ export function ownerImprovementReportPrompt(
     "For timestamps shown to the owner, use evidence.generatedAtLocal and the supplied displayTimeZone instead of restating UTC timestamps.",
     "Do not expose hidden chain-of-thought. Give concise conclusions and cite the metric or count that supports each conclusion.",
     "Prefer deterministic code/playbook fixes over adding more AI when they can safely solve the problem.",
+    "Before proposing a new code change, review evidence.agents.branches.candidates for existing unmerged sandbox implementations that may already solve the same issue.",
+    "When multiple branches address similar needs, compare successful checks, changed-file scope, portability, continuation history, and evidence. Recommend the strongest existing candidate instead of creating duplicate work.",
+    "A sandbox branch may be tested and revised repeatedly, but it must never be treated as mergeable until owner review marks it approved-for-merge.",
     "Treat model/provider changes as candidates that require benchmarks, not assumptions.",
     "Do not propose autonomous production deployment, secret changes, billing actions, or model promotion.",
     "Output these sections:",
     "1. Executive summary",
     "2. Evidence-backed findings",
-    "3. Proposed improvements",
-    "4. Eval/model-learning candidates",
-    "5. What should remain human-approved",
+    "3. Pending sandbox branches and competing implementations",
+    "4. Proposed improvements",
+    "5. Eval/model-learning candidates",
+    "6. What should remain human-approved",
+    "For each pending sandbox branch include: branch, reason/objective, checks/test status, scope, whether another branch overlaps it, and the recommended next action.",
     "For each proposed improvement include: evidence, expected benefit, risk, and the next bounded action.",
+    "Merging to the default branch must remain an explicit owner-review action; never recommend automatic merge merely because checks passed.",
     "",
     "AGGREGATE EVIDENCE:",
     JSON.stringify(evidence, null, 2),

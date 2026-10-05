@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     const admin = createAdminSupabaseClient();
     const { data: task, error: taskError } = await admin
       .from("agent_tasks")
-      .select("id,owner_ref,status")
+      .select("id,owner_ref,status,repo_key,mode,branch_name,result")
       .eq("id", taskId)
       .maybeSingle();
     if (taskError) throw taskError;
@@ -59,10 +59,58 @@ export async function POST(request: Request) {
     if (typeof body.status === "string" && allowedStatuses.has(body.status)) {
       update.status = body.status;
     }
-    if (typeof body.branchName === "string" && body.branchName.trim()) {
-      update.branch_name = body.branchName.trim().slice(0, 240);
+
+    const branchName =
+      typeof body.branchName === "string" && body.branchName.trim()
+        ? body.branchName.trim().slice(0, 240)
+        : null;
+    const sandboxBranchCreated =
+      Boolean(branchName?.startsWith("sandbox/")) &&
+      task.branch_name !== branchName;
+
+    if (branchName) {
+      update.branch_name = branchName;
+
+      if (branchName.startsWith("sandbox/")) {
+        const priorResult =
+          task.result && typeof task.result === "object"
+            ? (task.result as Record<string, unknown>)
+            : {};
+        const priorSandbox =
+          priorResult.sandbox && typeof priorResult.sandbox === "object"
+            ? (priorResult.sandbox as Record<string, unknown>)
+            : {};
+        update.result = {
+          ...priorResult,
+          sandbox: {
+            ...priorSandbox,
+            branchName,
+            promotionState: "testing",
+            mergeAllowed: false,
+            ownerReviewRequired: true,
+            reviewCadenceDays: 7,
+          },
+        };
+      }
     }
     await admin.from("agent_tasks").update(update).eq("id", taskId);
+
+    if (sandboxBranchCreated) {
+      await admin.from("agent_task_events").insert({
+        task_id: taskId,
+        owner_ref: task.owner_ref,
+        kind: "owner_branch_created",
+        message:
+          "A new sandbox code branch was created for user testing. It cannot merge until owner review.",
+        metadata: {
+          branchName,
+          repoKey: task.repo_key,
+          mode: task.mode,
+          mergeAllowed: false,
+          reviewCadenceDays: 7,
+        },
+      });
+    }
 
     return NextResponse.json({ ok: true, cancelled: false });
   } catch (error) {
