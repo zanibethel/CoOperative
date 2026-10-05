@@ -16,10 +16,15 @@ import {
 } from "@/lib/ai/runtime-context-markdown";
 import {
   aiProfileBalanceForUser,
+  cooperativeProfileRef,
   releaseAiProfileFunds,
   reserveAiProfileFunds,
   settleAiProfileFunds,
 } from "@/lib/billing/ai-profile-balance";
+import {
+  fundingDirective,
+  fundingQuoteForUser,
+} from "@/lib/billing/ai-funding-handoff";
 import { handleBusinessIntake } from "@/lib/runtime/business-intake";
 import { handleCodeFirstChat } from "@/lib/runtime/code-first-chat";
 import { platformFaqDataNeeds } from "@/lib/runtime/platform-faq";
@@ -2877,10 +2882,18 @@ export async function POST(request: Request) {
               "openrouter-api",
             )
           : null;
+      const cooperativeOpenRouterCredential =
+        process.env.OPENROUTER_API_KEY?.trim() || undefined;
+      const cooperativeFundedPaidRoute =
+        selectedProvider === "openrouter" &&
+        !selectedFree &&
+        Boolean(cooperativeOpenRouterCredential);
       const providerCredential =
-        openRouterService?.credential ||
-        process.env.OPENROUTER_API_KEY?.trim() ||
-        undefined;
+        cooperativeFundedPaidRoute
+          ? cooperativeOpenRouterCredential
+          : openRouterService?.credential ||
+            cooperativeOpenRouterCredential ||
+            undefined;
 
       if (
         selectedProvider === "openrouter" &&
@@ -3062,15 +3075,27 @@ export async function POST(request: Request) {
             estimatedProviderCostUsd === null
               ? null
               : Math.round(estimatedProviderCostUsd * 1_000_000),
-          estimated_user_charge_microusd: 0,
+          estimated_user_charge_microusd:
+            cooperativeFundedPaidRoute && estimatedProviderCostUsd !== null
+              ? Math.round(estimatedProviderCostUsd * 1_000_000)
+              : 0,
           estimated_infrastructure_cost_microusd: null,
           estimated_margin_microusd: null,
+          billing_mode: cooperativeFundedPaidRoute
+            ? "cooperative-balance"
+            : selectedProvider === "openrouter" && !selectedFree
+              ? "openrouter-byok"
+              : selectedProvider === "nous" && !selectedFree
+                ? "nous-subscription"
+                : null,
           provider_cost_bearer:
             selectedFree
               ? "free"
-              : selectedProvider === "nous" || selectedProvider === "openrouter"
-                ? "user-connected"
-                : "cooperative",
+              : cooperativeFundedPaidRoute
+                ? "cooperative"
+                : selectedProvider === "nous" || selectedProvider === "openrouter"
+                  ? "user-connected"
+                  : "cooperative",
           pricing_dimensions: {
             durationSeconds: mediaPlan.durationSeconds,
             aspectRatio: mediaPlan.aspectRatio,
@@ -3104,6 +3129,168 @@ export async function POST(request: Request) {
           job_id: jobId,
         });
       if (mediaUserMessageError) throw mediaUserMessageError;
+
+      let mediaBalanceReservationId: string | null = null;
+      if (
+        cooperativeFundedPaidRoute &&
+        estimatedProviderCostUsd !== null &&
+        estimatedProviderCostUsd > 0
+      ) {
+        const fundingQuote = await fundingQuoteForUser({
+          userId: owner.userId,
+          estimatedCostUsd: estimatedProviderCostUsd,
+          maxSpendUsd: requestCapUsd,
+        });
+
+        if (!fundingQuote.allowedBySpendPolicy) {
+          const message =
+            `This paid media route is estimated at ${estimatedProviderCostUsd.toFixed(4)}, which is above the current request cap of ${requestCapUsd.toFixed(4)}. I did not start a provider call.`;
+          await admin.from("local_ai_messages").insert({
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: message,
+            attachment_ids: [],
+            job_id: null,
+          });
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: mediaPlan.kind,
+              conversationId,
+              conversationTitle,
+              text: message,
+              provider: "code",
+              model: "media-profile-balance-spend-cap",
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        if (!fundingQuote.sufficientBalance) {
+          const directive = fundingDirective({
+            kind: "media",
+            jobId,
+            quote: fundingQuote,
+          });
+          const topUp = fundingQuote.topUpOption;
+          const assistantText = [
+            `This ${mediaPlan.kind} route is estimated to cost about ${estimatedProviderCostUsd.toFixed(4)}.`,
+            `Your available CoOperative AI balance is ${fundingQuote.availableBalanceUsd.toFixed(4)}. To reserve this request safely, the profile needs at least ${fundingQuote.minimumRequiredBalanceUsd.toFixed(4)}, so you need ${fundingQuote.shortfallUsd.toFixed(4)} more.`,
+            topUp
+              ? `The smallest configured Stripe top-up that covers it is ${topUp.amountUsd.toFixed(2)}.`
+              : "No Stripe balance top-up option is currently configured.",
+            "I did not start a provider call or spend anything.",
+            "",
+            directive,
+          ].join("\n");
+
+          await admin.from("local_ai_messages").insert({
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: assistantText,
+            attachment_ids: [],
+            job_id: null,
+          });
+
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: mediaPlan.kind,
+              conversationId,
+              conversationTitle,
+              text: assistantText,
+              provider: "code",
+              model: "media-profile-balance-funding-gate",
+              mediaFundingJobId: jobId,
+              fundingRequired: {
+                estimatedCostUsd: fundingQuote.estimatedCostUsd,
+                availableBalanceUsd: fundingQuote.availableBalanceUsd,
+                shortfallUsd: fundingQuote.shortfallUsd,
+                minimumRequiredBalanceUsd:
+                  fundingQuote.minimumRequiredBalanceUsd,
+                topUpOption: topUp,
+              },
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        const reservation = await reserveAiProfileFunds({
+          profileRef: cooperativeProfileRef(owner.userId),
+          estimatedCostUsd: estimatedProviderCostUsd,
+          source: "media-generation",
+          referenceId: jobId,
+          metadata: {
+            provider: selectedProvider,
+            model: selectedModel,
+            kind: mediaPlan.kind,
+            conversationId,
+          },
+        });
+
+        if (!reservation) {
+          const refreshedQuote = await fundingQuoteForUser({
+            userId: owner.userId,
+            estimatedCostUsd: estimatedProviderCostUsd,
+            maxSpendUsd: requestCapUsd,
+          });
+          const directive = fundingDirective({
+            kind: "media",
+            jobId,
+            quote: refreshedQuote,
+          });
+          const assistantText = [
+            "The available AI balance changed before I could reserve this media request.",
+            `You now need ${refreshedQuote.shortfallUsd.toFixed(4)} more available balance to continue.`,
+            "I did not start a provider call.",
+            "",
+            directive,
+          ].join("\n");
+          await admin.from("local_ai_messages").insert({
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: assistantText,
+            attachment_ids: [],
+            job_id: null,
+          });
+          return NextResponse.json(
+            {
+              status: "completed",
+              execution: "code",
+              capability: mediaPlan.kind,
+              conversationId,
+              conversationTitle,
+              text: assistantText,
+              provider: "code",
+              model: "media-profile-balance-reservation-race",
+            },
+            { status: 200, headers: { "Cache-Control": "no-store" } },
+          );
+        }
+
+        mediaBalanceReservationId = reservation.id;
+        const { error: reservationUpdateError } = await admin
+          .from("media_generation_jobs")
+          .update({
+            ai_balance_reservation_id: reservation.id,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", jobId)
+          .eq("owner_ref", ownerRef)
+          .eq("status", "queued");
+        if (reservationUpdateError) {
+          await releaseAiProfileFunds({
+            reservationId: reservation.id,
+            metadata: { reason: "media-job-reservation-link-failed" },
+          });
+          throw reservationUpdateError;
+        }
+      }
 
       try {
         const started = await startHermesMediaTask({
@@ -3163,10 +3350,18 @@ export async function POST(request: Request) {
           mediaStartFailure instanceof Error
             ? mediaStartFailure.message
             : "Hermes media generation could not start.";
+        if (mediaBalanceReservationId) {
+          await releaseAiProfileFunds({
+            reservationId: mediaBalanceReservationId,
+            metadata: { reason: "media-generation-did-not-start", jobId },
+          }).catch(() => undefined);
+        }
         await admin
           .from("media_generation_jobs")
           .update({
             status: "failed",
+            ai_balance_reservation_id: null,
+            actual_user_charge_microusd: 0,
             error: detail.slice(0, 1200),
             completed_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
