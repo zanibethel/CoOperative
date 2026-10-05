@@ -1099,6 +1099,8 @@ export async function POST(request: Request) {
               typeof sandbox.promotionState === "string"
                 ? sandbox.promotionState
                 : "testing",
+            scope:
+              typeof sandbox.scope === "string" ? sandbox.scope : "code-fix",
             changedFiles: Array.isArray(result.changedFiles)
               ? result.changedFiles.filter(
                   (value): value is string => typeof value === "string",
@@ -1124,7 +1126,7 @@ export async function POST(request: Request) {
         const files = branch.changedFiles.length
           ? ` Files: ${branch.changedFiles.slice(0, 4).join(", ")}${branch.changedFiles.length > 4 ? "…" : ""}`
           : "";
-        return `${index + 1}. ${branch.branchName} — ${state}. ${branch.summary}${files}`;
+        return `${index + 1}. ${branch.branchName} [${branch.scope}] — ${state}. ${branch.summary}${files}`;
       });
 
       const assistantText = [
