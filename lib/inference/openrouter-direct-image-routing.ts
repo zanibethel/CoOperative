@@ -27,6 +27,8 @@ type SourceMediaJob = {
   media_level: number | null;
   estimated_provider_cost_microusd: number | null;
   pricing_dimensions: unknown;
+  request_root_job_id: string;
+  route_attempt: number;
 };
 
 export type DirectImageFallbackResult =
@@ -36,6 +38,11 @@ export type DirectImageFallbackResult =
       model: string;
       estimatedProviderCostUsd: number;
       quotedUserPriceUsd: number;
+    }
+  | {
+      kind: "already-active";
+      jobId: string;
+      model: string;
     }
   | {
       kind: "funding-required";
@@ -65,6 +72,25 @@ export async function queueNextDirectOpenRouterImageFallback(input: {
   requestedClass: MediaAdultContentClass;
 }): Promise<DirectImageFallbackResult> {
   const admin = createAdminSupabaseClient();
+
+  const { data: existingActive, error: activeError } = await admin
+    .from("media_generation_jobs")
+    .select("id,model")
+    .eq("request_root_job_id", input.sourceJob.request_root_job_id)
+    .in("status", ["queued", "running"])
+    .neq("id", input.sourceJob.id)
+    .order("route_attempt", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (activeError) throw activeError;
+  if (existingActive) {
+    return {
+      kind: "already-active",
+      jobId: existingActive.id,
+      model: existingActive.model,
+    };
+  }
+
   const dims = dimensions(input.sourceJob);
   const referenceAttachmentIds = Array.isArray(dims.referenceAttachmentIds)
     ? dims.referenceAttachmentIds.filter(
@@ -255,6 +281,9 @@ export async function queueNextDirectOpenRouterImageFallback(input: {
         },
         pricing_source: catalog.source,
         fallback_from_job_id: input.sourceJob.id,
+        request_root_job_id: input.sourceJob.request_root_job_id,
+        route_attempt: Math.min(50, Math.max(1, Number(input.sourceJob.route_attempt || 1) + 1)),
+        execution_mode: "direct-provider",
       });
     if (insertError) throw insertError;
 
@@ -302,7 +331,10 @@ export async function queueNextDirectOpenRouterImageFallback(input: {
       },
       pricing_source: catalog.source,
       fallback_from_job_id: input.sourceJob.id,
-    });
+        request_root_job_id: input.sourceJob.request_root_job_id,
+        route_attempt: Math.min(50, Math.max(1, Number(input.sourceJob.route_attempt || 1) + 1)),
+        execution_mode: "direct-provider",
+      });
   if (insertError) throw insertError;
 
   return {
