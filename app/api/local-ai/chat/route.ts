@@ -5931,13 +5931,17 @@ export async function GET(request: Request) {
                     capability: mediaJob.kind,
                     provider: "openrouter",
                     model: backupModel.id,
-                    routeReason: freeRoute
-                      ? "Nous failed, no owned local route was available for this media request, and CoOperative selected a live free OpenRouter route before any paid backup."
-                      : `Nous failed and no local/free route was available. CoOperative verified live OpenRouter capacity, reserved the paid backup against the profile's Stripe-funded balance, and started one backup estimated at \${backupEstimate.toFixed(3)} within the remaining \${remainingCapUsd.toFixed(3)} request cap.`,
+                    routeReason: policyRefusal
+                      ? mustPreserveReference
+                        ? "The previous route refused this content class. CoOperative recorded that refusal, preserved the same reference image, and started the next eligible OpenRouter route that is not already known to block this request class."
+                        : "The previous route refused this content class. CoOperative recorded that refusal and started the next eligible OpenRouter route that is not already known to block this request class."
+                      : freeRoute
+                        ? "The previous provider route failed, and CoOperative selected a live free OpenRouter route before any paid backup."
+                        : "The previous provider route failed. CoOperative verified OpenRouter capacity and started the next eligible backup within the remaining request cap.",
                     estimatedProviderCostUsd: backupEstimate,
                     quotedUserPriceUsd: freeRoute
                       ? null
-                      : backupUserQuoteUsd,
+                      : effectiveBackupUserQuoteUsd,
                   },
                   { headers: { "Cache-Control": "no-store" } },
                 );
