@@ -1093,6 +1093,10 @@ export async function POST(request: Request) {
             result.sandbox && typeof result.sandbox === "object"
               ? (result.sandbox as Record<string, unknown>)
               : {};
+          const governance =
+            result.governance && typeof result.governance === "object"
+              ? (result.governance as Record<string, unknown>)
+              : {};
           return {
             taskId: row.id,
             branchName: row.branch_name as string,
@@ -1109,6 +1113,7 @@ export async function POST(request: Request) {
               typeof sandbox.promotionState === "string"
                 ? sandbox.promotionState
                 : "testing",
+            ownerAuthoritative: governance.ownerAuthoritative === true,
             scope:
               typeof sandbox.scope === "string" ? sandbox.scope : "code-fix",
             changedFiles: Array.isArray(result.changedFiles)
@@ -1121,7 +1126,13 @@ export async function POST(request: Request) {
 
       const pending = branches.filter(
         (branch) =>
+          !branch.ownerAuthoritative &&
           branch.promotionState !== "approved-for-merge" &&
+          branch.promotionState !== "rejected",
+      );
+      const ownerAuthoritative = branches.filter(
+        (branch) =>
+          branch.ownerAuthoritative &&
           branch.promotionState !== "rejected",
       );
       const successful = pending.filter(
@@ -1140,7 +1151,7 @@ export async function POST(request: Request) {
       });
 
       const assistantText = [
-        `Sandbox branch review: ${pending.length} branch${pending.length === 1 ? "" : "es"} currently need review; ${successful.length} have passed recorded checks and were pushed for testing.`,
+        `Sandbox branch review: ${pending.length} non-owner branch${pending.length === 1 ? "" : "es"} currently need owner review; ${successful.length} have passed recorded checks and were pushed for testing. ${ownerAuthoritative.length} owner-authoritative branch${ownerAuthoritative.length === 1 ? "" : "es"} are tracked separately for verification.`,
         "",
         ...(lines.length
           ? lines
@@ -1191,8 +1202,10 @@ export async function POST(request: Request) {
             "CoOperative read persisted sandbox branch/test state directly and produced the owner review report without invoking AI.",
           branchReview: {
             pending: pending.length,
+            ownerAuthoritativeTesting: ownerAuthoritative.length,
             successfulTested: successful.length,
             branches: pending.slice(0, 25),
+            ownerAuthoritativeBranches: ownerAuthoritative.slice(0, 25),
           },
         },
         { status: 200, headers: { "Cache-Control": "no-store" } },
