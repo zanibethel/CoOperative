@@ -14,6 +14,8 @@ const mediaContentPreferenceSchema = z.enum([
   "require_adult_capable",
 ]);
 
+const webAccessModeSchema = z.enum(["off", "auto", "always"]);
+
 const patchSchema = z.object({
   hostedHistoryEnabled: z.boolean().optional(),
   improvementOptIn: z.boolean().optional(),
@@ -22,6 +24,7 @@ const patchSchema = z.object({
   mediaContentPreference: mediaContentPreferenceSchema.optional(),
   adultContentAcknowledged: z.boolean().optional(),
   maxSpendPerPromptUsd: z.number().min(0).max(100).optional(),
+  webAccessMode: webAccessModeSchema.optional(),
 });
 
 async function readSettings(userId: string) {
@@ -29,7 +32,7 @@ async function readSettings(userId: string) {
   const { data, error } = await admin
     .from("personal_ai_settings")
     .select(
-      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,max_spend_per_prompt_usd,created_at,updated_at",
+      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,max_spend_per_prompt_usd,web_access_mode,created_at,updated_at",
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -41,7 +44,7 @@ async function readSettings(userId: string) {
     .from("personal_ai_settings")
     .insert({ user_id: userId })
     .select(
-      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,max_spend_per_prompt_usd,created_at,updated_at",
+      "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,max_spend_per_prompt_usd,web_access_mode,created_at,updated_at",
     )
     .single();
 
@@ -58,6 +61,10 @@ function serialize(row: Awaited<ReturnType<typeof readSettings>>) {
     mediaContentPreference: row.media_content_preference,
     adultContentAcknowledgedAt: row.adult_content_acknowledged_at,
     maxSpendPerPromptUsd: Number(row.max_spend_per_prompt_usd ?? 0.05),
+    webAccessMode:
+      row.web_access_mode === "auto" || row.web_access_mode === "always"
+        ? row.web_access_mode
+        : "off",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -116,6 +123,9 @@ export async function PATCH(request: Request) {
     if (input.maxSpendPerPromptUsd !== undefined) {
       update.max_spend_per_prompt_usd = Number(input.maxSpendPerPromptUsd.toFixed(4));
     }
+    if (input.webAccessMode !== undefined) {
+      update.web_access_mode = input.webAccessMode;
+    }
     if (input.mediaContentPreference !== undefined) {
       if (
         input.mediaContentPreference !== "sfw_only" &&
@@ -145,7 +155,7 @@ export async function PATCH(request: Request) {
       .update(update)
       .eq("user_id", userId)
       .select(
-        "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,max_spend_per_prompt_usd,created_at,updated_at",
+        "user_id,hosted_history_enabled,improvement_opt_in,remote_enabled,preferred_node_id,media_content_preference,adult_content_acknowledged_at,max_spend_per_prompt_usd,web_access_mode,created_at,updated_at",
       )
       .single();
 
