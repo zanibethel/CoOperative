@@ -43,7 +43,7 @@ export async function GET() {
       ]);
     const [catalog, nousCatalog] = await Promise.all([
       openRouterMediaCatalog(
-        Boolean(openRouterService?.credential),
+        false,
         openRouterService?.credential || undefined,
       ),
       nousManagedMediaCatalog(),
