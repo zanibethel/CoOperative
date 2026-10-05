@@ -29,10 +29,8 @@ export async function GET() {
 
   try {
     const ownerRef = `coop-user:${userId}`;
-    const [catalog, nousCatalog, balance, openRouterService, nousPortalService] =
+    const [balance, openRouterService, nousPortalService] =
       await Promise.all([
-        openRouterMediaCatalog(),
-        nousManagedMediaCatalog(),
         aiProfileBalanceForUser(userId),
         businessOwnedServiceCredentialForOwner(
           ownerRef,
@@ -43,6 +41,13 @@ export async function GET() {
           "nous-portal",
         ),
       ]);
+    const [catalog, nousCatalog] = await Promise.all([
+      openRouterMediaCatalog(
+        Boolean(openRouterService?.credential),
+        openRouterService?.credential || undefined,
+      ),
+      nousManagedMediaCatalog(),
+    ]);
 
     return NextResponse.json(
       {
@@ -61,7 +66,11 @@ export async function GET() {
         availableAiBalanceUsd: balance.availableUsd,
         nous: nousCatalog,
         image: {
-          bands: mediaLevelBands(catalog.image),
+          bands: mediaLevelBands(
+            catalog.image.some((model) => model.recommended)
+              ? catalog.image.filter((model) => model.recommended)
+              : catalog.image,
+          ),
           recommended: tierRows(catalog.image),
           models: catalog.image,
         },
