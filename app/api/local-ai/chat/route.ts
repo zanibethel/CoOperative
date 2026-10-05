@@ -34,6 +34,7 @@ import {
   resumeOnboarding,
 } from "@/lib/ai/user-profile-onboarding";
 import { resolveProfileExecutionPlan } from "@/lib/runtime/profile-execution-router";
+import { activeNodeIds } from "@/lib/unison/node-access";
 import {
   pollHermesMediaTask,
   startHermesMediaTask,
