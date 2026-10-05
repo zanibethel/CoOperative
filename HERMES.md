@@ -188,3 +188,10 @@ Hermes should help create the cloud task system, Telegram webhook path, on-deman
 The current end-state roadmap refines that direction: AWS should first become an additional governed compute target, while existing Vercel/Supabase systems remain in place until measured economics justify migration.
 
 This is a governed self-bootstrap task: Hermes may build and test the infrastructure, but it does not gain broader permissions merely because it is helping create its successor/runtime. Existing owner gates in this file continue to apply.
+
+
+## Free cloud Web research
+
+The free text fallback remains reasoning-only: Hermes/OpenRouter receives no browsing, terminal, file, computer-use, connector, or side-effect tools.
+
+When the profile Web mode permits it, CoOperative application code can perform a bounded public-web research pass before Hermes starts. Code applies Off / Auto / Always, credential-query guards, URL classification, public-DNS checks for direct page reads, redirect revalidation, content-type and size limits, and connector/private/executable restrictions. Only sanitized public excerpts and source URLs enter the Hermes prompt as untrusted context. Hermes cannot decide to browse.
