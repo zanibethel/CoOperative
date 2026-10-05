@@ -32,7 +32,7 @@ const API = "https://openrouter.ai/api/v1";
 const ROOT = "https://openrouter.ai";
 const CACHE_MS = 15 * 60 * 1000;
 
-let cached: { at: number; value: MediaCatalog } | null = null;
+let cached: { at: number; value: MediaCatalog; credentialed: boolean } | null = null;
 let inflight: Promise<MediaCatalog> | null = null;
 
 const RECOMMENDED_IMAGE_IDS = new Set([
@@ -324,12 +324,20 @@ async function buildCatalog(credential?: string): Promise<MediaCatalog> {
 
 export async function openRouterMediaCatalog(force = false, credential?: string) {
   const now = Date.now();
-  if (!force && cached && now - cached.at < CACHE_MS) return cached.value;
-  if (!force && inflight) return inflight;
+  const credentialed = Boolean(
+    credential?.trim() || process.env.OPENROUTER_API_KEY?.trim(),
+  );
+  if (
+    !force &&
+    cached &&
+    now - cached.at < CACHE_MS &&
+    (!credentialed || cached.credentialed)
+  ) return cached.value;
+  if (!force && inflight && !credentialed) return inflight;
 
   inflight = buildCatalog(credential)
     .then((value) => {
-      cached = { at: Date.now(), value };
+      cached = { at: Date.now(), value, credentialed };
       return value;
     })
     .finally(() => {
