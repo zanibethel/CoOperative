@@ -50,7 +50,12 @@ export async function GET(request: Request) {
 
   try {
     const access = await profileForNodeRequest(request, nodeId);
-    if ("error" in access) return accessError(access.error);
+    if (
+      "error" in access &&
+      (access.error === "node" || access.error === "profile")
+    ) {
+      return accessError(access.error);
+    }
 
     const userId = access.membership.userId;
     const { data, error } = await access.admin
@@ -105,7 +110,12 @@ export async function PATCH(request: Request) {
 
   try {
     const access = await profileForNodeRequest(request, input.nodeId);
-    if ("error" in access) return accessError(access.error);
+    if (
+      "error" in access &&
+      (access.error === "node" || access.error === "profile")
+    ) {
+      return accessError(access.error);
+    }
 
     const userId = access.membership.userId;
     const now = new Date().toISOString();
