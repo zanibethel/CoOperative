@@ -1452,27 +1452,31 @@ function SandboxCodeTaskCard({ taskId }: { taskId: string }) {
 }
 
 type FundingRequiredCardProps = {
+  resumeKind: "text" | "media";
   sourceJobId: string;
   estimatedCostUsd: number;
+  minimumBalanceUsd: number;
   availableBalanceUsd: number;
   topUpOptionId: string | null;
   topUpUsd: number;
-  onCompleted: (conversationId?: string | null) => Promise<void>;
+  onResumed: (payload: JobResult) => Promise<void>;
 };
 
 function FundingRequiredCard({
+  resumeKind,
   sourceJobId,
   estimatedCostUsd,
+  minimumBalanceUsd,
   availableBalanceUsd,
   topUpOptionId,
   topUpUsd,
-  onCompleted,
+  onResumed,
 }: FundingRequiredCardProps) {
   const [working, setWorking] = useState(false);
   const [cardError, setCardError] = useState("");
   const [currentBalanceUsd, setCurrentBalanceUsd] = useState(availableBalanceUsd);
 
-  const enoughBalance = currentBalanceUsd + 1e-9 >= estimatedCostUsd;
+  const enoughBalance = currentBalanceUsd + 1e-9 >= minimumBalanceUsd;
 
   useEffect(() => {
     let cancelled = false;
@@ -1515,7 +1519,11 @@ function FundingRequiredCard({
         );
       }
 
-      window.localStorage.setItem(PENDING_PAID_RESUME_KEY, sourceJobId);
+      const pendingKey =
+        resumeKind === "media"
+          ? PENDING_MEDIA_RESUME_KEY
+          : PENDING_PAID_RESUME_KEY;
+      window.localStorage.setItem(pendingKey, sourceJobId);
       window.location.assign(payload.checkoutUrl);
     } catch (err) {
       setCardError(
@@ -1530,11 +1538,16 @@ function FundingRequiredCard({
     setWorking(true);
     setCardError("");
     try {
-      const response = await fetch("/api/local-ai/chat/paid-fallback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: sourceJobId }),
-      });
+      const response = await fetch(
+        resumeKind === "media"
+          ? "/api/local-ai/chat/media-resume"
+          : "/api/local-ai/chat/paid-fallback",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ jobId: sourceJobId }),
+        },
+      );
       const payload = (await response.json()) as JobResult;
       if (response.status === 402 && payload.fundingRequired) {
         if (typeof payload.fundingRequired.availableBalanceUsd === "number") {
@@ -1546,13 +1559,21 @@ function FundingRequiredCard({
           ).toFixed(4)} short).`,
         );
       }
-      if (!response.ok || payload.status !== "completed") {
+      const resumed =
+        payload.status === "completed" ||
+        payload.status === "running" ||
+        payload.status === "queued";
+      if (!response.ok || !resumed) {
         throw new Error(
           payload.detail || payload.error || "Paid AI could not resume this request.",
         );
       }
-      window.localStorage.removeItem(PENDING_PAID_RESUME_KEY);
-      await onCompleted(payload.conversationId);
+      window.localStorage.removeItem(
+        resumeKind === "media"
+          ? PENDING_MEDIA_RESUME_KEY
+          : PENDING_PAID_RESUME_KEY,
+      );
+      await onResumed(payload);
     } catch (err) {
       setCardError(
         err instanceof Error ? err.message : "Paid AI could not resume this request.",
@@ -1567,10 +1588,15 @@ function FundingRequiredCard({
       <div className="secure-service-head">
         <span className="secure-service-lock" aria-hidden="true">$</span>
         <div>
-          <strong>Stronger AI available</strong>
+          <strong>
+            {resumeKind === "media"
+              ? "Funded media available"
+              : "Stronger AI available"}
+          </strong>
           <small>
-            Free/local routes were exhausted. CoOperative will not use a paid model
-            until the profile balance covers this request.
+            CoOperative will not start the paid{" "}
+            {resumeKind === "media" ? "media provider call" : "model"} until the
+            profile balance safely covers this request.
           </small>
         </div>
       </div>
@@ -1588,7 +1614,11 @@ function FundingRequiredCard({
       <div className="secure-service-actions">
         {enoughBalance ? (
           <button type="button" disabled={working} onClick={() => void continueRequest()}>
-            {working ? "Continuing…" : "Continue with stronger AI"}
+            {working
+              ? "Continuing…"
+              : resumeKind === "media"
+                ? "Continue media generation"
+                : "Continue with stronger AI"}
           </button>
         ) : topUpOptionId ? (
           <button type="button" disabled={working} onClick={() => void addBalance()}>
