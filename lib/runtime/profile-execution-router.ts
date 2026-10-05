@@ -1,5 +1,6 @@
 import "server-only";
 
+import { aiReservationRequirementUsd } from "@/lib/billing/ai-profile-balance";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { activeNodeIds } from "@/lib/unison/node-access";
 
@@ -107,7 +108,12 @@ export function paidFundingRequirement(input: {
       : money(input.maxSpendUsd);
   const allowedBySpendPolicy =
     maxSpendUsd === null || estimatedCostUsd <= maxSpendUsd;
-  const shortfallUsd = Math.max(0, estimatedCostUsd - availableBalanceUsd);
+  const minimumRequiredBalanceUsd =
+    aiReservationRequirementUsd(estimatedCostUsd);
+  const shortfallUsd = Math.max(
+    0,
+    minimumRequiredBalanceUsd - availableBalanceUsd,
+  );
 
   return {
     estimatedCostUsd,
@@ -116,7 +122,7 @@ export function paidFundingRequirement(input: {
     allowedBySpendPolicy,
     sufficientBalance: shortfallUsd <= 0,
     shortfallUsd,
-    minimumRequiredBalanceUsd: estimatedCostUsd,
+    minimumRequiredBalanceUsd,
   };
 }
 
