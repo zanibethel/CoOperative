@@ -238,7 +238,7 @@ def push_sandbox_branch(repo, branch, changed_files, summary):
     )
     commit_sha = run(["git", "rev-parse", "HEAD"], repo).stdout.strip()
     push = run(
-        ["git", "push", "-u", "origin", f"HEAD:refs/heads/{branch}"],
+        ["git", "push", "origin", f"HEAD:refs/heads/{branch}"],
         repo,
         timeout=240,
         check=False,
