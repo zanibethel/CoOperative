@@ -5329,7 +5329,6 @@ export async function GET(request: Request) {
 
         if (mediaJob.provider === "nous" || policyRefusal) {
           const referenceAttachmentIds =
-            referenceVerifiedRoute &&
             Array.isArray(referencePricingDimensions?.referenceAttachmentIds)
               ? (referencePricingDimensions.referenceAttachmentIds as unknown[])
                   .filter(
@@ -5338,8 +5337,7 @@ export async function GET(request: Request) {
                   )
                   .slice(0, 16)
               : [];
-          const mustPreserveReference =
-            referenceVerifiedRoute && referenceAttachmentIds.length > 0;
+          const mustPreserveReference = referenceAttachmentIds.length > 0;
 
           const requestCapUsd =
             typeof mediaJob.request_max_spend_microusd === "number"
