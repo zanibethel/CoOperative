@@ -15,6 +15,7 @@ type ResolveProfileExecutionInput = {
   nodeRouting?: ProfileNodeRouting;
   requiredNodeId?: string | null;
   requireProfileNode?: boolean;
+  requirePersonalChatCapability?: boolean;
   fundedBalanceUsd?: number;
   maxSpendUsd?: number | null;
 };
@@ -45,7 +46,11 @@ type NodeRow = {
   last_seen_at: string | null;
 };
 
-function capabilityAllowed(node: NodeRow, capability: ProfileExecutionCapability) {
+function capabilityAllowed(
+  node: NodeRow,
+  capability: ProfileExecutionCapability,
+  requirePersonalChatCapability: boolean,
+) {
   const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
   const policy =
     node.policy && typeof node.policy === "object"
@@ -62,7 +67,12 @@ function capabilityAllowed(node: NodeRow, capability: ProfileExecutionCapability
   }
 
   if (capability === "text") {
-    return capabilities.includes("text_generation") && policy.allowText !== false;
+    return (
+      capabilities.includes("text_generation") &&
+      policy.allowText !== false &&
+      (!requirePersonalChatCapability ||
+        capabilities.includes("local_personal_chat"))
+    );
   }
 
   return (
@@ -137,7 +147,13 @@ export async function resolveProfileExecutionPlan(
   if (nodesError) throw nodesError;
 
   const candidates = ((nodes || []) as NodeRow[])
-    .filter((node) => capabilityAllowed(node, input.capability))
+    .filter((node) =>
+      capabilityAllowed(
+        node,
+        input.capability,
+        input.requirePersonalChatCapability === true,
+      ),
+    )
     .sort(
       (a, b) =>
         stateRank(a.state) - stateRank(b.state) ||
