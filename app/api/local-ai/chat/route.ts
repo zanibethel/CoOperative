@@ -64,6 +64,7 @@ import {
   evaluateMediaExecutionContentGate,
   mediaKnownBlockedRouteKeys,
   mediaPolicyRefusalDetected,
+  mediaPolicyRefusalOrigin,
   recordMediaRuntimePolicyRefusal,
 } from "@/lib/inference/media-model-capabilities";
 import {
@@ -5250,6 +5251,10 @@ export async function GET(request: Request) {
           failure,
           requestedAdultClass,
         );
+        const policyRefusalOrigin = mediaPolicyRefusalOrigin(
+          failure,
+          requestedAdultClass,
+        );
 
         if (policyRefusal) {
           try {
@@ -5273,6 +5278,51 @@ export async function GET(request: Request) {
                   : "Unknown refusal-evidence error",
             });
           }
+        }
+
+        if (policyRefusalOrigin === "orchestrator") {
+          await admin
+            .from("media_generation_jobs")
+            .update({
+              status: "failed",
+              usage: polled.usage,
+              error: failure.slice(0, 1200),
+              completed_at: completedAt,
+              updated_at: completedAt,
+            })
+            .eq("id", mediaJob.id)
+            .eq("owner_ref", ownerRef)
+            .eq("status", "running");
+
+          const assistantText =
+            "The current media executor stopped this request before the selected image model was actually called. CoOperative did not mark that model as a proven blocker and did not keep cycling through additional models under the same executor path.";
+
+          if (mediaJob.conversation_id) {
+            await admin.from("local_ai_messages").insert({
+              conversation_id: mediaJob.conversation_id,
+              owner_ref: ownerRef,
+              role: "assistant",
+              content: assistantText,
+              attachment_ids: [],
+              job_id: null,
+            });
+          }
+
+          return NextResponse.json(
+            {
+              jobId: mediaJob.id,
+              execution: "code",
+              status: "completed",
+              conversationId: mediaJob.conversation_id,
+              capability: mediaJob.kind,
+              provider: "code",
+              model: "media-executor-policy-boundary",
+              text: assistantText,
+              routeReason:
+                "The orchestration layer refused before provider invocation. No provider/model capability evidence was recorded, no Recovery Agent was started, and no further same-executor model retries were attempted.",
+            },
+            { headers: { "Cache-Control": "no-store" } },
+          );
         }
 
         if (referenceRoute) {
