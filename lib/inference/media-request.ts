@@ -31,7 +31,7 @@ export type MediaAdultContentClass =
 const ADULT_OUTPUT =
   /\b(nsfw|nudes?|nudity|naked|porn(?:ographic|ography)?|sexually explicit|explicit sexual|erotic|full[- ]?frontal|adult (?:content|image|photo|scene))\b/i;
 const SEXUALLY_EXPLICIT_OUTPUT =
-  /\b(porn(?:ographic|ography)?|sexually explicit|explicit sexual|sexual (?:activity|intercourse|act)|sex scene|graphic sexual)\b/i;
+  /\b(porn(?:ographic|ography)?|sexually explicit|explicit sexual|sexual (?:activity|intercourse|act)|sex scene|graphic sexual)\b|\b(?:expose|exposes|exposed|show|shows|showing|display|displays|visible|bare|uncovered)\s+(?:the\s+)?(?:breasts?|nipples?|genitals?|penis|vagina|vulva|anus)\b|\b(?:bare|exposed|visible|uncovered)\s+(?:breasts?|nipples?|genitals?)\b/i;
 const SFW_OUTPUT_CONSTRAINT =
   /\b(sfw|safe for work|no nudity|without nudity|not nsfw)\b/i;
 const NON_EXPLICIT_CONSTRAINT =
