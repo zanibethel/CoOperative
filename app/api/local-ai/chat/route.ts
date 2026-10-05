@@ -1915,6 +1915,9 @@ export async function POST(request: Request) {
           .insert({
             id: retryJobId,
             status: "queued",
+            request_root_job_id: retryJobId,
+            route_attempt: 1,
+            execution_mode: "recovery-retry",
             owner_ref: ownerRef,
             conversation_id: conversationId,
             kind: recentMedia.kind,
@@ -3153,6 +3156,12 @@ export async function POST(request: Request) {
         .insert({
           id: jobId,
           status: "queued",
+          request_root_job_id: jobId,
+          route_attempt: 1,
+          execution_mode:
+            selectedProvider === "openrouter" && mediaPlan.kind === "image"
+              ? "direct-provider"
+              : "hermes",
           owner_ref: ownerRef,
           conversation_id: conversationId,
           kind: mediaPlan.kind,
@@ -4914,7 +4923,7 @@ export async function GET(request: Request) {
       let mediaQuery = admin
         .from("media_generation_jobs")
         .select(
-          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,estimated_user_charge_microusd,actual_user_charge_microusd,ai_balance_reservation_id,billing_mode,provider_cost_bearer,pricing_dimensions,pricing_source,fallback_from_job_id,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
+          "id,status,conversation_id,kind,prompt,provider,model,model_mixer,request_max_spend_microusd,media_level,estimated_provider_cost_microusd,estimated_user_charge_microusd,actual_user_charge_microusd,ai_balance_reservation_id,billing_mode,provider_cost_bearer,pricing_dimensions,pricing_source,fallback_from_job_id,request_root_job_id,route_attempt,execution_mode,sandbox_name,result_url,result_text,usage,error,started_at,deadline_at,completed_at,created_at",
         )
         .eq("owner_ref", ownerRef);
 
@@ -6159,6 +6168,13 @@ export async function GET(request: Request) {
                   .insert({
                     id: backupJobId,
                     status: "queued",
+                    request_root_job_id: mediaJob.request_root_job_id,
+                    route_attempt: Math.min(
+                      50,
+                      Math.max(1, Number(mediaJob.route_attempt || 1) + 1),
+                    ),
+                    execution_mode:
+                      mediaJob.kind === "image" ? "direct-provider" : "hermes",
                     owner_ref: ownerRef,
                     conversation_id: mediaJob.conversation_id,
                     kind: mediaJob.kind,
