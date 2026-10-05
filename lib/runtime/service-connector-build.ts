@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import type { ServiceConnectIntent } from "@/lib/runtime/service-connect-intent";
+import { canAccessMainCooperative } from "@/lib/ai/main-cooperative-access";
 
 type BuildIntent = Extract<ServiceConnectIntent, { type: "build-required" }>;
 
@@ -95,6 +96,7 @@ export async function queueConnectorBuild(input: {
   }
 
   const taskId = crypto.randomUUID();
+  const ownerAuthoritative = await canAccessMainCooperative(input.userId);
   const { error: taskError } = await admin.from("agent_tasks").insert({
     id: taskId,
     owner_ref: input.ownerRef,
@@ -114,6 +116,12 @@ export async function queueConnectorBuild(input: {
       credentialAccessAllowed: false,
       autoMergeAllowed: false,
       autoDeployAllowed: false,
+      governance: {
+        authority: ownerAuthoritative ? "platform-owner" : "standard-user",
+        ownerAuthoritative,
+        uiToggleRequired: !ownerAuthoritative,
+        ownerReviewRequired: !ownerAuthoritative,
+      },
     },
   });
   if (taskError) throw taskError;
@@ -129,6 +137,7 @@ export async function queueConnectorBuild(input: {
       conversationId: input.conversationId,
       credentialAccessAllowed: false,
       promotionTarget: "shared-code-registry",
+      governanceAuthority: ownerAuthoritative ? "platform-owner" : "standard-user",
     },
   });
 
