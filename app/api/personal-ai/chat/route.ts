@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { authenticatedUserId } from "@/lib/supabase/auth";
-import { activeNodeIds } from "@/lib/unison/node-access";
+import { resolveProfileExecutionPlan } from "@/lib/runtime/profile-execution-router";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -13,14 +13,6 @@ const requestSchema = z.object({
   modelMode: z.enum(["auto", "fast", "quality", "heavy"]).default("auto"),
   nodeId: z.string().min(1).max(160).optional(),
 });
-
-type NodeRow = {
-  id: string;
-  display_name: string;
-  state: string;
-  capabilities: unknown;
-  last_seen_at: string;
-};
 
 function titleFromMessage(message: string) {
   const compact = message.replace(/\s+/g, " ").trim();
@@ -77,18 +69,6 @@ function chooseProfile(message: string, mode: "auto" | "fast" | "quality" | "hea
   return { profile: "fast" as const, reason: "Auto chose Fast for a lightweight request." };
 }
 
-function nodeIsPersonalReady(node: NodeRow) {
-  const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
-  const seenAt = Date.parse(node.last_seen_at || "");
-  return (
-    Number.isFinite(seenAt) &&
-    seenAt >= Date.now() - 90_000 &&
-    node.state !== "paused" &&
-    capabilities.includes("text_generation") &&
-    capabilities.includes("local_personal_chat")
-  );
-}
-
 async function settingsFor(userId: string) {
   const admin = createAdminSupabaseClient();
   const { data, error } = await admin
@@ -106,20 +86,6 @@ async function settingsFor(userId: string) {
     .single();
   if (createError) throw createError;
   return created;
-}
-
-async function ownedNodes(userId: string) {
-  const admin = createAdminSupabaseClient();
-  const nodeIds = await activeNodeIds(admin, userId);
-  if (nodeIds.length === 0) return [];
-
-  const { data, error } = await admin
-    .from("unison_nodes")
-    .select("id,display_name,state,capabilities,last_seen_at")
-    .in("id", nodeIds)
-    .order("last_seen_at", { ascending: false });
-  if (error) throw error;
-  return (data || []) as NodeRow[];
 }
 
 async function readHistory(userId: string, conversationId: string) {
@@ -161,9 +127,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const nodes = await ownedNodes(userId);
     let conversationId = input.conversationId || null;
-    let targetNodeId: string | null = null;
+    let requestedNodeId = input.nodeId || settings.preferred_node_id || null;
     let conversationTitle = titleFromMessage(input.message);
 
     if (conversationId) {
@@ -177,7 +142,7 @@ export async function POST(request: Request) {
       if (!conversation) {
         return NextResponse.json({ error: "Conversation not found." }, { status: 404 });
       }
-      targetNodeId = conversation.node_id;
+      requestedNodeId = conversation.node_id;
 
       const { data: titles, error: titleError } = await admin.rpc(
         "personal_ai_list_conversations",
@@ -188,22 +153,36 @@ export async function POST(request: Request) {
         (row: Record<string, unknown>) => row.id === conversationId,
       );
       if (typeof match?.title === "string") conversationTitle = match.title;
-    } else {
-      const requested =
-        input.nodeId || settings.preferred_node_id || nodes.find(nodeIsPersonalReady)?.id || null;
-      const selected = nodes.find((node) => node.id === requested && nodeIsPersonalReady(node));
-      if (!selected) {
-        return NextResponse.json(
-          {
-            error: "Your Personal AI PC is offline.",
-            detail:
-              "Turn on a linked PC with Personal Local AI installed. CoOperative will not silently use cloud AI.",
-          },
-          { status: 409, headers: { "Cache-Control": "no-store" } },
-        );
-      }
-      targetNodeId = selected.id;
+    }
 
+    const profileExecutionPlan = await resolveProfileExecutionPlan({
+      admin,
+      userId,
+      capability: "text",
+      nodeRouting: "require-node",
+      requiredNodeId: requestedNodeId,
+      requireProfileNode: true,
+      requirePersonalChatCapability: true,
+      fundedBalanceUsd: 0,
+      maxSpendUsd: 0,
+    });
+
+    const targetNode = profileExecutionPlan.selectedNode;
+    if (profileExecutionPlan.requiredNodeUnavailable || !targetNode) {
+      return NextResponse.json(
+        {
+          error: "Your Personal AI PC is offline.",
+          detail: conversationId
+            ? "This conversation stays tied to its PC. Turn that PC on to continue it."
+            : "Turn on a linked PC with CoOperativeLocalAI installed. CoOperative will not silently use cloud AI from this local-only route.",
+        },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const targetNodeId = targetNode.id;
+
+    if (!conversationId) {
       const { data: createdId, error: createError } = await admin.rpc(
         "personal_ai_create_conversation",
         {
@@ -215,20 +194,6 @@ export async function POST(request: Request) {
       );
       if (createError) throw createError;
       conversationId = createdId as string;
-    }
-
-    const targetNode = nodes.find(
-      (node) => node.id === targetNodeId && nodeIsPersonalReady(node),
-    );
-    if (!targetNode) {
-      return NextResponse.json(
-        {
-          error: "Your Personal AI PC is offline.",
-          detail:
-            "This conversation stays tied to its PC. Turn that PC on to continue it.",
-        },
-        { status: 409, headers: { "Cache-Control": "no-store" } },
-      );
     }
 
     const previous = await readHistory(userId, conversationId);
@@ -265,7 +230,7 @@ export async function POST(request: Request) {
       temperature: 0.3,
       routing_mode: modelChoice.profile === "heavy" ? "local-heavy" : modelChoice.profile === "quality" ? "local-quality" : "local-fast",
       task_class: modelChoice.profile === "heavy" ? "reasoning" : "general",
-      route_reason: `Personal AI priority request. ${modelChoice.reason} Required authorized node ${targetNode.display_name || targetNode.id}.`,
+      route_reason: `Personal AI priority request. ${modelChoice.reason} ${profileExecutionPlan.routeReason}`,
       allow_paid_fallback: false,
       human_approval_required: false,
       verification_status: "not_run",
@@ -302,7 +267,7 @@ export async function POST(request: Request) {
         conversationTitle,
         node: {
           id: targetNode.id,
-          displayName: targetNode.display_name,
+          displayName: targetNode.displayName,
           state: targetNode.state,
         },
         profile: modelChoice.profile,
