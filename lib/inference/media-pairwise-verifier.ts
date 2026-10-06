@@ -72,9 +72,11 @@ export function decidePairwiseVerification(
     ...new Set(report.targetResults.map((result) => result.category)),
   ].sort();
 
+  const reportedTargetSet = new Set<string>(reportedTargets);
+
   const targetSetMatches =
     expectedTargets.length === 0 ||
-    expectedTargets.every((category) => reportedTargets.includes(category));
+    expectedTargets.every((category) => reportedTargetSet.has(category));
 
   if (!targetSetMatches) {
     consistencyIssues.push(
