@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Sandbox } from "@vercel/sandbox";
+import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 export type HermesMediaKind = "image" | "video";
 
@@ -58,6 +59,9 @@ const HERMES_INSTALLERS = [
   },
 ] as const;
 const STATUS_DIR = "/tmp/cooperative-media";
+const MEDIA_BUCKET = "cooperative-media-library";
+const HERMES_GENERATED_ROOT = "/tmp/cooperative-hermes/cache/generated/";
+const MAX_OUTPUT_BYTES = 50 * 1024 * 1024;
 const IMAGE_TIMEOUT_MS = 10 * 60 * 1000;
 const VIDEO_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -220,9 +224,132 @@ function extractMediaUrl(stdout: string) {
 
   const urls = [...stdout.matchAll(/https?:\/\/[^\s"'<>]+/g)].map((match) => match[0]);
   const likelyMedia = urls
-    .filter((url) => /\.(?:png|jpe?g|webp|gif|mp4|webm)(?:\?|$)/i.test(url))
+    .filter((url) => /\.(?:png|jpe?g|webp|gif|mp4|webm|mov)(?:\?|$)/i.test(url))
     .at(-1);
   return likelyMedia?.replace(/[)\]}>.,]+$/, "") || null;
+}
+
+function extractLocalMediaPath(stdout: string) {
+  const matches = [
+    ...stdout.matchAll(
+      /MEDIA:\s*((?:file:\/\/)?\/tmp\/cooperative-hermes\/cache\/generated\/(?:images|videos)\/[^\s"'<>]+)/gi,
+    ),
+  ];
+  const raw = matches.at(-1)?.[1];
+  if (!raw) return null;
+  const cleaned = raw.replace(/^file:\/\//i, "").replace(/[)\]}>.,]+$/, "");
+  return cleaned.startsWith(HERMES_GENERATED_ROOT) ? cleaned : null;
+}
+
+function jobIdFromSandboxName(sandboxName: string) {
+  const match = sandboxName.match(
+    /^cooperative-media-([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i,
+  );
+  return match?.[1]?.toLowerCase() || null;
+}
+
+function artifactType(path: string) {
+  const extension = path.split(".").pop()?.toLowerCase() || "";
+  if (extension === "png") return { mimeType: "image/png", extension: "png", kind: "image" as const };
+  if (extension === "jpg" || extension === "jpeg") {
+    return { mimeType: "image/jpeg", extension: "jpg", kind: "image" as const };
+  }
+  if (extension === "webp") return { mimeType: "image/webp", extension: "webp", kind: "image" as const };
+  if (extension === "gif") return { mimeType: "image/gif", extension: "gif", kind: "image" as const };
+  if (extension === "mp4") return { mimeType: "video/mp4", extension: "mp4", kind: "video" as const };
+  if (extension === "webm") return { mimeType: "video/webm", extension: "webm", kind: "video" as const };
+  if (extension === "mov") return { mimeType: "video/quicktime", extension: "mov", kind: "video" as const };
+  return null;
+}
+
+async function persistSandboxMediaArtifact(input: {
+  sandbox: Sandbox;
+  sandboxName: string;
+  localPath: string;
+}) {
+  if (!input.localPath.startsWith(HERMES_GENERATED_ROOT)) {
+    throw new Error("Hermes returned a local media path outside the allowed generated-media directory.");
+  }
+
+  const jobId = jobIdFromSandboxName(input.sandboxName);
+  if (!jobId) {
+    throw new Error("Could not associate the Hermes sandbox artifact with a media job.");
+  }
+
+  const type = artifactType(input.localPath);
+  if (!type) {
+    throw new Error("Hermes returned a local media artifact with an unsupported file type.");
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data: job, error: jobError } = await admin
+    .from("media_generation_jobs")
+    .select("id,owner_ref,kind,pricing_dimensions")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (jobError) throw jobError;
+  if (!job) {
+    throw new Error("The Hermes media job could not be found while persisting its artifact.");
+  }
+  if (job.kind !== type.kind) {
+    throw new Error(
+      `Hermes returned a ${type.kind} artifact for a ${job.kind} job.`,
+    );
+  }
+
+  const bytes = await input.sandbox.readFileToBuffer({
+    path: input.localPath,
+  });
+  if (!bytes || bytes.byteLength <= 0) {
+    throw new Error("Hermes generated a local media artifact, but the sandbox file was empty or unreadable.");
+  }
+  if (bytes.byteLength > MAX_OUTPUT_BYTES) {
+    throw new Error("Hermes generated media larger than the current 50 MB CoOperative output limit.");
+  }
+
+  const safeOwner = String(job.owner_ref || "unknown-owner").replace(
+    /[^a-zA-Z0-9_-]/g,
+    "_",
+  );
+  const storagePath =
+    `generated/${safeOwner}/${jobId}.${type.extension}`;
+
+  const { error: uploadError } = await admin.storage
+    .from(MEDIA_BUCKET)
+    .upload(storagePath, bytes, {
+      contentType: type.mimeType,
+      upsert: true,
+      cacheControl: "31536000",
+    });
+  if (uploadError) throw uploadError;
+
+  const pricingDimensions =
+    job.pricing_dimensions &&
+    typeof job.pricing_dimensions === "object" &&
+    !Array.isArray(job.pricing_dimensions)
+      ? (job.pricing_dimensions as Record<string, unknown>)
+      : {};
+  const mergedPricingDimensions = {
+    ...pricingDimensions,
+    generatedStoragePath: storagePath,
+    generatedMimeType: type.mimeType,
+    generatedArtifactSource: "hermes-sandbox",
+    generatedArtifactBytes: bytes.byteLength,
+  };
+
+  const { error: updateError } = await admin
+    .from("media_generation_jobs")
+    .update({
+      pricing_dimensions: mergedPricingDimensions,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+  if (updateError) {
+    await admin.storage.from(MEDIA_BUCKET).remove([storagePath]).catch(() => undefined);
+    throw updateError;
+  }
+
+  return `/api/local-ai/media-output?jobId=${encodeURIComponent(jobId)}`;
 }
 
 export async function startHermesMediaTask(
@@ -541,7 +668,27 @@ export async function pollHermesMediaTask(args: {
   }
 
   const exitCode = Number(exitCodeText);
-  const mediaUrl = extractMediaUrl(stdout);
+  let mediaUrl = extractMediaUrl(stdout);
+  let artifactError: string | null = null;
+
+  if (!mediaUrl && state === "completed" && exitCode === 0) {
+    const localPath = extractLocalMediaPath(stdout);
+    if (localPath) {
+      try {
+        mediaUrl = await persistSandboxMediaArtifact({
+          sandbox,
+          sandboxName: args.sandboxName,
+          localPath,
+        });
+      } catch (error) {
+        artifactError =
+          error instanceof Error
+            ? error.message
+            : "Could not persist the Hermes sandbox media artifact.";
+      }
+    }
+  }
+
   const completed = state === "completed" && exitCode === 0 && Boolean(mediaUrl);
 
   await sandbox.stop();
@@ -564,6 +711,7 @@ export async function pollHermesMediaTask(args: {
     stderr,
     usage,
     error:
+      artifactError ||
       stderr.slice(-1000) ||
       stdout.slice(-1000) ||
       "Hermes media generation finished without a usable media URL.",
