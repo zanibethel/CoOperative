@@ -632,11 +632,14 @@ export async function mediaContentPreferenceForUser(userId: string) {
 
   if (error) throw error;
 
+  const adultContentAcknowledgedAt =
+    data?.adult_content_acknowledged_at || null;
+
   return {
-    preference:
-      (data?.media_content_preference as MediaContentPreference | undefined) ||
-      "sfw_only",
-    adultContentAcknowledgedAt:
-      data?.adult_content_acknowledged_at || null,
+    preference: effectiveContentPreference(
+      data?.media_content_preference,
+      adultContentAcknowledgedAt,
+    ),
+    adultContentAcknowledgedAt,
   };
 }
