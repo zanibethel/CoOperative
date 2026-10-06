@@ -152,9 +152,16 @@ function pairwiseVerifierMessages(input: {
         `Targeted repair categories: ${targets}.`,
         "",
         "Compare image 2 against image 1. Prefer the candidate only when a targeted dimension clearly improves without material regression elsewhere.",
-        "Return exactly this contract:",
-        '{"version":"semantic-pairwise-v1","targetResults":[{"category":"hands","result":"better|same|worse|uncertain","confidence":0.0,"explanation":"grounded visible comparison"}],"promptAdherenceComparison":"better|same|worse|uncertain","compositionPreservation":"preserved|changed-minor|changed-material|uncertain","regressions":[{"category":"face|hands|anatomy|skin|lighting|background|prompt|artifact","severity":"low|medium|high|critical","description":"grounded visible regression"}],"confidence":0.0,"summary":"short comparison"}',
-        "Use one targetResults entry for each requested repair category.",
+        "Return these keys only: version, targetResults, promptAdherenceComparison, compositionPreservation, regressions, confidence, summary.",
+        'Set version to "semantic-pairwise-v1".',
+        "targetResults MUST be a JSON array with exactly one entry for each requested repair category and no extra categories.",
+        "Each targetResults entry must contain category, result, confidence, and explanation.",
+        "Allowed result values: better, same, worse, uncertain.",
+        "promptAdherenceComparison must be better, same, worse, or uncertain.",
+        "compositionPreservation must be preserved, changed-minor, changed-material, or uncertain.",
+        "regressions MUST be a JSON array. Each regression must contain category, severity, and description.",
+        "Allowed regression categories: face, hands, anatomy, skin, lighting, background, prompt, artifact.",
+        "Allowed regression severities: low, medium, high, critical.",
         "confidence fields must be between 0 and 1.",
         "If the difference is not visibly clear, use uncertain rather than guessing.",
         "regressions must contain only changes where image 2 is visibly worse than image 1.",
@@ -174,7 +181,7 @@ async function enqueuePairwiseVerifier(
     targetCategories: string[];
   },
 ) {
-  if (!input.workerId) return null;
+  if (!input.workerId || !input.targetCategories.length) return null;
 
   const { data: node, error: nodeError } = await supabase
     .from("unison_nodes")
@@ -283,9 +290,13 @@ async function persistPairwiseVerification(
     provider: string;
     latencyMs: number | null;
     report: PairwiseVerificationReport;
+    expectedTargetCategories: string[];
   },
 ) {
-  const decision = decidePairwiseVerification(input.report);
+  const decision = decidePairwiseVerification(
+    input.report,
+    input.expectedTargetCategories,
+  );
 
   const { data: original, error: originalError } = await supabase
     .from("inference_jobs")
@@ -786,6 +797,23 @@ export async function POST(request: Request) {
         });
       }
 
+      const { data: candidateForTargets, error: targetError } =
+        await supabase
+          .from("inference_jobs")
+          .select("repair_plan")
+          .eq("id", candidateImageJobId)
+          .maybeSingle();
+      if (targetError) throw targetError;
+
+      const expectedTargetCategories = repairTargetsFromPlan(
+        candidateForTargets?.repair_plan,
+      );
+      if (!expectedTargetCategories.length) {
+        throw new Error(
+          "Pairwise verifier has no persisted repair targets to validate.",
+        );
+      }
+
       const pairwiseCompletedAt = new Date().toISOString();
       const { error: pairwiseJobUpdateError } = await supabase
         .from("text_inference_jobs")
@@ -815,6 +843,7 @@ export async function POST(request: Request) {
         provider,
         latencyMs,
         report: pairwiseReport,
+        expectedTargetCategories,
       });
 
       await recordUnisonTextUsage(supabase, {
