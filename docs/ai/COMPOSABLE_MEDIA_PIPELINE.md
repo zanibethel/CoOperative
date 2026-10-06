@@ -152,14 +152,34 @@ Phase 1 foundation is now in place:
 - a typed portable-artifact/component contract exists;
 - deterministic specialist eligibility and ranking exists;
 - owned local image jobs are included in general model runtime scoring, so local successes/failures contribute to reliability evidence instead of being invisible to the registry;
-- the confirmed owned explicit image success is persisted in `ai_model_capability_evidence` as runtime evidence, while visual quality remains intentionally unscored until benchmark evidence exists.
+- the confirmed owned explicit image success is persisted in `ai_model_capability_evidence` as runtime evidence, while visual quality remains intentionally unscored until benchmark evidence exists;
+- image queue jobs now persist `pipeline_mode`, `pipeline_trace`, and `required_capabilities`;
+- queue claiming is capability-aware, so a pipeline or explicit job is not handed to a worker that does not advertise the required execution features;
+- the first executable pipeline is wired as **base generation -> local quality judge -> targeted low-strength refinement when indicated -> deterministic local upscale**;
+- successful pipeline stages mirror back into `ai_model_capability_evidence`, preserving the learning loop.
+
+### quality-v1 activation
+
+The first pipeline is intentionally conservative.
+
+It activates only when:
+
+1. the request selects the high-end owned/local quality image route;
+2. there is no reference-image handoff for this first version;
+3. an authorized node advertises `composable_media_pipeline_v1`.
+
+The worker advertises that capability beginning with `image-worker-0.11.0`. Until an updated worker heartbeats with that capability, routing remains on the existing single-pass path rather than queueing work that an older node cannot execute.
+
+The current quality judge is explicitly a **heuristic image-signal judge**, not a semantic anatomy critic. It measures detail, contrast, and resolution and uses prompt intent to prioritize human-detail refinement. Its trace sets `semanticAnatomyAssessment=false` so future semantic vision specialists can replace it without confusing the evidence.
+
+The first upscaler is Pillow/Lanczos. That is a cheap portable component and a useful pipeline placeholder, not a learned super-resolution model. The component contract allows it to be replaced independently when a stronger local or hosted upscaler is verified.
 
 Next implementation layer:
 
-1. expose real local specialist components such as upscaling, inpainting/detail repair, pose/depth conditioning, and quality judging as capability nodes;
-2. register and score them;
-3. have media recommendation building produce a multi-stage plan rather than only one generation route;
-4. execute the plan behind a feature gate;
-5. compare pipeline output against the current single-model baseline before making it the default.
+1. benchmark `quality-v1` against the single-pass baseline;
+2. add a learned local super-resolution specialist;
+3. add semantic vision judging for face/anatomy/hands and region masks;
+4. expose pose/depth/inpainting specialists as independently scored capability nodes;
+5. allow the planner to choose local specialists plus bounded cloud specialists within the Model Mixer ceiling.
 
-The first live pipeline should remain simple: **local base generation -> quality judge -> targeted refinement -> upscale**. More stages should be added only when evidence shows they improve output enough to justify their time and cost.
+More stages should be added only when evidence shows they improve output enough to justify their time and cost.
