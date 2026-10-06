@@ -319,7 +319,10 @@ async function capabilityCoverage(ownerRef: string) {
           ? ("adult_non_explicit_boundary" as const)
           : null,
     outcome: row.outcome,
-    conclusive: row.outcome === "supported" || row.outcome === "blocked",
+    conclusive:
+      row.outcome === "supported" ||
+      row.outcome === "blocked" ||
+      row.outcome === "partial",
   }));
 }
 
@@ -331,12 +334,18 @@ async function plan(ownerRef: string, userId: string) {
     batchJobs(ownerRef),
   ]);
 
-  const usedCapUsd = jobs.reduce(
+  // Aggregate ceiling is based on current provider-cost estimates, while each
+  // individual job still has its own request cap. This avoids counting an
+  // unused per-job safety cushion as if it were actual spend.
+  const usedEstimatedProviderUsd = jobs.reduce(
     (sum, job) =>
-      sum + Number(job.request_max_spend_microusd || 0) / 1_000_000,
+      sum + Number(job.estimated_provider_cost_microusd || 0) / 1_000_000,
     0,
   );
-  const remainingCapUsd = Math.max(0, HARD_BATCH_CAP_USD - usedCapUsd);
+  const remainingCapUsd = Math.max(
+    0,
+    HARD_BATCH_CAP_USD - usedEstimatedProviderUsd,
+  );
 
   const targets = TARGETS.map((target) => {
     const alreadyCovered = coverage.some(
@@ -398,7 +407,7 @@ async function plan(ownerRef: string, userId: string) {
 
   return {
     hardCapUsd: HARD_BATCH_CAP_USD,
-    usedCapUsd,
+    usedEstimatedProviderUsd,
     remainingCapUsd,
     jobs,
     targets,
@@ -570,8 +579,10 @@ async function startNext(ownerRef: string, userId: string) {
       },
       batch: {
         hardCapUsd: HARD_BATCH_CAP_USD,
-        previouslyReservedUsd: current.usedCapUsd,
-        reservedAfterStartUsd: current.usedCapUsd + route.capUsd,
+        previousEstimatedProviderUsd: current.usedEstimatedProviderUsd,
+        estimatedProviderAfterStartUsd:
+          current.usedEstimatedProviderUsd + route.estimatedProviderCostUsd,
+        nextRequestCapUsd: route.capUsd,
       },
     };
   } catch (error) {
