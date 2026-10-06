@@ -108,10 +108,7 @@ function normalizeFalPricingText(html: string) {
 }
 
 function canonicalVideoResolution(value: string) {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "2k") return "1440p";
-  if (normalized === "4k") return "2160p";
-  return normalized;
+  return value.trim().toLowerCase();
 }
 
 function setVideoRateIfMissing(
@@ -224,11 +221,23 @@ function parseFalVideoPricing(
     tokenFormulaPricing ||
     Boolean(audioPair);
 
+  const approximate =
+    /roughly|approximately|token(?:s| pricing| prices)/i.test(text);
+
+  // Add a conservative buffer whenever the page itself calls the rate an
+  // approximation or derives it from tokens. The exact provider usage can be
+  // reconciled later, but selection must never depend on an optimistic quote.
+  if (approximate) {
+    for (const rate of Object.values(rates)) {
+      rate.withoutAudio = rate.withoutAudio * 1.05;
+      rate.withAudio = rate.withAudio * 1.05;
+    }
+  }
+
   return {
     rates,
     audioPricingBounded,
-    approximate:
-      /roughly|approximately|token(?:s| pricing| prices)/i.test(text),
+    approximate,
     note: audioPricingBounded
       ? "Live FAL page pricing was normalized into request-level per-second rates."
       : "The live page exposes video pricing but does not bound the audio-toggle price difference.",
