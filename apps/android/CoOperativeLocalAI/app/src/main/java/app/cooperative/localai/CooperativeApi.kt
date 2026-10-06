@@ -66,6 +66,8 @@ class CooperativeApi(
             capabilities
                 .put("local_text_generation")
                 .put("text_generation")
+                .put("media_prompt_planning_v1")
+                .put("cross_device_media_planning")
         }
 
         val platform = JSONObject()
@@ -129,7 +131,7 @@ class CooperativeApi(
             .put("capabilities", capabilities)
             .put("resources", resources)
             .put("policy", policy)
-            .put("workerVersion", "android-local-ai-0.2.0")
+            .put("workerVersion", "android-local-ai-0.4.0")
 
         return post(
             path = "/api/unison/nodes/heartbeat",
@@ -138,12 +140,24 @@ class CooperativeApi(
         ) ?: JSONObject()
     }
 
-    fun claimPersonalTextJob(): JSONObject? =
+    fun claimTextJob(): JSONObject? =
+        claimPersonalTextJob() ?: claimMediaPlanningTextJob()
+
+    private fun claimPersonalTextJob(): JSONObject? =
         post(
             path = "/api/inference/text/jobs/claim",
             body = JSONObject()
                 .put("workerId", preferences.nodeId)
                 .put("personalOnly", true),
+            bearerToken = requireNodeToken(),
+        )
+
+    private fun claimMediaPlanningTextJob(): JSONObject? =
+        post(
+            path = "/api/inference/text/jobs/claim",
+            body = JSONObject()
+                .put("workerId", preferences.nodeId)
+                .put("planningOnly", true),
             bearerToken = requireNodeToken(),
         )
 
