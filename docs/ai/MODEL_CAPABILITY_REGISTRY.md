@@ -138,3 +138,20 @@ Production runs the registry scan once daily through Vercel Cron:
 The owner dashboard at `/models` includes a manual **Scan now** control and current route coverage.
 
 The daily scanner is metadata/catalog based and should not incur generation spend. A separate monitor can review `ai_model_scan_runs` and `ai_model_scan_changes` and surface only meaningful changes.
+
+## Model Mixer registry integration
+
+The Model Mixer consumes the same persisted `ai_model_registry` used by routing and scoring. It does not maintain a separate hand-curated list of model names.
+
+The authenticated `GET /api/inference/models` endpoint exposes the current registry snapshot to the Mixer with execution availability derived from the connected provider state, CoOperative AI balance/BYOK state, and route execution readiness. The UI ranks candidates per agent role using the persisted task scores:
+
+- Research: `general-text`
+- Planner: `reasoning`
+- Builder: `coding`
+- Verifier: `reasoning`
+- Media: `image-generation` and `video-generation`
+
+Slider levels change the ranking emphasis from free/cost-efficient to performance/quality. Level 0 excludes paid hosted routes. Higher levels may surface paid routes, but display eligibility never authorizes spending by itself.
+
+Final execution remains bounded by the request-level spend ceiling, provider connection, live node availability, BYOK or funded AI balance, capability fit, policy evidence, adult-content scope, exact media controls, and runtime fallback rules. This keeps the registry authoritative for discovery and scoring without allowing the Mixer UI to bypass execution safeguards.
+
