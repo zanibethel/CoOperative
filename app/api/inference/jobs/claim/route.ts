@@ -49,6 +49,7 @@ export async function POST(request: Request) {
         prompt: job.prompt,
         aspectRatio: job.aspect_ratio,
         profile: job.profile,
+        contentMode: job.content_mode || "sfw",
         references,
         negativePrompt: job.negative_prompt,
         steps: job.steps,
