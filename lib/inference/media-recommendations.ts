@@ -21,6 +21,10 @@ import type {
 import type { NousReferenceTransportVerification } from "@/lib/inference/nous-reference-transport-verification";
 import type { MediaReferenceModelVerification } from "@/lib/inference/media-reference-model-verification";
 import {
+  availableModelRegistryRoutes,
+  registryRouteEligible,
+} from "@/lib/inference/model-capability-registry";
+import {
   mediaBenchmarkQualityComposite,
   mediaBenchmarkSummaryForRoute,
   type MediaBenchmarkDimensionScores,
@@ -570,6 +574,17 @@ export async function buildMediaRecommendationOptions(input: {
     (input.adultOutputRequested ? "adult_non_explicit" : "sfw");
   const adultOutputRequested = adultContentClass !== "sfw";
   const candidates: Candidate[] = [];
+  const registryAvailability = await availableModelRegistryRoutes({
+    providers: ["openrouter", "nous"],
+    routeKinds: ["image", "video"],
+    maxAgeHours: 36,
+  }).catch(() => ({
+    authoritative: false,
+    latestCompletedScanAt: null,
+    coverage: new Set<string>(),
+    keys: new Set<string>(),
+    routes: [],
+  }));
   const requestShape = {
     durationSeconds: plan.durationSeconds,
     aspectRatio: plan.aspectRatio,
@@ -578,7 +593,7 @@ export async function buildMediaRecommendationOptions(input: {
   };
 
   const openRouterPool =
-    plan.kind === "video"
+    (plan.kind === "video"
       ? openRouterCatalog?.video || []
       : input.requiresReferenceImage
         ? (openRouterCatalog?.image || []).filter(
@@ -588,7 +603,14 @@ export async function buildMediaRecommendationOptions(input: {
                 (modality) => modality.toLowerCase() === "image",
               ),
           )
-        : openRouterCatalog?.image || [];
+        : openRouterCatalog?.image || []
+    ).filter((model) =>
+      registryRouteEligible(registryAvailability, {
+        provider: "openrouter",
+        model: model.id,
+        routeKind: plan.kind === "video" ? "video" : "image",
+      }),
+    );
   const exactOpenRouter = openRouterPool.filter((model) =>
     supportsExactRequest(model, plan),
   );
@@ -641,7 +663,16 @@ export async function buildMediaRecommendationOptions(input: {
 
   const nousCatalog = await nousManagedMediaCatalog();
 
-  if (plan.kind === "video" && plan.durationSeconds && nousCatalog.video) {
+  if (
+    plan.kind === "video" &&
+    plan.durationSeconds &&
+    nousCatalog.video &&
+    registryRouteEligible(registryAvailability, {
+      provider: "nous",
+      model: nousCatalog.video.model,
+      routeKind: "video",
+    })
+  ) {
     const requestedAudio = plan.audio ?? false;
     const resolutionEntries = plan.resolution
       ? [[plan.resolution.toLowerCase(), nousCatalog.video.rates[plan.resolution.toLowerCase()]] as const]
@@ -691,6 +722,15 @@ export async function buildMediaRecommendationOptions(input: {
 
     if (!input.requiresReferenceImage) {
       for (const model of nousCatalog.image) {
+        if (
+          !registryRouteEligible(registryAvailability, {
+            provider: "nous",
+            model: model.model,
+            routeKind: "image",
+          })
+        ) {
+          continue;
+        }
         candidates.push({
           provider: "nous",
           model: model.model,
@@ -948,6 +988,10 @@ export async function buildMediaRecommendationOptions(input: {
   return {
     options,
     fetchedAt: new Date().toISOString(),
+    registryAvailability: {
+      authoritative: registryAvailability.authoritative,
+      latestCompletedScanAt: registryAvailability.latestCompletedScanAt,
+    },
     contentPreference,
     requirementBlocked: false,
     explicitVerificationBlocked: false,
