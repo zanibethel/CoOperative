@@ -383,6 +383,53 @@ export default function WorkflowConsole() {
                         </button>
                       ) : null}
 
+                      {node.status === "needs_approval" &&
+                      node.selected_provider === "openrouter" &&
+                      node.selected_route_kind === "video" &&
+                      node.result.executionEnabled === false ? (
+                        <>
+                          {node.result.recipe &&
+                          typeof node.result.recipe === "object" &&
+                          !Array.isArray(node.result.recipe) ? (
+                            <p>
+                              <b>Video controls:</b>{" "}
+                              {typeof (node.result.recipe as Record<string, unknown>)
+                                .durationSeconds === "number"
+                                ? String(
+                                    (node.result.recipe as Record<string, unknown>)
+                                      .durationSeconds,
+                                  ) + "s"
+                                : "duration set by plan"}{" "}
+                              ·{" "}
+                              {typeof (node.result.recipe as Record<string, unknown>)
+                                .resolution === "string"
+                                ? String(
+                                    (node.result.recipe as Record<string, unknown>)
+                                      .resolution,
+                                  )
+                                : "provider resolution"}{" "}
+                              · audio{" "}
+                              {(node.result.recipe as Record<string, unknown>).audio ===
+                              true
+                                ? "on"
+                                : "off"}
+                            </p>
+                          ) : null}
+                          <button
+                            className="primary"
+                            type="button"
+                            disabled={Boolean(approvingNodeId)}
+                            onClick={() =>
+                              void approveMedia(selected.workflow.id, node.id)
+                            }
+                          >
+                            {approvingNodeId === node.id
+                              ? "Starting one video…"
+                              : "Approve one video generation"}
+                          </button>
+                        </>
+                      ) : null}
+
                       {typeof node.result.mediaUrl === "string" ? (
                         <div>
                           <p>
@@ -397,15 +444,28 @@ export default function WorkflowConsole() {
                                 ? "connected OpenRouter billing"
                                 : "free"}
                           </p>
-                          <img
-                            src={node.result.mediaUrl}
-                            alt="Generated workflow media"
-                            style={{
-                              maxWidth: "100%",
-                              borderRadius: 12,
-                              marginTop: 8,
-                            }}
-                          />
+                          {node.task_type === "video-generation" ? (
+                            <video
+                              src={node.result.mediaUrl}
+                              controls
+                              playsInline
+                              style={{
+                                maxWidth: "100%",
+                                borderRadius: 12,
+                                marginTop: 8,
+                              }}
+                            />
+                          ) : (
+                            <img
+                              src={node.result.mediaUrl}
+                              alt="Generated workflow media"
+                              style={{
+                                maxWidth: "100%",
+                                borderRadius: 12,
+                                marginTop: 8,
+                              }}
+                            />
+                          )}
                         </div>
                       ) : null}
                     </>
