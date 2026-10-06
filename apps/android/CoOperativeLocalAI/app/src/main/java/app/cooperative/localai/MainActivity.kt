@@ -16,12 +16,14 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import java.text.NumberFormat
+import java.time.Instant
 import kotlin.concurrent.thread
 
 class MainActivity : Activity() {
     private lateinit var preferences: NodePreferences
     private lateinit var tokenStore: SecureTokenStore
     private lateinit var api: CooperativeApi
+    private lateinit var modelManager: LocalModelManager
 
     private lateinit var statusText: TextView
     private lateinit var nodeToggle: Button
@@ -29,6 +31,11 @@ class MainActivity : Activity() {
     private lateinit var pairButton: Button
     private lateinit var hardwareText: TextView
     private lateinit var localModelText: TextView
+    private lateinit var downloadModelButton: Button
+    private lateinit var selfTestButton: Button
+    private lateinit var localPromptInput: EditText
+    private lateinit var runLocalButton: Button
+    private lateinit var localOutputText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +43,7 @@ class MainActivity : Activity() {
         preferences = NodePreferences(this)
         tokenStore = SecureTokenStore(this)
         api = CooperativeApi(this, preferences, tokenStore)
+        modelManager = LocalModelManager(this)
 
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
@@ -46,6 +54,10 @@ class MainActivity : Activity() {
 
         setContentView(buildUi())
         refreshUi()
+
+        if (preferences.nodeEnabled && tokenStore.getNodeToken() != null) {
+            startNodeService()
+        }
     }
 
     private fun buildUi(): ScrollView {
@@ -101,18 +113,45 @@ class MainActivity : Activity() {
         column.addView(pairButton.withTop(dp(8)))
 
         column.addView(sectionTitle("LOCAL MODEL"))
-        localModelText = text(
-            "Waiting for hardware report. APK alpha 1 does not download a model yet.",
-            14f,
-            color = Color.LTGRAY,
-        )
+        localModelText = text("", 14f, color = Color.LTGRAY)
         column.addView(localModelText)
+
+        downloadModelButton = Button(this).apply {
+            setOnClickListener { downloadStarterModel() }
+        }
+        column.addView(downloadModelButton.withTop(dp(10)))
+
+        selfTestButton = Button(this).apply {
+            text = "Run local self-test"
+            setOnClickListener { runSelfTest() }
+        }
+        column.addView(selfTestButton.withTop(dp(8)))
+
+        localPromptInput = EditText(this).apply {
+            hint = "Ask the local model something"
+            setHintTextColor(Color.GRAY)
+            setTextColor(Color.WHITE)
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 2
+            maxLines = 5
+        }
+        column.addView(localPromptInput.matchWidth().withTop(dp(12)))
+
+        runLocalButton = Button(this).apply {
+            text = "Run locally"
+            setOnClickListener { runLocalPrompt() }
+        }
+        column.addView(runLocalButton.withTop(dp(8)))
+
+        localOutputText = text("", 14f, color = Color.rgb(206, 235, 242))
+            .withTop(dp(10))
+        column.addView(localOutputText)
 
         column.addView(sectionTitle("DEVICE ASSIST"))
         column.addView(text(
-            "Screen understanding, Accessibility actions and MediaProjection are intentionally " +
-                "not enabled in this first APK. They will be added behind explicit user controls " +
-                "after node + local inference are validated.",
+            "Screen understanding and Android Accessibility actions are still disabled in alpha 2. " +
+                "Local text inference is being validated first; screen-assist permissions come next " +
+                "and will remain separately controlled.",
             14f,
             color = Color.LTGRAY,
         ))
@@ -130,6 +169,7 @@ class MainActivity : Activity() {
         val state = when {
             message != null -> message
             !paired -> "Not paired"
+            enabled && preferences.localModelVerified -> "Paired • node enabled • local AI ready"
             enabled -> "Paired • node enabled"
             else -> "Paired • node stopped"
         }
@@ -161,6 +201,23 @@ class MainActivity : Activity() {
                 append(" MB RAM")
             }
         }
+
+        val installed = modelManager.isStarterModelInstalled
+        localModelText.text = when {
+            preferences.localModelVerified ->
+                "Verified: Qwen3 0.6B INT4 • CPU • ${preferences.localModelLatencyMs} ms self-test"
+            installed ->
+                "Qwen3 0.6B INT4 is downloaded (~347 MB). Run the self-test before routing jobs."
+            else ->
+                "Starter profile: Qwen3 0.6B INT4 (~347 MB). Downloaded separately so APK updates stay small."
+        }
+
+        downloadModelButton.text =
+            if (installed) "Starter model downloaded" else "Download local model (~347 MB)"
+        downloadModelButton.isEnabled = !installed
+
+        selfTestButton.isEnabled = installed
+        runLocalButton.isEnabled = preferences.localModelVerified
     }
 
     private fun pairPhone() {
@@ -201,13 +258,129 @@ class MainActivity : Activity() {
         }
 
         preferences.nodeEnabled = true
+        startNodeService()
+        refreshUi()
+    }
+
+    private fun startNodeService() {
         val intent = Intent(this, NodeForegroundService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
             startService(intent)
         }
-        refreshUi()
+    }
+
+    private fun downloadStarterModel() {
+        downloadModelButton.isEnabled = false
+        selfTestButton.isEnabled = false
+        localOutputText.text = ""
+        localModelText.text = "Starting model download…"
+
+        thread(name = "CoOperativeModelDownload") {
+            try {
+                modelManager.downloadStarterModel { progress ->
+                    val downloadedMb = progress.downloadedBytes / (1024L * 1024L)
+                    val totalMb = progress.totalBytes?.div(1024L * 1024L)
+                    runOnUiThread {
+                        localModelText.text =
+                            if (totalMb != null && totalMb > 0) {
+                                "Downloading local model: $downloadedMb / $totalMb MB"
+                            } else {
+                                "Downloading local model: $downloadedMb MB"
+                            }
+                    }
+                }
+                preferences.clearLocalModelVerification()
+                runOnUiThread {
+                    refreshUi("Model downloaded • run local self-test")
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    downloadModelButton.isEnabled = true
+                    refreshUi("Model download failed: ${error.message.orEmpty().take(120)}")
+                }
+            }
+        }
+    }
+
+    private fun runSelfTest() {
+        selfTestButton.isEnabled = false
+        runLocalButton.isEnabled = false
+        localOutputText.text = ""
+        localModelText.text = "Loading model and running local self-test…"
+
+        thread(name = "CoOperativeLocalSelfTest") {
+            val engine = LiteRtLocalInferenceEngine(this)
+            try {
+                val result = engine.generate(
+                    listOf(
+                        LocalMessage(
+                            role = "user",
+                            content = "Reply with one short sentence confirming local Android AI is running.",
+                        ),
+                    ),
+                )
+                preferences.localModelVerified = true
+                preferences.localModelId = result.modelId
+                preferences.localModelLatencyMs = result.latencyMs
+                preferences.localModelVerifiedAt = Instant.now().toString()
+
+                if (tokenStore.getNodeToken() != null) {
+                    runCatching { api.heartbeat() }
+                }
+
+                runOnUiThread {
+                    localOutputText.text = result.text
+                    refreshUi("Local AI verified • ${result.latencyMs} ms")
+                    if (preferences.nodeEnabled) startNodeService()
+                }
+            } catch (error: Exception) {
+                preferences.clearLocalModelVerification()
+                runOnUiThread {
+                    refreshUi("Local self-test failed: ${error.message.orEmpty().take(140)}")
+                }
+            } finally {
+                engine.close()
+                runOnUiThread {
+                    selfTestButton.isEnabled = modelManager.isStarterModelInstalled
+                    runLocalButton.isEnabled = preferences.localModelVerified
+                }
+            }
+        }
+    }
+
+    private fun runLocalPrompt() {
+        val prompt = localPromptInput.text.toString().trim()
+        if (prompt.isBlank()) {
+            localOutputText.text = "Enter a prompt first."
+            return
+        }
+
+        runLocalButton.isEnabled = false
+        localOutputText.text = "Running entirely on this phone…"
+
+        thread(name = "CoOperativeLocalPrompt") {
+            val engine = LiteRtLocalInferenceEngine(this)
+            try {
+                val result = engine.generate(
+                    listOf(LocalMessage(role = "user", content = prompt)),
+                )
+                runOnUiThread {
+                    localOutputText.text = "${result.text}\n\n${result.latencyMs} ms"
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    localOutputText.text =
+                        "Local generation failed: ${error.message.orEmpty().take(180)}"
+                }
+            } finally {
+                engine.close()
+                runOnUiThread {
+                    runLocalButton.isEnabled = preferences.localModelVerified
+                }
+            }
+        }
     }
 
     private fun sectionTitle(value: String): TextView =
