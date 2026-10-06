@@ -1762,7 +1762,10 @@ export async function POST(request: Request) {
               role: "user",
               content: input.message.trim(),
               attachment_ids: [],
-              job_id: localJobId,
+              // local_ai_messages.job_id references text_inference_jobs only.
+              // Local image queue ids live in inference_jobs and are returned to
+              // the client separately for polling, so do not cross-link them here.
+              job_id: null,
             });
           if (localRetryMessageError) throw localRetryMessageError;
 
@@ -2312,7 +2315,7 @@ export async function POST(request: Request) {
             const supportsExplicitMode =
               requestedAdultContentClass !== "adult_explicit" ||
               (!requiresReferenceImage &&
-                capabilities.includes("adult_explicit_sdxl_lora"));
+                capabilities.includes("adult_explicit_sdxl_lora_peft"));
             const supportsRequestedImageMode = requiresReferenceImage
               ? capabilities.includes("image_to_image") ||
                 capabilities.includes("single_reference_identity")
@@ -2908,7 +2911,10 @@ export async function POST(request: Request) {
             role: "user",
             content: visibleUserText,
             attachment_ids: effectiveMediaAttachmentIds,
-            job_id: localJobId,
+            // local_ai_messages.job_id references text_inference_jobs only.
+              // Local image queue ids live in inference_jobs and are returned to
+              // the client separately for polling, so do not cross-link them here.
+              job_id: null,
           });
         if (localMessageError) throw localMessageError;
 
@@ -6367,7 +6373,7 @@ export async function GET(request: Request) {
                 return (
                   capabilities.includes("image_generation") &&
                   (requestedAdultClass !== "adult_explicit" ||
-                    capabilities.includes("adult_explicit_sdxl_lora")) &&
+                    capabilities.includes("adult_explicit_sdxl_lora_peft")) &&
                   policy.allowImage !== false &&
                   Number.isFinite(seenAt) &&
                   seenAt >= freshAfter &&
