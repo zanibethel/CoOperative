@@ -181,17 +181,13 @@ export async function ensureMediaCapabilityRouteCatalog() {
       referenceCapability: "not-applicable",
       referenceCapabilitySource: model.pricingSource,
     })),
-    ...(nous.video
-      ? [
-          {
-            provider: "nous",
-            model: nous.video.model,
-            endpoint: "",
-            referenceCapability: "not-applicable",
-            referenceCapabilitySource: nous.video.pricingSource,
-          },
-        ]
-      : []),
+    ...(nous.videoModels || []).map((model) => ({
+      provider: "nous",
+      model: model.model,
+      endpoint: "",
+      referenceCapability: "not-applicable",
+      referenceCapabilitySource: model.pricingSource,
+    })),
     ...openRouter.image.map((model) => ({
       provider: "openrouter",
       model: model.id,
