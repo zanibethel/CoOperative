@@ -1,6 +1,13 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import ModelMixer, {
   DEFAULT_MODEL_MIXER_SETTINGS,
   ModelMixerTrigger,
@@ -471,6 +478,167 @@ function generatedMedia(content: string) {
     url: repairGeneratedMediaUrl(match[2]),
     text: content.replace(match[0], "").trim(),
   };
+}
+
+function inlineMarkdown(text: string) {
+  const tokens = text.split(
+    /(\*\*[^*\n]+\*\*|\`[^\`\n]+\`|\*[^*\n]+\*|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g,
+  );
+
+  return tokens.map((token, index) => {
+    const key = `${index}-${token.slice(0, 16)}`;
+    if (token.startsWith("**") && token.endsWith("**")) {
+      return <strong key={key}>{token.slice(2, -2)}</strong>;
+    }
+    if (token.startsWith("\`") && token.endsWith("\`")) {
+      return <code key={key}>{token.slice(1, -1)}</code>;
+    }
+    if (token.startsWith("*") && token.endsWith("*")) {
+      return <em key={key}>{token.slice(1, -1)}</em>;
+    }
+    const link = token.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/);
+    if (link) {
+      return (
+        <a key={key} href={link[2]} target="_blank" rel="noreferrer noopener">
+          {link[1]}
+        </a>
+      );
+    }
+    return token;
+  });
+}
+
+function markdownHeading(level: number, text: string, key: string) {
+  const content = inlineMarkdown(text);
+  if (level === 1) return <h1 key={key}>{content}</h1>;
+  if (level === 2) return <h2 key={key}>{content}</h2>;
+  if (level === 3) return <h3 key={key}>{content}</h3>;
+  return <h4 key={key}>{content}</h4>;
+}
+
+function AssistantMarkdown({ text }: { text: string }) {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const blocks: ReactNode[] = [];
+  const isSpecial = (line: string) =>
+    /^\s*```/.test(line) ||
+    /^\s*#{1,4}\s+/.test(line) ||
+    /^\s*(?:[-*_]\s*){3,}$/.test(line) ||
+    /^\s*[-*]\s+/.test(line) ||
+    /^\s*\d+\.\s+/.test(line) ||
+    /^\s*>\s?/.test(line);
+
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const fence = line.match(/^\s*```([^\s]*)\s*$/);
+    if (fence) {
+      const code: string[] = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```/.test(lines[index])) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push(
+        <pre className="assistant-markdown-code" key={`code-${index}`}>
+          <code>{code.join("\n")}</code>
+        </pre>,
+      );
+      continue;
+    }
+
+    const heading = line.match(/^\s*(#{1,4})\s+(.+)$/);
+    if (heading) {
+      blocks.push(
+        markdownHeading(
+          heading[1].length,
+          heading[2],
+          `heading-${index}`,
+        ),
+      );
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*(?:[-*_]\s*){3,}$/.test(line)) {
+      blocks.push(<hr key={`hr-${index}`} />);
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push(
+        <ul key={`ul-${index}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`ul-${itemIndex}-${item.slice(0, 12)}`}>
+              {inlineMarkdown(item)}
+            </li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*\d+\.\s+/, ""));
+        index += 1;
+      }
+      blocks.push(
+        <ol key={`ol-${index}`}>
+          {items.map((item, itemIndex) => (
+            <li key={`ol-${itemIndex}-${item.slice(0, 12)}`}>
+              {inlineMarkdown(item)}
+            </li>
+          ))}
+        </ol>,
+      );
+      continue;
+    }
+
+    if (/^\s*>\s?/.test(line)) {
+      const quote: string[] = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        quote.push(lines[index].replace(/^\s*>\s?/, ""));
+        index += 1;
+      }
+      blocks.push(
+        <blockquote key={`quote-${index}`}>
+          {quote.map((value, quoteIndex) => (
+            <p key={`quote-line-${quoteIndex}`}>{inlineMarkdown(value)}</p>
+          ))}
+        </blockquote>,
+      );
+      continue;
+    }
+
+    const paragraph = [line.trim()];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !isSpecial(lines[index])
+    ) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push(
+      <p key={`p-${index}`}>{inlineMarkdown(paragraph.join(" "))}</p>,
+    );
+  }
+
+  return <div className="assistant-markdown">{blocks}</div>;
 }
 
 
@@ -3610,7 +3778,7 @@ export default function LocalAiChat() {
                   if (oauthConnect) {
                     return (
                       <>
-                        {oauthConnect.text ? <div>{oauthConnect.text}</div> : null}
+                        {oauthConnect.text ? <AssistantMarkdown text={oauthConnect.text} /> : null}
                         <OAuthServiceConnectCard
                           providerKey={oauthConnect.providerKey}
                           conversationId={conversationId}
@@ -3631,7 +3799,7 @@ export default function LocalAiChat() {
                   if (fundingRequired) {
                     return (
                       <>
-                        {fundingRequired.text ? <div>{fundingRequired.text}</div> : null}
+                        {fundingRequired.text ? <AssistantMarkdown text={fundingRequired.text} /> : null}
                         <FundingRequiredCard
                           resumeKind={fundingRequired.resumeKind}
                           sourceJobId={fundingRequired.sourceJobId}
@@ -3676,7 +3844,7 @@ export default function LocalAiChat() {
                   if (sandboxCodeTask) {
                     return (
                       <>
-                        {sandboxCodeTask.text ? <div>{sandboxCodeTask.text}</div> : null}
+                        {sandboxCodeTask.text ? <AssistantMarkdown text={sandboxCodeTask.text} /> : null}
                         <SandboxCodeTaskCard taskId={sandboxCodeTask.taskId} />
                       </>
                     );
@@ -3686,7 +3854,7 @@ export default function LocalAiChat() {
                   if (connectorBuild) {
                     return (
                       <>
-                        {connectorBuild.text ? <div>{connectorBuild.text}</div> : null}
+                        {connectorBuild.text ? <AssistantMarkdown text={connectorBuild.text} /> : null}
                         <ConnectorBuildStatusCard taskId={connectorBuild.taskId} />
                       </>
                     );
@@ -3696,7 +3864,7 @@ export default function LocalAiChat() {
                   if (recovery) {
                     return (
                       <>
-                        {recovery.text ? <div>{recovery.text}</div> : null}
+                        {recovery.text ? <AssistantMarkdown text={recovery.text} /> : null}
                         <RecoveryStatusCard
                           incidentId={recovery.incidentId}
                           onSuggestion={(value) => setInput(value)}
@@ -3724,7 +3892,7 @@ export default function LocalAiChat() {
                     return (
                       <>
                         {mediaRecommendations.text ? (
-                          <div>{mediaRecommendations.text}</div>
+                          <AssistantMarkdown text={mediaRecommendations.text} />
                         ) : null}
                         <MediaRecommendationChoices
                           options={mediaRecommendations.options}
@@ -3758,7 +3926,7 @@ export default function LocalAiChat() {
                   if (budgetFollowup) {
                     return (
                       <>
-                        {budgetFollowup.text ? <div>{budgetFollowup.text}</div> : null}
+                        {budgetFollowup.text ? <AssistantMarkdown text={budgetFollowup.text} /> : null}
                         <BudgetFollowups
                           onSuggestion={(value) => setInput(value)}
                           suggestedCap={budgetFollowup.suggestedCap}
@@ -3778,7 +3946,7 @@ export default function LocalAiChat() {
                   if (serviceConnect) {
                     return (
                       <>
-                        {serviceConnect.text ? <div>{serviceConnect.text}</div> : null}
+                        {serviceConnect.text ? <AssistantMarkdown text={serviceConnect.text} /> : null}
                         <SecureServiceConnectCard
                           providerKey={serviceConnect.providerKey}
                           conversationId={conversationId}
@@ -3796,7 +3964,13 @@ export default function LocalAiChat() {
                   }
 
                   const media = generatedMedia(message.content);
-                  if (!media) return <div>{message.content}</div>;
+                  if (!media) {
+                    return message.role === "assistant" ? (
+                      <AssistantMarkdown text={message.content} />
+                    ) : (
+                      <div className="chat-message-plain">{message.content}</div>
+                    );
+                  }
                   const viewerMedia: FullscreenMedia = {
                     kind: media.kind,
                     url: media.url,
@@ -3808,7 +3982,7 @@ export default function LocalAiChat() {
                   };
                   return (
                     <>
-                      {media.text ? <div>{media.text}</div> : null}
+                      {media.text ? <AssistantMarkdown text={media.text} /> : null}
                       {media.kind === "image" ? (
                         <button
                           className="generated-media-open"
