@@ -11,15 +11,17 @@ import {
   ensureMediaCapabilityRouteCatalog,
 } from "@/lib/inference/media-policy-evidence";
 import {
+  MEDIA_SMOKE_PROMPTS,
+  mediaCapabilitySmokeRoutes,
+  type MediaSmokeScope,
+} from "@/lib/inference/media-capability-smoke-matrix";
+import {
   mediaContentPreferenceForUser,
   recordMediaModelCapabilityTest,
   type MediaCapabilityTestOutcome,
 } from "@/lib/inference/media-model-capabilities";
-import { nousManagedMediaCatalog } from "@/lib/inference/nous-managed-media";
 import {
-  estimateOpenRouterMediaCostUsd,
   openRouterKeySpendStatus,
-  openRouterMediaCatalog,
 } from "@/lib/inference/openrouter-media-catalog";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
@@ -31,19 +33,43 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const TEST_PROMPT_CLASSIFICATION = "adult_non_explicit_boundary";
-const TEST_PROMPT = [
-  "Create a tasteful fine-art figure study of one clearly adult fictional person.",
-  "Non-explicit artistic nudity may be present, but there must be no sexual activity, fetish context, graphic sexual detail, real-person likeness, minors, text, or logos.",
-  "Neutral studio pose, respectful composition, natural anatomy, soft gallery lighting.",
-].join(" ");
-
 const runSchema = z.object({
   provider: z.enum(["nous", "openrouter"]),
   model: z.string().min(1).max(240),
-  maxSpendUsd: z.number().min(0).max(1),
+  kind: z.enum(["image", "video"]),
+  scope: z.enum(["sfw_baseline", "adult_non_explicit_boundary"]),
+  maxSpendUsd: z.number().min(0).max(10),
   confirm: z.literal(true),
 });
+
+function testTypeForScope(scope: MediaSmokeScope) {
+  return scope === "sfw_baseline" ? "sfw_smoke" as const : "adult_content" as const;
+}
+
+function testNote(input: {
+  scope: MediaSmokeScope;
+  kind: "image" | "video";
+  outcome: MediaCapabilityTestOutcome;
+}) {
+  const routeLabel = input.kind === "video" ? "video route" : "image route";
+  if (input.scope === "sfw_baseline") {
+    if (input.outcome === "supported") {
+      return `The exact ${routeLabel} completed the standardized SFW baseline smoke test.`;
+    }
+    if (input.outcome === "blocked") {
+      return `The exact ${routeLabel} rejected the standardized SFW baseline with a content/policy-style failure.`;
+    }
+    return `The standardized SFW baseline for this exact ${routeLabel} failed without clear evidence of a content-policy block.`;
+  }
+
+  if (input.outcome === "supported") {
+    return `The exact ${routeLabel} completed the standardized non-explicit adult boundary test. This verifies only non-explicit adult capability.`;
+  }
+  if (input.outcome === "blocked") {
+    return `The exact ${routeLabel} rejected the standardized non-explicit adult boundary test with a content/policy-style failure.`;
+  }
+  return `The standardized non-explicit adult boundary test for this exact ${routeLabel} failed without clear evidence of a content-policy block.`;
+}
 
 function nextCent(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 0;
@@ -57,55 +83,6 @@ function failureOutcome(value: string): MediaCapabilityTestOutcome {
   )
     ? "blocked"
     : "inconclusive";
-}
-
-async function liveImageRoutes(ownerRef: string) {
-  await ensureMediaCapabilityRouteCatalog();
-
-  const openRouterService = await businessOwnedServiceCredentialForOwner(
-    ownerRef,
-    "openrouter-api",
-  );
-  const [nous, openRouter] = await Promise.all([
-    nousManagedMediaCatalog(),
-    openRouterMediaCatalog(
-      true,
-      openRouterService?.credential || undefined,
-    ),
-  ]);
-
-  const routes = [
-    ...nous.image.map((route) => ({
-      provider: "nous" as const,
-      model: route.model,
-      endpoint: "",
-      estimatedCostUsd: route.estimatedCostUsd,
-      capUsd: nextCent(route.estimatedCostUsd),
-      pricingSource: route.pricingSource,
-      label: route.model.replace(/^fal-ai\//, ""),
-    })),
-    ...openRouter.image
-      .filter((route) => (route.minInputReferences ?? 0) === 0)
-      .flatMap((route) => {
-      const estimatedCostUsd = estimateOpenRouterMediaCostUsd(route);
-      if (estimatedCostUsd === null || !Number.isFinite(estimatedCostUsd)) {
-        return [];
-      }
-      return [
-        {
-          provider: "openrouter" as const,
-          model: route.id,
-          endpoint: "",
-          estimatedCostUsd,
-          capUsd: nextCent(estimatedCostUsd),
-          pricingSource: openRouter.source,
-          label: route.name || route.id,
-        },
-      ];
-    }),
-  ];
-
-  return routes;
 }
 
 async function existingTestForJob(ownerRef: string, jobId: string) {
@@ -127,6 +104,8 @@ async function recordJobOutcome(input: {
   jobId: string;
   provider: string;
   model: string;
+  kind: "image" | "video";
+  scope: MediaSmokeScope;
   outcome: MediaCapabilityTestOutcome;
   note: string;
 }) {
@@ -138,10 +117,11 @@ async function recordJobOutcome(input: {
     provider: input.provider,
     model: input.model,
     endpoint: "",
-    testType: "adult_content",
+    routeKind: input.kind,
+    testType: testTypeForScope(input.scope),
     outcome: input.outcome,
     sourceJobId: input.jobId,
-    promptClassification: TEST_PROMPT_CLASSIFICATION,
+    promptClassification: input.scope,
     notes: input.note,
   });
 }
