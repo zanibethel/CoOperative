@@ -650,6 +650,7 @@ export default function ModelMixer({
   const [benchmarkPreparation, setBenchmarkPreparation] =
     useState<MediaQualityBenchmarkPreparation | null>(null);
   const [benchmarkPreparationError, setBenchmarkPreparationError] = useState("");
+  const [benchmarkReviewOpen, setBenchmarkReviewOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -1752,11 +1753,22 @@ export default function ModelMixer({
                 </div>
 
                 <p className="model-mixer-capability-message">
-                  Benchmark generation is complete. Review and save the outputs below before
-                  testing evidence-driven model selection.
+                  Benchmark generation is complete. Open the review only when you need the
+                  side-by-side outputs; keeping it closed avoids loading the full benchmark
+                  media set into Model Mixer on mobile.
                 </p>
 
-                <MediaBenchmarkReview />
+                <div className="model-mixer-capability-actions">
+                  <button
+                    type="button"
+                    onClick={() => setBenchmarkReviewOpen((current) => !current)}
+                    aria-expanded={benchmarkReviewOpen}
+                  >
+                    {benchmarkReviewOpen ? "Close benchmark review" : "Open benchmark review"}
+                  </button>
+                </div>
+
+                {benchmarkReviewOpen ? <MediaBenchmarkReview /> : null}
               </>
             ) : (
               <small className="model-mixer-capability-scope">
