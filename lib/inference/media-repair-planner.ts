@@ -200,9 +200,11 @@ export function planMediaRepair(
     }
 
     if (
-      isStrongSeverity(finding.severity) &&
       score !== null &&
-      score >= 88
+      (
+        (isStrongSeverity(finding.severity) && score >= 88) ||
+        (finding.severity === "medium" && score >= 92)
+      )
     ) {
       consistencyIssues.push({
         code: "score-severity-conflict",
