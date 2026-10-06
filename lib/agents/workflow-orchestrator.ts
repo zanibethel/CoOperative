@@ -17,12 +17,27 @@ import {
   userIdFromOwnerRef,
 } from "@/lib/unison/owned-text-routing";
 import { canAccessMainCooperative } from "@/lib/ai/main-cooperative-access";
+import {
+  adultMediaContentClass,
+  planMediaRequest,
+} from "@/lib/inference/media-request";
+import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog";
+import {
+  bestMediaRecommendationWithinCap,
+  buildMediaRecommendationOptions,
+} from "@/lib/inference/media-recommendations";
 
 export type AgentWorkflowPreset = "economy" | "balanced" | "premium";
 export type AgentWorkflowMode = "inspect" | "prepare_change";
 
-type TaskType = "general-text" | "summary" | "coding" | "reasoning";
-type NodeKind = "inference" | "agent-task";
+type TaskType =
+  | "general-text"
+  | "summary"
+  | "coding"
+  | "reasoning"
+  | "image-generation"
+  | "video-generation";
+type NodeKind = "inference" | "agent-task" | "media";
 
 type Workflow = {
   id: string;
@@ -92,12 +107,17 @@ function researchNeeded(text: string) {
   return /\b(research|compare|latest|current|docs?|documentation|api|provider|model|pricing|benchmark|news|find|investigate)\b/i.test(text);
 }
 
+function mediaPlanForObjective(text: string) {
+  return planMediaRequest(text);
+}
+
 function specsFor(
   objective: string,
   mode: AgentWorkflowMode,
   preset: AgentWorkflowPreset,
 ): Spec[] {
   const research = researchNeeded(objective);
+  const mediaPlan = mediaPlanForObjective(objective);
   const rows: Spec[] = [];
 
   if (preset === "premium") {
@@ -191,6 +211,23 @@ function specsFor(
     mutates: mode === "prepare_change",
   });
 
+  if (mediaPlan) {
+    rows.push({
+      key: "media",
+      role: "media",
+      kind: "media",
+      task:
+        mediaPlan.kind === "video"
+          ? "video-generation"
+          : "image-generation",
+      objective:
+        "Plan the requested media generation using the existing CoOperative media router, scored registry, live provider catalog, shared workflow budget, and current policy gates. Do not generate media in this rollout.",
+      deps: executionDeps,
+      required: false,
+      mutates: false,
+    });
+  }
+
   if (mode === "prepare_change") {
     rows.push({
       key: "verifier",
@@ -233,6 +270,7 @@ function specsFor(
 }
 
 function supports(route: ModelRegistryAvailabilityRoute, task: TaskType) {
+  if (task === "image-generation" || task === "video-generation") return false;
   if (!route.executionReady) return false;
   if (!["cooperative-local", "openrouter"].includes(route.provider)) return false;
   if (route.provider === "openrouter" && !route.free) return false;
@@ -371,6 +409,208 @@ function messagesFor(workflow: Workflow, node: Node, nodes: Node[]) {
         .slice(0, 30000),
     },
   ];
+}
+
+async function planMediaNode(
+  workflow: Workflow,
+  node: Node,
+) {
+  const admin = createAdminSupabaseClient();
+  const plan = mediaPlanForObjective(workflow.objective);
+  const now = new Date().toISOString();
+
+  if (!plan) {
+    await admin
+      .from("agent_workflow_nodes")
+      .update({
+        status: "skipped",
+        result: {
+          executionEnabled: false,
+          reason: "The workflow objective no longer resolves to a direct image/video generation request.",
+        },
+        completed_at: now,
+        updated_at: now,
+      })
+      .eq("id", node.id)
+      .eq("status", "ready");
+    return;
+  }
+
+  if (plan.clarification) {
+    await admin
+      .from("agent_workflow_nodes")
+      .update({
+        status: "needs_approval",
+        result: {
+          executionEnabled: false,
+          phase: "media-planning-only",
+          kind: plan.kind,
+          clarification: plan.clarification,
+          reason: "Required media controls are missing; no route was selected and no provider was called.",
+        },
+        attempt: node.attempt + 1,
+        completed_at: now,
+        updated_at: now,
+      })
+      .eq("id", node.id)
+      .eq("status", "ready");
+
+    await addEvent(
+      workflow,
+      node,
+      "media-plan-needs-input",
+      "Media planning stopped before routing because required request details are missing.",
+      { clarification: plan.clarification, kind: plan.kind },
+    );
+    return;
+  }
+
+  const capUsd = Math.max(0, workflow.max_spend_microusd / 1_000_000);
+  const adultClass = adultMediaContentClass(workflow.objective);
+  const catalog = await openRouterMediaCatalog(false);
+
+  const recommendations = await buildMediaRecommendationOptions({
+    plan,
+    openRouterCatalog: catalog,
+    currentCapUsd: capUsd,
+    localImageAvailable: false,
+    requiresReferenceImage: false,
+    contentPreference: "sfw_only",
+    adultOutputRequested: adultClass !== "sfw",
+    adultContentClass: adultClass,
+    cooperativeManagedOpenRouter: true,
+  });
+
+  const preferredTier =
+    workflow.preset === "economy"
+      ? "lowest-cost"
+      : workflow.preset === "premium"
+        ? "high-end"
+        : "balanced";
+  const preferred = recommendations.options.find(
+    (option) =>
+      option.tier === preferredTier &&
+      option.executionReady !== false &&
+      option.capUsd <= capUsd + 0.000001,
+  );
+  const selected =
+    preferred ||
+    bestMediaRecommendationWithinCap(recommendations.options, capUsd);
+
+  if (!selected) {
+    await admin
+      .from("agent_workflow_nodes")
+      .update({
+        status: "needs_approval",
+        result: {
+          executionEnabled: false,
+          phase: "media-planning-only",
+          kind: plan.kind,
+          capUsd,
+          sfwConflict: recommendations.sfwConflict,
+          requirementBlocked: recommendations.requirementBlocked,
+          explicitVerificationBlocked:
+            recommendations.explicitVerificationBlocked,
+          availableOptions: recommendations.options.map((option) => ({
+            tier: option.tier,
+            provider: option.provider,
+            model: option.model,
+            estimatedCostUsd: option.estimatedCostUsd,
+            capUsd: option.capUsd,
+            executionReady: option.executionReady,
+          })),
+          reason:
+            "No currently eligible media route fits the workflow cap and policy/capability gates. No provider was called.",
+        },
+        attempt: node.attempt + 1,
+        completed_at: now,
+        updated_at: now,
+      })
+      .eq("id", node.id)
+      .eq("status", "ready");
+    return;
+  }
+
+  const estimatedMicrousd = Math.max(
+    0,
+    Math.round(selected.capUsd * 1_000_000),
+  );
+
+  await admin
+    .from("agent_workflow_nodes")
+    .update({
+      status: "needs_approval",
+      selected_provider: selected.provider,
+      selected_model: selected.model,
+      selected_route_kind: plan.kind === "video" ? "video" : "image",
+      score_snapshot: {
+        taskType: node.task_type,
+        tier: selected.tier,
+        performance: selected.scorecard.registryPerformanceScore,
+        costEfficiency: selected.scorecard.registryCostEfficiencyScore,
+        overallValue: selected.scorecard.registryOverallValueScore,
+        confidence: selected.scorecard.registryConfidence,
+        quality: selected.scorecard.qualityScore,
+        benchmarkCoverage: selected.scorecard.benchmarkCoverage,
+        selectionBasis: selected.scorecard.selectionBasis,
+      },
+      estimated_cost_microusd: estimatedMicrousd,
+      result: {
+        executionEnabled: false,
+        phase: "media-planning-only",
+        kind: plan.kind,
+        selectedTier: selected.tier,
+        provider: selected.provider,
+        model: selected.model,
+        modelName: selected.modelName,
+        estimatedCostUsd: selected.estimatedCostUsd,
+        providerCostEstimateUsd: selected.providerCostEstimateUsd,
+        quotedCapUsd: selected.capUsd,
+        pricingSource: selected.pricingSource,
+        recipe: selected.recipe,
+        scorecard: selected.scorecard,
+        reason:
+          "Route selected and persisted for review. Media execution is intentionally disabled in this rollout, so no provider was called and no funds were spent.",
+      },
+      attempt: node.attempt + 1,
+      completed_at: now,
+      updated_at: now,
+    })
+    .eq("id", node.id)
+    .eq("status", "ready");
+
+  const { data: workflowCosts } = await admin
+    .from("agent_workflow_nodes")
+    .select("estimated_cost_microusd")
+    .eq("workflow_id", workflow.id);
+  const estimatedTotal = (workflowCosts || []).reduce(
+    (sum, row) => sum + Number(row.estimated_cost_microusd || 0),
+    0,
+  );
+  if (estimatedTotal <= workflow.max_spend_microusd) {
+    await admin
+      .from("agent_workflows")
+      .update({
+        estimated_spend_microusd: estimatedTotal,
+        updated_at: now,
+      })
+      .eq("id", workflow.id);
+  }
+
+  await addEvent(
+    workflow,
+    node,
+    "media-route-planned",
+    "Media route selected and persisted without executing generation.",
+    {
+      provider: selected.provider,
+      model: selected.model,
+      tier: selected.tier,
+      estimatedCostUsd: selected.estimatedCostUsd,
+      quotedCapUsd: selected.capUsd,
+      executionEnabled: false,
+    },
+  );
 }
 
 async function credential(ownerRef: string) {
@@ -1017,13 +1257,17 @@ export async function advanceAgentWorkflow(
     const childIds = state.nodes
       .map((node) => node.child_agent_task_id)
       .filter((value): value is string => Boolean(value));
-    let needsApproval = false;
+    let needsApproval = state.nodes.some(
+      (node) => node.status === "needs_approval",
+    );
     if (childIds.length) {
       const { data: tasks } = await admin
         .from("agent_tasks")
         .select("status")
         .in("id", childIds);
-      needsApproval = (tasks || []).some((task) => task.status === "needs_approval");
+      needsApproval =
+        needsApproval ||
+        (tasks || []).some((task) => task.status === "needs_approval");
     }
     const synth = state.nodes.find((node) => node.node_key === "synthesizer");
     await admin
@@ -1079,8 +1323,10 @@ export async function advanceAgentWorkflow(
         try {
           if (node.node_kind === "inference") {
             await startInference(state!.workflow, node, state!.nodes);
-          } else {
+          } else if (node.node_kind === "agent-task") {
             await startAgentTask(state!.workflow, node, state!.nodes);
+          } else {
+            await planMediaNode(state!.workflow, node);
           }
         } catch (error) {
           const detail =
