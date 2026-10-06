@@ -89,7 +89,26 @@ function extractJsonObject(text: string) {
 }
 
 function parseSemanticJudgeReport(text: string): SemanticJudgeReport {
-  const parsed = JSON.parse(extractJsonObject(text));
+  const parsed = JSON.parse(extractJsonObject(text)) as Record<string, unknown>;
+
+  if (Array.isArray(parsed.suggestedActions)) {
+    parsed.suggestedActions = parsed.suggestedActions
+      .map((value) => {
+        if (typeof value === "string") return value.trim();
+        if (
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          typeof (value as { action?: unknown }).action === "string"
+        ) {
+          return (value as { action: string }).action.trim();
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .slice(0, 10);
+  }
+
   return semanticJudgeSchema.parse(parsed);
 }
 
