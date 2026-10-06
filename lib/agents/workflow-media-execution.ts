@@ -21,6 +21,10 @@ import {
   type MediaRecommendationOption,
 } from "@/lib/inference/media-recommendations";
 import { executeOpenRouterImageDirect } from "@/lib/inference/openrouter-direct-image";
+import {
+  pollHermesMediaTask,
+  startHermesMediaTask,
+} from "@/lib/inference/hermes-media-cloud";
 import { classifyMediaRouteOutcome } from "@/lib/inference/media-route-outcome";
 import { recordMediaRouteOutcome } from "@/lib/inference/media-route-evidence";
 import { userIdFromOwnerRef } from "@/lib/unison/owned-text-routing";
@@ -49,6 +53,7 @@ type NodeRow = {
   budget_reserved_microusd: number;
   result: Record<string, unknown> | null;
   attempt: number;
+  child_media_job_id?: string | null;
 };
 
 function microusd(value: number) {
@@ -79,7 +84,7 @@ async function loadWorkflowMediaNode(
       admin
         .from("agent_workflow_nodes")
         .select(
-          "id,workflow_id,node_kind,task_type,status,selected_provider,selected_model,selected_route_kind,estimated_cost_microusd,budget_reserved_microusd,result,attempt",
+          "id,workflow_id,node_kind,task_type,status,selected_provider,selected_model,selected_route_kind,estimated_cost_microusd,budget_reserved_microusd,result,attempt,child_media_job_id",
         )
         .eq("id", nodeId)
         .eq("workflow_id", workflowId)
@@ -804,5 +809,938 @@ export async function approveAndExecuteWorkflowMediaImage(input: {
     providerError: direct.error,
     outcomeKind: outcome.kind,
     jobId,
+  };
+}
+
+
+function videoPromptForSelection(
+  objective: string,
+  plan: NonNullable<ReturnType<typeof planMediaRequest>>,
+  selected: MediaRecommendationOption,
+) {
+  let prompt = mediaPromptWithResolvedControls(objective, plan);
+  if (selected.recipe.durationSeconds) {
+    prompt += "\nBudget-approved duration: " + selected.recipe.durationSeconds + " seconds.";
+  }
+  if (selected.recipe.resolution) {
+    prompt += "\nBudget-approved resolution: " + selected.recipe.resolution + ".";
+  }
+  if (selected.recipe.audio !== null) {
+    prompt += "\nBudget-approved generated audio: " +
+      (selected.recipe.audio ? "on." : "off.");
+  }
+  return prompt;
+}
+
+export async function approveAndStartWorkflowMediaVideo(input: {
+  ownerRef: string;
+  workflowId: string;
+  nodeId: string;
+}) {
+  const state = await loadWorkflowMediaNode(
+    input.ownerRef,
+    input.workflowId,
+    input.nodeId,
+  );
+  if (!state) {
+    return { ok: false as const, status: 404, error: "Workflow media node not found." };
+  }
+
+  const { workflow, node } = state;
+  if (
+    node.node_kind !== "media" ||
+    node.task_type !== "video-generation" ||
+    node.status !== "needs_approval"
+  ) {
+    return {
+      ok: false as const,
+      status: 409,
+      error: "This media node is not awaiting video-generation approval.",
+    };
+  }
+
+  if (
+    node.selected_provider !== "openrouter" ||
+    !node.selected_model ||
+    node.selected_route_kind !== "video"
+  ) {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "This planned route is not in the currently enabled one-shot OpenRouter video execution slice.",
+    };
+  }
+
+  const plan = planMediaRequest(workflow.objective);
+  if (!plan || plan.kind !== "video" || plan.clarification) {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "The workflow objective no longer resolves to an executable video request.",
+    };
+  }
+
+  const connectedOpenRouter =
+    await businessOwnedServiceCredentialForOwner(
+      input.ownerRef,
+      "openrouter-api",
+    );
+  const usingConnectedCredential = Boolean(connectedOpenRouter?.credential);
+  const catalog = await openRouterMediaCatalog(
+    true,
+    connectedOpenRouter?.credential || undefined,
+  );
+
+  const remainingBudgetUsd = Math.max(
+    0,
+    (workflow.max_spend_microusd -
+      workflow.actual_spend_microusd -
+      workflow.reserved_spend_microusd) /
+      1_000_000,
+  );
+
+  const adultClass = adultMediaContentClass(workflow.objective);
+  const recommendations = await buildMediaRecommendationOptions({
+    plan,
+    openRouterCatalog: catalog,
+    currentCapUsd: remainingBudgetUsd,
+    localImageAvailable: false,
+    requiresReferenceImage: false,
+    contentPreference: "sfw_only",
+    adultOutputRequested: adultClass !== "sfw",
+    adultContentClass: adultClass,
+    cooperativeManagedOpenRouter: !usingConnectedCredential,
+  });
+  const selected = exactPlannedRoute(recommendations.options, node);
+
+  if (!selected || selected.executionReady === false) {
+    await moveBackToApproval({
+      ownerRef: input.ownerRef,
+      workflowId: input.workflowId,
+      nodeId: input.nodeId,
+      reason:
+        "The previously planned video route is no longer eligible in the live catalog/registry/policy checks. Re-plan before approving generation.",
+      resultPatch: {
+        routeRevalidation: "failed",
+        availableOptions: recommendations.options.map((option) => ({
+          tier: option.tier,
+          provider: option.provider,
+          model: option.model,
+          capUsd: option.capUsd,
+          executionReady: option.executionReady,
+        })),
+      },
+    });
+    return {
+      ok: false as const,
+      status: 409,
+      error: "The planned video route changed and requires a fresh approval.",
+    };
+  }
+
+  const currentQuoteMicrousd = microusd(selected.capUsd);
+  const priorQuoteMicrousd = Math.max(
+    0,
+    Number(node.estimated_cost_microusd || 0),
+  );
+  if (currentQuoteMicrousd > priorQuoteMicrousd) {
+    const admin = createAdminSupabaseClient();
+    await admin
+      .from("agent_workflow_nodes")
+      .update({
+        estimated_cost_microusd: currentQuoteMicrousd,
+        result: {
+          ...(node.result || {}),
+          quotedCapUsd: selected.capUsd,
+          estimatedCostUsd: selected.estimatedCostUsd,
+          providerCostEstimateUsd: selected.providerCostEstimateUsd,
+          pricingSource: selected.pricingSource,
+          recipe: selected.recipe,
+          routeRevalidation: "price-increased",
+          executionEnabled: false,
+          generationSent: false,
+          reason:
+            "The live video quote increased after planning. The route was not executed; approve the updated quote separately.",
+        },
+        error: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", node.id)
+      .eq("workflow_id", workflow.id)
+      .eq("status", "needs_approval");
+
+    return {
+      ok: false as const,
+      status: 409,
+      error: "The live video quote increased and requires a fresh approval.",
+      updatedQuoteUsd: selected.capUsd,
+    };
+  }
+
+  const userId = userIdFromOwnerRef(input.ownerRef);
+  if (!userId) {
+    return {
+      ok: false as const,
+      status: 403,
+      error: "This workflow owner cannot pass the execution-time media content gate.",
+    };
+  }
+
+  const gate = await evaluateMediaExecutionContentGate({
+    userId,
+    ownerRef: input.ownerRef,
+    provider: selected.provider,
+    model: selected.model,
+    endpoint: selected.editEndpoint,
+    adultContentClass: adultClass,
+  });
+  if (!gate.allowed) {
+    const admin = createAdminSupabaseClient();
+    await admin
+      .from("agent_workflow_nodes")
+      .update({
+        status: "failed",
+        result: {
+          ...(node.result || {}),
+          executionEnabled: false,
+          generationSent: false,
+          contentGate: gate,
+        },
+        error: gate.note.slice(0, 2000),
+        completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", node.id)
+      .eq("status", "needs_approval");
+
+    return { ok: false as const, status: 409, error: gate.note };
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data: reserved, error: reserveError } = await admin.rpc(
+    "reserve_agent_workflow_node_budget",
+    {
+      p_owner_ref: input.ownerRef,
+      p_workflow_id: workflow.id,
+      p_node_id: node.id,
+      p_amount_microusd: currentQuoteMicrousd,
+    },
+  );
+  if (reserveError) throw reserveError;
+  if (reserved !== true) {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "The shared workflow budget changed before this video approval could be reserved.",
+    };
+  }
+
+  const providerCredential =
+    connectedOpenRouter?.credential ||
+    process.env.OPENROUTER_API_KEY?.trim() ||
+    null;
+  if (!providerCredential) {
+    await moveBackToApproval({
+      ownerRef: input.ownerRef,
+      workflowId: workflow.id,
+      nodeId: node.id,
+      reason: "No OpenRouter credential is available for the approved video route.",
+    });
+    return {
+      ok: false as const,
+      status: 409,
+      error: "OpenRouter credential unavailable.",
+    };
+  }
+
+  const cooperativeFunded =
+    !usingConnectedCredential &&
+    selected.providerCostEstimateUsd > 0 &&
+    currentQuoteMicrousd > 0;
+
+  let profileReservationId: string | null = null;
+  if (cooperativeFunded) {
+    const profileRef = profileRefFromAiOwnerRef(input.ownerRef);
+    if (!profileRef) {
+      await moveBackToApproval({
+        ownerRef: input.ownerRef,
+        workflowId: workflow.id,
+        nodeId: node.id,
+        reason: "This workflow does not map to a CoOperative AI balance profile.",
+      });
+      return {
+        ok: false as const,
+        status: 409,
+        error: "AI balance profile unavailable.",
+      };
+    }
+
+    const profileReservation = await reserveAiProfileFunds({
+      profileRef,
+      estimatedCostUsd: currentQuoteMicrousd / 1_000_000,
+      source: "agent-workflow-video",
+      referenceId: node.id,
+      metadata: {
+        workflowId: workflow.id,
+        workflowNodeId: node.id,
+        provider: selected.provider,
+        model: selected.model,
+        quotedUserPriceUsd: currentQuoteMicrousd / 1_000_000,
+        providerCostEstimateUsd: selected.providerCostEstimateUsd,
+        oneShot: true,
+        kind: "video",
+      },
+    });
+
+    if (!profileReservation) {
+      const balance = await aiProfileBalanceForOwnerRef(input.ownerRef);
+      await moveBackToApproval({
+        ownerRef: input.ownerRef,
+        workflowId: workflow.id,
+        nodeId: node.id,
+        reason:
+          "The CoOperative AI balance is too low to reserve the approved video generation.",
+        resultPatch: {
+          availableAiBalanceUsd: balance?.availableUsd ?? null,
+          requiredQuoteUsd: currentQuoteMicrousd / 1_000_000,
+        },
+      });
+      return {
+        ok: false as const,
+        status: 409,
+        error: "Insufficient CoOperative AI balance for this approved video route.",
+      };
+    }
+    profileReservationId = profileReservation.id;
+  }
+
+  const jobId = crypto.randomUUID();
+  const queuedAt = new Date().toISOString();
+  const generationPrompt = videoPromptForSelection(
+    workflow.objective,
+    plan,
+    selected,
+  );
+
+  const { error: insertError } = await admin
+    .from("media_generation_jobs")
+    .insert({
+      id: jobId,
+      status: "queued",
+      request_root_job_id: jobId,
+      route_attempt: 1,
+      execution_mode: "workflow-hermes-one-shot",
+      owner_ref: input.ownerRef,
+      conversation_id: null,
+      kind: "video",
+      prompt: generationPrompt,
+      provider: "openrouter",
+      model: selected.model,
+      model_mixer: {
+        workflowId: workflow.id,
+        workflowNodeId: node.id,
+        preset: workflow.preset,
+        approvedOneShot: true,
+        noRetry: true,
+        selectedScorecard: selected.scorecard,
+      },
+      request_max_spend_microusd: currentQuoteMicrousd,
+      media_level:
+        workflow.preset === "premium"
+          ? 4
+          : workflow.preset === "balanced"
+            ? 2
+            : 0,
+      estimated_provider_cost_microusd: microusd(
+        selected.providerCostEstimateUsd,
+      ),
+      estimated_user_charge_microusd: cooperativeFunded
+        ? currentQuoteMicrousd
+        : 0,
+      estimated_margin_microusd: cooperativeFunded
+        ? Math.max(
+            0,
+            currentQuoteMicrousd -
+              microusd(selected.providerCostEstimateUsd),
+          )
+        : null,
+      billing_mode: cooperativeFunded
+        ? "cooperative-balance"
+        : usingConnectedCredential
+          ? "openrouter-byok"
+          : null,
+      provider_cost_bearer: cooperativeFunded
+        ? "cooperative"
+        : usingConnectedCredential
+          ? "user-connected"
+          : "free",
+      ai_balance_reservation_id: profileReservationId,
+      pricing_dimensions: {
+        workflowId: workflow.id,
+        workflowNodeId: node.id,
+        approvedOneShot: true,
+        noAutomaticRetry: true,
+        durationSeconds: selected.recipe.durationSeconds,
+        aspectRatio: selected.recipe.aspectRatio,
+        resolution: selected.recipe.resolution,
+        audio: selected.recipe.audio,
+        quotedWorkflowBudgetUsd: currentQuoteMicrousd / 1_000_000,
+        quotedUserPriceUsd: cooperativeFunded
+          ? currentQuoteMicrousd / 1_000_000
+          : 0,
+        providerCostEstimateUsd: selected.providerCostEstimateUsd,
+        pricingSource: selected.pricingSource,
+        directProvider: false,
+      },
+      pricing_source: selected.pricingSource,
+      created_at: queuedAt,
+      updated_at: queuedAt,
+    });
+
+  if (insertError) {
+    if (profileReservationId) {
+      await releaseAiProfileFunds({
+        reservationId: profileReservationId,
+        metadata: {
+          reason: "workflow-video-job-insert-failed",
+          workflowId: workflow.id,
+        },
+      }).catch(() => undefined);
+    }
+    await moveBackToApproval({
+      ownerRef: input.ownerRef,
+      workflowId: workflow.id,
+      nodeId: node.id,
+      reason:
+        "The approved video job could not be created, so no generation request was sent.",
+    });
+    throw insertError;
+  }
+
+  await admin
+    .from("agent_workflow_nodes")
+    .update({
+      child_media_job_id: jobId,
+      result: {
+        ...(node.result || {}),
+        executionEnabled: true,
+        generationSent: false,
+        approvedAt: queuedAt,
+        mediaJobId: jobId,
+        oneShot: true,
+        noAutomaticRetry: true,
+        recipe: selected.recipe,
+        billingMode: cooperativeFunded
+          ? "cooperative-balance"
+          : usingConnectedCredential
+            ? "openrouter-byok"
+            : "free",
+      },
+      error: null,
+      updated_at: queuedAt,
+    })
+    .eq("id", node.id)
+    .eq("status", "running");
+
+  try {
+    const started = await startHermesMediaTask({
+      jobId,
+      kind: "video",
+      userRequest: generationPrompt,
+      provider: "openrouter",
+      model: selected.model,
+      providerCredential,
+    });
+
+    const { error: startUpdateError } = await admin
+      .from("media_generation_jobs")
+      .update({
+        status: "running",
+        sandbox_name: started.sandboxName,
+        started_at: started.startedAt,
+        deadline_at: started.deadlineAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", jobId)
+      .eq("owner_ref", input.ownerRef)
+      .eq("status", "queued");
+    if (startUpdateError) throw startUpdateError;
+
+    await admin
+      .from("agent_workflow_nodes")
+      .update({
+        result: {
+          ...(node.result || {}),
+          executionEnabled: true,
+          generationSent: true,
+          approvedAt: queuedAt,
+          mediaJobId: jobId,
+          oneShot: true,
+          noAutomaticRetry: true,
+          recipe: selected.recipe,
+          billingMode: cooperativeFunded
+            ? "cooperative-balance"
+            : usingConnectedCredential
+              ? "openrouter-byok"
+              : "free",
+        },
+        error: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", node.id)
+      .eq("status", "running");
+
+    return {
+      ok: true as const,
+      status: 202,
+      jobId,
+      provider: "openrouter",
+      model: selected.model,
+      billingMode: cooperativeFunded
+        ? "cooperative-balance"
+        : usingConnectedCredential
+          ? "openrouter-byok"
+          : "free",
+      quotedBudgetUsd: currentQuoteMicrousd / 1_000_000,
+      message:
+        "The approved one-shot video generation started. No automatic retry or fallback is enabled.",
+    };
+  } catch (error) {
+    const detail =
+      error instanceof Error
+        ? error.message
+        : "The approved video generation could not start.";
+    const completedAt = new Date().toISOString();
+
+    if (profileReservationId) {
+      await releaseAiProfileFunds({
+        reservationId: profileReservationId,
+        metadata: {
+          reason: "workflow-video-did-not-start",
+          workflowId: workflow.id,
+          workflowNodeId: node.id,
+          jobId,
+        },
+      }).catch(() => undefined);
+    }
+    await releaseWorkflowBudget({
+      ownerRef: input.ownerRef,
+      workflowId: workflow.id,
+      nodeId: node.id,
+    });
+
+    await admin
+      .from("media_generation_jobs")
+      .update({
+        status: "failed",
+        error: detail.slice(0, 1200),
+        ai_balance_reservation_id: null,
+        actual_user_charge_microusd: 0,
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq("id", jobId)
+      .eq("owner_ref", input.ownerRef);
+
+    await admin
+      .from("agent_workflow_nodes")
+      .update({
+        status: "failed",
+        budget_reserved_microusd: 0,
+        actual_cost_microusd: 0,
+        result: {
+          ...(node.result || {}),
+          executionEnabled: true,
+          generationSent: false,
+          oneShot: true,
+          noAutomaticRetry: true,
+          mediaJobId: jobId,
+          provider: "openrouter",
+          model: selected.model,
+          error: detail,
+        },
+        error: detail.slice(0, 2000),
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq("id", node.id)
+      .eq("workflow_id", workflow.id);
+
+    return {
+      ok: false as const,
+      status: 502,
+      error:
+        "The approved one-shot video could not start. No retry or fallback was started.",
+      providerError: detail,
+      jobId,
+    };
+  }
+}
+
+export async function syncWorkflowMediaNode(input: {
+  ownerRef: string;
+  workflowId: string;
+  nodeId: string;
+}) {
+  const state = await loadWorkflowMediaNode(
+    input.ownerRef,
+    input.workflowId,
+    input.nodeId,
+  );
+  if (!state) return null;
+
+  const { workflow, node } = state;
+  if (
+    node.node_kind !== "media" ||
+    node.task_type !== "video-generation" ||
+    !node.child_media_job_id ||
+    !["queued", "running"].includes(node.status)
+  ) {
+    return state;
+  }
+
+  const admin = createAdminSupabaseClient();
+  const { data: job, error: jobError } = await admin
+    .from("media_generation_jobs")
+    .select(
+      "id,status,provider,model,sandbox_name,deadline_at,result_url,result_text,usage,error,billing_mode,ai_balance_reservation_id,estimated_user_charge_microusd,estimated_provider_cost_microusd,pricing_dimensions",
+    )
+    .eq("id", node.child_media_job_id)
+    .eq("owner_ref", input.ownerRef)
+    .maybeSingle();
+  if (jobError) throw jobError;
+  if (!job) return state;
+
+  let current = job;
+
+  if (
+    current.status === "running" &&
+    current.sandbox_name &&
+    current.deadline_at
+  ) {
+    const polled = await pollHermesMediaTask({
+      sandboxName: current.sandbox_name,
+      deadlineAt: current.deadline_at,
+    });
+
+    if (polled.state === "running") return state;
+
+    const completedAt = new Date().toISOString();
+
+    if (polled.state === "completed" && polled.mediaUrl) {
+      const resultText =
+        "Generated video with " +
+        current.model +
+        ".\nMEDIA_VIDEO:" +
+        polled.mediaUrl;
+
+      const { data: claimed, error: completeError } = await admin
+        .from("media_generation_jobs")
+        .update({
+          status: "completed",
+          result_url: polled.mediaUrl,
+          result_text: resultText,
+          usage: polled.usage,
+          error: null,
+          completed_at: completedAt,
+          updated_at: completedAt,
+        })
+        .eq("id", current.id)
+        .eq("owner_ref", input.ownerRef)
+        .eq("status", "running")
+        .select(
+          "id,status,provider,model,sandbox_name,deadline_at,result_url,result_text,usage,error,billing_mode,ai_balance_reservation_id,estimated_user_charge_microusd,estimated_provider_cost_microusd,pricing_dimensions",
+        )
+        .maybeSingle();
+      if (completeError) throw completeError;
+      if (claimed) current = claimed;
+    } else {
+      const failure =
+        polled.error || "The one-shot workflow video generation failed.";
+      if (
+        current.billing_mode === "cooperative-balance" &&
+        current.ai_balance_reservation_id
+      ) {
+        await releaseAiProfileFunds({
+          reservationId: current.ai_balance_reservation_id,
+          metadata: {
+            reason: "workflow-one-shot-video-failed",
+            workflowId: workflow.id,
+            workflowNodeId: node.id,
+            jobId: current.id,
+          },
+        }).catch(() => undefined);
+      }
+      await releaseWorkflowBudget({
+        ownerRef: input.ownerRef,
+        workflowId: workflow.id,
+        nodeId: node.id,
+      });
+
+      const outcome = classifyMediaRouteOutcome({ detail: failure });
+      await recordMediaRouteOutcome({
+        ownerRef: input.ownerRef,
+        sourceJobId: current.id,
+        provider: current.provider,
+        model: current.model,
+        executionMode: "workflow-hermes-one-shot",
+        requestShape: "video-text",
+        outcomeKind: outcome.kind,
+        detail: failure,
+        blocksRoute: outcome.kind === "capability-refusal",
+      }).catch(() => undefined);
+
+      const adultClass = adultMediaContentClass(workflow.objective);
+      if (outcome.kind === "provider-policy") {
+        await recordMediaRuntimePolicyRefusal({
+          ownerRef: input.ownerRef,
+          provider: current.provider,
+          model: current.model,
+          endpoint: null,
+          sourceJobId: current.id,
+          requestedClass: adultClass,
+          detail: failure,
+        }).catch(() => undefined);
+      }
+
+      await admin
+        .from("media_generation_jobs")
+        .update({
+          status: "failed",
+          usage: polled.usage,
+          error: failure.slice(0, 1200),
+          ai_balance_reservation_id: null,
+          actual_user_charge_microusd: 0,
+          completed_at: completedAt,
+          updated_at: completedAt,
+        })
+        .eq("id", current.id)
+        .eq("owner_ref", input.ownerRef);
+
+      await admin
+        .from("agent_workflow_nodes")
+        .update({
+          status: "failed",
+          budget_reserved_microusd: 0,
+          actual_cost_microusd: 0,
+          result: {
+            ...(node.result || {}),
+            executionEnabled: true,
+            generationSent: true,
+            oneShot: true,
+            noAutomaticRetry: true,
+            mediaJobId: current.id,
+            provider: current.provider,
+            model: current.model,
+            outcomeKind: outcome.kind,
+            error: failure,
+          },
+          error: failure.slice(0, 2000),
+          completed_at: completedAt,
+          updated_at: completedAt,
+        })
+        .eq("id", node.id)
+        .eq("workflow_id", workflow.id);
+
+      return loadWorkflowMediaNode(
+        input.ownerRef,
+        input.workflowId,
+        input.nodeId,
+      );
+    }
+  }
+
+  if (current.status === "completed" && current.result_url) {
+    const quotedMicrousd = Math.max(
+      0,
+      Number(current.estimated_user_charge_microusd || 0),
+    );
+    const workflowActualMicrousd =
+      node.budget_reserved_microusd > 0
+        ? node.budget_reserved_microusd
+        : Math.max(0, Number(node.estimated_cost_microusd || 0));
+
+    if (
+      current.billing_mode === "cooperative-balance" &&
+      current.ai_balance_reservation_id
+    ) {
+      await settleAiProfileFunds({
+        reservationId: current.ai_balance_reservation_id,
+        actualCostUsd: quotedMicrousd / 1_000_000,
+        metadata: {
+          workflowId: workflow.id,
+          workflowNodeId: node.id,
+          jobId: current.id,
+          outcome: "completed",
+          provider: current.provider,
+          model: current.model,
+          kind: "video",
+          oneShot: true,
+        },
+      });
+    }
+
+    await settleWorkflowBudget({
+      ownerRef: input.ownerRef,
+      workflowId: workflow.id,
+      nodeId: node.id,
+      actualMicrousd: workflowActualMicrousd,
+    });
+
+    await admin
+      .from("media_generation_jobs")
+      .update({
+        billed_microusd:
+          current.billing_mode === "cooperative-balance"
+            ? quotedMicrousd
+            : 0,
+        actual_user_charge_microusd:
+          current.billing_mode === "cooperative-balance"
+            ? quotedMicrousd
+            : 0,
+        actual_provider_cost_microusd: Math.max(
+          0,
+          Number(current.estimated_provider_cost_microusd || 0),
+        ),
+        actual_margin_microusd:
+          current.billing_mode === "cooperative-balance"
+            ? Math.max(
+                0,
+                quotedMicrousd -
+                  Math.max(
+                    0,
+                    Number(current.estimated_provider_cost_microusd || 0),
+                  ),
+              )
+            : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", current.id)
+      .eq("owner_ref", input.ownerRef);
+
+    const completedAt = new Date().toISOString();
+    await admin
+      .from("agent_workflow_nodes")
+      .update({
+        status: "completed",
+        result: {
+          ...(node.result || {}),
+          executionEnabled: true,
+          generationSent: true,
+          oneShot: true,
+          noAutomaticRetry: true,
+          mediaJobId: current.id,
+          mediaUrl: current.result_url,
+          text: current.result_text,
+          provider: current.provider,
+          model: current.model,
+          quotedBudgetUsd: workflowActualMicrousd / 1_000_000,
+          chargedCoOperativeBalanceUsd:
+            current.billing_mode === "cooperative-balance"
+              ? quotedMicrousd / 1_000_000
+              : 0,
+          billingMode: current.billing_mode || "free",
+          usage: current.usage,
+        },
+        error: null,
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq("id", node.id)
+      .eq("workflow_id", workflow.id);
+
+    return loadWorkflowMediaNode(
+      input.ownerRef,
+      input.workflowId,
+      input.nodeId,
+    );
+  }
+
+  if (current.status === "failed") {
+    if (
+      current.billing_mode === "cooperative-balance" &&
+      current.ai_balance_reservation_id
+    ) {
+      await releaseAiProfileFunds({
+        reservationId: current.ai_balance_reservation_id,
+        metadata: {
+          reason: "workflow-video-job-failed",
+          workflowId: workflow.id,
+          workflowNodeId: node.id,
+          jobId: current.id,
+        },
+      }).catch(() => undefined);
+    }
+    await releaseWorkflowBudget({
+      ownerRef: input.ownerRef,
+      workflowId: workflow.id,
+      nodeId: node.id,
+    });
+
+    const completedAt = new Date().toISOString();
+    await admin
+      .from("agent_workflow_nodes")
+      .update({
+        status: "failed",
+        budget_reserved_microusd: 0,
+        actual_cost_microusd: 0,
+        result: {
+          ...(node.result || {}),
+          executionEnabled: true,
+          generationSent: true,
+          oneShot: true,
+          noAutomaticRetry: true,
+          mediaJobId: current.id,
+          provider: current.provider,
+          model: current.model,
+          error: current.error || "Workflow video failed.",
+        },
+        error: (current.error || "Workflow video failed.").slice(0, 2000),
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq("id", node.id)
+      .eq("workflow_id", workflow.id);
+  }
+
+  return loadWorkflowMediaNode(
+    input.ownerRef,
+    input.workflowId,
+    input.nodeId,
+  );
+}
+
+export async function approveAndExecuteWorkflowMedia(input: {
+  ownerRef: string;
+  workflowId: string;
+  nodeId: string;
+}) {
+  const state = await loadWorkflowMediaNode(
+    input.ownerRef,
+    input.workflowId,
+    input.nodeId,
+  );
+  if (!state) {
+    return {
+      ok: false as const,
+      status: 404,
+      error: "Workflow media node not found.",
+    };
+  }
+
+  if (state.node.task_type === "image-generation") {
+    return approveAndExecuteWorkflowMediaImage(input);
+  }
+  if (state.node.task_type === "video-generation") {
+    return approveAndStartWorkflowMediaVideo(input);
+  }
+
+  return {
+    ok: false as const,
+    status: 409,
+    error: "This workflow media node type is not executable in the current rollout.",
   };
 }
