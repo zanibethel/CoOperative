@@ -23,6 +23,7 @@ import type { MediaReferenceModelVerification } from "@/lib/inference/media-refe
 import {
   availableModelRegistryRoutes,
   registryRouteEligible,
+  registryTaskScore,
 } from "@/lib/inference/model-capability-registry";
 import {
   mediaBenchmarkQualityComposite,
@@ -92,6 +93,10 @@ export type MediaRouteScorecard = {
   latestMeasuredAt: string | null;
   dimensions: MediaBenchmarkDimensionScores;
   selectionBasis: string;
+  registryPerformanceScore?: number | null;
+  registryCostEfficiencyScore?: number | null;
+  registryOverallValueScore?: number | null;
+  registryConfidence?: number | null;
 };
 
 export type MediaRecommendationOption = {
@@ -834,19 +839,46 @@ export async function buildMediaRecommendationOptions(input: {
     }
   }
 
+  const registryTaskType =
+    plan.kind === "video"
+      ? "video-generation"
+      : input.requiresReferenceImage
+        ? "image-reference"
+        : "image-generation";
+
   const enriched = candidates.map((candidate) => {
     const adultEnriched = withAdultCapability(
       candidate,
       input.adultCapabilityEvidence,
       adultContentClass,
     );
+    const scorecard = routeScorecardFor(
+      adultEnriched,
+      input.benchmarkEvidence,
+      Boolean(input.requiresReferenceImage),
+    );
+    const registryScore = registryTaskScore(registryAvailability, {
+      provider: candidate.provider,
+      model: candidate.model,
+      endpoint: candidate.editEndpoint || "",
+      routeKind:
+        plan.kind === "video"
+          ? "video"
+          : candidate.editEndpoint
+            ? "image-edit"
+            : "image",
+      taskType: registryTaskType,
+    });
+
     return {
       ...adultEnriched,
-      scorecard: routeScorecardFor(
-        adultEnriched,
-        input.benchmarkEvidence,
-        Boolean(input.requiresReferenceImage),
-      ),
+      scorecard: {
+        ...scorecard,
+        registryPerformanceScore: registryScore?.performance ?? null,
+        registryCostEfficiencyScore: registryScore?.costEfficiency ?? null,
+        registryOverallValueScore: registryScore?.overallValue ?? null,
+        registryConfidence: registryScore?.confidence ?? null,
+      },
     };
   });
   if (adultOutputRequested && contentPreference === "sfw_only") {
@@ -940,7 +972,18 @@ export async function buildMediaRecommendationOptions(input: {
           0,
           1 - Math.abs(candidate.estimatedCostUsd - midpoint) / costSpan,
         );
-        return normalizedQuality * 0.6 + midpointFit * 0.4;
+        const registryValue =
+          (candidate.scorecard?.registryOverallValueScore ?? 50) / 100;
+        const registryConfidence =
+          candidate.scorecard?.registryConfidence ?? 0;
+        const evidenceValue =
+          registryValue * registryConfidence +
+          0.5 * (1 - registryConfidence);
+        return (
+          normalizedQuality * 0.5 +
+          midpointFit * 0.25 +
+          evidenceValue * 0.25
+        );
       };
       return (
         score(b) - score(a) ||
@@ -1012,6 +1055,14 @@ export function bestMediaRecommendationWithinCap(
       )
       .sort(
         (a, b) =>
+          (b.scorecard?.registryOverallValueScore ??
+            b.scorecard?.qualityScore ??
+            0) -
+            (a.scorecard?.registryOverallValueScore ??
+              a.scorecard?.qualityScore ??
+              0) ||
+          (b.scorecard?.registryConfidence ?? 0) -
+            (a.scorecard?.registryConfidence ?? 0) ||
           (b.scorecard?.qualityScore ?? 0) - (a.scorecard?.qualityScore ?? 0) ||
           (b.scorecard?.benchmarkCoverage ?? 0) -
             (a.scorecard?.benchmarkCoverage ?? 0) ||
