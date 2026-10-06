@@ -271,7 +271,29 @@ function parseSemanticJudgeReport(text: string): SemanticJudgeReport {
 function parsePairwiseVerificationReport(
   text: string,
 ): PairwiseVerificationReport {
-  const parsed = JSON.parse(extractJsonObject(text));
+  const parsed = JSON.parse(extractJsonObject(text)) as Record<string, unknown>;
+
+  const compositionAliases: Record<string, string> = {
+    preserved: "preserved",
+    preserve: "preserved",
+    unchanged: "preserved",
+    "change-minor": "changed-minor",
+    "minor-change": "changed-minor",
+    "changed-minor": "changed-minor",
+    "change-material": "changed-material",
+    "material-change": "changed-material",
+    "changed-material": "changed-material",
+    uncertain: "uncertain",
+  };
+
+  if (
+    typeof parsed.compositionPreservation === "string" &&
+    compositionAliases[parsed.compositionPreservation]
+  ) {
+    parsed.compositionPreservation =
+      compositionAliases[parsed.compositionPreservation];
+  }
+
   return pairwiseVerificationSchema.parse(parsed);
 }
 
