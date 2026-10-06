@@ -3,12 +3,13 @@ import "server-only";
 import { createHash } from "crypto";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { hermesManagedMediaCatalog } from "@/lib/inference/hermes-managed-catalog";
 import { nousManagedMediaCatalog } from "@/lib/inference/nous-managed-media";
 import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog";
 import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
 import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
-export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-05.1";
+export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-05.2";
 
 type JsonMap = Record<string, unknown>;
 
@@ -619,12 +620,17 @@ export async function scanModelCapabilities(input: {
     const sources: ScanSourceResult[] = [];
     const successfulCoverage = new Set<string>();
 
-    const [openRouterResult, openRouterTextResult, nousResult] =
-      await Promise.allSettled([
-        openRouterMediaCatalog(true),
-        openRouterTextCatalog(),
-        nousManagedMediaCatalog(),
-      ]);
+    const [
+      openRouterResult,
+      openRouterTextResult,
+      hermesManagedResult,
+      nousResult,
+    ] = await Promise.allSettled([
+      openRouterMediaCatalog(true),
+      openRouterTextCatalog(),
+      hermesManagedMediaCatalog(),
+      nousManagedMediaCatalog(),
+    ]);
 
     if (openRouterResult.status === "fulfilled") {
       const catalog = openRouterResult.value;
@@ -834,10 +840,209 @@ export async function scanModelCapabilities(input: {
       });
     }
 
-    if (nousResult.status === "fulfilled") {
-      const catalog = nousResult.value;
+    if (hermesManagedResult.status === "fulfilled") {
+      const catalog = hermesManagedResult.value;
       successfulCoverage.add("nous:image");
       successfulCoverage.add("nous:video");
+
+      for (const model of catalog.image) {
+        const pricingVerifiedEnoughForAutomaticRouting =
+          model.estimatedCostUsd !== null &&
+          Number.isFinite(model.estimatedCostUsd) &&
+          model.estimatedCostUsd >= 0;
+
+        routes.push({
+          provider: "nous",
+          model: model.id,
+          endpoint: "",
+          routeKind: "image",
+          displayName: model.displayName,
+          source: catalog.source,
+          status: "active",
+          free: false,
+          recommended: false,
+          executionReady: pricingVerifiedEnoughForAutomaticRouting,
+          inputModalities: ["text"],
+          outputModalities: ["image"],
+          capabilitySummary: {
+            textToImage: true,
+            imageToImage: Boolean(model.editEndpoint),
+            referenceImages: Boolean(model.editEndpoint),
+            maxReferenceImages: model.maxReferenceImages,
+            hermesManaged: true,
+            speed: model.speed,
+            strengths: model.strengths,
+          },
+          pricing: {
+            estimatedCostUsd: model.estimatedCostUsd,
+            unit: model.pricingUnit,
+            costLabel: model.priceLabel,
+            approximate: true,
+            pricingSource: catalog.imageSource,
+          },
+          limits: {
+            maxReferenceImages: model.maxReferenceImages,
+          },
+          policySummary: policySummary(
+            policyMap.get(policyKey("nous", model.id)),
+          ),
+          benchmarkSummary: {},
+          runtimeSummary:
+            runtimeMap.get(policyKey("nous", model.id)) || {},
+          metadata: {
+            catalogFetchedAt: catalog.fetchedAt,
+            hermesRelease: catalog.release,
+            managedBackend: "fal",
+            sourceCatalog: catalog.imageSource,
+            automaticRouting:
+              pricingVerifiedEnoughForAutomaticRouting
+                ? "eligible-with-runtime-gates"
+                : "price-unbounded",
+          },
+        });
+
+        if (model.editEndpoint) {
+          routes.push({
+            provider: "nous",
+            model: model.id,
+            endpoint: model.editEndpoint,
+            routeKind: "image-edit",
+            displayName: `${model.displayName} · edit/reference`,
+            source: catalog.source,
+            status: "active",
+            free: false,
+            recommended: false,
+            // Reference routes remain gated by the existing exact-route verification
+            // flow. Discovery alone must not authorize a paid edit.
+            executionReady: false,
+            inputModalities: ["text", "image"],
+            outputModalities: ["image"],
+            capabilitySummary: {
+              textToImage: false,
+              imageToImage: true,
+              referenceImages: true,
+              maxReferenceImages: model.maxReferenceImages,
+              hermesManaged: true,
+            },
+            pricing: {
+              estimatedCostUsd: model.estimatedCostUsd,
+              unit: model.pricingUnit,
+              costLabel: model.priceLabel,
+              approximate: true,
+              pricingSource: catalog.imageSource,
+            },
+            limits: {
+              maxReferenceImages: model.maxReferenceImages,
+            },
+            policySummary: policySummary(
+              policyMap.get(
+                policyKey("nous", model.id, model.editEndpoint),
+              ),
+            ),
+            benchmarkSummary: {},
+            runtimeSummary:
+              runtimeMap.get(
+                policyKey("nous", model.id, model.editEndpoint),
+              ) || {},
+            metadata: {
+              catalogFetchedAt: catalog.fetchedAt,
+              hermesRelease: catalog.release,
+              managedBackend: "fal",
+              sourceCatalog: catalog.imageSource,
+              exactRouteVerificationRequired: true,
+            },
+          });
+        }
+      }
+
+      for (const model of catalog.video) {
+        routes.push({
+          provider: "nous",
+          model: model.id,
+          endpoint: "",
+          routeKind: "video",
+          displayName: model.displayName,
+          source: catalog.source,
+          status: "active",
+          free: false,
+          recommended: false,
+          // Hermes can execute these families, but automatic selection waits for
+          // request-specific live price bounding. PixVerse is overwritten below
+          // by the existing live-priced route and remains execution-ready.
+          executionReady: false,
+          inputModalities: model.imageEndpoint
+            ? ["text", "image"]
+            : ["text"],
+          outputModalities: ["video"],
+          capabilitySummary: {
+            textToVideo: Boolean(model.textEndpoint),
+            imageToVideo: Boolean(model.imageEndpoint),
+            audioGeneration: model.audioSupported,
+            aspectRatios: model.aspectRatios,
+            resolutions: model.resolutions,
+            hermesManaged: true,
+            tier: model.tier,
+            speed: model.speed,
+            strengths: model.strengths,
+          },
+          pricing: {
+            costLabel: model.tier,
+            approximate: true,
+            pricingSource: catalog.videoSource,
+            livePriceRequiredForAutomaticRouting: true,
+          },
+          limits: {
+            aspectRatios: model.aspectRatios,
+            resolutions: model.resolutions,
+            durationSeconds:
+              model.minDurationSeconds !== null &&
+              model.maxDurationSeconds !== null
+                ? {
+                    min: model.minDurationSeconds,
+                    max: model.maxDurationSeconds,
+                  }
+                : null,
+          },
+          policySummary: policySummary(
+            policyMap.get(policyKey("nous", model.id)),
+          ),
+          benchmarkSummary: {},
+          runtimeSummary:
+            runtimeMap.get(policyKey("nous", model.id)) || {},
+          metadata: {
+            catalogFetchedAt: catalog.fetchedAt,
+            hermesRelease: catalog.release,
+            managedBackend: "fal-queue",
+            sourceCatalog: catalog.videoSource,
+            automaticRouting: "live-price-required",
+          },
+        });
+      }
+
+      sources.push({
+        source: catalog.source,
+        provider: "nous",
+        ok: true,
+        count:
+          catalog.image.length +
+          catalog.image.filter((model) => Boolean(model.editEndpoint)).length +
+          catalog.video.length,
+      });
+    } else {
+      sources.push({
+        source: "hermes-managed-catalog",
+        provider: "nous",
+        ok: false,
+        count: 0,
+        detail:
+          hermesManagedResult.reason instanceof Error
+            ? hermesManagedResult.reason.message.slice(0, 500)
+            : "Hermes managed media catalog scan failed.",
+      });
+    }
+
+    if (nousResult.status === "fulfilled") {
+      const catalog = nousResult.value;
 
       for (const model of catalog.image) {
         routes.push({
@@ -845,7 +1050,10 @@ export async function scanModelCapabilities(input: {
           model: model.model,
           endpoint: "",
           routeKind: "image",
-          displayName: model.model.replace(/^fal-ai\//, ""),
+          displayName:
+            typeof model.displayName === "string"
+              ? model.displayName
+              : model.model.replace(/^fal-ai\//, ""),
           source: catalog.source,
           status: "active",
           free: false,
@@ -855,16 +1063,21 @@ export async function scanModelCapabilities(input: {
           outputModalities: ["image"],
           capabilitySummary: {
             textToImage: true,
-            imageToImage: false,
-            referenceImages: false,
+            imageToImage: Boolean(model.editEndpoint),
+            referenceImages: Boolean(model.editEndpoint),
+            maxReferenceImages: model.maxReferenceImages || 0,
             qualityLabel: model.qualityLabel,
             minQualityLevel: model.minLevel,
+            hermesManaged: true,
           },
           pricing: {
             estimatedCostUsd: model.estimatedCostUsd,
             pricingSource: model.pricingSource,
+            approximate: model.pricingApproximate === true,
           },
-          limits: {},
+          limits: {
+            maxReferenceImages: model.maxReferenceImages || 0,
+          },
           policySummary: policySummary(
             policyMap.get(policyKey("nous", model.model)),
           ),
@@ -874,6 +1087,8 @@ export async function scanModelCapabilities(input: {
           metadata: {
             catalogFetchedAt: catalog.fetchedAt,
             qualityLabel: model.qualityLabel,
+            hermesRelease: catalog.hermesRelease || null,
+            managedBackend: "fal",
           },
         });
       }
