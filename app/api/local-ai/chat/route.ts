@@ -1748,6 +1748,11 @@ export async function POST(request: Request) {
               profile: "quality",
               content_mode: adultMediaContentClass(recentMedia.prompt),
               variation_mode: "balanced",
+              pipeline_mode: "single-pass",
+              required_capabilities:
+                adultMediaContentClass(recentMedia.prompt) === "adult_explicit"
+                  ? ["image_generation", "adult_explicit_owned_checkpoint"]
+                  : ["image_generation"],
               seed:
                 Number.parseInt(localJobId.replaceAll("-", "").slice(0, 8), 16) %
                 2147483648,
@@ -2295,6 +2300,7 @@ export async function POST(request: Request) {
       const requestedAdultContentClass =
         adultMediaContentClass(effectiveMediaRequestText);
       let localImageAvailable = false;
+      let localImagePipelineAvailable = false;
       if (mediaPlan.kind === "image") {
         const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
         if (authorizedNodeIds.length > 0) {
@@ -2304,7 +2310,7 @@ export async function POST(request: Request) {
             .in("id", authorizedNodeIds);
           if (imageNodesError) throw imageNodesError;
 
-          localImageAvailable = (imageNodes || []).some((node) => {
+          const eligibleImageNodes = (imageNodes || []).filter((node) => {
             const capabilities = Array.isArray(node.capabilities)
               ? node.capabilities
               : [];
@@ -2327,6 +2333,16 @@ export async function POST(request: Request) {
               node.state !== "paused"
             );
           });
+
+          localImageAvailable = eligibleImageNodes.length > 0;
+          localImagePipelineAvailable =
+            !requiresReferenceImage &&
+            eligibleImageNodes.some((node) => {
+              const capabilities = Array.isArray(node.capabilities)
+                ? node.capabilities
+                : [];
+              return capabilities.includes("composable_media_pipeline_v1");
+            });
         }
       }
 
@@ -2878,6 +2894,28 @@ export async function POST(request: Request) {
           selectedRecommendation.model.includes("quality-reference")
             ? "preserve"
             : "balanced";
+        const pipelineMode =
+          selectedRecommendation.tier === "high-end" &&
+          localProfile === "quality" &&
+          effectiveMediaAttachmentIds.length === 0 &&
+          localImagePipelineAvailable
+            ? "quality-v1"
+            : "single-pass";
+        const requiredCapabilities = new Set<string>(["image_generation"]);
+        if (adultContentClass === "adult_explicit") {
+          requiredCapabilities.add("adult_explicit_owned_checkpoint");
+        }
+        if (effectiveMediaAttachmentIds.length > 0) {
+          requiredCapabilities.delete("image_generation");
+          requiredCapabilities.add(
+            selectedRecommendation.model.includes("identity")
+              ? "single_reference_identity"
+              : "image_to_image",
+          );
+        }
+        if (pipelineMode === "quality-v1") {
+          requiredCapabilities.add("composable_media_pipeline_v1");
+        }
 
         const { error: localJobError } = await admin.from("inference_jobs").insert({
           id: localJobId,
@@ -2890,6 +2928,8 @@ export async function POST(request: Request) {
           content_mode: adultContentClass,
           variation_mode: variationMode,
           reference_paths: referencePaths,
+          pipeline_mode: pipelineMode,
+          required_capabilities: [...requiredCapabilities],
           seed:
             Number.parseInt(localJobId.replaceAll("-", "").slice(0, 8), 16) %
             2147483648,
@@ -2931,7 +2971,10 @@ export async function POST(request: Request) {
             routeReason:
               effectiveMediaAttachmentIds.length > 0
                 ? `The user selected the quoted ${selectedRecommendation.label.toLowerCase()} reference-image route. The current attachment is scoped to this new image task only.`
-                : `The user selected the quoted ${selectedRecommendation.label.toLowerCase()} owned/local image route.`,
+                : pipelineMode === "quality-v1"
+                  ? `The user selected the quoted ${selectedRecommendation.label.toLowerCase()} owned/local image route. A pipeline-capable owned node will run base generation, local quality judging, targeted refinement when indicated, and local upscaling.`
+                  : `The user selected the quoted ${selectedRecommendation.label.toLowerCase()} owned/local image route.`,
+            pipelineMode,
             estimatedProviderCostUsd: 0,
             requestMaxSpendUsd: requestCapUsd,
           },
