@@ -940,7 +940,7 @@ export async function buildMediaRecommendationOptions(input: {
           model: "local-image-quality",
           modelName:
             adultContentClass === "adult_explicit"
-              ? "Owned Local Quality · SDXL + adult LoRA"
+              ? "Owned Local Quality · Real3D NSFW XL"
               : "Owned Local Quality · SSD-1B",
           estimatedCostUsd: 0,
           providerCostEstimateUsd: 0,
@@ -954,7 +954,7 @@ export async function buildMediaRecommendationOptions(input: {
           referenceBehavior: null,
           verificationNote:
             adultContentClass === "adult_explicit"
-              ? "Owned text-only route. The server-derived explicit content mode switches the worker to local SDXL with the configured adult LoRA and rejects reference/identity inputs."
+              ? "Owned text-only route. The server-derived explicit content mode switches the worker to the owned Real3D NSFW XL checkpoint and rejects reference/identity inputs."
               : "Owned local quality image execution is already wired.",
           editEndpoint: null,
         });
