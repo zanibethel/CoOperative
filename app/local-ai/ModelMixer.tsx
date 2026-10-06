@@ -651,6 +651,7 @@ export default function ModelMixer({
     useState<MediaQualityBenchmarkPreparation | null>(null);
   const [benchmarkPreparationError, setBenchmarkPreparationError] = useState("");
   const [benchmarkReviewOpen, setBenchmarkReviewOpen] = useState(false);
+  const [advancedDiagnosticsOpen, setAdvancedDiagnosticsOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -711,7 +712,7 @@ export default function ModelMixer({
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !advancedDiagnosticsOpen) return;
 
     let cancelled = false;
     void fetch("/api/inference/models", { cache: "no-store" })
@@ -732,10 +733,10 @@ export default function ModelMixer({
     return () => {
       cancelled = true;
     };
-  }, [open, refreshKey]);
+  }, [open, refreshKey, advancedDiagnosticsOpen]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !advancedDiagnosticsOpen) return;
 
     let cancelled = false;
     void fetch("/api/inference/media/models", { cache: "no-store" })
@@ -756,10 +757,10 @@ export default function ModelMixer({
     return () => {
       cancelled = true;
     };
-  }, [open, refreshKey]);
+  }, [open, refreshKey, advancedDiagnosticsOpen]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !advancedDiagnosticsOpen) return;
 
     let cancelled = false;
     void loadMediaQualityBenchmarkPreparation()
@@ -781,10 +782,10 @@ export default function ModelMixer({
     return () => {
       cancelled = true;
     };
-  }, [open, refreshKey]);
+  }, [open, refreshKey, advancedDiagnosticsOpen]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !advancedDiagnosticsOpen) return;
 
     let cancelled = false;
     void loadCapabilityTestCatalog()
@@ -832,11 +833,12 @@ export default function ModelMixer({
     return () => {
       cancelled = true;
     };
-  }, [open, refreshKey]);
+  }, [open, refreshKey, advancedDiagnosticsOpen]);
 
   useEffect(() => {
     if (
       !open ||
+      !advancedDiagnosticsOpen ||
       !capabilityTestJobId ||
       (capabilityTestStatus !== "running" && capabilityTestStatus !== "queued")
     ) {
@@ -897,7 +899,7 @@ export default function ModelMixer({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [open, capabilityTestJobId, capabilityTestStatus]);
+  }, [open, advancedDiagnosticsOpen, capabilityTestJobId, capabilityTestStatus]);
 
   const registryBlend = useMemo(() => {
     const result = {} as Record<ModelMixerAgent, MixerRegistryRoute[]>;
@@ -1205,8 +1207,10 @@ export default function ModelMixer({
                 </small>
               ) : registryCatalogError ? (
                 <small>Live registry unavailable; fallback labels are shown.</small>
-              ) : (
+              ) : advancedDiagnosticsOpen ? (
                 <small>Loading live registry…</small>
+              ) : (
+                <small>Lightweight mobile mode · live diagnostics load only on request.</small>
               )}
             </div>
           </div>
@@ -1218,6 +1222,22 @@ export default function ModelMixer({
           >
             ×
           </button>
+        </div>
+
+        <div className="model-mixer-content-actions">
+          <button
+            type="button"
+            onClick={() => {
+              setAdvancedDiagnosticsOpen((current) => !current);
+              setBenchmarkReviewOpen(false);
+            }}
+            aria-expanded={advancedDiagnosticsOpen}
+          >
+            {advancedDiagnosticsOpen ? "Close advanced diagnostics" : "Open advanced diagnostics"}
+          </button>
+          <small>
+            Registry, provider pricing, capability tests, and benchmark data stay unloaded until opened.
+          </small>
         </div>
 
         <div className="model-mixer-presets">
@@ -1801,6 +1821,8 @@ export default function ModelMixer({
           ) : null}
         </div>
 
+        {advancedDiagnosticsOpen ? (
+        <>
         <div className="model-mixer-funding-note">
           <strong>Media provider order</strong>
           <span>
@@ -1862,6 +1884,8 @@ export default function ModelMixer({
               server-side vault and uses it for image/video generation.
             </span>
           </div>
+        ) : null}
+        </>
         ) : null}
       </aside>
     </>
