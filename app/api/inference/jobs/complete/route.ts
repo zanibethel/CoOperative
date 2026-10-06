@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { authorizeUnisonNode } from "@/lib/unison/auth";
+import { recordModelCapabilityEvidence } from "@/lib/inference/model-capability-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -104,6 +105,85 @@ function safePipelineTrace(value: unknown) {
   }
 }
 
+async function recordPipelineCapabilityEvidence(input: {
+  ownerRef: string | null;
+  jobId: string;
+  pipelineTrace: Record<string, unknown>;
+}) {
+  if (input.pipelineTrace.version !== "quality-v1") return;
+
+  const stages = Array.isArray(input.pipelineTrace.stages)
+    ? input.pipelineTrace.stages.filter(
+        (stage): stage is Record<string, unknown> =>
+          Boolean(stage) && typeof stage === "object" && !Array.isArray(stage),
+      )
+    : [];
+
+  const evidenceRows: Array<{
+    capabilityKey: string;
+    stage: Record<string, unknown> | null;
+  }> = [
+    {
+      capabilityKey: "composable-media-pipeline",
+      stage: null,
+    },
+    {
+      capabilityKey: "quality-judge",
+      stage:
+        stages.find((stage) => stage.stage === "quality-judge") || null,
+    },
+    {
+      capabilityKey: "targeted-refinement",
+      stage:
+        stages.find(
+          (stage) =>
+            stage.stage === "targeted-refinement" && stage.applied === true,
+        ) || null,
+    },
+    {
+      capabilityKey: "upscaling",
+      stage:
+        stages.find(
+          (stage) => stage.stage === "upscale" && stage.applied === true,
+        ) || null,
+    },
+  ];
+
+  for (const row of evidenceRows) {
+    if (
+      row.capabilityKey !== "composable-media-pipeline" &&
+      row.stage === null
+    ) {
+      continue;
+    }
+
+    await recordModelCapabilityEvidence({
+      ownerRef: input.ownerRef,
+      provider: "cooperative-local",
+      model: "local-image-quality",
+      endpoint: "",
+      routeKind: "image",
+      capabilityKey: row.capabilityKey,
+      scope: "quality-v1",
+      state: "supported",
+      sourceType: "runtime-success",
+      sourceRef: input.jobId,
+      confidence: row.capabilityKey === "composable-media-pipeline" ? 0.95 : 0.9,
+      evidence: {
+        pipelineVersion: "quality-v1",
+        stage: row.stage,
+      },
+    }).catch((error) => {
+      console.error("Could not record local pipeline capability evidence", {
+        jobId: input.jobId,
+        capabilityKey: row.capabilityKey,
+        detail:
+          error instanceof Error ? error.message.slice(0, 500) : "unknown",
+      });
+    });
+  }
+}
+
 function parseDataUrl(value: string) {
   const prefixMatch = value.match(/^data:(image\/(?:png|jpeg|webp));base64,/);
   if (!prefixMatch) throw new Error("Unsupported generated image format.");
@@ -145,7 +225,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("inference_jobs")
-      .select("id,status,worker_id,claimed_at")
+      .select("id,status,worker_id,claimed_at,client_owner_ref,pipeline_mode")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -211,6 +291,7 @@ export async function POST(request: Request) {
         ? Math.max(0, Math.round(body.latencyMs))
         : null;
 
+    const pipelineTrace = safePipelineTrace(body.pipelineTrace);
     const completedAt = new Date().toISOString();
     const { error: updateError } = await supabase
       .from("inference_jobs")
@@ -229,7 +310,7 @@ export async function POST(request: Request) {
             ? body.referenceMode
             : null,
         latency_ms: latencyMs,
-        pipeline_trace: safePipelineTrace(body.pipelineTrace),
+        pipeline_trace: pipelineTrace,
         error: null,
         completed_at: completedAt,
         updated_at: completedAt,
@@ -246,6 +327,17 @@ export async function POST(request: Request) {
       completedAt,
       latencyMs,
     });
+
+    if (job.pipeline_mode === "quality-v1") {
+      await recordPipelineCapabilityEvidence({
+        ownerRef:
+          typeof job.client_owner_ref === "string"
+            ? job.client_owner_ref
+            : null,
+        jobId,
+        pipelineTrace,
+      });
+    }
 
     return NextResponse.json({ ok: true, status: "completed" });
   } catch (error) {
