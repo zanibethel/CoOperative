@@ -59,8 +59,29 @@ export type PairwiseVerificationDecision = {
 
 export function decidePairwiseVerification(
   report: PairwiseVerificationReport,
+  expectedTargetCategories: string[] = [],
 ): PairwiseVerificationDecision {
   const reasons: string[] = [];
+  const expectedTargets = [
+    ...new Set(expectedTargetCategories.filter(Boolean)),
+  ].sort();
+  const reportedTargets = [
+    ...new Set(report.targetResults.map((result) => result.category)),
+  ].sort();
+  const targetSetMatches =
+    expectedTargets.length === 0 ||
+    (expectedTargets.length === reportedTargets.length &&
+      expectedTargets.every(
+        (category, index) => category === reportedTargets[index],
+      ));
+
+  if (!targetSetMatches) {
+    reasons.push(
+      `Verifier target mismatch. Expected [${expectedTargets.join(
+        ", ",
+      )}] but received [${reportedTargets.join(", ")}].`,
+    );
+  }
   const anyBetter = report.targetResults.some(
     (result) => result.result === "better",
   );
@@ -105,6 +126,7 @@ export function decidePairwiseVerification(
   }
 
   const acceptCandidate =
+    targetSetMatches &&
     report.confidence >= 0.75 &&
     anyBetter &&
     !anyWorse &&
@@ -116,6 +138,8 @@ export function decidePairwiseVerification(
   let verdict: PairwiseVerificationDecision["verdict"] = "review";
   if (acceptCandidate) {
     verdict = "candidate-better";
+  } else if (!targetSetMatches) {
+    verdict = "review";
   } else if (
     anyWorse ||
     materialRegression ||
