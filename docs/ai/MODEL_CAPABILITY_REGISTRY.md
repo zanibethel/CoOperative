@@ -124,3 +124,17 @@ Any active generation benchmark or capability test must remain an explicitly con
 - persisted outcome and scope.
 
 The general scanner itself should not incur generation spend.
+
+
+## Automatic refresh
+
+Production runs the registry scan once daily through Vercel Cron:
+
+- route: `/api/inference/models/scan/cron`
+- schedule: `0 13 * * *`
+- authentication: `CRON_SECRET`
+- configuration: `vercel.json`
+
+The owner dashboard at `/models` includes a manual **Scan now** control and current route coverage.
+
+The daily scanner is metadata/catalog based and should not incur generation spend. A separate monitor can review `ai_model_scan_runs` and `ai_model_scan_changes` and surface only meaningful changes.
