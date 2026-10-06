@@ -636,6 +636,147 @@ export async function POST(request: Request) {
         ? body.webAccessMode
         : "off";
 
+    if (
+      job.capability === "media-judge" &&
+      job.routing_mode === "semantic-pairwise-v1"
+    ) {
+      const originalImageJobId =
+        typeof job.source_image_job_id === "string"
+          ? job.source_image_job_id
+          : null;
+      const candidateImageJobId =
+        typeof job.comparison_image_job_id === "string"
+          ? job.comparison_image_job_id
+          : null;
+
+      if (!originalImageJobId || !candidateImageJobId) {
+        throw new Error("Pairwise verifier job is missing one of its image jobs.");
+      }
+
+      let pairwiseReport: PairwiseVerificationReport;
+      try {
+        pairwiseReport = parsePairwiseVerificationReport(body.text);
+      } catch (parseError) {
+        const failureDetail =
+          parseError instanceof Error
+            ? parseError.message.slice(0, 800)
+            : "Pairwise verifier report could not be parsed.";
+        const failedAt = new Date().toISOString();
+
+        const { error: failureError } = await supabase
+          .from("text_inference_jobs")
+          .update({
+            status: "failed",
+            error: failureDetail,
+            result_text: body.text.trim().slice(0, 8000),
+            result_model: resultModel,
+            result_provider: provider,
+            latency_ms: latencyMs,
+            completed_at: failedAt,
+            updated_at: failedAt,
+          })
+          .eq("id", jobId);
+
+        if (failureError) throw failureError;
+
+        await recordUnisonTextUsage(supabase, {
+          jobId,
+          workerId,
+          claimedAt: job.claimed_at,
+          status: "failed",
+          completedAt: failedAt,
+          latencyMs,
+        });
+
+        return NextResponse.json({
+          ok: true,
+          status: "failed",
+          pairwiseVerificationError: failureDetail,
+        });
+      }
+
+      const pairwiseCompletedAt = new Date().toISOString();
+      const { error: pairwiseJobUpdateError } = await supabase
+        .from("text_inference_jobs")
+        .update({
+          status: "completed",
+          partial_text: body.text.trim(),
+          result_text: body.text.trim(),
+          result_model: resultModel,
+          result_provider: provider,
+          prompt_tokens: asCount(body.promptTokens),
+          output_tokens: asCount(body.outputTokens),
+          latency_ms: latencyMs,
+          error: null,
+          verification_status: "passed",
+          completed_at: pairwiseCompletedAt,
+          updated_at: pairwiseCompletedAt,
+        })
+        .eq("id", jobId);
+
+      if (pairwiseJobUpdateError) throw pairwiseJobUpdateError;
+
+      const decision = await persistPairwiseVerification(supabase, {
+        originalImageJobId,
+        candidateImageJobId,
+        verifierJobId: jobId,
+        model: resultModel,
+        provider,
+        latencyMs,
+        report: pairwiseReport,
+      });
+
+      await recordUnisonTextUsage(supabase, {
+        jobId,
+        workerId,
+        claimedAt: job.claimed_at,
+        status: "completed",
+        completedAt: pairwiseCompletedAt,
+        latencyMs,
+      });
+
+      await recordModelCapabilityEvidence({
+        ownerRef: job.client_owner_ref,
+        provider: "cooperative-local",
+        model: "local-image-quality",
+        endpoint: "",
+        routeKind: "image",
+        capabilityKey: "pairwise-quality-verifier",
+        scope: "semantic-pairwise-v1",
+        state: "supported",
+        sourceType: "runtime-success",
+        sourceRef: jobId,
+        confidence: Math.max(
+          0.5,
+          Math.min(0.99, pairwiseReport.confidence),
+        ),
+        evidence: {
+          originalImageJobId,
+          candidateImageJobId,
+          judgeModel: resultModel,
+          judgeProvider: provider,
+          latencyMs,
+          report: pairwiseReport,
+          decision,
+        },
+      }).catch((evidenceError) => {
+        console.error("Could not record pairwise verifier evidence", {
+          verifierJobId: jobId,
+          detail:
+            evidenceError instanceof Error
+              ? evidenceError.message.slice(0, 500)
+              : "unknown",
+        });
+      });
+
+      return NextResponse.json({
+        ok: true,
+        status: "completed",
+        pairwiseVerification: pairwiseReport,
+        decision,
+      });
+    }
+
     if (job.capability === "media-judge") {
       const sourceImageJobId =
         typeof job.source_image_job_id === "string"
