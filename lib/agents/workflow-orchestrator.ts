@@ -446,7 +446,7 @@ async function planMediaNode(
           phase: "media-planning-only",
           kind: plan.kind,
           clarification: plan.clarification,
-          reason: "Required media controls are missing; no route was selected and no provider was called.",
+          reason: "Required media controls are missing; no route was selected and no generation request was sent.",
         },
         attempt: node.attempt + 1,
         completed_at: now,
@@ -520,7 +520,7 @@ async function planMediaNode(
             executionReady: option.executionReady,
           })),
           reason:
-            "No currently eligible media route fits the workflow cap and policy/capability gates. No provider was called.",
+            "No currently eligible media route fits the workflow cap and policy/capability gates. No generation request was sent.",
         },
         attempt: node.attempt + 1,
         completed_at: now,
@@ -570,7 +570,7 @@ async function planMediaNode(
         recipe: selected.recipe,
         scorecard: selected.scorecard,
         reason:
-          "Route selected and persisted for review. Media execution is intentionally disabled in this rollout, so no provider was called and no funds were spent.",
+          "Route selected and persisted for review. Media execution is intentionally disabled in this rollout, so no generation request was sent and no funds were spent.",
       },
       attempt: node.attempt + 1,
       completed_at: now,
@@ -601,7 +601,7 @@ async function planMediaNode(
     workflow,
     node,
     "media-route-planned",
-    "Media route selected and persisted without executing generation.",
+    "Media route selected and persisted without sending a generation request.",
     {
       provider: selected.provider,
       model: selected.model,
