@@ -10,6 +10,7 @@ import {
   mediaBenchmarkEvidenceForOwner,
   mediaBenchmarkSummaryForRoute,
 } from "@/lib/inference/media-model-benchmarks";
+import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -252,10 +253,13 @@ export async function POST(request: Request) {
     .insert(inserts);
   if (insertError) throw insertError;
 
+  const registryScoring = await recomputeAllModelTaskScores();
+
   return NextResponse.json(
     {
       saved: inserts.length,
       scorecards: await scorecardsForOwner(owner),
+      registryScoring,
     },
     { headers: { "Cache-Control": "no-store" } },
   );
