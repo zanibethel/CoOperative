@@ -60,6 +60,8 @@ type NodeRow = {
   child_media_job_id?: string | null;
 };
 
+const WORKFLOW_VIDEO_EXECUTION_ENABLED = false;
+
 function microusd(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 0;
   return Math.max(0, Math.round(value * 1_000_000));
@@ -218,6 +220,15 @@ function exactPlannedRoute(
       if (plannedTier && option.tier !== plannedTier) return false;
       if (!plannedRecipe) return true;
 
+      const sameWorkflow =
+        plannedRecipe.workflow == null ||
+        option.recipe.workflow === plannedRecipe.workflow;
+      const sameQualityIntent =
+        plannedRecipe.qualityIntent == null ||
+        option.recipe.qualityIntent === plannedRecipe.qualityIntent;
+      const sameContentConstraint =
+        plannedRecipe.contentConstraint == null ||
+        option.recipe.contentConstraint === plannedRecipe.contentConstraint;
       const sameDuration =
         plannedRecipe.durationSeconds == null ||
         option.recipe.durationSeconds === plannedRecipe.durationSeconds;
@@ -231,7 +242,15 @@ function exactPlannedRoute(
         plannedRecipe.aspectRatio == null ||
         option.recipe.aspectRatio === plannedRecipe.aspectRatio;
 
-      return sameDuration && sameResolution && sameAudio && sameAspect;
+      return (
+        sameWorkflow &&
+        sameQualityIntent &&
+        sameContentConstraint &&
+        sameDuration &&
+        sameResolution &&
+        sameAudio &&
+        sameAspect
+      );
     }) || null
   );
 }
@@ -921,6 +940,15 @@ export async function approveAndStartWorkflowMediaVideo(input: {
   workflowId: string;
   nodeId: string;
 }) {
+  if (!WORKFLOW_VIDEO_EXECUTION_ENABLED) {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "Workflow video execution is not enabled in the current rollout. Video remains planning-only until the next approved phase.",
+    };
+  }
+
   const state = await loadWorkflowMediaNode(
     input.ownerRef,
     input.workflowId,
@@ -1913,7 +1941,12 @@ export async function approveAndExecuteWorkflowMedia(input: {
     return approveAndExecuteWorkflowMediaImage(input);
   }
   if (state.node.task_type === "video-generation") {
-    return approveAndStartWorkflowMediaVideo(input);
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "Workflow video execution is not enabled in the current rollout. Video remains planning-only until the next approved phase.",
+    };
   }
 
   return {

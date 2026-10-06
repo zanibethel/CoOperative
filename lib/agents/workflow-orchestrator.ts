@@ -584,7 +584,9 @@ async function planMediaNode(
         recipe: selected.recipe,
         scorecard: selected.scorecard,
         reason:
-          "Route selected and persisted for review. Media execution is intentionally disabled in this rollout, so no generation request was sent and no funds were spent.",
+          plan.kind === "image"
+            ? "Route selected and persisted for review. Planning sent no generation request and spent nothing. Eligible OpenRouter text-to-image routes require a separate explicit one-shot approval."
+            : "Route selected and persisted for review. Planning sent no generation request and spent nothing. Video workflow execution remains disabled until the next approved rollout phase.",
       },
       attempt: node.attempt + 1,
       completed_at: now,

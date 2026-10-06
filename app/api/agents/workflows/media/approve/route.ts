@@ -27,19 +27,14 @@ export async function POST(request: Request) {
       nodeId: input.nodeId,
     });
 
-    if (
-      execution.ok ||
-      execution.status >= 500
-    ) {
-      await advanceAgentWorkflow(input.workflowId, ownerRef).catch((error) => {
-        console.error("Could not advance workflow after media execution", {
-          workflowId: input.workflowId,
-          nodeId: input.nodeId,
-          detail:
-            error instanceof Error ? error.message.slice(0, 800) : "unknown",
-        });
+    await advanceAgentWorkflow(input.workflowId, ownerRef).catch((error) => {
+      console.error("Could not advance workflow after media execution", {
+        workflowId: input.workflowId,
+        nodeId: input.nodeId,
+        detail:
+          error instanceof Error ? error.message.slice(0, 800) : "unknown",
       });
-    }
+    });
 
     return NextResponse.json(
       execution,
