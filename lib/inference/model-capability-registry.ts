@@ -9,7 +9,7 @@ import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog
 import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
 import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
-export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-06.1";
+export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-06.2";
 
 type JsonMap = Record<string, unknown>;
 
@@ -441,6 +441,8 @@ function localRegistrySnapshots(
     inputModalities: string[];
     defaultModelId: string;
     explicitModelId?: string;
+    explicitAdapterId?: string;
+    explicitAdapterScale?: number;
     profile: "fast" | "quality";
     referenceMode?: string;
   }> = [
@@ -454,11 +456,13 @@ function localRegistrySnapshots(
     },
     {
       model: "local-image-quality",
-      displayName: "Owned Local Quality · SSD-1B / SDXL adult mode",
+      displayName: "Owned Local Quality · SSD-1B / SDXL + adult LoRA",
       routeKind: "image",
       inputModalities: ["text"],
       defaultModelId: "segmind/SSD-1B",
       explicitModelId: "stabilityai/stable-diffusion-xl-base-1.0",
+      explicitAdapterId: "wangkanai/sdxl-fp8-loras-nsfw",
+      explicitAdapterScale: 0.8,
       profile: "quality",
     },
     {
@@ -512,6 +516,8 @@ function localRegistrySnapshots(
         runtime: "diffusers-owned-worker",
         defaultModelId: imageRoute.defaultModelId,
         explicitModelId: imageRoute.explicitModelId || null,
+        explicitAdapterId: imageRoute.explicitAdapterId || null,
+        explicitAdapterScale: imageRoute.explicitAdapterScale ?? null,
         safetyFilterControl: "local-configurable",
         explicitReferenceImagesAllowed: false,
         referenceMode: imageRoute.referenceMode || null,
@@ -542,6 +548,11 @@ function localRegistrySnapshots(
                 explicitLicense: "CreativeML Open RAIL++-M",
                 explicitLicenseSource:
                   "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md",
+                explicitAdapter: "wangkanai/sdxl-fp8-loras-nsfw",
+                explicitAdapterLicense: "OpenRAIL++",
+                explicitAdapterSource:
+                  "https://huggingface.co/wangkanai/sdxl-fp8-loras-nsfw",
+                explicitAdapterDefaultScale: 0.8,
               }
             : {},
       },
