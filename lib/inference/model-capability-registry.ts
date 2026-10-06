@@ -1504,3 +1504,71 @@ export async function availableModelRegistryRoutes(input?: {
     routes,
   };
 }
+
+export async function preferredRegistryFreeTextModel(input?: {
+  needsVision?: boolean;
+  requireReasoning?: boolean;
+  requireStructuredOutput?: boolean;
+}) {
+  const availability = await availableModelRegistryRoutes({
+    providers: ["openrouter"],
+    routeKinds: ["text", "multimodal-text"],
+    maxAgeHours: 36,
+  }).catch(() => null);
+
+  if (!availability?.authoritative) return "openrouter/free";
+
+  const candidates = availability.routes.filter((route) => {
+    if (!route.free || !route.executionReady) return false;
+    if (
+      input?.needsVision &&
+      !route.inputModalities.some(
+        (value) => value.toLowerCase() === "image",
+      )
+    ) {
+      return false;
+    }
+    if (
+      input?.requireReasoning &&
+      route.capabilitySummary.reasoning !== true
+    ) {
+      return false;
+    }
+    if (
+      input?.requireStructuredOutput &&
+      route.capabilitySummary.structuredOutput !== true
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  if (!candidates.length) return null;
+
+  const explicitFreeRouter = candidates.find(
+    (route) => route.model === "openrouter/free",
+  );
+  if (explicitFreeRouter) return explicitFreeRouter.model;
+
+  const ranked = [...candidates].sort((a, b) => {
+    const score = (route: ModelRegistryAvailabilityRoute) => {
+      let value = 0;
+      if (route.capabilitySummary.reasoning === true) value += 4;
+      if (route.capabilitySummary.structuredOutput === true) value += 3;
+      if (route.capabilitySummary.toolCalling === true) value += 1;
+      if (
+        route.inputModalities.some(
+          (item) => item.toLowerCase() === "image",
+        )
+      ) {
+        value += input?.needsVision ? 4 : 0;
+      }
+      const contextLength = Number(route.limits.contextLength || 0);
+      value += Math.min(4, contextLength / 100_000);
+      return value;
+    };
+    return score(b) - score(a) || a.model.localeCompare(b.model);
+  });
+
+  return ranked[0]?.model || null;
+}
