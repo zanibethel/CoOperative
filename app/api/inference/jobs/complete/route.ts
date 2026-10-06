@@ -265,7 +265,7 @@ async function enqueueSemanticJudge(
     profile: "quality",
     max_tokens: 1400,
     temperature: 0,
-    routing_mode: "semantic-vision-v1.1",
+    routing_mode: "semantic-vision-v1-1",
     task_class: "media-quality-judge",
     route_reason:
       "Internal post-generation semantic quality review for composable local media. No paid fallback is permitted.",
