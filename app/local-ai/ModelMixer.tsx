@@ -15,6 +15,53 @@ type LiveMediaTier = {
   model: LiveMediaModel | null;
 };
 
+type MixerRegistryScore = {
+  performance?: number | null;
+  costEfficiency?: number | null;
+  overallValue?: number | null;
+  confidence?: number | null;
+  quality?: number | null;
+  reliability?: number | null;
+  speed?: number | null;
+};
+
+type MixerRegistryRoute = {
+  id: string;
+  provider: string;
+  model: string;
+  endpoint: string;
+  routeKind: string;
+  displayName: string;
+  status: string;
+  free: boolean;
+  recommended: boolean;
+  executionReady: boolean;
+  availableNow: boolean;
+  availabilityReason: string;
+  pricing: Record<string, unknown>;
+  scoreSummary: Record<string, MixerRegistryScore>;
+};
+
+type MixerRegistryCatalog = {
+  registry: {
+    authoritative: boolean;
+    latestCompletedScanAt: string | null;
+    totalRouteCount: number;
+    activeRouteCount: number;
+    executionReadyRouteCount: number;
+    availableNowRouteCount: number;
+    routes: MixerRegistryRoute[];
+  };
+  limits: {
+    paidAiEligible: boolean;
+    availableAiBalanceUsd: number;
+    openRouterConnected: boolean;
+    openRouterByok: boolean;
+    nousConnected: boolean;
+    policy: string;
+  };
+};
+
 type LiveMediaCatalog = {
   fetchedAt: string;
   configured: {
@@ -348,6 +395,129 @@ function formatBenchmarkScore(value: number | null | undefined) {
     : "Not benchmarked";
 }
 
+function numericValue(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function representativeRegistryCostUsd(route: MixerRegistryRoute) {
+  if (route.free) return 0;
+  return (
+    numericValue(route.pricing.estimatedCostUsd) ??
+    numericValue(route.pricing.minUnitCostUsd) ??
+    numericValue(route.pricing.maxUnitCostUsd) ??
+    null
+  );
+}
+
+function registryCostLabel(route: MixerRegistryRoute) {
+  const cost = representativeRegistryCostUsd(route);
+  if (route.free) return "Free";
+  if (cost === null) return "Live price";
+  return `~${cost.toFixed(cost < 0.01 ? 4 : 3)}`;
+}
+
+function registryTaskForAgent(agent: ModelMixerAgent) {
+  if (agent === "builder") return "coding";
+  if (agent === "planner" || agent === "verifier") return "reasoning";
+  if (agent === "research") return "general-text";
+  return null;
+}
+
+function registryTaskScore(
+  route: MixerRegistryRoute,
+  task: string,
+): MixerRegistryScore | null {
+  const row = route.scoreSummary?.[task];
+  return row && typeof row === "object" ? row : null;
+}
+
+function registryRouteRank(
+  route: MixerRegistryRoute,
+  task: string,
+  level: ModelMixerLevel,
+) {
+  const score = registryTaskScore(route, task);
+  if (!score) return Number.NEGATIVE_INFINITY;
+
+  const performance = numericValue(score.performance) ?? 50;
+  const value = numericValue(score.overallValue) ?? 50;
+  const cost = numericValue(score.costEfficiency) ?? (route.free ? 100 : 50);
+  const quality = numericValue(score.quality) ?? performance;
+  const confidence = (numericValue(score.confidence) ?? 0) * 100;
+  const recommendedBonus = route.recommended ? 2 : 0;
+
+  if (level === 0) {
+    return cost * 0.5 + value * 0.25 + performance * 0.1 + confidence * 0.15 + recommendedBonus;
+  }
+  if (level === 1) {
+    return cost * 0.35 + value * 0.4 + performance * 0.15 + confidence * 0.1 + recommendedBonus;
+  }
+  if (level === 2) {
+    return value * 0.45 + performance * 0.25 + cost * 0.2 + confidence * 0.1 + recommendedBonus;
+  }
+  if (level === 3) {
+    return performance * 0.4 + value * 0.3 + quality * 0.1 + cost * 0.08 + confidence * 0.12 + recommendedBonus;
+  }
+  return performance * 0.5 + quality * 0.15 + value * 0.2 + confidence * 0.1 + cost * 0.05 + recommendedBonus;
+}
+
+function rankedRegistryRoutes(
+  catalog: MixerRegistryCatalog | null,
+  task: string,
+  level: ModelMixerLevel,
+  maxSpendUsd: number,
+  routeKinds: string[],
+  limit = 2,
+) {
+  if (!catalog) return [] as MixerRegistryRoute[];
+
+  return catalog.registry.routes
+    .filter((route) => {
+      if (
+        route.status !== "active" ||
+        !route.executionReady ||
+        !route.availableNow ||
+        !routeKinds.includes(route.routeKind) ||
+        !registryTaskScore(route, task)
+      ) {
+        return false;
+      }
+
+      if (
+        level === 0 &&
+        !route.free &&
+        route.provider !== "cooperative-local"
+      ) {
+        return false;
+      }
+
+      const cost = representativeRegistryCostUsd(route);
+      if (
+        !route.free &&
+        route.provider !== "cooperative-local" &&
+        maxSpendUsd <= 0
+      ) {
+        return false;
+      }
+      if (cost !== null && cost > maxSpendUsd + 0.000001) {
+        return false;
+      }
+      return true;
+    })
+    .sort(
+      (a, b) =>
+        registryRouteRank(b, task, level) -
+          registryRouteRank(a, task, level) ||
+        a.displayName.localeCompare(b.displayName),
+    )
+    .slice(0, limit);
+}
+
 function capabilityRouteKey(route: Pick<CapabilityTestRoute, "provider" | "model">) {
   return `${route.provider}|${route.model}`;
 }
@@ -456,6 +626,9 @@ export default function ModelMixer({
 }: ModelMixerProps) {
   const [mediaCatalog, setMediaCatalog] = useState<LiveMediaCatalog | null>(null);
   const [mediaCatalogError, setMediaCatalogError] = useState(false);
+  const [registryCatalog, setRegistryCatalog] =
+    useState<MixerRegistryCatalog | null>(null);
+  const [registryCatalogError, setRegistryCatalogError] = useState(false);
   const [mediaContentPreference, setMediaContentPreference] =
     useState<MediaContentPreference>("sfw_only");
   const [adultContentAcknowledged, setAdultContentAcknowledged] = useState(false);
@@ -535,6 +708,30 @@ export default function ModelMixer({
       cancelled = true;
     };
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    void fetch("/api/inference/models", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Model registry unavailable.");
+        return (await response.json()) as MixerRegistryCatalog;
+      })
+      .then((payload) => {
+        if (!cancelled) {
+          setRegistryCatalog(payload);
+          setRegistryCatalogError(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRegistryCatalogError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, refreshKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -701,16 +898,45 @@ export default function ModelMixer({
     };
   }, [open, capabilityTestJobId, capabilityTestStatus]);
 
-  const liveMedia = useMemo(() => {
-    if (!mediaCatalog) return null;
-    const level = settings.agents.media;
-    return {
-      image:
-        mediaCatalog.image.recommended.find((entry) => entry.level === level)?.model || null,
-      video:
-        mediaCatalog.video.recommended.find((entry) => entry.level === level)?.model || null,
-    };
-  }, [mediaCatalog, settings.agents.media]);
+  const registryBlend = useMemo(() => {
+    const result = {} as Record<ModelMixerAgent, MixerRegistryRoute[]>;
+    for (const agent of AGENTS) {
+      const level = settings.agents[agent.key];
+      if (agent.key === "media") {
+        const image = rankedRegistryRoutes(
+          registryCatalog,
+          "image-generation",
+          level,
+          settings.maxSpendUsd,
+          ["image"],
+          1,
+        );
+        const video = rankedRegistryRoutes(
+          registryCatalog,
+          "video-generation",
+          level,
+          settings.maxSpendUsd,
+          ["video"],
+          1,
+        );
+        result.media = [...image, ...video];
+        continue;
+      }
+
+      const task = registryTaskForAgent(agent.key);
+      result[agent.key] = task
+        ? rankedRegistryRoutes(
+            registryCatalog,
+            task,
+            level,
+            settings.maxSpendUsd,
+            ["text", "multimodal-text", "text-runtime", "vision"],
+            2,
+          )
+        : [];
+    }
+    return result;
+  }, [registryCatalog, settings.agents, settings.maxSpendUsd]);
 
   if (!open) return null;
 
@@ -971,6 +1197,16 @@ export default function ModelMixer({
             <div>
               <h2>Model Mixer</h2>
               <p>Control how each agent uses AI models for this session.</p>
+              {registryCatalog ? (
+                <small>
+                  Live registry · {registryCatalog.registry.availableNowRouteCount} ready now · {registryCatalog.registry.totalRouteCount} tracked ·{" "}
+                  <a href="/models">review registry</a>
+                </small>
+              ) : registryCatalogError ? (
+                <small>Live registry unavailable; fallback labels are shown.</small>
+              ) : (
+                <small>Loading live registry…</small>
+              )}
             </div>
           </div>
           <button
@@ -1020,19 +1256,20 @@ export default function ModelMixer({
                     <small>{agent.description}</small>
                   </div>
                   <div className="model-mixer-models" aria-label="Likely model blend">
-                    {agent.key === "media" && liveMedia ? (
-                      <>
-                        {liveMedia.image ? (
-                          <span title={liveMedia.image.id}>
-                            Img · {liveMedia.image.name.replace(/^[^:]+:\s*/, "")} · {liveMedia.image.costLabel}
-                          </span>
-                        ) : null}
-                        {liveMedia.video ? (
-                          <span title={liveMedia.video.id}>
-                            Vid · {liveMedia.video.name.replace(/^[^:]+:\s*/, "")} · {liveMedia.video.costLabel}
-                          </span>
-                        ) : null}
-                      </>
+                    {registryBlend[agent.key]?.length ? (
+                      registryBlend[agent.key].map((route) => (
+                        <span
+                          key={`${route.provider}|${route.model}|${route.endpoint}|${route.routeKind}`}
+                          title={`${route.provider} · ${route.model} · ${route.availabilityReason}`}
+                        >
+                          {agent.key === "media"
+                            ? route.routeKind === "video"
+                              ? "Vid · "
+                              : "Img · "
+                            : ""}
+                          {route.displayName.replace(/^[^:]+:\s*/, "")} · {registryCostLabel(route)}
+                        </span>
+                      ))
                     ) : (
                       agent.modelMix[level].map((model) => (
                         <span key={model}>{model}</span>
@@ -1121,6 +1358,11 @@ export default function ModelMixer({
             <small>
               Hard ceiling for one chat prompt. The slider covers $0–$5; type an exact
               value above $5 if needed.
+            </small>
+            <small>
+              The model names above now come from the scored live registry. Final execution
+              still filters them by task capability, provider connection, policy evidence,
+              live node availability, BYOK/AI balance, and this request ceiling.
             </small>
             <button
               className="model-mixer-test-cap"
