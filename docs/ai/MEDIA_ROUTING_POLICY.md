@@ -768,3 +768,23 @@ The matrix stores results in the existing `media_model_capability_tests`, `ai_mo
 
 Provider policy refresh is generation-free. Current policy evidence may classify a scope as disallowed without spending inference credits. In particular, a provider-wide explicit-content prohibition applies to every exact route behind that provider boundary until fresher route-specific policy evidence supersedes it.
 
+## 27. Durable Hermes sandbox artifacts
+
+Hermes media workers may return either a remote HTTP(S) media URL or a sandbox-local result such as `MEDIA:/tmp/cooperative-hermes/cache/generated/.../file.png`.
+
+A sandbox-local media path is not a provider failure. When Hermes exits successfully and the path is inside CoOperative's allowed generated-media directory, the poller must:
+
+1. associate the persistent sandbox with its existing `media_generation_jobs` job id;
+2. read the generated binary with the Vercel Sandbox file API before stopping the sandbox;
+3. validate the file type against the media job kind and enforce the current 50 MB output ceiling;
+4. upload the bytes into the private `cooperative-media-library` Storage bucket under the existing generated-job namespace;
+5. merge `generatedStoragePath`, `generatedMimeType`, `generatedArtifactSource=hermes-sandbox`, and byte size into the existing `pricing_dimensions`;
+6. return the authenticated `/api/local-ai/media-output?jobId=...` URL as the job result;
+7. only then stop the persistent sandbox.
+
+The local path is accepted only under `/tmp/cooperative-hermes/cache/generated/`; arbitrary sandbox paths are never copied into user-accessible storage.
+
+Share, Save to Photos, export, and Save to CoOperative Cloud must prefer `generatedStoragePath` when it exists instead of attempting to fetch the relative authenticated result URL as though it were a public provider URL.
+
+This handoff does not start a second inference call and does not change provider billing. Persistent sandboxes may be reopened to recover an already-generated artifact after a transport-path bug, and that recovery is recorded separately from model capability. A successful recovery may upgrade an SFW smoke observation from partial to supported without spending additional inference credits.
+
