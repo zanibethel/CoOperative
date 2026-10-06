@@ -23,6 +23,23 @@ function normalizeMediaIntentText(value: string) {
 const IMAGE_NOUNS = /\b(image|picture|photo|portrait|illustration|graphic|poster|thumbnail)\b/i;
 const VIDEO_NOUNS = /\b(video|clip|reel|animation|movie|film)\b|\b(?:youtube|instagram|tiktok)\s+short\b/i;
 const AMBIGUOUS_MEDIA_NOUNS = /\b(ad|advertisement|commercial)\b/i;
+const DESCRIPTIVE_MEDIA_PROMPT_LEAD =
+  /^\s*(?:photorealistic|cinematic|editorial|studio|professional|realistic|stylized|illustrated|anime|watercolor|oil[- ]painting|3d|close[- ]?up|wide[- ]angle|macro|portrait|landscape)\b/i;
+const DESCRIPTIVE_VISUAL_CUES =
+  /\b(?:lighting|depth of field|camera|lens|composition|framing|background|foreground|skin texture|high detail|ultra[- ]?detailed|photorealistic|realistic|cinematic|editorial|portrait|illustration|render|no text)\b/i;
+
+function descriptiveMediaPrompt(message: string) {
+  const words = message.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 8) return false;
+
+  const kind = mediaKindFrom(message);
+  if (!kind) return false;
+
+  return (
+    DESCRIPTIVE_MEDIA_PROMPT_LEAD.test(message) ||
+    DESCRIPTIVE_VISUAL_CUES.test(message)
+  );
+}
 export type MediaAdultContentClass =
   | "sfw"
   | "adult_non_explicit"
@@ -99,7 +116,13 @@ function mediaKindFrom(message: string): MediaRequestKind | null {
 
 export function planMediaRequest(message: string): MediaRequestPlan | null {
   const text = normalizeMediaIntentText(message).trim();
-  if (!text || (!CREATE_VERBS.test(text) && !DIRECT_MEDIA_REQUEST.test(text))) {
+  if (!text) return null;
+
+  const hasExplicitCreationIntent =
+    CREATE_VERBS.test(text) || DIRECT_MEDIA_REQUEST.test(text);
+  const hasDescriptivePromptIntent = descriptiveMediaPrompt(text);
+
+  if (!hasExplicitCreationIntent && !hasDescriptivePromptIntent) {
     return null;
   }
 
