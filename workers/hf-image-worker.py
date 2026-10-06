@@ -711,6 +711,8 @@ def unison_capabilities():
         "variation_modes",
         "ip_adapter_identity",
         "single_reference_identity",
+        "owned_content_mode",
+        "adult_explicit_text_to_image",
     ]
     if platform.system() == "Windows" and TEXT_READY_MARKER.exists():
         capabilities.extend(
