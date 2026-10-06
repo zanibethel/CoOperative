@@ -97,7 +97,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.11.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.11.1")
 
 def start_repo_recovery_worker():
     enabled = os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
@@ -1094,6 +1094,20 @@ def unison_capabilities():
                 "text_quality_profile",
             ]
         )
+
+    mac_text_enabled = os.getenv("COOPERATIVE_START_TEXT_WORKER", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if (
+        platform.system() == "Darwin"
+        and platform.machine() in {"arm64", "aarch64"}
+        and mac_text_enabled
+        and Path(__file__).with_name("mlx-text-worker.py").exists()
+    ):
+        capabilities.append("semantic_media_judge_v1")
     if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine":
         capabilities.extend(["machine_wide", "whole_pc_idle"])
     if platform.system() == "Windows" and LOCAL_CHAT_READY_MARKER.exists():
@@ -1216,7 +1230,7 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.11.0"
+            else "image-worker-0.11.1"
         ),
         busy_provider=unison_busy,
     )
