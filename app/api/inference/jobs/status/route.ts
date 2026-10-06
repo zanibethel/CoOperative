@@ -68,6 +68,13 @@ export async function GET(request: Request) {
         variationMode: job.variation_mode,
         referenceMode: job.reference_mode,
         pipelineMode: job.pipeline_mode || "single-pass",
+        pipelineRole: job.pipeline_role || "primary",
+        parentImageJobId: job.parent_image_job_id || null,
+        acceptedResultJobId: job.accepted_result_job_id || null,
+        verificationSummary:
+          job.verification_summary && typeof job.verification_summary === "object"
+            ? job.verification_summary
+            : {},
         pipelineTrace:
           job.pipeline_trace && typeof job.pipeline_trace === "object"
             ? job.pipeline_trace
