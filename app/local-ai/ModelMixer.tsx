@@ -199,6 +199,7 @@ type MediaQualityBenchmarkPreparation = {
 export type ModelMixerSettings = {
   preset: ModelMixerPreset;
   maxSpendUsd: number;
+  localFreeOnly: boolean;
   agents: Record<ModelMixerAgent, ModelMixerLevel>;
 };
 
@@ -326,6 +327,7 @@ const PRESETS: Record<
 > = {
   economy: {
     maxSpendUsd: 0.05,
+    localFreeOnly: false,
     agents: {
       research: 0,
       planner: 1,
@@ -336,6 +338,7 @@ const PRESETS: Record<
   },
   balanced: {
     maxSpendUsd: 1,
+    localFreeOnly: false,
     agents: {
       research: 1,
       planner: 2,
@@ -346,6 +349,7 @@ const PRESETS: Record<
   },
   premium: {
     maxSpendUsd: 3,
+    localFreeOnly: false,
     agents: {
       research: 2,
       planner: 3,
@@ -365,7 +369,11 @@ export function estimateModelMixer(settings: ModelMixerSettings) {
   const variableCost = AGENTS.reduce((total, agent) => {
     return total + LEVEL_COST_USD[settings.agents[agent.key]] * agent.costWeight;
   }, 0);
-  const estimatedUsd = Math.min(settings.maxSpendUsd, Math.max(0, variableCost + 0.01));
+  const effectiveMaxSpendUsd = settings.localFreeOnly ? 0 : settings.maxSpendUsd;
+  const estimatedUsd = Math.min(
+    effectiveMaxSpendUsd,
+    Math.max(0, variableCost + 0.01),
+  );
 
   const seconds = Math.round(
     45 +
@@ -378,7 +386,7 @@ export function estimateModelMixer(settings: ModelMixerSettings) {
   return {
     estimatedUsd,
     seconds,
-    withinCap: estimatedUsd <= settings.maxSpendUsd,
+    withinCap: estimatedUsd <= effectiveMaxSpendUsd,
   };
 }
 
@@ -577,6 +585,7 @@ function presetSettings(preset: Exclude<ModelMixerPreset, "custom">): ModelMixer
   return {
     preset,
     maxSpendUsd: PRESETS[preset].maxSpendUsd,
+    localFreeOnly: false,
     agents: { ...PRESETS[preset].agents },
   };
 }
@@ -910,7 +919,7 @@ export default function ModelMixer({
           registryCatalog,
           "image-generation",
           level,
-          settings.maxSpendUsd,
+          settings.localFreeOnly ? 0 : settings.maxSpendUsd,
           ["image"],
           1,
         );
@@ -918,7 +927,7 @@ export default function ModelMixer({
           registryCatalog,
           "video-generation",
           level,
-          settings.maxSpendUsd,
+          settings.localFreeOnly ? 0 : settings.maxSpendUsd,
           ["video"],
           1,
         );
@@ -932,14 +941,19 @@ export default function ModelMixer({
             registryCatalog,
             task,
             level,
-            settings.maxSpendUsd,
+            settings.localFreeOnly ? 0 : settings.maxSpendUsd,
             ["text", "multimodal-text", "text-runtime", "vision"],
             2,
           )
         : [];
     }
     return result;
-  }, [registryCatalog, settings.agents, settings.maxSpendUsd]);
+  }, [
+    registryCatalog,
+    settings.agents,
+    settings.localFreeOnly,
+    settings.maxSpendUsd,
+  ]);
 
   if (!open) return null;
 
@@ -1115,6 +1129,13 @@ export default function ModelMixer({
     );
     if (!route) return;
 
+    if (settings.localFreeOnly && route.estimatedCostUsd > 0) {
+      setCapabilityTestMessage(
+        "Local + Free Only is on. This provider-cost capability test is blocked until you turn that mode off.",
+      );
+      return;
+    }
+
     if (!nsfwEnabled || !adultContentAcknowledged) {
       setCapabilityTestMessage(
         "Enable NSFW output, confirm 18+, and save the preference before running a capability test.",
@@ -1169,9 +1190,25 @@ export default function ModelMixer({
   }
 
   function setPreset(preset: Exclude<ModelMixerPreset, "custom">) {
-    const next = presetSettings(preset);
+    const next = {
+      ...presetSettings(preset),
+      localFreeOnly: settings.localFreeOnly,
+    };
     onChange(next);
     void saveMaxSpendPerPrompt(next.maxSpendUsd);
+  }
+
+  function setLocalFreeOnly(enabled: boolean) {
+    onChange({
+      ...settings,
+      preset: "custom",
+      localFreeOnly: enabled,
+    });
+    setMaxSpendMessage(
+      enabled
+        ? "Local + Free Only is on. Paid provider calls are blocked."
+        : "Local + Free Only is off. Your saved spend ceiling is active again.",
+    );
   }
 
   function setLevel(agent: ModelMixerAgent, value: ModelMixerLevel) {
@@ -1265,6 +1302,39 @@ export default function ModelMixer({
           })}
         </div>
 
+        <div
+          className={`model-mixer-free-only${settings.localFreeOnly ? " active" : ""}`}
+        >
+          <div className="model-mixer-free-only-copy">
+            <strong>Local + Free Only</strong>
+            <span>
+              Strict no-paid mode. CoOperative may use code, owned/local models, and
+              verified zero-provider-cost hosted routes only. Paid OpenRouter, Nous
+              subscription usage, BYOK paid calls, and funded fallbacks are blocked.
+            </span>
+            {settings.localFreeOnly ? (
+              <small>
+                Effective paid spend ceiling: $0. Your saved {`${settings.maxSpendUsd.toFixed(2)}`}
+                ceiling is preserved for when you turn this off.
+              </small>
+            ) : (
+              <small>
+                Turn this on for clean local/free routing tests without changing your saved
+                spend ceiling.
+              </small>
+            )}
+          </div>
+          <label className="model-mixer-nsfw-toggle">
+            <input
+              type="checkbox"
+              checked={settings.localFreeOnly}
+              onChange={(event) => setLocalFreeOnly(event.target.checked)}
+              aria-label="Use local and free models only"
+            />
+            <span aria-hidden="true" />
+          </label>
+        </div>
+
         <div className="model-mixer-agent-list">
           {AGENTS.map((agent) => {
             const level = settings.agents[agent.key];
@@ -1346,6 +1416,7 @@ export default function ModelMixer({
                   changeMaxSpendPerPrompt(Number(event.target.value))
                 }
                 onBlur={() => void saveMaxSpendPerPrompt(settings.maxSpendUsd)}
+                disabled={settings.localFreeOnly}
                 aria-label="Maximum spend per prompt"
               />
             </span>
@@ -1360,6 +1431,7 @@ export default function ModelMixer({
                 onChange={(event) =>
                   changeMaxSpendPerPrompt(Number(event.target.value))
                 }
+                disabled={settings.localFreeOnly}
                 onPointerUp={(event) =>
                   void saveMaxSpendPerPrompt(Number(event.currentTarget.value))
                 }
@@ -1377,8 +1449,9 @@ export default function ModelMixer({
               </div>
             </div>
             <small>
-              Hard ceiling for one chat prompt. The slider covers $0–$5; type an exact
-              value above $5 if needed.
+              {settings.localFreeOnly
+                ? "Paid spend is hard-blocked at $0 while Local + Free Only is enabled."
+                : "Hard ceiling for one chat prompt. The slider covers $0–$5; type an exact value above $5 if needed."}
             </small>
             <small>
               The model names above now come from the scored live registry. Final execution
@@ -1392,7 +1465,7 @@ export default function ModelMixer({
                 changeMaxSpendPerPrompt(0.05);
                 void saveMaxSpendPerPrompt(0.05);
               }}
-              disabled={maxSpendSaving}
+              disabled={maxSpendSaving || settings.localFreeOnly}
             >
               Use $0.05 test cap
             </button>
@@ -1870,8 +1943,8 @@ export default function ModelMixer({
             CoOperative builds an execution recipe for each subtask within your per-prompt spend ceiling.
             The mixer considers model/provider plus the requested output type, quality, configuration,
             cost, and time. The slider is a quality/cost ceiling for that agent, not a requirement to
-            spend at that level. For connected paid media, Nous subscription credits are preferred first,
-            owned/local or free capacity is next, and paid OpenRouter is used only as a bounded
+            spend at that level. When Local + Free Only is on, provider-cost routes are excluded entirely.
+            Otherwise, connected paid media can be considered and paid OpenRouter remains a bounded
             backup. {mediaCatalog
               ? `Media prices are live from Nous/FAL and OpenRouter as of ${new Date(mediaCatalog.fetchedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`
               : mediaCatalogError
