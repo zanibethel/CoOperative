@@ -6,6 +6,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { nousManagedMediaCatalog } from "@/lib/inference/nous-managed-media";
 import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog";
 import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
+import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
 export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-05.1";
 
@@ -1231,6 +1232,8 @@ export async function scanModelCapabilities(input: {
       missingCount += 1;
     }
 
+    const scoring = await recomputeAllModelTaskScores();
+
     const completedAt = new Date().toISOString();
     const { error: completeError } = await admin
       .from("ai_model_scan_runs")
@@ -1244,6 +1247,7 @@ export async function scanModelCapabilities(input: {
         completed_at: completedAt,
         metadata: {
           successfulCoverage: [...successfulCoverage],
+          scoring,
         },
       })
       .eq("id", scanId);
@@ -1258,6 +1262,7 @@ export async function scanModelCapabilities(input: {
       changedCount,
       missingCount,
       sources,
+      scoring,
       completedAt,
     };
   } catch (error) {
