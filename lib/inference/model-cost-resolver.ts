@@ -100,9 +100,10 @@ function imageDimensions(aspectRatio: MediaRequestPlan["aspectRatio"]) {
   // Hermes v2026.9.24 maps image-generation aspect buckets to FAL's standard
   // presets for FLUX/Z-Image/Qwen/Recraft/Ideogram. These preset dimensions are
   // also the billing dimensions used by the request-cost resolver.
-  if (aspectRatio === "16:9") return { width: 1024, height: 576 };
+  if (aspectRatio === "1:1") return { width: 1024, height: 1024 };
   if (aspectRatio === "9:16") return { width: 576, height: 1024 };
-  return { width: 1024, height: 1024 };
+  // Hermes defaults image generation to landscape when no aspect is supplied.
+  return { width: 1024, height: 576 };
 }
 
 function rateForVideoResolution(
