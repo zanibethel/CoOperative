@@ -36,7 +36,7 @@ import uvicorn
 from diffusers import AutoPipelineForImage2Image, AutoPipelineForText2Image
 from fastapi import FastAPI, Header, HTTPException
 from transformers import CLIPVisionModelWithProjection
-from PIL import Image
+from PIL import Image, ImageFilter, ImageStat
 from pydantic import BaseModel, Field
 
 from unison_runtime import node_available, start_heartbeat_thread
@@ -97,7 +97,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.10.3")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.11.0")
 
 def start_repo_recovery_worker():
     enabled = os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
@@ -245,6 +245,7 @@ class ImageRequest(BaseModel):
     strength: float | None = Field(default=None, ge=0, le=1)
     variationMode: Literal["preserve", "balanced", "new-scene"] = "balanced"
     seed: int | None = Field(default=None, ge=0, le=2147483647)
+    pipelineMode: Literal["single-pass", "quality-v1"] = "single-pass"
 
 
 def clear_model():
@@ -358,7 +359,11 @@ def ensure_explicit_profile():
         if EXPLICIT_LORA_ID
         else "explicit-owned-model"
     )
-    if loaded_profile == expected_profile and text_pipe is not None:
+    if (
+        loaded_profile == expected_profile
+        and text_pipe is not None
+        and image_pipe is not None
+    ):
         return
 
     clear_model()
@@ -394,8 +399,14 @@ def ensure_explicit_profile():
     if hasattr(pipe, "enable_vae_tiling"):
         pipe.enable_vae_tiling()
 
+    img_pipe = AutoPipelineForImage2Image.from_pipe(pipe).to(DEVICE)
+    if hasattr(img_pipe, "enable_vae_slicing"):
+        img_pipe.enable_vae_slicing()
+    if hasattr(img_pipe, "enable_vae_tiling"):
+        img_pipe.enable_vae_tiling()
+
     text_pipe = pipe
-    image_pipe = None
+    image_pipe = img_pipe
     loaded_profile = expected_profile
     identity_adapter_loaded = False
     if EXPLICIT_LORA_ID:
@@ -509,8 +520,234 @@ def fetch_reference(url: str, title: str | None = None) -> ReferenceImage:
     return ReferenceImage(dataUrl=data_url, title=title)
 
 
+HUMAN_DETAIL_TERMS = (
+    "person", "people", "woman", "women", "man", "men", "adult", "couple",
+    "portrait", "face", "body", "human", "girl", "boy"
+)
+
+
+def local_quality_report(image: Image.Image, prompt: str):
+    """
+    Fast local image-signal judge.
+
+    This intentionally does not pretend to semantically understand anatomy.
+    It measures image detail/contrast/resolution and uses prompt intent only to
+    prioritize a human-detail refinement pass when the request contains people.
+    """
+    gray = image.convert("L")
+    gray_stats = ImageStat.Stat(gray)
+    contrast = float(gray_stats.stddev[0]) if gray_stats.stddev else 0.0
+    edges = gray.filter(ImageFilter.FIND_EDGES)
+    edge_stats = ImageStat.Stat(edges)
+    edge_mean = float(edge_stats.mean[0]) if edge_stats.mean else 0.0
+    edge_std = float(edge_stats.stddev[0]) if edge_stats.stddev else 0.0
+    prompt_lower = prompt.lower()
+    human_detail_priority = any(term in prompt_lower for term in HUMAN_DETAIL_TERMS)
+
+    sharpness_score = max(0.0, min(100.0, edge_std * 2.2))
+    contrast_score = max(0.0, min(100.0, contrast * 1.7))
+    min_dimension = min(image.size)
+    resolution_score = max(
+        0.0,
+        min(100.0, ((min_dimension - 384.0) / (1024.0 - 384.0)) * 100.0),
+    )
+
+    reasons = []
+    if sharpness_score < 52:
+        reasons.append("soft-detail")
+    if contrast_score < 42:
+        reasons.append("low-local-contrast")
+    if human_detail_priority:
+        reasons.append("human-detail-priority")
+
+    score = (
+        sharpness_score * 0.50
+        + contrast_score * 0.25
+        + resolution_score * 0.25
+    )
+
+    return {
+        "judge": "heuristic-local-quality-judge-v1",
+        "score": round(score, 1),
+        "sharpnessScore": round(sharpness_score, 1),
+        "contrastScore": round(contrast_score, 1),
+        "resolutionScore": round(resolution_score, 1),
+        "width": image.width,
+        "height": image.height,
+        "humanDetailPriority": human_detail_priority,
+        "reasons": reasons,
+        "semanticAnatomyAssessment": False,
+    }
+
+
+def refinement_prompt(prompt: str, human_detail_priority: bool):
+    if human_detail_priority:
+        priorities = (
+            "Refinement priorities: preserve the existing composition and pose; "
+            "increase facial fidelity, anatomically coherent hands and limbs, "
+            "natural skin texture, realistic proportions, fine photographic detail, "
+            "and consistent lighting."
+        )
+    else:
+        priorities = (
+            "Refinement priorities: preserve the existing composition; increase "
+            "fine texture detail, crisp natural edges, coherent materials, depth, "
+            "and consistent lighting."
+        )
+    return prompt.rstrip() + "\n" + priorities
+
+
+def run_quality_pipeline(
+    request: ImageRequest,
+    image: Image.Image,
+    negative: str,
+    model_used: str,
+    seed: int,
+):
+    before = local_quality_report(image, request.prompt)
+    trace = {
+        "version": "quality-v1",
+        "portableArtifactHandoff": "image",
+        "stages": [
+            {
+                "stage": "quality-judge",
+                "component": before["judge"],
+                "score": before["score"],
+                "metrics": before,
+            }
+        ],
+    }
+
+    should_refine = (
+        request.profile == "quality"
+        and not request.references
+        and (
+            before["sharpnessScore"] < 52
+            or before["contrastScore"] < 42
+            or before["humanDetailPriority"]
+        )
+    )
+
+    refined = image
+    if should_refine:
+        refine_started = time.time()
+        refine_steps = max(8, min(14, (request.steps or PROFILE_CONFIG["quality"]["steps"]) // 2))
+        refine_strength = 0.22 if before["humanDetailPriority"] else 0.18
+        refine_guidance = min(
+            8.0,
+            max(
+                5.5,
+                request.guidanceScale
+                if request.guidanceScale is not None
+                else PROFILE_CONFIG["quality"]["guidance"],
+            ),
+        )
+        refine_seed = (seed + 1) % 2147483648
+
+        try:
+            with MODEL_LOCK:
+                if request.contentMode == "adult_explicit":
+                    ensure_explicit_profile()
+                else:
+                    ensure_profile("quality")
+
+                refine_result = image_pipe(
+                    prompt=refinement_prompt(
+                        request.prompt,
+                        bool(before["humanDetailPriority"]),
+                    ),
+                    negative_prompt=negative,
+                    image=image,
+                    strength=refine_strength,
+                    num_inference_steps=refine_steps,
+                    guidance_scale=refine_guidance,
+                    generator=torch.Generator(device="cpu").manual_seed(refine_seed),
+                )
+
+            if refine_result.images:
+                refined = refine_result.images[0].convert("RGB")
+                after_refine = local_quality_report(refined, request.prompt)
+                trace["stages"].append(
+                    {
+                        "stage": "targeted-refinement",
+                        "component": model_used,
+                        "applied": True,
+                        "promptDrivenTargets": (
+                            ["face-detail", "anatomy", "hands", "skin-texture", "lighting"]
+                            if before["humanDetailPriority"]
+                            else ["fine-detail", "texture", "lighting"]
+                        ),
+                        "semanticRegionDetection": False,
+                        "strength": refine_strength,
+                        "steps": refine_steps,
+                        "seed": refine_seed,
+                        "latencyMs": int((time.time() - refine_started) * 1000),
+                        "postRefinementJudge": after_refine,
+                    }
+                )
+            else:
+                trace["stages"].append(
+                    {
+                        "stage": "targeted-refinement",
+                        "component": model_used,
+                        "applied": False,
+                        "reason": "refinement-model-returned-no-image",
+                    }
+                )
+        except Exception as exc:
+            trace["stages"].append(
+                {
+                    "stage": "targeted-refinement",
+                    "component": model_used,
+                    "applied": False,
+                    "reason": "refinement-failed",
+                    "detail": str(exc)[:500],
+                }
+            )
+    else:
+        trace["stages"].append(
+            {
+                "stage": "targeted-refinement",
+                "component": model_used,
+                "applied": False,
+                "reason": "judge-did-not-request-refinement",
+            }
+        )
+
+    upscale_started = time.time()
+    max_dimension = max(refined.size)
+    upscale_scale = min(1.5, 2048 / max_dimension) if max_dimension > 0 else 1.0
+    upscale_scale = max(1.0, upscale_scale)
+    if upscale_scale > 1.001:
+        target_size = (
+            max(1, round(refined.width * upscale_scale)),
+            max(1, round(refined.height * upscale_scale)),
+        )
+        refined = refined.resize(target_size, Image.Resampling.LANCZOS)
+        upscale_applied = True
+    else:
+        target_size = refined.size
+        upscale_applied = False
+
+    trace["stages"].append(
+        {
+            "stage": "upscale",
+            "component": "pillow-lanczos-v1",
+            "applied": upscale_applied,
+            "scale": round(upscale_scale, 3),
+            "width": target_size[0],
+            "height": target_size[1],
+            "latencyMs": int((time.time() - upscale_started) * 1000),
+            "note": "Deterministic local resampling; a learned super-resolution specialist can replace this component later.",
+        }
+    )
+    trace["finalJudge"] = local_quality_report(refined, request.prompt)
+    return refined, trace
+
+
 def run_generation(request: ImageRequest):
     started = time.time()
+    base_started = time.time()
     validate_content_mode(request)
     config = PROFILE_CONFIG[request.profile]
     width, height = config["dimensions"][request.aspectRatio]
@@ -665,6 +902,41 @@ def run_generation(request: ImageRequest):
             "Model produced an all-black image. The worker rejected the result instead of returning it."
         )
 
+    base_latency_ms = int((time.time() - base_started) * 1000)
+    pipeline_trace = {
+        "version": "single-pass",
+        "portableArtifactHandoff": "image",
+        "stages": [
+            {
+                "stage": "base-generation",
+                "component": model_used,
+                "latencyMs": base_latency_ms,
+                "width": image.width,
+                "height": image.height,
+            }
+        ],
+    }
+
+    if request.pipelineMode == "quality-v1":
+        image, quality_trace = run_quality_pipeline(
+            request,
+            image,
+            negative,
+            model_used,
+            seed,
+        )
+        quality_trace["stages"].insert(
+            0,
+            {
+                "stage": "base-generation",
+                "component": model_used,
+                "latencyMs": base_latency_ms,
+                "width": result.images[0].width,
+                "height": result.images[0].height,
+            },
+        )
+        pipeline_trace = quality_trace
+
     return {
         "dataUrl": encode_png(image),
         "model": model_used,
@@ -676,6 +948,8 @@ def run_generation(request: ImageRequest):
         "variationMode": request.variationMode,
         "referenceMode": reference_mode,
         "contentMode": request.contentMode,
+        "pipelineMode": request.pipelineMode,
+        "pipelineTrace": pipeline_trace,
         "explicitLora": (
             {
                 "id": EXPLICIT_LORA_ID,
@@ -758,6 +1032,7 @@ def queue_loop():
                 strength=job.get("strength"),
                 variationMode=job.get("variationMode", "balanced"),
                 seed=job.get("seed"),
+                pipelineMode=job.get("pipelineMode", "single-pass"),
             )
 
             UNISON_BUSY.set()
@@ -806,6 +1081,10 @@ def unison_capabilities():
         "owned_content_mode",
         "adult_explicit_text_to_image",
         "adult_explicit_owned_checkpoint",
+        "composable_media_pipeline_v1",
+        "local_quality_judge_v1",
+        "targeted_refinement_v1",
+        "local_lanczos_upscale_v1",
     ]
     if platform.system() == "Windows" and TEXT_READY_MARKER.exists():
         capabilities.extend(
@@ -909,6 +1188,10 @@ def capabilities():
             "explicitLora": EXPLICIT_LORA_ID,
             "explicitLoraScale": EXPLICIT_LORA_SCALE,
             "multiReferenceIdentity": 0,
+            "composableMediaPipeline": ["quality-v1"],
+            "qualityJudge": "heuristic-local-quality-judge-v1",
+            "refinement": "same-model-low-strength-img2img",
+            "upscaler": "pillow-lanczos-v1",
         },
     }
 
@@ -933,7 +1216,7 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.10.3"
+            else "image-worker-0.11.0"
         ),
         busy_provider=unison_busy,
     )
