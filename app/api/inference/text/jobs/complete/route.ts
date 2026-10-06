@@ -176,6 +176,22 @@ async function enqueuePairwiseVerifier(
 ) {
   if (!input.workerId) return null;
 
+  const { data: node, error: nodeError } = await supabase
+    .from("unison_nodes")
+    .select("capabilities")
+    .eq("id", input.workerId)
+    .maybeSingle();
+  if (nodeError) throw nodeError;
+
+  const capabilities = Array.isArray(node?.capabilities)
+    ? node.capabilities.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+  if (!capabilities.includes("semantic_media_pairwise_v1")) {
+    return null;
+  }
+
   const { data: existing, error: existingError } = await supabase
     .from("text_inference_jobs")
     .select("id,status")
@@ -970,11 +986,72 @@ export async function POST(request: Request) {
         });
       });
 
+      let pairwiseVerifierJobId: string | null = null;
+      try {
+        const { data: candidateJob, error: candidateError } = await supabase
+          .from("inference_jobs")
+          .select("parent_image_job_id,pipeline_role,repair_plan")
+          .eq("id", sourceImageJobId)
+          .maybeSingle();
+
+        if (candidateError) throw candidateError;
+
+        if (
+          candidateJob?.pipeline_role === "repair-candidate" &&
+          typeof candidateJob.parent_image_job_id === "string"
+        ) {
+          const { data: originalJob, error: originalError } = await supabase
+            .from("inference_jobs")
+            .select("prompt,pipeline_trace")
+            .eq("id", candidateJob.parent_image_job_id)
+            .maybeSingle();
+
+          if (originalError) throw originalError;
+
+          const originalTrace =
+            originalJob?.pipeline_trace &&
+            typeof originalJob.pipeline_trace === "object" &&
+            !Array.isArray(originalJob.pipeline_trace)
+              ? (originalJob.pipeline_trace as {
+                  semanticJudge?: { repairPlan?: unknown };
+                })
+              : {};
+
+          const targetCategories = repairTargetsFromPlan(
+            candidateJob.repair_plan &&
+              typeof candidateJob.repair_plan === "object" &&
+              !Array.isArray(candidateJob.repair_plan) &&
+              Object.keys(candidateJob.repair_plan).length
+              ? candidateJob.repair_plan
+              : originalTrace.semanticJudge?.repairPlan,
+          );
+
+          pairwiseVerifierJobId = await enqueuePairwiseVerifier(supabase, {
+            ownerRef: job.client_owner_ref,
+            workerId,
+            originalImageJobId: candidateJob.parent_image_job_id,
+            candidateImageJobId: sourceImageJobId,
+            sourcePrompt:
+              typeof originalJob?.prompt === "string" ? originalJob.prompt : "",
+            targetCategories,
+          });
+        }
+      } catch (pairwiseError) {
+        console.error("Could not enqueue pairwise media verifier", {
+          candidateImageJobId: sourceImageJobId,
+          detail:
+            pairwiseError instanceof Error
+              ? pairwiseError.message.slice(0, 500)
+              : "unknown",
+        });
+      }
+
       return NextResponse.json({
         ok: true,
         status: "completed",
         semanticJudge: report,
         repairPlan,
+        pairwiseVerifierJobId,
       });
     }
 
