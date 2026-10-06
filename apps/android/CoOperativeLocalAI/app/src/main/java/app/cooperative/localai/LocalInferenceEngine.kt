@@ -1,13 +1,10 @@
 package app.cooperative.localai
 
-/**
- * Stable boundary for on-device model runtimes.
- *
- * APK alpha 1 intentionally leaves the engine unavailable until the first
- * physical phone reports its hardware. The next phase can plug LiteRT-LM (or
- * another qualified runtime) into this interface without changing the UI,
- * node identity, pairing, or CoOperative routing contract.
- */
+import android.content.Context
+import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
+
 interface LocalInferenceEngine {
     val isAvailable: Boolean
     val modelId: String?
@@ -30,15 +27,87 @@ data class LocalGeneration(
     val latencyMs: Long,
 )
 
-class UnavailableLocalInferenceEngine : LocalInferenceEngine {
-    override val isAvailable = false
-    override val modelId: String? = null
+class LiteRtLocalInferenceEngine(
+    private val context: Context,
+) : LocalInferenceEngine, AutoCloseable {
+    private val modelManager = LocalModelManager(context)
+    private var engine: Engine? = null
+
+    override val isAvailable: Boolean
+        get() = modelManager.isStarterModelInstalled
+
+    override val modelId: String
+        get() = LocalModelCatalog.STARTER_MODEL_ID
+
+    @Synchronized
+    private fun ensureEngine(): Engine {
+        engine?.let { return it }
+        if (!modelManager.isStarterModelInstalled) {
+            error("The local model has not been downloaded yet.")
+        }
+
+        val config = EngineConfig(
+            modelPath = modelManager.starterModelFile.absolutePath,
+            backend = Backend.CPU(),
+            cacheDir = context.cacheDir.absolutePath,
+        )
+        return Engine(config).also {
+            it.initialize()
+            engine = it
+        }
+    }
 
     override fun generate(
         messages: List<LocalMessage>,
         maxTokens: Int,
         temperature: Float,
     ): LocalGeneration {
-        error("No on-device model is installed yet.")
+        val prompt = formatMessages(messages)
+        if (prompt.isBlank()) error("Local generation requires at least one message.")
+
+        val started = System.currentTimeMillis()
+        val response = ensureEngine().createConversation().use { conversation ->
+            conversation.sendMessage(prompt)
+        }
+        val text = response.text.trim()
+        if (text.isBlank()) error("The local model returned an empty response.")
+
+        return LocalGeneration(
+            text = text,
+            modelId = modelId,
+            latencyMs = System.currentTimeMillis() - started,
+        )
+    }
+
+    private fun formatMessages(messages: List<LocalMessage>): String {
+        val clean = messages
+            .filter { it.content.isNotBlank() }
+            .takeLast(30)
+
+        return buildString {
+            append(
+                "You are the local CoOperative assistant running privately on this Android device. " +
+                    "Answer the latest user request directly and concisely.\n\n",
+            )
+            for (message in clean) {
+                val role = when (message.role.lowercase()) {
+                    "system" -> "SYSTEM"
+                    "assistant", "model" -> "ASSISTANT"
+                    else -> "USER"
+                }
+                append(role)
+                append(": ")
+                append(message.content.trim().take(12000))
+                append("\n")
+            }
+            append("ASSISTANT:")
+        }
+    }
+
+    override fun close() {
+        synchronized(this) {
+            engine?.close()
+            engine = null
+        }
     }
 }
