@@ -205,7 +205,14 @@ function representativeTextCostUsd(pricing: JsonMap, taskType: TaskType) {
   const completionPerToken =
     numeric(pricing.completionTokenUsd) ??
     numeric(jsonMap(pricing.raw).completion);
-  if (promptPerToken === null || completionPerToken === null) return null;
+  if (
+    promptPerToken === null ||
+    completionPerToken === null ||
+    promptPerToken < 0 ||
+    completionPerToken < 0
+  ) {
+    return null;
+  }
 
   const assumptions: Record<
     "general-text" | "summary" | "coding" | "reasoning" | "vision",
@@ -233,10 +240,12 @@ function representativeTextCostUsd(pricing: JsonMap, taskType: TaskType) {
 
 function representativeMediaCostUsd(pricing: JsonMap, taskType: TaskType) {
   const estimated = numeric(pricing.estimatedCostUsd);
-  if (estimated !== null) return estimated;
+  if (estimated !== null && estimated >= 0) return estimated;
 
-  const minUnit = numeric(pricing.minUnitCostUsd);
-  const maxUnit = numeric(pricing.maxUnitCostUsd);
+  const rawMinUnit = numeric(pricing.minUnitCostUsd);
+  const rawMaxUnit = numeric(pricing.maxUnitCostUsd);
+  const minUnit = rawMinUnit !== null && rawMinUnit >= 0 ? rawMinUnit : null;
+  const maxUnit = rawMaxUnit !== null && rawMaxUnit >= 0 ? rawMaxUnit : null;
   if (minUnit !== null || maxUnit !== null) {
     if (minUnit !== null && maxUnit !== null) return (minUnit + maxUnit) / 2;
     return minUnit ?? maxUnit;
