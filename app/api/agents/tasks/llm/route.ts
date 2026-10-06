@@ -365,7 +365,7 @@ export async function POST(request: Request) {
             client_owner_ref: `agent-task:${input.taskId}`,
             agent_task_id: input.taskId,
             messages: input.messages,
-            profile: selectedLocalProfile,
+            profile: input.profile,
             max_tokens: input.maxTokens,
             temperature: input.temperature,
             routing_mode: "workflow-free-cloud",
@@ -444,7 +444,7 @@ export async function POST(request: Request) {
           {
             jobId,
             status: "running",
-            profile: selectedLocalProfile,
+            profile: input.profile,
             workflowSelected: true,
             provider: selectedProvider,
             model: selectedModel,
@@ -469,7 +469,7 @@ export async function POST(request: Request) {
       client_owner_ref: `agent-task:${input.taskId}`,
       agent_task_id: input.taskId,
       messages: input.messages,
-      profile: input.profile,
+      profile: selectedLocalProfile,
       max_tokens: input.maxTokens,
       temperature: input.temperature,
       routing_mode:
@@ -513,7 +513,13 @@ export async function POST(request: Request) {
       {
         jobId,
         status: "queued",
-        profile: input.profile,
+        profile: selectedLocalProfile,
+        workflowSelected:
+          selectedProvider === "cooperative-local" && Boolean(selectedModel),
+        provider:
+          selectedProvider === "cooperative-local" ? selectedProvider : null,
+        model:
+          selectedProvider === "cooperative-local" ? selectedModel || null : null,
         ownedNodePreferred: Boolean(ownedNode),
         preferredNodeId: ownedNode?.id ?? null,
         preferredNodeName: ownedNode?.displayName ?? null,
