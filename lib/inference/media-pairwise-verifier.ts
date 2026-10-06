@@ -62,12 +62,15 @@ export function decidePairwiseVerification(
   expectedTargetCategories: string[] = [],
 ): PairwiseVerificationDecision {
   const reasons: string[] = [];
+  const consistencyIssues: string[] = [];
+
   const expectedTargets = [
     ...new Set(expectedTargetCategories.filter(Boolean)),
   ].sort();
   const reportedTargets = [
     ...new Set(report.targetResults.map((result) => result.category)),
   ].sort();
+
   const targetSetMatches =
     expectedTargets.length === 0 ||
     (expectedTargets.length === reportedTargets.length &&
@@ -76,12 +79,44 @@ export function decidePairwiseVerification(
       ));
 
   if (!targetSetMatches) {
-    reasons.push(
+    consistencyIssues.push(
       `Verifier target mismatch. Expected [${expectedTargets.join(
         ", ",
       )}] but received [${reportedTargets.join(", ")}].`,
     );
   }
+
+  const targetResultMap = new Map(
+    report.targetResults.map((result) => [result.category, result.result]),
+  );
+
+  const contradictoryRegressions = report.regressions.filter((regression) => {
+    if (
+      regression.category === "prompt" &&
+      report.promptAdherenceComparison !== "worse"
+    ) {
+      return true;
+    }
+
+    const targetResult = targetResultMap.get(regression.category);
+    return Boolean(targetResult && targetResult !== "worse");
+  });
+
+  for (const regression of contradictoryRegressions) {
+    consistencyIssues.push(
+      `Regression conflict: ${regression.category} is labeled ${regression.severity} regression while the direct comparison does not say that category is worse.`,
+    );
+  }
+
+  const contradictorySevereRegression = contradictoryRegressions.some(
+    (regression) =>
+      regression.severity === "high" || regression.severity === "critical",
+  );
+
+  const effectiveRegressions = report.regressions.filter(
+    (regression) => !contradictoryRegressions.includes(regression),
+  );
+
   const anyBetter = report.targetResults.some(
     (result) => result.result === "better",
   );
@@ -94,9 +129,11 @@ export function decidePairwiseVerification(
   const anyUncertain = report.targetResults.some(
     (result) => result.result === "uncertain",
   );
-  const materialRegression = report.regressions.some(
+  const meaningfulRegression = effectiveRegressions.some(
     (regression) =>
-      regression.severity === "high" || regression.severity === "critical",
+      regression.severity === "medium" ||
+      regression.severity === "high" ||
+      regression.severity === "critical",
   );
 
   if (report.confidence < 0.75) {
@@ -109,8 +146,15 @@ export function decidePairwiseVerification(
   if (anyWorse) {
     reasons.push("At least one targeted repair dimension became worse.");
   }
-  if (materialRegression) {
-    reasons.push("A high or critical regression was detected outside the target.");
+  if (meaningfulRegression) {
+    reasons.push(
+      "A medium, high, or critical regression was detected outside the repair target.",
+    );
+  }
+  if (contradictorySevereRegression) {
+    reasons.push(
+      "The verifier emitted a severe regression that conflicts with its direct comparison, so promotion requires review.",
+    );
   }
   if (report.promptAdherenceComparison === "worse") {
     reasons.push("Prompt adherence regressed.");
@@ -130,7 +174,8 @@ export function decidePairwiseVerification(
     report.confidence >= 0.75 &&
     anyBetter &&
     !anyWorse &&
-    !materialRegression &&
+    !meaningfulRegression &&
+    !contradictorySevereRegression &&
     report.promptAdherenceComparison !== "worse" &&
     report.compositionPreservation !== "changed-material" &&
     !anyUncertain;
@@ -138,11 +183,11 @@ export function decidePairwiseVerification(
   let verdict: PairwiseVerificationDecision["verdict"] = "review";
   if (acceptCandidate) {
     verdict = "candidate-better";
-  } else if (!targetSetMatches) {
+  } else if (!targetSetMatches || contradictorySevereRegression) {
     verdict = "review";
   } else if (
     anyWorse ||
-    materialRegression ||
+    meaningfulRegression ||
     report.promptAdherenceComparison === "worse" ||
     report.compositionPreservation === "changed-material"
   ) {
@@ -150,14 +195,14 @@ export function decidePairwiseVerification(
   } else if (
     allSame &&
     report.promptAdherenceComparison === "same" &&
-    !report.regressions.length
+    effectiveRegressions.length === 0
   ) {
     verdict = "equivalent";
   }
 
   if (acceptCandidate) {
     reasons.push(
-      "Candidate improves the targeted dimension without a material regression.",
+      "Candidate improves the targeted dimension without a meaningful regression.",
     );
   }
 
@@ -166,6 +211,8 @@ export function decidePairwiseVerification(
     verdict,
     acceptCandidate,
     reasons,
+    consistencyIssues,
     confidence: report.confidence,
   };
 }
+
