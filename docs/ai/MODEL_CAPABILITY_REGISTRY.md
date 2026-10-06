@@ -187,3 +187,23 @@ Cost reconciliation happens twice:
 
 The existing `media_generation_jobs` ledger remains authoritative. Its `pricing_dimensions` payload stores both the recommendation-time estimate and the execution-time `costResolution` breakdown, while the existing estimated/actual provider cost, user charge, and margin columns support later quote-versus-actual reconciliation. No parallel billing ledger is introduced.
 
+## Live Hermes video pricing
+
+Hermes video families remain discoverable from the pinned Hermes release, while execution eligibility is derived from current provider pricing at request time.
+
+`nousManagedMediaCatalog()` now loads the current FAL model page for each Hermes text-to-video endpoint and normalizes only pricing forms that can be bounded safely:
+
+- per-second rates by resolution;
+- separate audio-off/audio-on per-second rates;
+- flat per-second rates when the provider explicitly states that resolution/audio does not change the price;
+- provider-native resolution labels such as `768p` or `4k`;
+- approximate/token-derived per-second rates only with a 5% conservative routing buffer.
+
+A video family is exposed to automatic Mixer routing only when its current pricing can be converted into a bounded total for the exact duration, resolution, and audio controls. Unknown pricing, incomplete audio-toggle pricing, unsupported request controls, or stale/missing provider pages keep the family visible in the registry but non-spendable.
+
+Recommendation-time pricing and execution-time pricing use the same `model-cost-resolver.ts` path. Immediately before execution, CoOperative reloads the live Nous/Hermes catalog and reconciles the selected route again. If the price no longer fits the Model Mixer cap, or can no longer be bounded, no provider call begins.
+
+The registry scanner persists successful live video pricing under `pricing.rates` with `unit=second` and `requestCostResolverRequired=true`. Runtime and benchmark evidence remains separate from pricing evidence; a lower price never implies higher output quality. Promotional provider rates are intentionally refreshed from the live page rather than pinned indefinitely.
+
+Explicit output controls are capability constraints, not preferences. For example, a native/always-on-audio video model is excluded when the request explicitly requires no audio.
+
