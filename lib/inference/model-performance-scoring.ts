@@ -2,7 +2,7 @@ import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
-export const MODEL_SCORE_VERSION = "2026-10-05.1";
+export const MODEL_SCORE_VERSION = "2026-10-06.1";
 
 type JsonMap = Record<string, unknown>;
 
@@ -458,6 +458,7 @@ export async function recomputeAllModelTaskScores() {
     { data: benchmarks, error: benchmarkError },
     { data: mediaJobs, error: mediaError },
     { data: mediaOutcomes, error: outcomeError },
+    { data: localImageJobs, error: localImageError },
     { data: textJobs, error: textError },
   ] = await Promise.all([
     admin
@@ -483,6 +484,14 @@ export async function recomputeAllModelTaskScores() {
       .select("source_job_id,outcome_kind,created_at")
       .gte("created_at", cutoff),
     admin
+      .from("inference_jobs")
+      .select(
+        "status,profile,references_used,latency_ms,error,created_at",
+      )
+      .eq("kind", "image")
+      .gte("created_at", cutoff)
+      .in("status", ["completed", "failed"]),
+    admin
       .from("text_inference_jobs")
       .select(
         "status,result_model,result_provider,fallback_model,fallback_provider,task_class,latency_ms,created_at",
@@ -495,6 +504,7 @@ export async function recomputeAllModelTaskScores() {
   if (benchmarkError) throw new Error(`Registry score benchmark query failed: ${JSON.stringify(benchmarkError)}`);
   if (mediaError) throw new Error(`Registry score media runtime query failed: ${JSON.stringify(mediaError)}`);
   if (outcomeError) throw new Error(`Registry score outcome query failed: ${JSON.stringify(outcomeError)}`);
+  if (localImageError) throw new Error(`Registry score local image runtime query failed: ${JSON.stringify(localImageError)}`);
   if (textError) throw new Error(`Registry score text runtime query failed: ${JSON.stringify(textError)}`);
 
   const qualityMap = new Map<string, QualityAggregate>();
@@ -567,6 +577,36 @@ export async function recomputeAllModelTaskScores() {
         latency,
       );
     }
+  }
+
+  for (const row of localImageJobs || []) {
+    const errorDetail =
+      typeof row.error === "string" ? row.error.toLowerCase() : "";
+    const policyStopped =
+      row.status === "failed" &&
+      (
+        errorDetail.includes("blocked because the prompt") ||
+        errorDetail.includes("minor-age language") ||
+        errorDetail.includes("coercive") ||
+        errorDetail.includes("non-consensual")
+      );
+
+    // Content-policy stops are not model/runtime reliability failures.
+    if (policyStopped) continue;
+
+    const model =
+      row.profile === "fast" ? "local-image-fast" : "local-image-quality";
+    const taskType: TaskType =
+      Number(row.references_used || 0) > 0
+        ? "image-reference"
+        : "image-generation";
+
+    addRuntime(
+      runtimeMap,
+      runtimeKey("cooperative-local", model, taskType),
+      row.status,
+      numeric(row.latency_ms),
+    );
   }
 
   for (const row of textJobs || []) {
