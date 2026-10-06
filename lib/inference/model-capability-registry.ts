@@ -9,7 +9,7 @@ import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog
 import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
 import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
-export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-05.3";
+export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-05.4";
 
 type JsonMap = Record<string, unknown>;
 
@@ -1098,41 +1098,67 @@ export async function scanModelCapabilities(input: {
         });
       }
 
-      if (catalog.video) {
+      for (const model of catalog.videoModels || []) {
         routes.push({
           provider: "nous",
-          model: catalog.video.model,
+          model: model.model,
           endpoint: "",
           routeKind: "video",
-          displayName: "PixVerse V6",
+          displayName: model.displayName,
           source: catalog.source,
           status: "active",
           free: false,
-          recommended: true,
-          executionReady: true,
-          inputModalities: ["text"],
+          recommended: model.executionReady,
+          executionReady: model.executionReady,
+          inputModalities: model.imageEndpoint
+            ? ["text", "image"]
+            : ["text"],
           outputModalities: ["video"],
           capabilitySummary: {
             textToVideo: true,
-            audioGeneration: true,
-            resolutions: Object.keys(catalog.video.rates),
+            imageToVideo: Boolean(model.imageEndpoint),
+            audioGeneration: model.audioSupported,
+            audioMode: model.audioMode,
+            aspectRatios: model.aspectRatios,
+            resolutions: model.resolutions,
+            qualityLabel: model.qualityLabel,
+            minQualityLevel: model.minLevel,
+            hermesManaged: true,
           },
           pricing: {
             unit: "second",
-            rates: catalog.video.rates,
-            pricingSource: catalog.video.pricingSource,
+            rates: model.rates,
+            pricingSource: model.pricingSource,
+            approximate: model.pricingApproximate,
+            requestCostResolverRequired: true,
           },
           limits: {
-            durationSeconds: catalog.video.durationSeconds,
-            resolutions: Object.keys(catalog.video.rates),
+            durationSeconds:
+              model.minDurationSeconds !== null &&
+              model.maxDurationSeconds !== null
+                ? {
+                    min: model.minDurationSeconds,
+                    max: model.maxDurationSeconds,
+                  }
+                : null,
+            aspectRatios: model.aspectRatios,
+            resolutions: model.resolutions,
           },
           policySummary: policySummary(
-            policyMap.get(policyKey("nous", catalog.video.model)),
+            policyMap.get(policyKey("nous", model.model)),
           ),
           benchmarkSummary: {},
           runtimeSummary:
-            runtimeMap.get(policyKey("nous", catalog.video.model)) || {},
-          metadata: { catalogFetchedAt: catalog.fetchedAt },
+            runtimeMap.get(policyKey("nous", model.model)) || {},
+          metadata: {
+            catalogFetchedAt: catalog.fetchedAt,
+            hermesRelease: catalog.hermesRelease || null,
+            managedBackend: "fal-queue",
+            automaticRouting: model.executionReady
+              ? "request-cost-resolver-required"
+              : "live-price-unbounded",
+            pricingNote: model.pricingNote,
+          },
         });
       }
 
@@ -1140,7 +1166,7 @@ export async function scanModelCapabilities(input: {
         source: catalog.source,
         provider: "nous",
         ok: true,
-        count: catalog.image.length + (catalog.video ? 1 : 0),
+        count: catalog.image.length + (catalog.videoModels?.length || 0),
       });
     } else {
       sources.push({
