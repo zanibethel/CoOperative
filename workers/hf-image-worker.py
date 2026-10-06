@@ -22,6 +22,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import socket
 import subprocess
 from pathlib import Path
@@ -97,7 +98,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.11.2")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.11.3")
 
 def start_repo_recovery_worker():
     enabled = os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
@@ -135,6 +136,108 @@ def start_repo_recovery_worker():
     return thread
 
 
+def stop_local_text_worker(process):
+    if process is None:
+        return
+
+    try:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3)
+    except Exception as exc:
+        print(
+            "Local MLX text worker cleanup warning: " + str(exc)[:500],
+            flush=True,
+        )
+    finally:
+        TEXT_BUSY_MARKER.unlink(missing_ok=True)
+        TEXT_READY_MARKER.unlink(missing_ok=True)
+
+
+def terminate_stale_local_text_workers(script: Path):
+    """
+    The image worker owns the MLX text/vision child on macOS.
+
+    Older parent versions did not terminate that subprocess on restart, which
+    could leave multiple queue pollers racing under the same Unison node id.
+    Kill only processes whose command line contains this exact resolved worker
+    script before starting the new owned child.
+    """
+    if platform.system() != "Darwin":
+        return
+
+    pgrep = shutil.which("pgrep")
+    if not pgrep:
+        return
+
+    try:
+        result = subprocess.run(
+            [pgrep, "-f", str(script.resolve())],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        pids = []
+        for raw in result.stdout.split():
+            try:
+                pid = int(raw)
+            except ValueError:
+                continue
+            if pid > 1 and pid != os.getpid():
+                pids.append(pid)
+
+        if not pids:
+            return
+
+        print(
+            "Stopping stale local MLX worker process(es): "
+            + ", ".join(str(pid) for pid in pids),
+            flush=True,
+        )
+
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+        deadline = time.time() + 4
+        while time.time() < deadline:
+            remaining = []
+            for pid in pids:
+                try:
+                    os.kill(pid, 0)
+                    remaining.append(pid)
+                except ProcessLookupError:
+                    pass
+            if not remaining:
+                break
+            time.sleep(0.15)
+
+        for pid in pids:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    except Exception as exc:
+        print(
+            "Could not clean stale local MLX workers: " + str(exc)[:500],
+            flush=True,
+        )
+    finally:
+        TEXT_BUSY_MARKER.unlink(missing_ok=True)
+        TEXT_READY_MARKER.unlink(missing_ok=True)
+
+
 def start_local_text_worker():
     enabled = os.getenv("COOPERATIVE_START_TEXT_WORKER", "1").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
@@ -147,6 +250,8 @@ def start_local_text_worker():
     if not script.exists():
         print("Local MLX text worker script not found; recovery reasoning will wait for another text node.", flush=True)
         return None
+
+    terminate_stale_local_text_workers(script)
 
     uv = shutil.which("uv")
     if not uv:
@@ -1234,13 +1339,13 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.11.2"
+            else "image-worker-0.11.3"
         ),
         busy_provider=unison_busy,
     )
     print("UNISON_RUNTIME_STARTED", flush=True)
     start_repo_recovery_worker()
-    start_local_text_worker()
+    text_worker_process = start_local_text_worker()
 
     if PRELOAD_PROFILE in {"fast", "quality"}:
         try:
@@ -1274,5 +1379,6 @@ if __name__ == "__main__":
             port=listener_port,
         )
     finally:
+        stop_local_text_worker(text_worker_process)
         if platform.system() == "Windows":
             IMAGE_PORT_MARKER.unlink(missing_ok=True)
