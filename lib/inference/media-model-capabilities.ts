@@ -395,6 +395,19 @@ export async function evaluateMediaExecutionContentGate(input: {
     };
   }
 
+  if (requestedClass === "adult_explicit" && state !== "verified") {
+    return {
+      allowed: false,
+      preference,
+      adultCapability: state,
+      reason: "adult_explicit_unverified",
+      note:
+        "Sexually explicit output requires exact-route evidence that explicitly covers that scope. CoOperative will not probe an unknown hosted route during a real user request.",
+      policySource,
+      latestTestOutcome,
+    };
+  }
+
   if (preference === "require_adult_capable" && state !== "verified") {
     return {
       allowed: false,
@@ -416,9 +429,7 @@ export async function evaluateMediaExecutionContentGate(input: {
     note:
       state === "verified"
         ? "The current preference and capability evidence allow this adult-output route."
-        : requestedClass === "adult_explicit"
-          ? "Explicit adult output is enabled for this profile. This exact route is not currently known to block it, so CoOperative may try it and will learn from any provider policy refusal."
-          : "Adult output is allowed for this profile and this route is not currently known to block it; capability remains unverified.",
+        : "Adult output is allowed for this profile and this route is not currently known to block it; capability remains unverified.",
     policySource,
     latestTestOutcome,
   };
