@@ -165,3 +165,21 @@ The shared workflow budget reservation is enforced by database RPCs:
 - release_agent_workflow_node_budget
 
 These functions lock the workflow/node rows so simultaneous approvals cannot exceed the shared request cap.
+
+
+### Phase 3 — explicit one-shot OpenRouter video approval
+
+The same approval/budget ledger now supports planned OpenRouter text-to-video routes:
+
+- the user must explicitly click **Approve one video generation**;
+- the exact planned model + tier + duration + resolution + audio + aspect ratio is revalidated;
+- higher pricing or changed route/configuration requires fresh planning/approval;
+- the shared workflow budget is reserved atomically before execution;
+- connected OpenRouter is treated as BYOK; otherwise eligible CoOperative-funded execution reserves the profile AI balance;
+- Hermes is launched with one configured video route and its worker is required to call video_generate exactly once;
+- automatic retry and provider/model fallback are disabled;
+- the approval request returns after the asynchronous video job starts;
+- workflow polling reconciles the linked media job, then settles or releases both reservations;
+- completed videos render directly in the workflow console.
+
+Nous/PixVerse video execution remains planning-only in this phase. Reference-image video remains unsupported until a verified route is wired.
