@@ -54,6 +54,7 @@ export type PairwiseVerificationDecision = {
     | "review";
   acceptCandidate: boolean;
   reasons: string[];
+  consistencyIssues: string[];
   confidence: number;
 };
 
