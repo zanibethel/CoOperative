@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { authorizeUnisonNode } from "@/lib/unison/auth";
 import { recordModelCapabilityEvidence } from "@/lib/inference/model-capability-registry";
+import {
+  executableRepairTargets,
+} from "@/lib/inference/media-repair-executor";
+import type { MediaRepairPlanV1 } from "@/lib/inference/media-repair-planner";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -278,6 +282,169 @@ async function enqueueSemanticJudge(
   return judgeJobId;
 }
 
+function repairTargetCategories(plan: unknown) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return [];
+  try {
+    return executableRepairTargets(plan as MediaRepairPlanV1).map(
+      (target) => target.category,
+    );
+  } catch {
+    return [];
+  }
+}
+
+function pairwiseVerifierMessages(input: {
+  sourcePrompt: string;
+  targetCategories: string[];
+}) {
+  const sourcePrompt = input.sourcePrompt.replace(/\s+/g, " ").trim().slice(0, 6000);
+  const targets = input.targetCategories.join(", ");
+
+  return [
+    {
+      role: "system",
+      content:
+        "You are CoOperative Pairwise Image Verifier v1. You will receive exactly two images in order: image 1 is the ORIGINAL baseline and image 2 is the REPAIRED CANDIDATE. Compare them directly. Do not assign absolute quality scores. Do not assume the candidate is better. Judge only visible differences. Return exactly one JSON object and no markdown.",
+    },
+    {
+      role: "user",
+      content: [
+        "Original source prompt:",
+        sourcePrompt,
+        "",
+        `Targeted repair categories: ${targets}.`,
+        "",
+        "Compare image 2 against image 1. Prefer the candidate only when the targeted dimension clearly improves without material regression elsewhere.",
+        "Return these keys only: version, targetResults, promptAdherenceComparison, compositionPreservation, regressions, confidence, summary.",
+        'Set version to "semantic-pairwise-v1".',
+        "targetResults MUST be a JSON array with exactly one entry for each requested repair category and no extra categories.",
+        "Each targetResults entry must contain category, result, confidence, and explanation.",
+        "Allowed result values: better, same, worse, uncertain.",
+        "promptAdherenceComparison must be better, same, worse, or uncertain.",
+        "compositionPreservation must be preserved, changed-minor, changed-material, or uncertain.",
+        "regressions MUST be a JSON array containing only visible ways image 2 is worse than image 1.",
+        "Each regression must contain category, severity, and description.",
+        "Allowed regression categories: face, hands, anatomy, skin, lighting, background, prompt, artifact.",
+        "Allowed regression severities: low, medium, high, critical.",
+        "confidence fields must be between 0 and 1.",
+        "If the difference is not visibly clear, use uncertain rather than guessing.",
+      ].join("\n"),
+    },
+  ];
+}
+
+async function enqueuePairwiseVerifierForRepair(
+  supabase: AdminClient,
+  input: {
+    workerId: string | null;
+    ownerRef: string;
+    originalImageJobId: string;
+    candidateImageJobId: string;
+    sourcePrompt: string;
+    targetCategories: string[];
+  },
+) {
+  if (!input.workerId || !input.targetCategories.length) return null;
+
+  const { data: node, error: nodeError } = await supabase
+    .from("unison_nodes")
+    .select("capabilities")
+    .eq("id", input.workerId)
+    .maybeSingle();
+  if (nodeError) throw nodeError;
+
+  const capabilities = Array.isArray(node?.capabilities)
+    ? node.capabilities.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+
+  if (!capabilities.includes("semantic_media_pairwise_v1")) {
+    return null;
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from("text_inference_jobs")
+    .select("id,status")
+    .eq("source_image_job_id", input.originalImageJobId)
+    .eq("comparison_image_job_id", input.candidateImageJobId)
+    .eq("routing_mode", "semantic-pairwise-v1")
+    .in("status", ["queued", "running", "completed"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (existing) return existing.id;
+
+  const verifierJobId = crypto.randomUUID();
+  const { error: insertError } = await supabase
+    .from("text_inference_jobs")
+    .insert({
+      id: verifierJobId,
+      status: "queued",
+      client_owner_ref: input.ownerRef,
+      messages: pairwiseVerifierMessages({
+        sourcePrompt: input.sourcePrompt,
+        targetCategories: input.targetCategories,
+      }),
+      profile: "quality",
+      max_tokens: 1100,
+      temperature: 0,
+      routing_mode: "semantic-pairwise-v1",
+      task_class: "media-pairwise-verification",
+      route_reason:
+        "Automatic repaired-candidate comparison against the original. No paid fallback.",
+      allow_paid_fallback: false,
+      human_approval_required: false,
+      capability: "media-judge",
+      routing_preference: "require-node",
+      preferred_node_id: input.workerId,
+      target_node_id: input.workerId,
+      source_image_job_id: input.originalImageJobId,
+      comparison_image_job_id: input.candidateImageJobId,
+    });
+
+  if (insertError) throw insertError;
+  return verifierJobId;
+}
+
+async function updateParentRepairTrace(
+  supabase: AdminClient,
+  input: {
+    parentImageJobId: string;
+    value: Record<string, unknown>;
+  },
+) {
+  const { data: parent, error: parentError } = await supabase
+    .from("inference_jobs")
+    .select("pipeline_trace")
+    .eq("id", input.parentImageJobId)
+    .maybeSingle();
+  if (parentError) throw parentError;
+  if (!parent) return;
+
+  const trace =
+    parent.pipeline_trace &&
+    typeof parent.pipeline_trace === "object" &&
+    !Array.isArray(parent.pipeline_trace)
+      ? (parent.pipeline_trace as Record<string, unknown>)
+      : {};
+
+  const { error: updateError } = await supabase
+    .from("inference_jobs")
+    .update({
+      pipeline_trace: {
+        ...trace,
+        repairCandidate: input.value,
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.parentImageJobId);
+
+  if (updateError) throw updateError;
+}
+
 function parseDataUrl(value: string) {
   const prefixMatch = value.match(/^data:(image\/(?:png|jpeg|webp));base64,/);
   if (!prefixMatch) throw new Error("Unsupported generated image format.");
@@ -319,7 +486,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("inference_jobs")
-      .select("id,status,worker_id,claimed_at,client_owner_ref,pipeline_mode,prompt,content_mode")
+      .select("id,status,worker_id,claimed_at,client_owner_ref,pipeline_mode,prompt,content_mode,pipeline_role,parent_image_job_id,repair_plan,repair_attempt")
       .eq("id", jobId)
       .maybeSingle();
 
@@ -355,6 +522,31 @@ export async function POST(request: Request) {
         completedAt,
         latencyMs: null,
       });
+
+      if (
+        job.pipeline_role === "repair-candidate" &&
+        typeof job.parent_image_job_id === "string"
+      ) {
+        await updateParentRepairTrace(supabase, {
+          parentImageJobId: job.parent_image_job_id,
+          value: {
+            status: "failed",
+            version: "bounded-img2img-v1",
+            candidateJobId: jobId,
+            repairAttempt:
+              typeof job.repair_attempt === "number" ? job.repair_attempt : 1,
+            error: body.error.slice(0, 800),
+          },
+        }).catch((traceError) => {
+          console.error("Could not persist automatic repair failure", {
+            candidateJobId: jobId,
+            detail:
+              traceError instanceof Error
+                ? traceError.message.slice(0, 500)
+                : "unknown",
+          });
+        });
+      }
 
       return NextResponse.json({ ok: true, status: "failed" });
     }
@@ -421,6 +613,58 @@ export async function POST(request: Request) {
       completedAt,
       latencyMs,
     });
+
+    if (
+      job.pipeline_role === "repair-candidate" &&
+      typeof job.parent_image_job_id === "string"
+    ) {
+      try {
+        const targetCategories = repairTargetCategories(job.repair_plan);
+        const { data: parent, error: parentError } = await supabase
+          .from("inference_jobs")
+          .select("prompt,client_owner_ref")
+          .eq("id", job.parent_image_job_id)
+          .maybeSingle();
+
+        if (parentError) throw parentError;
+        if (!parent) throw new Error("Repair candidate parent image was not found.");
+
+        const verifierJobId = await enqueuePairwiseVerifierForRepair(supabase, {
+          workerId,
+          ownerRef:
+            typeof parent.client_owner_ref === "string"
+              ? parent.client_owner_ref
+              : job.client_owner_ref,
+          originalImageJobId: job.parent_image_job_id,
+          candidateImageJobId: jobId,
+          sourcePrompt: typeof parent.prompt === "string" ? parent.prompt : "",
+          targetCategories,
+        });
+
+        await updateParentRepairTrace(supabase, {
+          parentImageJobId: job.parent_image_job_id,
+          value: {
+            status: verifierJobId ? "verification-queued" : "completed-unverified",
+            version: "bounded-img2img-v1",
+            candidateJobId: jobId,
+            repairAttempt:
+              typeof job.repair_attempt === "number" ? job.repair_attempt : 1,
+            targetCategories,
+            pairwiseVerifierJobId: verifierJobId,
+            promotionRequiresPairwiseVerification: true,
+          },
+        });
+      } catch (pairwiseError) {
+        console.error("Could not enqueue automatic pairwise verification", {
+          candidateImageJobId: jobId,
+          parentImageJobId: job.parent_image_job_id,
+          detail:
+            pairwiseError instanceof Error
+              ? pairwiseError.message.slice(0, 500)
+              : "unknown",
+        });
+      }
+    }
 
     if (job.pipeline_mode === "quality-v1") {
       const ownerRef =
