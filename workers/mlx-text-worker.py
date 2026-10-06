@@ -41,6 +41,7 @@ QUEUE_POLL_SECONDS = max(2, int(os.getenv("COOPERATIVE_TEXT_QUEUE_POLL_SECONDS",
 WORKER_TOKEN = os.getenv("UNISON_NODE_TOKEN") or os.getenv("INFERENCE_WORKER_TOKEN")
 WORKER_ID = (
     os.getenv("UNISON_NODE_ID")
+    or os.getenv("COOPERATIVE_WORKER_ID")
     or os.getenv("COOPERATIVE_TEXT_WORKER_ID")
     or f"{socket.gethostname()}-text"
 )[:160]
