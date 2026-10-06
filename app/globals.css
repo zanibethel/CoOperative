@@ -112,6 +112,23 @@ b { color: var(--text); }
 .local-ai-composer textarea { min-height: 96px; }
 .local-ai-actions { display: flex; align-items: center; gap: 14px; }
 .local-ai-meta { margin: 6px 0 0; font-size: .78rem; }
+.local-ai-response-panel { margin-top: 10px; display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.local-ai-route-summary { display: flex; flex-wrap: wrap; gap: 8px; }
+.local-ai-route-summary span { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2); font-size: .7rem; }
+.local-ai-route-trace { display: grid; gap: 8px; }
+.local-ai-route-step { display: grid; gap: 4px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel-2) 86%, transparent); }
+.local-ai-route-step-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--text); font-size: .76rem; }
+.local-ai-route-badge { flex: 0 0 auto; padding: 3px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: .62rem; font-weight: 800; letter-spacing: .06em; }
+.local-ai-route-badge.local,
+.local-ai-route-badge.free { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--text); }
+.local-ai-route-badge.paid { background: color-mix(in srgb, var(--text) 10%, var(--panel)); color: var(--text); }
+.local-ai-route-badge.connected,
+.local-ai-route-badge.code,
+.local-ai-route-badge.unknown { background: var(--panel-2); color: var(--muted); }
+.local-ai-route-identity { color: var(--text); font-size: .72rem; overflow-wrap: anywhere; }
+.local-ai-route-detail,
+.local-ai-route-reason { margin: 0; color: var(--muted); font-size: .7rem; line-height: 1.45; }
+.local-ai-route-cost { color: var(--text); font-size: .7rem; font-weight: 700; }
 .local-ai-execution-details,
 .local-ai-response-details { color: var(--muted); }
 .local-ai-execution-details summary,
