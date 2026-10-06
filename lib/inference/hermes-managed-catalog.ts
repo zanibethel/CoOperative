@@ -230,7 +230,7 @@ function parseVideoCatalog(source: string): HermesManagedVideoModel[] {
       );
       const displayName = strings[0] || id;
       const speed = strings[1] || null;
-      const tier =
+      const tier: HermesManagedVideoModel["tier"] =
         strings[2] === "cheap" || strings[2] === "premium"
           ? strings[2]
           : "unknown";
