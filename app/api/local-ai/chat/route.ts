@@ -98,6 +98,10 @@ import {
 } from "@/lib/inference/media-recommendations";
 import { prepareMediaExecutionWithReasoning } from "@/lib/inference/media-preflight-reasoning";
 import {
+  availableModelRegistryRoutes,
+  registryRouteEligible,
+} from "@/lib/inference/model-capability-registry";
+import {
   businessOwnedServiceCredentialForOwner,
   connectedServiceStatusesForOwner,
 } from "@/lib/integrations/business-service-credentials";
@@ -6318,7 +6322,20 @@ export async function GET(request: Request) {
               ownerRef,
               requestedClass: requestedAdultClass,
             });
-            const catalog = await openRouterMediaCatalog(true);
+            const [catalog, registryAvailability] = await Promise.all([
+              openRouterMediaCatalog(true),
+              availableModelRegistryRoutes({
+                providers: ["openrouter"],
+                routeKinds: [mediaJob.kind === "video" ? "video" : "image"],
+                maxAgeHours: 36,
+              }).catch(() => ({
+                authoritative: false,
+                latestCompletedScanAt: null,
+                coverage: new Set<string>(),
+                keys: new Set<string>(),
+                routes: [],
+              })),
+            ]);
             const rawPool =
               mediaJob.kind === "video"
                 ? catalog.video
@@ -6332,6 +6349,15 @@ export async function GET(request: Request) {
                     )
                   : catalog.image;
             const pool = rawPool.filter((model) => {
+              if (
+                !registryRouteEligible(registryAvailability, {
+                  provider: "openrouter",
+                  model: model.id,
+                  routeKind: mediaJob.kind === "video" ? "video" : "image",
+                })
+              ) {
+                return false;
+              }
               const routeKey = ["openrouter", model.id, ""].join("|");
               const isCurrentRoute =
                 mediaJob.provider === "openrouter" &&
