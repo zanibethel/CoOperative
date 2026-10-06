@@ -118,16 +118,22 @@ export function decidePairwiseVerification(
     (regression) => !contradictoryRegressions.includes(regression),
   );
 
-  const anyBetter = report.targetResults.some(
+  const decisionTargetResults = expectedTargets.length
+    ? report.targetResults.filter((result) =>
+        expectedTargets.includes(result.category),
+      )
+    : report.targetResults;
+
+  const anyBetter = decisionTargetResults.some(
     (result) => result.result === "better",
   );
-  const anyWorse = report.targetResults.some(
+  const anyWorse = decisionTargetResults.some(
     (result) => result.result === "worse",
   );
-  const allSame = report.targetResults.every(
-    (result) => result.result === "same",
-  );
-  const anyUncertain = report.targetResults.some(
+  const allSame =
+    decisionTargetResults.length > 0 &&
+    decisionTargetResults.every((result) => result.result === "same");
+  const anyUncertain = decisionTargetResults.some(
     (result) => result.result === "uncertain",
   );
   const meaningfulRegression = effectiveRegressions.some(
