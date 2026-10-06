@@ -99,7 +99,7 @@ class CooperativeApi(
                     )
                     .put(
                         "selectionReason",
-                        "Verified on this Android device before enabling personal text queue execution.",
+                        "Verified on this Android device for personal text and bounded media-planning execution.",
                     ),
             )
             resources.put(
