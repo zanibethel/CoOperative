@@ -24,18 +24,23 @@ class MainActivity : Activity() {
     private lateinit var tokenStore: SecureTokenStore
     private lateinit var api: CooperativeApi
     private lateinit var modelManager: LocalModelManager
+    private lateinit var updateManager: AppUpdateManager
 
     private lateinit var statusText: TextView
     private lateinit var nodeToggle: Button
     private lateinit var pairingInput: EditText
     private lateinit var pairButton: Button
     private lateinit var hardwareText: TextView
+    private lateinit var updateStatusText: TextView
+    private lateinit var updateButton: Button
     private lateinit var localModelText: TextView
     private lateinit var downloadModelButton: Button
     private lateinit var selfTestButton: Button
     private lateinit var localPromptInput: EditText
     private lateinit var runLocalButton: Button
     private lateinit var localOutputText: TextView
+
+    private var latestUpdate: AppUpdateInfo? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,6 +49,7 @@ class MainActivity : Activity() {
         tokenStore = SecureTokenStore(this)
         api = CooperativeApi(this, preferences, tokenStore)
         modelManager = LocalModelManager(this)
+        updateManager = AppUpdateManager(this)
 
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
@@ -57,6 +63,17 @@ class MainActivity : Activity() {
 
         if (preferences.nodeEnabled && tokenStore.getNodeToken() != null) {
             startNodeService()
+        }
+
+        checkForUpdates()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::updateManager.isInitialized && updateManager.installPendingIfAllowed()) {
+            if (::updateStatusText.isInitialized) {
+                updateStatusText.text = "Opening Android installer…"
+            }
         }
     }
 
@@ -83,6 +100,27 @@ class MainActivity : Activity() {
 
         hardwareText = text("", 14f, color = Color.LTGRAY).withTop(dp(10))
         column.addView(hardwareText)
+
+        column.addView(sectionTitle("APP UPDATES"))
+        updateStatusText = text(
+            "Installed: ${BuildConfig.VERSION_NAME} • Checking for updates…",
+            14f,
+            color = Color.LTGRAY,
+        )
+        column.addView(updateStatusText)
+
+        updateButton = Button(this).apply {
+            text = "Check for updates"
+            setOnClickListener {
+                val update = latestUpdate
+                if (update != null && updateManager.isUpdateAvailable(update)) {
+                    downloadAppUpdate(update)
+                } else {
+                    checkForUpdates()
+                }
+            }
+        }
+        column.addView(updateButton.withTop(dp(8)))
 
         nodeToggle = Button(this).apply {
             setOnClickListener { toggleNode() }
@@ -149,9 +187,9 @@ class MainActivity : Activity() {
 
         column.addView(sectionTitle("DEVICE ASSIST"))
         column.addView(text(
-            "Screen understanding and Android Accessibility actions are still disabled in alpha 2. " +
-                "Local text inference is being validated first; screen-assist permissions come next " +
-                "and will remain separately controlled.",
+            "Screen understanding and Android Accessibility actions are still disabled in alpha 3. " +
+                "Local text inference and reliable app updates are being validated first; " +
+                "screen-assist permissions come next and remain separately controlled.",
             14f,
             color = Color.LTGRAY,
         ))
@@ -218,6 +256,87 @@ class MainActivity : Activity() {
 
         selfTestButton.isEnabled = installed
         runLocalButton.isEnabled = preferences.localModelVerified
+    }
+
+    private fun checkForUpdates() {
+        updateButton.isEnabled = false
+        updateButton.text = "Checking…"
+        updateStatusText.text = "Installed: ${BuildConfig.VERSION_NAME} • Checking for updates…"
+
+        thread(name = "CoOperativeUpdateCheck") {
+            try {
+                val info = updateManager.checkForUpdate()
+                latestUpdate = info
+
+                runOnUiThread {
+                    updateButton.isEnabled = true
+                    if (updateManager.isUpdateAvailable(info)) {
+                        updateStatusText.text = buildString {
+                            append("Installed: ").append(BuildConfig.VERSION_NAME)
+                            append("\nAvailable: ").append(info.versionName)
+                            if (info.notes.isNotBlank()) {
+                                append("\n").append(info.notes)
+                            }
+                        }
+                        updateButton.text = "Download update"
+                    } else {
+                        updateStatusText.text =
+                            "Installed: ${BuildConfig.VERSION_NAME} • Up to date"
+                        updateButton.text = "Check for updates"
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    updateButton.isEnabled = true
+                    updateButton.text = "Check for updates"
+                    updateStatusText.text =
+                        "Installed: ${BuildConfig.VERSION_NAME}\n" +
+                            "Could not check: ${error.message.orEmpty().take(100)}"
+                }
+            }
+        }
+    }
+
+    private fun downloadAppUpdate(info: AppUpdateInfo) {
+        updateButton.isEnabled = false
+        updateButton.text = "Downloading…"
+        updateStatusText.text = "Downloading ${info.versionName}…"
+
+        updateManager.downloadUpdate(
+            info = info,
+            onProgress = { progress ->
+                val downloadedMb = progress.downloadedBytes / (1024L * 1024L)
+                val totalMb = progress.totalBytes?.div(1024L * 1024L)
+                runOnUiThread {
+                    updateStatusText.text =
+                        if (totalMb != null && totalMb > 0L) {
+                            "Downloading ${info.versionName}: $downloadedMb / $totalMb MB"
+                        } else {
+                            "Downloading ${info.versionName}: $downloadedMb MB"
+                        }
+                }
+            },
+            onReady = { uri ->
+                runOnUiThread {
+                    updateButton.isEnabled = true
+                    updateButton.text = "Check for updates"
+                    if (updateManager.requestInstall(uri)) {
+                        updateStatusText.text = "Download complete • opening Android installer…"
+                    } else {
+                        updateStatusText.text =
+                            "Download complete • allow installs from CoOperativeLocalAI, then return here."
+                    }
+                }
+            },
+            onError = { error ->
+                runOnUiThread {
+                    updateButton.isEnabled = true
+                    updateButton.text = "Download update"
+                    updateStatusText.text =
+                        "Update download failed: ${error.message.orEmpty().take(120)}"
+                }
+            },
+        )
     }
 
     private fun pairPhone() {

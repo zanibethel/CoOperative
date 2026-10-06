@@ -60,11 +60,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION_CODE="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -1)"
+          VERSION_NAME="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)"
           cp app/build/outputs/apk/debug/app-debug.apk CoOperativeLocalAI.apk
+          cat > android-update.json <<EOF
+          {
+            "versionCode": ${VERSION_CODE},
+            "versionName": "${VERSION_NAME}",
+            "downloadUrl": "https://co-operative-mu.vercel.app/download/android",
+            "notes": "In-app update checking/downloads, local AI runtime, and private-node improvements."
+          }
+          EOF
           if gh release view android-alpha >/dev/null 2>&1; then
-            gh release upload android-alpha CoOperativeLocalAI.apk --clobber
+            gh release upload android-alpha CoOperativeLocalAI.apk android-update.json --clobber
           else
-            gh release create android-alpha CoOperativeLocalAI.apk \
+            gh release create android-alpha CoOperativeLocalAI.apk android-update.json \
               --target "$GITHUB_SHA" \
               --prerelease \
               --title "CoOperativeLocalAI Android Alpha" \
