@@ -9,7 +9,7 @@ import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog
 import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
 import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
-export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-06.6";
+export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-06.7";
 
 type JsonMap = Record<string, unknown>;
 
@@ -533,6 +533,7 @@ function localRegistrySnapshots(
                 "base-generation",
                 "quality-judge",
                 "semantic-quality-judge",
+                "pairwise-quality-verifier",
                 "repair-planning",
                 "targeted-refinement",
                 "upscaling",
@@ -541,7 +542,7 @@ function localRegistrySnapshots(
         semanticJudge:
           imageRoute.model === "local-image-quality"
             ? {
-                version: "semantic-vision-v1",
+                version: "semantic-vision-v1.1",
                 model: "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
                 workerCapability: "semantic_media_judge_v1",
                 paidFallback: false,
@@ -556,6 +557,17 @@ function localRegistrySnapshots(
                 autoExecute: false,
                 confidenceThreshold: 0.75,
                 protectsUncertainDimensions: true,
+              }
+            : null,
+        pairwiseVerifier:
+          imageRoute.model === "local-image-quality"
+            ? {
+                version: "semantic-pairwise-v1",
+                model: "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+                workerCapability: "semantic_media_pairwise_v1",
+                execution: "two-image-local-vision-comparison",
+                promotionThreshold: 0.75,
+                rejectsMaterialRegressions: true,
               }
             : null,
       },
