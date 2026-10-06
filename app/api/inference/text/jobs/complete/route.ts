@@ -7,6 +7,11 @@ import { persistResponseSupport } from "@/lib/ai/response-support";
 import { refreshRuntimeContextAfterOutcome } from "@/lib/ai/runtime-context-markdown";
 import { recordModelCapabilityEvidence } from "@/lib/inference/model-capability-registry";
 import { planMediaRepair } from "@/lib/inference/media-repair-planner";
+import {
+  decidePairwiseVerification,
+  pairwiseVerificationSchema,
+  type PairwiseVerificationReport,
+} from "@/lib/inference/media-pairwise-verifier";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -113,6 +118,106 @@ function parseSemanticJudgeReport(text: string): SemanticJudgeReport {
   }
 
   return semanticJudgeSchema.parse(parsed);
+}
+
+
+function parsePairwiseVerificationReport(
+  text: string,
+): PairwiseVerificationReport {
+  const parsed = JSON.parse(extractJsonObject(text));
+  return pairwiseVerificationSchema.parse(parsed);
+}
+
+function pairwiseVerifierMessages(input: {
+  sourcePrompt: string;
+  targetCategories: string[];
+}) {
+  const sourcePrompt = input.sourcePrompt.replace(/\s+/g, " ").trim().slice(0, 6000);
+  const targets = input.targetCategories.length
+    ? input.targetCategories.join(", ")
+    : "the intended repair target";
+
+  return [
+    {
+      role: "system",
+      content:
+        "You are CoOperative Pairwise Image Verifier v1. You will receive exactly two images in order: image 1 is the ORIGINAL baseline and image 2 is the REPAIRED CANDIDATE. Compare them directly. Do not assign absolute quality scores. Do not assume the candidate is better. Judge only visible differences. Return exactly one JSON object and no markdown.",
+    },
+    {
+      role: "user",
+      content: [
+        "Original source prompt:",
+        sourcePrompt,
+        "",
+        `Targeted repair categories: ${targets}.`,
+        "",
+        "Compare image 2 against image 1. Prefer the candidate only when a targeted dimension clearly improves without material regression elsewhere.",
+        "Return exactly this contract:",
+        '{"version":"semantic-pairwise-v1","targetResults":[{"category":"hands","result":"better|same|worse|uncertain","confidence":0.0,"explanation":"grounded visible comparison"}],"promptAdherenceComparison":"better|same|worse|uncertain","compositionPreservation":"preserved|changed-minor|changed-material|uncertain","regressions":[{"category":"face|hands|anatomy|skin|lighting|background|prompt|artifact","severity":"low|medium|high|critical","description":"grounded visible regression"}],"confidence":0.0,"summary":"short comparison"}',
+        "Use one targetResults entry for each requested repair category.",
+        "confidence fields must be between 0 and 1.",
+        "If the difference is not visibly clear, use uncertain rather than guessing.",
+        "regressions must contain only changes where image 2 is visibly worse than image 1.",
+      ].join("\n"),
+    },
+  ];
+}
+
+async function enqueuePairwiseVerifier(
+  supabase: AdminClient,
+  input: {
+    ownerRef: string;
+    workerId: string | null;
+    originalImageJobId: string;
+    candidateImageJobId: string;
+    sourcePrompt: string;
+    targetCategories: string[];
+  },
+) {
+  if (!input.workerId) return null;
+
+  const { data: existing, error: existingError } = await supabase
+    .from("text_inference_jobs")
+    .select("id,status")
+    .eq("source_image_job_id", input.originalImageJobId)
+    .eq("comparison_image_job_id", input.candidateImageJobId)
+    .eq("routing_mode", "semantic-pairwise-v1")
+    .in("status", ["queued", "running", "completed"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (existing) return existing.id;
+
+  const pairwiseJobId = crypto.randomUUID();
+  const { error } = await supabase.from("text_inference_jobs").insert({
+    id: pairwiseJobId,
+    status: "queued",
+    client_owner_ref: input.ownerRef,
+    messages: pairwiseVerifierMessages({
+      sourcePrompt: input.sourcePrompt,
+      targetCategories: input.targetCategories,
+    }),
+    profile: "quality",
+    max_tokens: 1100,
+    temperature: 0,
+    routing_mode: "semantic-pairwise-v1",
+    task_class: "media-pairwise-verification",
+    route_reason:
+      "Compare the original image with its repaired candidate locally before promotion.",
+    allow_paid_fallback: false,
+    human_approval_required: false,
+    capability: "media-judge",
+    routing_preference: "require-node",
+    preferred_node_id: input.workerId,
+    target_node_id: input.workerId,
+    source_image_job_id: input.originalImageJobId,
+    comparison_image_job_id: input.candidateImageJobId,
+  });
+
+  if (error) throw error;
+  return pairwiseJobId;
 }
 
 async function updateSourceSemanticJudgeTrace(
