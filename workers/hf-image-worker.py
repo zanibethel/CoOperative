@@ -51,6 +51,10 @@ IDENTITY_MODEL_ID = os.getenv(
     "IDENTITY_MODEL_ID",
     "stabilityai/stable-diffusion-xl-base-1.0",
 )
+EXPLICIT_MODEL_ID = os.getenv(
+    "EXPLICIT_MODEL_ID",
+    "stabilityai/stable-diffusion-xl-base-1.0",
+)
 IP_ADAPTER_MODEL_ID = os.getenv(
     "IP_ADAPTER_MODEL_ID",
     "h94/IP-Adapter",
@@ -221,6 +225,7 @@ class ImageRequest(BaseModel):
     aspectRatio: Literal["1:1", "4:5", "3:2", "16:9", "9:16"] = "4:5"
     references: list[ReferenceImage] = Field(default_factory=list, max_length=4)
     profile: Literal["fast", "quality"] = "fast"
+    contentMode: Literal["sfw", "adult_non_explicit", "adult_explicit"] = "sfw"
     negativePrompt: str | None = None
     steps: int | None = Field(default=None, ge=1, le=80)
     guidanceScale: float | None = Field(default=None, ge=0, le=30)
@@ -331,6 +336,61 @@ def ensure_identity_profile():
     print("SDXL identity pipeline loaded.", flush=True)
 
 
+
+def ensure_explicit_profile():
+    global loaded_profile, text_pipe, image_pipe, identity_adapter_loaded
+
+    if loaded_profile == "explicit-sdxl" and text_pipe is not None:
+        return
+
+    clear_model()
+    print(f"Loading owned explicit-capable base model {EXPLICIT_MODEL_ID}...", flush=True)
+
+    pipe = AutoPipelineForText2Image.from_pretrained(
+        EXPLICIT_MODEL_ID,
+        dtype=DTYPE,
+        use_safetensors=True,
+    ).to(DEVICE)
+
+    if hasattr(pipe, "enable_vae_slicing"):
+        pipe.enable_vae_slicing()
+    if hasattr(pipe, "enable_vae_tiling"):
+        pipe.enable_vae_tiling()
+
+    text_pipe = pipe
+    image_pipe = None
+    loaded_profile = "explicit-sdxl"
+    identity_adapter_loaded = False
+    print("Owned SDXL explicit-capable text-to-image pipeline loaded.", flush=True)
+
+
+def validate_content_mode(request: ImageRequest):
+    if request.contentMode != "adult_explicit":
+        return
+
+    if request.references:
+        raise RuntimeError(
+            "Explicit adult local generation does not accept reference images or identity-preservation inputs."
+        )
+
+    text = request.prompt.lower()
+    minor_terms = (
+        "minor", "child", "kid", "underage", "teen", "schoolgirl",
+        "schoolboy", "young-looking", "preteen", "pre-teen"
+    )
+    coercion_terms = (
+        "rape", "raped", "forced sex", "nonconsensual", "non-consensual",
+        "against their will", "unconscious sex", "drugged sex"
+    )
+    if any(term in text for term in minor_terms):
+        raise RuntimeError(
+            "Explicit adult local generation was blocked because the prompt contains minor-age language."
+        )
+    if any(term in text for term in coercion_terms):
+        raise RuntimeError(
+            "Explicit adult local generation was blocked because the prompt contains coercive or non-consensual sexual content."
+        )
+
 def identity_scale(variation_mode: str) -> float:
     if variation_mode == "new-scene":
         return 0.50
@@ -372,6 +432,7 @@ def fetch_reference(url: str, title: str | None = None) -> ReferenceImage:
 
 def run_generation(request: ImageRequest):
     started = time.time()
+    validate_content_mode(request)
     config = PROFILE_CONFIG[request.profile]
     width, height = config["dimensions"][request.aspectRatio]
 
@@ -387,6 +448,11 @@ def run_generation(request: ImageRequest):
         )
     )
     negative = request.negativePrompt or DEFAULT_NEGATIVE
+    if request.contentMode == "sfw":
+        negative = (
+            negative
+            + ", nudity, nude body, explicit sexual content, genitals, pornographic content"
+        )
     seed = (
         request.seed
         if request.seed is not None
@@ -396,10 +462,12 @@ def run_generation(request: ImageRequest):
         return torch.Generator(device="cpu").manual_seed(seed)
 
     with MODEL_LOCK:
+        explicit_generation = request.contentMode == "adult_explicit"
         identity_generation = (
             bool(request.references)
             and request.profile == "quality"
             and request.variationMode != "preserve"
+            and not explicit_generation
         )
 
         common = dict(
@@ -411,7 +479,19 @@ def run_generation(request: ImageRequest):
 
         model_used = config["model"]
 
-        if identity_generation:
+        if explicit_generation:
+            ensure_explicit_profile()
+            result = text_pipe(
+                width=width,
+                height=height,
+                generator=seeded_generator(),
+                **common,
+            )
+            references_used = 0
+            reference_mode = "none"
+            model_used = EXPLICIT_MODEL_ID
+            print("Local image path: owned SDXL explicit-capable text-to-image succeeded.", flush=True)
+        elif identity_generation:
             # Stability first: use one identity reference until multi-reference
             # IP-Adapter support is proven reliable on every local runtime.
             identity_image = decode_data_url(request.references[0].dataUrl)
@@ -513,6 +593,7 @@ def run_generation(request: ImageRequest):
         "seed": seed,
         "variationMode": request.variationMode,
         "referenceMode": reference_mode,
+        "contentMode": request.contentMode,
     }
 
 
@@ -577,6 +658,7 @@ def queue_loop():
                 prompt=job["prompt"],
                 aspectRatio=job.get("aspectRatio", "4:5"),
                 profile=profile,
+                contentMode=job.get("contentMode", "sfw"),
                 references=references,
                 negativePrompt=job.get("negativePrompt"),
                 steps=job.get("steps"),
