@@ -17,6 +17,7 @@ import {
   userIdFromOwnerRef,
 } from "@/lib/unison/owned-text-routing";
 import { canAccessMainCooperative } from "@/lib/ai/main-cooperative-access";
+import { syncWorkflowMediaNode } from "@/lib/agents/workflow-media-execution";
 import {
   adultMediaContentClass,
   planMediaRequest,
@@ -1232,7 +1233,13 @@ export async function advanceAgentWorkflow(
       .map((node) =>
         node.node_kind === "inference"
           ? syncInference(state!.workflow, node)
-          : syncAgentTask(state!.workflow, node),
+          : node.node_kind === "media"
+            ? syncWorkflowMediaNode({
+                ownerRef: state!.workflow.owner_ref,
+                workflowId: state!.workflow.id,
+                nodeId: node.id,
+              })
+            : syncAgentTask(state!.workflow, node),
       ),
   );
 
