@@ -1,6 +1,9 @@
 import "server-only";
 
-import { hermesManagedMediaCatalog } from "@/lib/inference/hermes-managed-catalog";
+import {
+  hermesManagedMediaCatalog,
+  type HermesManagedVideoModel,
+} from "@/lib/inference/hermes-managed-catalog";
 
 export type NousManagedMediaKind = "image" | "video";
 
@@ -65,6 +68,207 @@ function firstNumber(text: string, patterns: RegExp[]) {
     if (Number.isFinite(value) && value >= 0) return value;
   }
   return null;
+}
+
+
+type LiveVideoRate = {
+  withoutAudio: number;
+  withAudio: number;
+};
+
+export type NousManagedVideoModel = {
+  model: string;
+  displayName: string;
+  qualityLabel: string;
+  minLevel: 1 | 2 | 3 | 4;
+  textEndpoint: string;
+  imageEndpoint: string | null;
+  rates: Record<string, LiveVideoRate>;
+  pricingSource: string;
+  pricingApproximate: boolean;
+  executionReady: boolean;
+  aspectRatios: string[];
+  resolutions: string[];
+  minDurationSeconds: number | null;
+  maxDurationSeconds: number | null;
+  audioSupported: boolean;
+  audioMode: "none" | "toggle" | "native";
+  pricingNote: string;
+};
+
+function normalizeFalPricingText(html: string) {
+  return html
+    .replace(/\\u0024/gi, "$")
+    .replace(/&#36;|&#x24;|&dollar;/gi, "$")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function canonicalVideoResolution(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "2k") return "1440p";
+  if (normalized === "4k") return "2160p";
+  return normalized;
+}
+
+function setVideoRateIfMissing(
+  rates: Record<string, LiveVideoRate>,
+  resolution: string,
+  withoutAudio: number,
+  withAudio = withoutAudio,
+) {
+  const key = canonicalVideoResolution(resolution);
+  if (
+    rates[key] ||
+    !Number.isFinite(withoutAudio) ||
+    withoutAudio < 0 ||
+    !Number.isFinite(withAudio) ||
+    withAudio < 0
+  ) {
+    return;
+  }
+  rates[key] = { withoutAudio, withAudio };
+}
+
+function parseFalVideoPricing(
+  html: string,
+  model: HermesManagedVideoModel,
+) {
+  const text = normalizeFalPricingText(html);
+  const rates: Record<string, LiveVideoRate> = {};
+
+  // Kling-style audio toggle: "$0.084 (audio off) or $0.126 (audio on)".
+  const audioPair = text.match(
+    /\$\s*([0-9]+(?:\.[0-9]+)?)\s*\(\s*audio\s+off\s*\)\s*or\s*\$\s*([0-9]+(?:\.[0-9]+)?)\s*\(\s*audio\s+on\s*\)/i,
+  );
+  if (audioPair) {
+    const withoutAudio = Number(audioPair[1]);
+    const withAudio = Number(audioPair[2]);
+    setVideoRateIfMissing(rates, "default", withoutAudio, withAudio);
+  }
+
+  // Resolution first: "720p ... $0.09 per second" or "720p at $0.14/sec".
+  const resolutionFirst =
+    /\b(360p|480p|540p|720p|768p|1080p|1440p|2160p|2k|4k)\b[^$]{0,100}\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*(?:sec(?:ond)?|s)\b|per\s+second\b)/gi;
+  for (const match of text.matchAll(resolutionFirst)) {
+    setVideoRateIfMissing(rates, match[1], Number(match[2]));
+  }
+
+  // Price first: "$0.08/sec for 480p" / "$0.015 per second at 480p".
+  const priceFirst =
+    /\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*(?:sec(?:ond)?|s)\b|per\s+second\b)[^$]{0,70}?\b(?:at|for)\s+(360p|480p|540p|720p|768p|1080p|1440p|2160p|2k|4k)\b/gi;
+  for (const match of text.matchAll(priceFirst)) {
+    setVideoRateIfMissing(rates, match[2], Number(match[1]));
+  }
+
+  // Wan-style sentence: "For every second ... $0.068 at 480p, $0.14 at 720p".
+  const shortResolutionPrice =
+    /\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:at|for)\s+(360p|480p|540p|720p|768p|1080p|1440p|2160p|2k|4k)\b/gi;
+  for (const match of text.matchAll(shortResolutionPrice)) {
+    const at = match.index ?? 0;
+    const context = text.slice(Math.max(0, at - 180), at).toLowerCase();
+    if (
+      context.includes("every second") ||
+      context.includes("per second") ||
+      context.includes("second of video")
+    ) {
+      setVideoRateIfMissing(rates, match[2], Number(match[1]));
+    }
+  }
+
+  // Flat pricing is only safe when the page explicitly says resolution/audio do
+  // not change price, or the Hermes family exposes no resolution choices.
+  if (!Object.keys(rates).length) {
+    const flat = text.match(
+      /(?:charged|costs?|priced(?:\s+at)?)\s*\$\s*([0-9]+(?:\.[0-9]+)?)\s*(?:\/\s*(?:sec(?:ond)?|s)\b|per\s+second\b)/i,
+    );
+    const explicitlyFlat =
+      /regardless\s+of\s+(?:whether\s+)?audio/i.test(text) ||
+      /same\s+(?:price|rate)[^.]*(?:resolution|audio)/i.test(text);
+    if (
+      flat &&
+      (explicitlyFlat || model.resolutions.length <= 1)
+    ) {
+      const rate = Number(flat[1]);
+      setVideoRateIfMissing(rates, "default", rate, rate);
+    }
+  }
+
+  const tokenFormulaPricing =
+    /token(?:s| prices| pricing)[^$]{0,120}\$[0-9.]+[^.]{0,160}(?:height|width|duration)/i.test(
+      text,
+    );
+  const audioIncluded =
+    /native\s+audio\s+is\s+included|audio\s+is\s+included|audio\s+included/i.test(
+      text,
+    );
+
+  // For native-audio/no-audio families, or token-formula pricing that does not
+  // vary by the audio toggle, one rate safely covers both UI states.
+  if (
+    model.audioMode !== "toggle" ||
+    audioIncluded ||
+    tokenFormulaPricing
+  ) {
+    for (const rate of Object.values(rates)) {
+      rate.withAudio = rate.withoutAudio;
+    }
+  }
+
+  const audioPricingBounded =
+    model.audioMode !== "toggle" ||
+    audioIncluded ||
+    tokenFormulaPricing ||
+    Boolean(audioPair);
+
+  return {
+    rates,
+    audioPricingBounded,
+    approximate:
+      /roughly|approximately|token(?:s| pricing| prices)/i.test(text),
+    note: audioPricingBounded
+      ? "Live FAL page pricing was normalized into request-level per-second rates."
+      : "The live page exposes video pricing but does not bound the audio-toggle price difference.",
+  };
+}
+
+async function liveHermesVideoPricing(
+  model: HermesManagedVideoModel,
+): Promise<NousManagedVideoModel | null> {
+  if (!model.textEndpoint) return null;
+
+  const pageUrl = `https://fal.ai/models/${model.textEndpoint}`;
+  try {
+    const html = await liveText(pageUrl);
+    const parsed = parseFalVideoPricing(html, model);
+    if (!Object.keys(parsed.rates).length) return null;
+
+    const qualityLabel = model.tier === "cheap" ? "balanced" : "premium";
+    return {
+      model: model.id,
+      displayName: model.displayName,
+      qualityLabel,
+      minLevel: model.tier === "cheap" ? 2 : 4,
+      textEndpoint: model.textEndpoint,
+      imageEndpoint: model.imageEndpoint,
+      rates: parsed.rates,
+      pricingSource: pageUrl,
+      pricingApproximate: parsed.approximate,
+      executionReady: parsed.audioPricingBounded,
+      aspectRatios: model.aspectRatios,
+      resolutions: model.resolutions.map(canonicalVideoResolution),
+      minDurationSeconds: model.minDurationSeconds,
+      maxDurationSeconds: model.maxDurationSeconds,
+      audioSupported: model.audioSupported,
+      audioMode: model.audioMode,
+      pricingNote: parsed.note,
+    };
+  } catch {
+    return null;
+  }
 }
 
 const IMAGE_CANDIDATES: LiveImageCandidate[] = [
@@ -333,8 +537,8 @@ export async function affordableVideoSuggestion(
 
 
 export async function nousManagedMediaCatalog() {
-  const [hermesCatalog, liveCurated, pixverse] = await Promise.all([
-    hermesManagedMediaCatalog().catch(() => null),
+  const hermesCatalog = await hermesManagedMediaCatalog().catch(() => null);
+  const [liveCurated, pixverse, liveVideoModels] = await Promise.all([
     Promise.all(
       IMAGE_CANDIDATES.map(async (candidate) => {
         try {
@@ -361,6 +565,11 @@ export async function nousManagedMediaCatalog() {
       }),
     ),
     livePixversePricing(),
+    Promise.all(
+      (hermesCatalog?.video || []).map((model) =>
+        liveHermesVideoPricing(model),
+      ),
+    ),
   ]);
 
   const imageByModel = new Map<
@@ -441,6 +650,42 @@ export async function nousManagedMediaCatalog() {
         }
       : null,
     image,
+    videoModels: [
+      ...new Map(
+        [
+          ...liveVideoModels.filter(
+            (model): model is NousManagedVideoModel => Boolean(model),
+          ),
+          ...(pixverse
+            ? [{
+                model: "pixverse-v6",
+                displayName: "PixVerse V6",
+                qualityLabel: "balanced",
+                minLevel: 2 as const,
+                textEndpoint: "fal-ai/pixverse/v6/text-to-video",
+                imageEndpoint: "fal-ai/pixverse/v6/image-to-video",
+                rates: pixverse.rates,
+                pricingSource: pixverse.source,
+                pricingApproximate: false,
+                executionReady: true,
+                aspectRatios: [],
+                resolutions: Object.keys(pixverse.rates),
+                minDurationSeconds: 1,
+                maxDurationSeconds: 15,
+                audioSupported: true,
+                audioMode: "toggle" as const,
+                pricingNote:
+                  "Live PixVerse duration/resolution/audio pricing is verified.",
+              }]
+            : []),
+        ].map((model) => [model.model, model]),
+      ).values(),
+    ].sort(
+      (a, b) =>
+        a.minLevel - b.minLevel ||
+        a.displayName.localeCompare(b.displayName),
+    ),
+    // Backward-compatible PixVerse view for the existing affordability helper.
     video: pixverse
       ? {
           model: "pixverse-v6",
