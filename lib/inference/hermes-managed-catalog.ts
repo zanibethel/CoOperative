@@ -39,6 +39,7 @@ export type HermesManagedVideoModel = {
   minDurationSeconds: number | null;
   maxDurationSeconds: number | null;
   audioSupported: boolean;
+  audioMode: "none" | "toggle" | "native";
 };
 
 export type HermesManagedMediaCatalog = {
@@ -290,6 +291,11 @@ function parseVideoCatalog(source: string): HermesManagedVideoModel[] {
         audioSupported:
           /\baudio\s*=\s*True\b/.test(block) ||
           /\baudio_native\s*=\s*True\b/.test(block),
+        audioMode: /\baudio_native\s*=\s*True\b/.test(block)
+          ? "native"
+          : /\baudio\s*=\s*True\b/.test(block)
+            ? "toggle"
+            : "none",
       };
     })
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
