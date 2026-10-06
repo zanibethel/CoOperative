@@ -14,6 +14,7 @@ type CompletionBody = {
   referencesUsed?: unknown;
   latencyMs?: unknown;
   referenceMode?: unknown;
+  pipelineTrace?: unknown;
   error?: unknown;
 };
 
@@ -88,6 +89,18 @@ async function recordUnisonUsage(
       workerId: input.workerId,
       detail: error instanceof Error ? error.message.slice(0, 500) : "Unknown ledger error",
     });
+  }
+}
+
+function safePipelineTrace(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  try {
+    const serialized = JSON.stringify(value);
+    if (!serialized || serialized.length > 32_000) return {};
+    return value as Record<string, unknown>;
+  } catch {
+    return {};
   }
 }
 
@@ -216,6 +229,7 @@ export async function POST(request: Request) {
             ? body.referenceMode
             : null,
         latency_ms: latencyMs,
+        pipeline_trace: safePipelineTrace(body.pipelineTrace),
         error: null,
         completed_at: completedAt,
         updated_at: completedAt,
