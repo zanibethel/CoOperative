@@ -174,7 +174,7 @@ The current quality judge is explicitly a **heuristic image-signal judge**, not 
 
 The first upscaler is Pillow/Lanczos. That is a cheap portable component and a useful pipeline placeholder, not a learned super-resolution model. The component contract allows it to be replaced independently when a stronger local or hosted upscaler is verified.
 
-### Semantic Vision Judge v1
+### Semantic Vision Judge v1.1
 
 The next quality layer is now implemented as a separate owned/local vision stage rather than being embedded inside the diffusion worker.
 
@@ -185,7 +185,7 @@ After a successful `quality-v1` image completes:
 3. `mlx-community/Qwen2.5-VL-3B-Instruct-4bit` returns a structured semantic report for prompt adherence, faces, hands, anatomy, skin, lighting, background integrity, and artifact severity;
 4. the control plane validates the JSON contract before accepting it;
 5. the accepted report is appended to the image job's `pipeline_trace.semanticJudge`;
-6. successful runtime evidence is recorded as `semantic-quality-judge / semantic-vision-v1`.
+6. successful runtime evidence is recorded as `semantic-quality-judge / semantic-vision-v1.1`.
 
 The judge is local-only in this first version. It is created with `allow_paid_fallback=false` and `routing_preference=require-node`, so a missing local judge cannot silently spill into paid cloud inference.
 
@@ -216,11 +216,35 @@ The plan is persisted inside `pipeline_trace.semanticJudge.repairPlan` with one 
 
 `autoRepairEligible` means the evidence is strong enough for a future bounded repair executor. `autoExecute` remains hard-coded to `false` in this phase so the planner cannot silently mutate an image before the repair executor and before/after verifier are proven.
 
+### Pairwise A/B Verifier v1
+
+Repairs are no longer evaluated by comparing two independent absolute quality scores.
+
+`semantic-pairwise-v1` receives exactly two local artifacts in fixed order:
+
+1. image 1 = original baseline;
+2. image 2 = repaired candidate.
+
+The verifier compares only the intended repair target(s), prompt adherence, composition preservation, and regressions. It produces relative outcomes such as `better`, `same`, `worse`, or `uncertain`.
+
+The deterministic promotion gate accepts the repaired candidate only when:
+
+- verifier confidence is at least 0.75;
+- at least one requested repair target is clearly better;
+- no requested repair target is worse or uncertain;
+- prompt adherence did not regress;
+- composition did not materially change;
+- no high/critical regression was detected outside the repaired target.
+
+If the gate passes, the primary image job points to the candidate artifact and records `accepted_result_job_id`. If it fails, the original remains the selected result. Both images remain stored with lineage and verification evidence for later benchmarking.
+
+Pairwise jobs are local-only and require the worker capability `semantic_media_pairwise_v1`. Older workers cannot claim them.
+
 Next implementation layer:
 
-1. smoke-test `repair-planner-v1` against the controlled semantic report and confirm contradictions are handled deterministically;
-2. add a bounded whole-image repair executor for face/hands/anatomy/skin/lighting targets;
-3. semantic re-check the repaired candidate and keep it only when the targeted dimensions improve without unacceptable regressions;
+1. smoke-test `semantic-pairwise-v1` on the existing original/hand-repair candidate;
+2. wire the bounded repair executor to create repair-candidate lineage automatically instead of using a manual test candidate;
+3. keep or reject each repair using pairwise verification before changing the user-visible result;
 4. add a learned local super-resolution specialist and compare it with the current Lanczos component;
 5. add region masks / inpainting for face, hand, anatomy, skin, and background repairs;
 6. allow the planner to choose local specialists plus bounded cloud specialists within the Model Mixer ceiling.
