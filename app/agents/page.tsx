@@ -9,6 +9,7 @@ export default function AgentsPage() {
         <div className="nav-links">
           <Link href="/local-ai">Local AI</Link>
           <Link href="/models">Models</Link>
+          <Link href="/agents/workflows">Workflows</Link>
           <div className="badge">Agent Runtime</div>
         </div>
       </nav>
