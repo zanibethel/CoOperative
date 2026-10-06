@@ -155,3 +155,20 @@ Slider levels change the ranking emphasis from free/cost-efficient to performanc
 
 Final execution remains bounded by the request-level spend ceiling, provider connection, live node availability, BYOK or funded AI balance, capability fit, policy evidence, adult-content scope, exact media controls, and runtime fallback rules. This keeps the registry authoritative for discovery and scoring without allowing the Mixer UI to bypass execution safeguards.
 
+## Hermes / Nous managed media discovery
+
+CoOperative now scans the media model catalog shipped by the exact pinned Hermes release used by the media worker (`v2026.9.24` by default, overrideable with `HERMES_MEDIA_RELEASE`). This avoids maintaining a second hand-curated copy of the Nous/Hermes media universe.
+
+Discovery reads the release-pinned Hermes image catalog and FAL video-family registry. Routes are persisted under provider `nous`, with the Hermes release and source catalog recorded in registry metadata.
+
+Execution readiness is deliberately stricter than discovery:
+
+- Fixed per-image prices can become eligible for automatic text-to-image routing, subject to the normal Model Mixer spend ceiling, connected Nous entitlement, policy evidence, and runtime checks.
+- Per-megapixel models remain discoverable but non-executable until request dimensions allow CoOperative to bound the total provider cost. A per-MP number must never be treated as a whole-image quote.
+- Token-priced or otherwise unbounded image routes remain discoverable but non-executable until pricing can be bounded.
+- Image edit/reference endpoints are persisted separately and remain non-executable until the existing exact-route reference verification flow approves them.
+- Hermes video families are discovered with their capabilities and limits, but remain non-executable until request-specific live pricing is available. The existing live-priced PixVerse route remains the current automatic Nous video path.
+- Catalog-only models receive only low-confidence provisional cost/value scores. CoOperative does not infer quality from price. Runtime and benchmark evidence replace these provisional scores as evidence accumulates.
+
+A provider-side rejection or missing managed proxy does not finalize the user request. Runtime evidence is recorded for the exact route and normal fallback routing continues within the user's approved capability, content-policy, and spend constraints.
+
