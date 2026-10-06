@@ -124,6 +124,42 @@ function parseSemanticJudgeReport(text: string): SemanticJudgeReport {
     parsed.confidence = parsed.confidence / 100;
   }
 
+  const semanticScoreKeys = [
+    "overallScore",
+    "promptAdherence",
+    "faceQuality",
+    "handQuality",
+    "anatomyQuality",
+    "skinRealism",
+    "lightingConsistency",
+    "backgroundIntegrity",
+    "artifactSeverity",
+  ] as const;
+
+  const fractionalSemanticScoreCount = semanticScoreKeys.filter((key) => {
+    const value = parsed[key];
+    return (
+      typeof value === "number" &&
+      Number.isFinite(value) &&
+      value > 0 &&
+      value <= 1
+    );
+  }).length;
+
+  if (fractionalSemanticScoreCount >= 4) {
+    for (const key of semanticScoreKeys) {
+      const value = parsed[key];
+      if (
+        typeof value === "number" &&
+        Number.isFinite(value) &&
+        value >= 0 &&
+        value <= 1
+      ) {
+        parsed[key] = value * 100;
+      }
+    }
+  }
+
   const categoryAliases: Record<string, string> = {
     face: "face",
     faceQuality: "face",
