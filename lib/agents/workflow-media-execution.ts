@@ -190,11 +190,46 @@ function exactPlannedRoute(
   options: MediaRecommendationOption[],
   node: NodeRow,
 ) {
-  return options.find(
-    (option) =>
-      option.provider === node.selected_provider &&
-      option.model === node.selected_model,
-  ) || null;
+  const planned =
+    node.result && typeof node.result === "object"
+      ? node.result
+      : {};
+  const plannedTier =
+    typeof planned.selectedTier === "string" ? planned.selectedTier : null;
+  const plannedRecipe =
+    planned.recipe &&
+    typeof planned.recipe === "object" &&
+    !Array.isArray(planned.recipe)
+      ? (planned.recipe as Record<string, unknown>)
+      : null;
+
+  return (
+    options.find((option) => {
+      if (
+        option.provider !== node.selected_provider ||
+        option.model !== node.selected_model
+      ) {
+        return false;
+      }
+      if (plannedTier && option.tier !== plannedTier) return false;
+      if (!plannedRecipe) return true;
+
+      const sameDuration =
+        plannedRecipe.durationSeconds == null ||
+        option.recipe.durationSeconds === plannedRecipe.durationSeconds;
+      const sameResolution =
+        plannedRecipe.resolution == null ||
+        option.recipe.resolution === plannedRecipe.resolution;
+      const sameAudio =
+        plannedRecipe.audio == null ||
+        option.recipe.audio === plannedRecipe.audio;
+      const sameAspect =
+        plannedRecipe.aspectRatio == null ||
+        option.recipe.aspectRatio === plannedRecipe.aspectRatio;
+
+      return sameDuration && sameResolution && sameAudio && sameAspect;
+    }) || null
+  );
 }
 
 export async function approveAndExecuteWorkflowMediaImage(input: {
