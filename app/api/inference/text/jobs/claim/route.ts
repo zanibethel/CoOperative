@@ -83,6 +83,10 @@ export async function POST(request: Request) {
         profile: job.profile,
         capability: job.capability || "text",
         attachmentIds: Array.isArray(job.attachment_ids) ? job.attachment_ids : [],
+        sourceImageJobId:
+          typeof job.source_image_job_id === "string"
+            ? job.source_image_job_id
+            : null,
         maxTokens: job.max_tokens,
         temperature: Number(job.temperature),
         routingPreference: job.routing_preference || "default",
