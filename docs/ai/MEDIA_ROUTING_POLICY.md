@@ -796,11 +796,19 @@ The route is split by server-derived content mode:
 
 - `sfw` and normal quality generation use `segmind/SSD-1B`.
 - `adult_non_explicit` remains on the owned quality path and may use the normal quality model.
-- `adult_explicit` switches the worker to `stabilityai/stable-diffusion-xl-base-1.0` and is text-to-image only.
+- `adult_explicit` switches the worker to `stabilityai/stable-diffusion-xl-base-1.0`, loads `wangkanai/sdxl-fp8-loras-nsfw`, and is text-to-image only.
 
 The client never chooses `content_mode` directly. CoOperative derives it from the authenticated request immediately before the local job is queued. The database stores only `sfw`, `adult_non_explicit`, or `adult_explicit`.
 
 Explicit local execution is fail-closed at the node boundary. A worker may claim an `adult_explicit` image job only when its fresh Unison heartbeat advertises `adult_explicit_text_to_image`. Older workers therefore cannot accidentally claim a job they do not understand.
+
+Explicit SDXL adapter configuration is environment-overridable without a code change:
+
+- `EXPLICIT_LORA_ID` defaults to `wangkanai/sdxl-fp8-loras-nsfw`.
+- `EXPLICIT_LORA_SCALE` defaults to `0.8` and is clamped to `0.0..1.5`.
+- `EXPLICIT_LORA_ADAPTER_NAME` defaults to `cooperative-explicit`.
+- The worker loads the adapter only for `adult_explicit` jobs and advertises `adult_explicit_sdxl_lora` in its Unison heartbeat.
+- The explicit route fails if the adapter cannot be loaded or its strength cannot be applied; it does not silently fall back to unadapted SDXL.
 
 The owned explicit route does not accept reference or identity inputs. The worker rejects explicit requests containing reference images, and the registry marks `local-image-fast-reference`, `local-image-quality-reference`, and `local-image-quality-identity` as explicit-disallowed by CoOperative policy. This keeps sexualized identity/reference transformations out of the owned route.
 
@@ -809,7 +817,8 @@ The worker also rejects obvious minor-age and coercive/non-consensual sexual pro
 Model/license and runtime capability are separate evidence dimensions. The registry records:
 
 - `segmind/SSD-1B` as the default owned quality model with Apache-2.0 license metadata.
-- `stabilityai/stable-diffusion-xl-base-1.0` as the explicit-mode model with CreativeML Open RAIL++-M license metadata.
+- `stabilityai/stable-diffusion-xl-base-1.0` as the explicit-mode base model with CreativeML Open RAIL++-M license metadata.
+- `wangkanai/sdxl-fp8-loras-nsfw` as the explicit-mode LoRA adapter with OpenRAIL++ metadata and a default adapter strength of `0.8`.
 - `safetyFilterControl=local-configurable` and `thirdPartyProviderBoundary=false`.
 - explicit scope as permitted by the owned runtime/license boundary, while controlled generation quality/effectiveness remains a separate benchmark question.
 
