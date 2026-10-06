@@ -8,6 +8,7 @@ export default function AgentsPage() {
         <Link className="brand" href="/">CoOperative AI</Link>
         <div className="nav-links">
           <Link href="/local-ai">Local AI</Link>
+          <Link href="/models">Models</Link>
           <div className="badge">Agent Runtime</div>
         </div>
       </nav>
