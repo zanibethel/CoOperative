@@ -13,7 +13,7 @@ class AndroidTextWorker(
     fun pollOnce(): Boolean {
         if (!engine.isAvailable) return false
 
-        val job = api.claimPersonalTextJob() ?: return false
+        val job = api.claimTextJob() ?: return false
         val jobId = job.optString("jobId")
         if (jobId.isBlank()) return false
 
@@ -23,7 +23,7 @@ class AndroidTextWorker(
             if (capability != "text" || attachments.length() > 0) {
                 api.failTextJob(
                     jobId,
-                    "This Android alpha supports text-only personal inference.",
+                    "This Android alpha supports text-only personal and media-planning inference.",
                 )
                 return true
             }
