@@ -137,6 +137,28 @@ type AttachmentResult = {
   detail?: string;
 };
 
+type RouteCostClass = "code" | "local" | "free" | "paid" | "connected" | "unknown";
+
+type RouteTraceStep = {
+  stage?: string;
+  label: string;
+  provider?: string | null;
+  model?: string | null;
+  costClass?: RouteCostClass;
+  status?: string | null;
+  detail?: string | null;
+  chargedUsd?: number | null;
+  estimatedChargeUsd?: number | null;
+};
+
+type RouteSummary = {
+  localFreeSteps: number;
+  paidSteps: number;
+  connectedSteps: number;
+  totalChargedUsd: number;
+  estimatedTotalChargeUsd: number;
+};
+
 type JobResult = {
   jobId?: string;
   execution?:
@@ -196,6 +218,11 @@ type JobResult = {
   modelMixerUpdate?: {
     maxSpendUsd?: number;
   } | null;
+  estimatedChargeUsd?: number | null;
+  billingMode?: string | null;
+  providerCostBearer?: string | null;
+  routeTrace?: RouteTraceStep[];
+  routeSummary?: RouteSummary | null;
 };
 
 type RecoveryEvent = {
@@ -268,6 +295,95 @@ function readMessages(value: unknown): ChatMessage[] {
       typeof candidate.content === "string"
     );
   });
+}
+
+function routeCostLabel(costClass?: RouteCostClass) {
+  if (costClass === "local") return "LOCAL";
+  if (costClass === "free") return "FREE";
+  if (costClass === "paid") return "PAID";
+  if (costClass === "connected") return "CONNECTED";
+  if (costClass === "code") return "CODE";
+  return "ROUTE";
+}
+
+function fallbackRouteCostClass(result: JobResult): RouteCostClass {
+  if (result.execution === "code") return "code";
+  if (result.execution === "local-ai") return "local";
+  if (
+    result.execution === "free-cloud-vision" ||
+    result.execution === "free-cloud-text" ||
+    result.execution === "community-ai"
+  ) {
+    return "free";
+  }
+  if (result.execution === "paid-ai") return "paid";
+
+  if (result.execution === "media") {
+    if (
+      result.provider === "cooperative-local" ||
+      result.provider?.includes("local")
+    ) {
+      return "local";
+    }
+    if (result.providerCostBearer === "free") return "free";
+    if (
+      result.providerCostBearer === "user-connected" ||
+      result.billingMode === "openrouter-byok" ||
+      result.billingMode === "nous-subscription"
+    ) {
+      return "connected";
+    }
+    if (
+      result.billingMode === "cooperative-balance" ||
+      typeof result.funding?.chargedUsd === "number" ||
+      Number(result.estimatedChargeUsd || 0) > 0
+    ) {
+      return "paid";
+    }
+  }
+
+  return "unknown";
+}
+
+function responseRouteTrace(result: JobResult | null) {
+  if (!result) return [] as RouteTraceStep[];
+  if (Array.isArray(result.routeTrace) && result.routeTrace.length > 0) {
+    return result.routeTrace;
+  }
+
+  if (!result.provider && !result.model && !result.execution) return [];
+
+  return [
+    {
+      stage:
+        result.capability === "image" || result.capability === "video"
+          ? "render"
+          : "response",
+      label:
+        result.capability === "image" || result.capability === "video"
+          ? "Final render"
+          : "Response",
+      provider: result.provider || null,
+      model: result.model || null,
+      costClass: fallbackRouteCostClass(result),
+      status: result.status || null,
+      detail: result.routeReason || null,
+      chargedUsd:
+        typeof result.funding?.chargedUsd === "number"
+          ? result.funding.chargedUsd
+          : null,
+      estimatedChargeUsd:
+        typeof result.estimatedChargeUsd === "number"
+          ? result.estimatedChargeUsd
+          : null,
+    },
+  ] satisfies RouteTraceStep[];
+}
+
+function formatRouteUsd(value: number) {
+  if (value === 0) return "$0";
+  if (value < 0.01) return `${value.toFixed(4)}`;
+  return `${value.toFixed(2)}`;
 }
 
 function resultMeta(result: JobResult) {
@@ -2071,6 +2187,7 @@ export default function LocalAiChat() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [meta, setMeta] = useState("");
+  const [responseDetails, setResponseDetails] = useState<JobResult | null>(null);
   const [streamingText, setStreamingText] = useState("");
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ImageAttachment[]>([]);
@@ -2195,6 +2312,7 @@ export default function LocalAiChat() {
     setMessages(result.messages || []);
     setAttachments([]);
     setMeta("");
+    setResponseDetails(null);
     setError("");
     return result;
   }, []);
@@ -2426,6 +2544,7 @@ export default function LocalAiChat() {
             }
             setStreamingText("");
             setMeta(resultMeta(result));
+            setResponseDetails(result);
             setStatus("Ready");
             window.localStorage.removeItem(ACTIVE_JOB_KEY);
             break;
@@ -2472,6 +2591,7 @@ export default function LocalAiChat() {
               }
               await Promise.all([refreshConversations(), refreshBusinesses()]);
               setMeta(resultMeta(paid));
+            setResponseDetails(paid);
               setStatus("Ready");
               window.localStorage.removeItem(ACTIVE_JOB_KEY);
               break;
@@ -2590,6 +2710,7 @@ export default function LocalAiChat() {
             }
             await Promise.all([refreshConversations(), refreshBusinesses()]);
             setMeta(resultMeta(media));
+            setResponseDetails(media);
             setStatus("Ready");
             return;
           }
@@ -2628,6 +2749,7 @@ export default function LocalAiChat() {
             }
             await Promise.all([refreshConversations(), refreshBusinesses()]);
             setMeta(resultMeta(paid));
+            setResponseDetails(paid);
             setStatus("Ready");
             return;
           }
@@ -2761,6 +2883,7 @@ export default function LocalAiChat() {
       if (startedOnboarding) {
         setInput("");
         setMeta("");
+    setResponseDetails(null);
         setError("");
         setStatus("Ready");
         return;
@@ -2778,6 +2901,7 @@ export default function LocalAiChat() {
     setMessages([]);
     setInput("");
     setMeta("");
+    setResponseDetails(null);
     setError("");
     setStatus("Ready");
     setModelMixer({
@@ -2815,6 +2939,7 @@ export default function LocalAiChat() {
         setConversationTitle("New chat");
         setMessages([]);
         setMeta("");
+    setResponseDetails(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not delete conversation.");
@@ -3006,6 +3131,7 @@ export default function LocalAiChat() {
     setInput("");
     setError("");
     setMeta("");
+    setResponseDetails(null);
     setStreamingText("");
     setBusy(true);
     setStatus("Preparing context…");
@@ -3051,6 +3177,7 @@ export default function LocalAiChat() {
           await refreshConversations();
           setAttachments([]);
           setMeta("");
+    setResponseDetails(null);
           setStatus("Ready");
           setBusy(false);
           return;
@@ -3115,6 +3242,7 @@ export default function LocalAiChat() {
         await loadConversation(queued.conversationId);
         await refreshConversations();
         setMeta(resultMeta(queued));
+            setResponseDetails(queued);
         setStatus("Ready");
         setBusy(false);
         return;
@@ -3521,6 +3649,7 @@ export default function LocalAiChat() {
                               await pollJob(payload.jobId, []);
                             } else {
                               setMeta(resultMeta(payload));
+            setResponseDetails(payload);
                               setStatus("Ready");
                             }
                           }}
@@ -3842,7 +3971,85 @@ export default function LocalAiChat() {
         {meta ? (
           <details className="local-ai-response-details">
             <summary>Response details</summary>
-            <p className="local-ai-meta">{meta}</p>
+            <div className="local-ai-response-panel">
+              {responseDetails?.routeSummary ? (
+                <div className="local-ai-route-summary">
+                  <span>
+                    Local/free <strong>{responseDetails.routeSummary.localFreeSteps}</strong>
+                  </span>
+                  <span>
+                    Paid <strong>{responseDetails.routeSummary.paidSteps}</strong>
+                  </span>
+                  {responseDetails.routeSummary.connectedSteps > 0 ? (
+                    <span>
+                      Connected{" "}
+                      <strong>{responseDetails.routeSummary.connectedSteps}</strong>
+                    </span>
+                  ) : null}
+                  <span>
+                    Charged{" "}
+                    <strong>
+                      {formatRouteUsd(responseDetails.routeSummary.totalChargedUsd)}
+                    </strong>
+                  </span>
+                </div>
+              ) : null}
+
+              <p className="local-ai-meta">{meta}</p>
+
+              {responseRouteTrace(responseDetails).length > 0 ? (
+                <div className="local-ai-route-trace">
+                  {responseRouteTrace(responseDetails).map((step, index) => {
+                    const charged =
+                      typeof step.chargedUsd === "number" && step.chargedUsd > 0
+                        ? `Charged ${formatRouteUsd(step.chargedUsd)}`
+                        : typeof step.estimatedChargeUsd === "number" &&
+                            step.estimatedChargeUsd > 0
+                          ? `Quoted ${formatRouteUsd(step.estimatedChargeUsd)}`
+                          : null;
+                    const identity = [step.provider, step.model]
+                      .filter(Boolean)
+                      .join(" · ");
+
+                    return (
+                      <div
+                        className="local-ai-route-step"
+                        key={`${step.stage || "route"}-${index}-${step.model || "model"}`}
+                      >
+                        <div className="local-ai-route-step-head">
+                          <strong>
+                            {index + 1}. {step.label}
+                          </strong>
+                          <span
+                            className={`local-ai-route-badge ${step.costClass || "unknown"}`}
+                          >
+                            {routeCostLabel(step.costClass)}
+                          </span>
+                        </div>
+                        {identity ? (
+                          <div className="local-ai-route-identity">{identity}</div>
+                        ) : null}
+                        {step.detail ? (
+                          <div className="local-ai-route-detail">{step.detail}</div>
+                        ) : null}
+                        {charged ? (
+                          <div className="local-ai-route-cost">{charged}</div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {responseDetails?.routeReason &&
+              !responseRouteTrace(responseDetails).some(
+                (step) => step.detail === responseDetails.routeReason,
+              ) ? (
+                <p className="local-ai-route-reason">
+                  {responseDetails.routeReason}
+                </p>
+              ) : null}
+            </div>
           </details>
         ) : null}
         </div>
