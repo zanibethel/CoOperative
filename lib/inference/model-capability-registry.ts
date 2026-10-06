@@ -9,7 +9,7 @@ import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog
 import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
 import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
-export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-06.3";
+export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-06.4";
 
 type JsonMap = Record<string, unknown>;
 
@@ -519,6 +519,23 @@ function localRegistrySnapshots(
         safetyFilterControl: "local-configurable",
         explicitReferenceImagesAllowed: false,
         referenceMode: imageRoute.referenceMode || null,
+        pipelineModes:
+          imageRoute.model === "local-image-quality"
+            ? ["single-pass", "quality-v1"]
+            : ["single-pass"],
+        pipelineWorkerCapability:
+          imageRoute.model === "local-image-quality"
+            ? "composable_media_pipeline_v1"
+            : null,
+        componentCapabilities:
+          imageRoute.model === "local-image-quality"
+            ? [
+                "base-generation",
+                "quality-judge",
+                "targeted-refinement",
+                "upscaling",
+              ]
+            : ["base-generation"],
       },
       pricing: {
         billing: "owned-local",
