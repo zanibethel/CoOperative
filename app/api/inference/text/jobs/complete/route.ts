@@ -1155,6 +1155,17 @@ export async function POST(request: Request) {
         expectedTargetCategories,
       });
 
+      console.info("Pairwise media verification completed", {
+        verifierJobId: jobId,
+        originalImageJobId,
+        candidateImageJobId,
+        expectedTargetCategories,
+        verdict: decision.verdict,
+        acceptCandidate: decision.acceptCandidate,
+        consistencyIssues: decision.consistencyIssues,
+        confidence: decision.confidence,
+      });
+
       await recordUnisonTextUsage(supabase, {
         jobId,
         workerId,
