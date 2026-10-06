@@ -66,7 +66,7 @@ class NodeForegroundService : Service() {
             val status = try {
                 api.heartbeat()
                 if (preferences.localModelVerified) {
-                    "Online • local text AI ready"
+                    "Online • local text + media planning ready"
                 } else {
                     "Online • node only"
                 }
