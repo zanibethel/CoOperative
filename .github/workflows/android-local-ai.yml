@@ -14,7 +14,7 @@ on:
       - ".github/workflows/android-local-ai.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-debug-apk:
@@ -44,3 +44,19 @@ jobs:
           name: CoOperativeLocalAI-debug
           path: apps/android/CoOperativeLocalAI/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Publish stable Android alpha download
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/android-local-ai-alpha'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk CoOperativeLocalAI.apk
+          if gh release view android-alpha >/dev/null 2>&1; then
+            gh release upload android-alpha CoOperativeLocalAI.apk --clobber
+          else
+            gh release create android-alpha CoOperativeLocalAI.apk \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --title "CoOperativeLocalAI Android Alpha" \
+              --notes "Development APK for the CoOperativeLocalAI Android private-node and local-AI alpha."
+          fi
