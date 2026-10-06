@@ -736,16 +736,13 @@ export async function POST(request: Request) {
         ownerRef,
         "openrouter-api",
       );
-      providerCredential =
-        service?.credential ||
-        process.env.OPENROUTER_API_KEY?.trim() ||
-        undefined;
+      providerCredential = service?.credential || undefined;
 
       if (!providerCredential) {
         return NextResponse.json(
           {
             error:
-              "OpenRouter is not connected for a controlled test.",
+              "Controlled OpenRouter smoke tests require the profile's own connected OpenRouter key. CoOperative does not silently use platform-paid OpenRouter credits for the test matrix.",
           },
           { status: 400 },
         );
