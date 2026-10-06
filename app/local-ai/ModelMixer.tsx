@@ -1492,6 +1492,7 @@ export default function ModelMixer({
                 Recommendation and execution routing already use scoped capability evidence.
               </p>
 
+              {advancedDiagnosticsOpen ? (
               <div className="model-mixer-capability-lab">
                 <div className="model-mixer-capability-lab-head">
                   <div>
@@ -1707,7 +1708,9 @@ export default function ModelMixer({
               </div>
             </div>
           )}
+              ) : null}
 
+          {advancedDiagnosticsOpen ? (
           <div className="model-mixer-capability-lab">
             <div className="model-mixer-capability-lab-head">
               <div>
@@ -1796,6 +1799,8 @@ export default function ModelMixer({
               </small>
             )}
           </div>
+
+          ) : null}
 
           <div className="model-mixer-content-actions">
             <button
