@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { TEXT_MODEL_REGISTRY_REVISION } from "@/lib/inference/text-model-registry";
+import { preferredRegistryFreeTextModel } from "@/lib/inference/model-capability-registry";
 import type { HermesTextContextMessage } from "@/lib/inference/hermes-text-cloud";
 import type {
   MediaRecommendationOption,
@@ -256,6 +257,11 @@ async function runFreePreparation(input: {
     connected?.credential || process.env.OPENROUTER_API_KEY?.trim() || null;
   if (!credential) return null;
 
+  const fallbackModel =
+    (await preferredRegistryFreeTextModel({
+      requireReasoning: true,
+      requireStructuredOutput: true,
+    })) || "openrouter/free";
   const fallbackId = crypto.randomUUID();
   const now = new Date().toISOString();
   const { error: insertError } = await input.admin
@@ -283,7 +289,7 @@ async function runFreePreparation(input: {
       claimed_at: now,
       fallback_attempted_at: now,
       fallback_provider: "openrouter",
-      fallback_model: "openrouter/free",
+      fallback_model: fallbackModel,
     });
   if (insertError) throw insertError;
 
@@ -300,7 +306,7 @@ async function runFreePreparation(input: {
         "X-Title": "CoOperative",
       },
       body: JSON.stringify({
-        model: "openrouter/free",
+        model: fallbackModel,
         messages: input.messages,
         max_tokens: 1000,
         temperature: 0.1,
@@ -353,7 +359,7 @@ async function runFreePreparation(input: {
         result_model:
           typeof payload.model === "string" && payload.model
             ? payload.model
-            : "openrouter/free",
+            : fallbackModel,
         result_provider: "openrouter-free",
         prompt_tokens:
           typeof payload?.usage?.prompt_tokens === "number"
