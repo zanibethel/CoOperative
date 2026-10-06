@@ -1294,7 +1294,9 @@ export default function ModelMixer({
               >
                 <strong>{labels[preset][0]}</strong>
                 <span>
-                  ~${summary.estimatedUsd.toFixed(2)} · ~{formatDuration(summary.seconds)}
+                  {settings.localFreeOnly
+                    ? `Local/free · ~${formatDuration(summary.seconds)}`
+                    : `~${summary.estimatedUsd.toFixed(2)} · ~${formatDuration(summary.seconds)}`}
                 </span>
                 <small>{labels[preset][1]}</small>
               </button>
@@ -1314,7 +1316,7 @@ export default function ModelMixer({
             </span>
             {settings.localFreeOnly ? (
               <small>
-                Effective paid spend ceiling: $0. Your saved {`${settings.maxSpendUsd.toFixed(2)}`}
+                Effective paid spend ceiling: $0. Your saved {`${settings.maxSpendUsd.toFixed(2)}`}{" "}
                 ceiling is preserved for when you turn this off.
               </small>
             ) : (
