@@ -15,6 +15,10 @@ import {
   recommendedForRequest,
 } from "@/lib/inference/openrouter-media-catalog";
 import { mediaKnownBlockedRouteKeys } from "@/lib/inference/media-model-capabilities";
+import {
+  availableModelRegistryRoutes,
+  registryRouteEligible,
+} from "@/lib/inference/model-capability-registry";
 import type { MediaAdultContentClass } from "@/lib/inference/media-request";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 
@@ -133,15 +137,35 @@ export async function queueNextDirectOpenRouterImageFallback(input: {
   const credential = byokCredential || cooperativeCredential;
   if (!credential) return { kind: "none" };
 
-  const [catalog, blocked] = await Promise.all([
+  const [catalog, blocked, registryAvailability] = await Promise.all([
     openRouterMediaCatalog(true, credential),
     mediaKnownBlockedRouteKeys({
       ownerRef: input.ownerRef,
       requestedClass: input.requestedClass,
     }),
+    availableModelRegistryRoutes({
+      providers: ["openrouter"],
+      routeKinds: ["image"],
+      maxAgeHours: 36,
+    }).catch(() => ({
+      authoritative: false,
+      latestCompletedScanAt: null,
+      coverage: new Set<string>(),
+      keys: new Set<string>(),
+      routes: [],
+    })),
   ]);
 
   const pool = catalog.image.filter((model) => {
+    if (
+      !registryRouteEligible(registryAvailability, {
+        provider: "openrouter",
+        model: model.id,
+        routeKind: "image",
+      })
+    ) {
+      return false;
+    }
     if (model.id === input.sourceJob.model) return false;
     if (blocked.has(["openrouter", model.id, ""].join("|"))) return false;
     if (
