@@ -74,16 +74,22 @@ export function decidePairwiseVerification(
 
   const targetSetMatches =
     expectedTargets.length === 0 ||
-    (expectedTargets.length === reportedTargets.length &&
-      expectedTargets.every(
-        (category, index) => category === reportedTargets[index],
-      ));
+    expectedTargets.every((category) => reportedTargets.includes(category));
 
   if (!targetSetMatches) {
     consistencyIssues.push(
-      `Verifier target mismatch. Expected [${expectedTargets.join(
+      `Verifier target mismatch. Expected repair targets [${expectedTargets.join(
         ", ",
       )}] but received [${reportedTargets.join(", ")}].`,
+    );
+  } else if (
+    expectedTargets.length > 0 &&
+    reportedTargets.some((category) => !expectedTargets.includes(category))
+  ) {
+    consistencyIssues.push(
+      `Verifier returned extra comparison categories beyond the repair targets: [${reportedTargets
+        .filter((category) => !expectedTargets.includes(category))
+        .join(", ")}]. Extra categories are treated only as regression context, not as repair targets.`,
     );
   }
 
