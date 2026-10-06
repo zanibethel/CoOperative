@@ -87,6 +87,11 @@ export async function POST(request: Request) {
           typeof job.source_image_job_id === "string"
             ? job.source_image_job_id
             : null,
+        comparisonImageJobId:
+          typeof job.comparison_image_job_id === "string"
+            ? job.comparison_image_job_id
+            : null,
+        routingMode: job.routing_mode || "default",
         maxTokens: job.max_tokens,
         temperature: Number(job.temperature),
         routingPreference: job.routing_preference || "default",
