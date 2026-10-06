@@ -761,6 +761,7 @@ def unison_capabilities():
         "single_reference_identity",
         "owned_content_mode",
         "adult_explicit_text_to_image",
+        "adult_explicit_sdxl_lora",
     ]
     if platform.system() == "Windows" and TEXT_READY_MARKER.exists():
         capabilities.extend(
