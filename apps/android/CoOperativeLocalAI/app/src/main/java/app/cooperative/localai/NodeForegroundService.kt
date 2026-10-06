@@ -12,7 +12,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class NodeForegroundService : Service() {
     private val running = AtomicBoolean(false)
-    private var workerThread: Thread? = null
+    private var heartbeatThread: Thread? = null
+    private var inferenceThread: Thread? = null
+    private var textWorker: AndroidTextWorker? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -32,7 +34,10 @@ class NodeForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (running.compareAndSet(false, true)) {
-            workerThread = Thread({ heartbeatLoop() }, "CoOperativeAndroidNode").also {
+            heartbeatThread = Thread({ heartbeatLoop() }, "CoOperativeAndroidHeartbeat").also {
+                it.start()
+            }
+            inferenceThread = Thread({ inferenceLoop() }, "CoOperativeAndroidInference").also {
                 it.start()
             }
         }
@@ -41,8 +46,12 @@ class NodeForegroundService : Service() {
 
     override fun onDestroy() {
         running.set(false)
-        workerThread?.interrupt()
-        workerThread = null
+        heartbeatThread?.interrupt()
+        inferenceThread?.interrupt()
+        heartbeatThread = null
+        inferenceThread = null
+        textWorker?.close()
+        textWorker = null
         super.onDestroy()
     }
 
@@ -56,9 +65,13 @@ class NodeForegroundService : Service() {
         while (running.get()) {
             val status = try {
                 api.heartbeat()
-                "Online • ${preferences.displayName}"
+                if (preferences.localModelVerified) {
+                    "Online • local text AI ready"
+                } else {
+                    "Online • node only"
+                }
             } catch (error: Exception) {
-                val detail = error.message.orEmpty().take(120)
+                val detail = error.message.orEmpty().take(100)
                 if (tokenStore.getNodeToken() == null) {
                     "Waiting for pairing"
                 } else {
@@ -73,6 +86,45 @@ class NodeForegroundService : Service() {
                 Thread.sleep(HEARTBEAT_MS)
             } catch (_: InterruptedException) {
                 break
+            }
+        }
+    }
+
+    private fun inferenceLoop() {
+        val preferences = NodePreferences(this)
+        val tokenStore = SecureTokenStore(this)
+        val api = CooperativeApi(this, preferences, tokenStore)
+
+        while (running.get()) {
+            try {
+                if (!preferences.localModelVerified) {
+                    textWorker?.close()
+                    textWorker = null
+                    Thread.sleep(5_000L)
+                    continue
+                }
+
+                if (textWorker == null) {
+                    textWorker = AndroidTextWorker(this, api)
+                }
+
+                val didWork = textWorker?.pollOnce() == true
+                Thread.sleep(if (didWork) 750L else 3_000L)
+            } catch (_: InterruptedException) {
+                break
+            } catch (error: Exception) {
+                val manager = getSystemService(NotificationManager::class.java)
+                manager.notify(
+                    NOTIFICATION_ID,
+                    buildNotification(
+                        "Local AI worker issue: ${error.message.orEmpty().take(80)}",
+                    ),
+                )
+                try {
+                    Thread.sleep(5_000L)
+                } catch (_: InterruptedException) {
+                    break
+                }
             }
         }
     }
