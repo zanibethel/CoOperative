@@ -743,6 +743,9 @@ export async function buildMediaRecommendationOptions(input: {
         continue;
       }
 
+      if (model.audioMode === "native" && plan.audio === false) {
+        continue;
+      }
       const requestedAudio =
         model.audioMode === "native"
           ? true
