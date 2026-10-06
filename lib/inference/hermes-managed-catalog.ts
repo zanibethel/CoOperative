@@ -231,7 +231,7 @@ function parseImageCatalog(source: string): HermesManagedImageModel[] {
 
 function parseVideoCatalog(source: string): HermesManagedVideoModel[] {
   return pythonCallBlocks(source, "_family")
-    .map(({ id, block }) => {
+    .map(({ id, block }): HermesManagedVideoModel => {
       const callStart = block.indexOf("_family(");
       const strings = quotedStrings(
         callStart >= 0 ? block.slice(callStart + "_family(".length) : block,
