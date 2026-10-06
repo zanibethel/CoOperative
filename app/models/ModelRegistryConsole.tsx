@@ -26,6 +26,9 @@ type RegistryRoute = {
   free: boolean;
   recommended: boolean;
   execution_ready: boolean;
+  score_summary?: Record<string, Record<string, unknown>>;
+  score_version?: string | null;
+  score_updated_at?: string | null;
   last_seen_at: string;
   last_changed_at: string;
 };
@@ -44,6 +47,12 @@ type ScanResponse = {
   newCount?: number;
   changedCount?: number;
   missingCount?: number;
+  scoring?: {
+    scoreVersion?: string;
+    routeCount?: number;
+    taskScoreCount?: number;
+    calculatedAt?: string;
+  };
   error?: string;
   detail?: string;
 };
@@ -51,6 +60,20 @@ type ScanResponse = {
 function formatTime(value?: string | null) {
   if (!value) return "—";
   return new Date(value).toLocaleString();
+}
+
+function numericScore(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function scoreLabel(value: unknown) {
+  const score = numericScore(value);
+  return score === null ? "—" : score.toFixed(1);
 }
 
 export default function ModelRegistryConsole() {
@@ -103,6 +126,45 @@ export default function ModelRegistryConsole() {
       counts.set(key, (counts.get(key) || 0) + 1);
     }
     return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [routes]);
+
+  const scoredRoutes = useMemo(() => {
+    const rows: Array<{
+      route: RegistryRoute;
+      taskType: string;
+      performance: number | null;
+      costEfficiency: number | null;
+      overallValue: number | null;
+      confidence: number | null;
+      quality: number | null;
+      reliability: number | null;
+      speed: number | null;
+    }> = [];
+
+    for (const route of routes) {
+      for (const [taskType, raw] of Object.entries(route.score_summary || {})) {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+        rows.push({
+          route,
+          taskType,
+          performance: numericScore(raw.performance),
+          costEfficiency: numericScore(raw.costEfficiency),
+          overallValue: numericScore(raw.overallValue),
+          confidence: numericScore(raw.confidence),
+          quality: numericScore(raw.quality),
+          reliability: numericScore(raw.reliability),
+          speed: numericScore(raw.speed),
+        });
+      }
+    }
+
+    return rows
+      .filter((row) => row.overallValue !== null)
+      .sort(
+        (a, b) =>
+          (b.overallValue || 0) - (a.overallValue || 0) ||
+          (b.confidence || 0) - (a.confidence || 0),
+      );
   }, [routes]);
 
   async function scanNow() {
@@ -210,6 +272,32 @@ export default function ModelRegistryConsole() {
           </ul>
         ) : (
           <p>No registry routes yet. Run the first scan.</p>
+        )}
+      </div>
+
+      <div className="card">
+        <strong>Evidence-weighted model value</strong>
+        <p>
+          Scores are task-specific. Performance combines capability fit with measured
+          quality, reliability, and speed. Cost efficiency is normalized against
+          comparable routes; confidence keeps sparse evidence close to neutral.
+        </p>
+        {scoredRoutes.length ? (
+          <div>
+            {scoredRoutes.slice(0, 25).map((row) => (
+              <p key={`${row.route.id}|${row.taskType}`}>
+                <b>{row.route.display_name}</b> · {row.taskType} · Value{" "}
+                {scoreLabel(row.overallValue)} · Performance{" "}
+                {scoreLabel(row.performance)} · Cost{" "}
+                {scoreLabel(row.costEfficiency)} · Confidence{" "}
+                {row.confidence === null
+                  ? "—"
+                  : `${Math.round(row.confidence * 100)}%`}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <p>No task scores yet. Run a registry scan to calculate them.</p>
         )}
       </div>
 
