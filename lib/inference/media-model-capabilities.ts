@@ -11,11 +11,13 @@ export type MediaContentPreference =
   | "require_adult_capable";
 
 export type MediaCapabilityTestType =
+  | "sfw_smoke"
   | "adult_content"
   | "reference_fidelity"
   | "identity_preservation"
   | "edit_strength"
   | "policy_behavior"
+  | "control_compatibility"
   | "other";
 
 export type MediaCapabilityTestOutcome =
@@ -552,6 +554,7 @@ export async function recordMediaModelCapabilityTest(input: {
   sourceJobId?: string | null;
   promptClassification?: string | null;
   notes?: string | null;
+  routeKind?: "image" | "image-edit" | "video";
 }) {
   const admin = createAdminSupabaseClient();
   const { data, error } = await admin
@@ -574,9 +577,9 @@ export async function recordMediaModelCapabilityTest(input: {
 
   if (error) throw error;
 
-  const routeKind = (input.endpoint || "").trim()
-    ? "image-edit"
-    : "image";
+  const routeKind =
+    input.routeKind ||
+    ((input.endpoint || "").trim() ? "image-edit" : "image");
   const state =
     input.outcome === "supported"
       ? "supported"
@@ -593,7 +596,9 @@ export async function recordMediaModelCapabilityTest(input: {
     capabilityKey:
       input.testType === "adult_content"
         ? "adult-content"
-        : input.testType.replace(/_/g, "-"),
+        : input.testType === "sfw_smoke"
+          ? "sfw-smoke"
+          : input.testType.replace(/_/g, "-"),
     scope: input.promptClassification || input.testType,
     state,
     sourceType: "controlled-test",
