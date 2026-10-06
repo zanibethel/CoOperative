@@ -12,6 +12,13 @@ import {
   pairwiseVerificationSchema,
   type PairwiseVerificationReport,
 } from "@/lib/inference/media-pairwise-verifier";
+import {
+  boundedRepairPrompt,
+  boundedRepairSeed,
+  boundedRepairStrength,
+  candidateRepairPlan,
+  executableRepairTargets,
+} from "@/lib/inference/media-repair-executor";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -463,6 +470,146 @@ function repairTargetsFromPlan(plan: unknown) {
   ].slice(0, 8);
 }
 
+
+async function enqueueAutomaticRepairCandidate(
+  supabase: AdminClient,
+  input: {
+    sourceImageJobId: string;
+    ownerRef: string;
+    semanticJudgeJobId: string;
+    repairPlan: ReturnType<typeof planMediaRepair>;
+  },
+) {
+  const targets = executableRepairTargets(input.repairPlan);
+  if (!targets.length) return null;
+
+  const { data: source, error: sourceError } = await supabase
+    .from("inference_jobs")
+    .select(
+      "id,client_owner_ref,result_path,prompt,aspect_ratio,content_mode,negative_prompt,seed,pipeline_role,accepted_result_job_id,pipeline_trace",
+    )
+    .eq("id", input.sourceImageJobId)
+    .maybeSingle();
+
+  if (sourceError) throw sourceError;
+  if (!source?.result_path) return null;
+  if (source.pipeline_role !== "primary") return null;
+  if (source.accepted_result_job_id) return null;
+
+  const contentMode =
+    typeof source.content_mode === "string" ? source.content_mode : "sfw";
+  if (contentMode === "adult_explicit") {
+    return null;
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from("inference_jobs")
+    .select("id,status")
+    .eq("parent_image_job_id", input.sourceImageJobId)
+    .eq("pipeline_role", "repair-candidate")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+  if (existing) return existing.id;
+
+  const repairAttempt = 1;
+  const candidateJobId = crypto.randomUUID();
+  const candidatePlan = candidateRepairPlan(input.repairPlan, targets);
+  const sourceSeed =
+    typeof source.seed === "number" ? source.seed : Number(source.seed);
+
+  const { error: insertError } = await supabase.from("inference_jobs").insert({
+    id: candidateJobId,
+    kind: "image",
+    status: "queued",
+    client_owner_ref:
+      typeof source.client_owner_ref === "string"
+        ? source.client_owner_ref
+        : input.ownerRef,
+    prompt: boundedRepairPrompt(
+      typeof source.prompt === "string" ? source.prompt : "",
+      targets,
+    ),
+    aspect_ratio:
+      typeof source.aspect_ratio === "string" ? source.aspect_ratio : "4:5",
+    profile: "quality",
+    content_mode: contentMode,
+    negative_prompt:
+      typeof source.negative_prompt === "string" ? source.negative_prompt : null,
+    reference_paths: [
+      {
+        path: source.result_path,
+        title: "Automatic bounded repair source",
+      },
+    ],
+    strength: boundedRepairStrength(targets),
+    variation_mode: "preserve",
+    seed: boundedRepairSeed(
+      Number.isFinite(sourceSeed) ? sourceSeed : null,
+      repairAttempt,
+    ),
+    pipeline_mode: "single-pass",
+    required_capabilities: ["image_to_image"],
+    parent_image_job_id: input.sourceImageJobId,
+    pipeline_role: "repair-candidate",
+    repair_plan: candidatePlan,
+    repair_attempt: repairAttempt,
+    pipeline_trace: {
+      version: "repair-candidate-v1",
+      sourceImageJobId: input.sourceImageJobId,
+      semanticJudgeJobId: input.semanticJudgeJobId,
+      executor: "bounded-img2img-v1",
+      targets: targets.map((target) => ({
+        category: target.category,
+        plannedAction: target.plannedAction,
+        priority: target.priority,
+      })),
+    },
+  });
+
+  if (insertError) {
+    if (insertError.code === "23505") {
+      const { data: duplicate } = await supabase
+        .from("inference_jobs")
+        .select("id")
+        .eq("parent_image_job_id", input.sourceImageJobId)
+        .eq("pipeline_role", "repair-candidate")
+        .eq("repair_attempt", repairAttempt)
+        .maybeSingle();
+      return duplicate?.id || null;
+    }
+    throw insertError;
+  }
+
+  const sourceTrace =
+    source.pipeline_trace &&
+    typeof source.pipeline_trace === "object" &&
+    !Array.isArray(source.pipeline_trace)
+      ? (source.pipeline_trace as Record<string, unknown>)
+      : {};
+
+  await supabase
+    .from("inference_jobs")
+    .update({
+      pipeline_trace: {
+        ...sourceTrace,
+        repairCandidate: {
+          status: "queued",
+          version: "bounded-img2img-v1",
+          candidateJobId,
+          repairAttempt,
+          targetCategories: targets.map((target) => target.category),
+          promotionRequiresPairwiseVerification: true,
+        },
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.sourceImageJobId);
+
+  return candidateJobId;
+}
 
 async function recordSemanticJudgeEvidence(input: {
   ownerRef: string;
@@ -1015,6 +1162,28 @@ export async function POST(request: Request) {
         });
       });
 
+      let automaticRepairCandidateJobId: string | null = null;
+      if (repairPlan.autoRepairEligible) {
+        try {
+          automaticRepairCandidateJobId =
+            await enqueueAutomaticRepairCandidate(supabase, {
+              sourceImageJobId,
+              ownerRef: job.client_owner_ref,
+              semanticJudgeJobId: jobId,
+              repairPlan,
+            });
+        } catch (repairError) {
+          console.error("Could not enqueue automatic bounded repair candidate", {
+            sourceImageJobId,
+            semanticJudgeJobId: jobId,
+            detail:
+              repairError instanceof Error
+                ? repairError.message.slice(0, 500)
+                : "unknown",
+          });
+        }
+      }
+
       let pairwiseVerifierJobId: string | null = null;
       try {
         const { data: candidateJob, error: candidateError } = await supabase
@@ -1080,6 +1249,7 @@ export async function POST(request: Request) {
         status: "completed",
         semanticJudge: report,
         repairPlan,
+        automaticRepairCandidateJobId,
         pairwiseVerifierJobId,
       });
     }
