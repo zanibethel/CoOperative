@@ -2315,7 +2315,7 @@ export async function POST(request: Request) {
             const supportsExplicitMode =
               requestedAdultContentClass !== "adult_explicit" ||
               (!requiresReferenceImage &&
-                capabilities.includes("adult_explicit_sdxl_lora_peft"));
+                capabilities.includes("adult_explicit_owned_checkpoint"));
             const supportsRequestedImageMode = requiresReferenceImage
               ? capabilities.includes("image_to_image") ||
                 capabilities.includes("single_reference_identity")
@@ -6373,7 +6373,7 @@ export async function GET(request: Request) {
                 return (
                   capabilities.includes("image_generation") &&
                   (requestedAdultClass !== "adult_explicit" ||
-                    capabilities.includes("adult_explicit_sdxl_lora_peft")) &&
+                    capabilities.includes("adult_explicit_owned_checkpoint")) &&
                   policy.allowImage !== false &&
                   Number.isFinite(seenAt) &&
                   seenAt >= freshAfter &&
