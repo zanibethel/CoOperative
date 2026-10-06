@@ -329,8 +329,9 @@ def download_attachments(attachment_ids: list[str], directory: str):
 
 def download_media_judge_artifact(
     judge_job_id: str,
-    source_image_job_id: str,
+    image_job_id: str,
     directory: str,
+    role: str = "source",
 ):
     response = httpx.get(
         f"{QUEUE_URL}/api/inference/text/media-artifact",
@@ -338,6 +339,7 @@ def download_media_judge_artifact(
         params={
             "judgeJobId": judge_job_id,
             "workerId": WORKER_ID,
+            "role": role,
         },
         timeout=60.0,
         follow_redirects=True,
@@ -345,14 +347,20 @@ def download_media_judge_artifact(
     response.raise_for_status()
 
     returned_source = response.headers.get("x-cooperative-source-image-job")
-    if returned_source and returned_source != source_image_job_id:
-        raise RuntimeError("Semantic judge artifact source did not match the queued image job.")
+    if returned_source and returned_source != image_job_id:
+        raise RuntimeError(
+            f"Semantic judge {role} artifact did not match the queued image job."
+        )
+
+    returned_role = response.headers.get("x-cooperative-artifact-role")
+    if returned_role and returned_role != role:
+        raise RuntimeError("Semantic judge artifact role did not match the request.")
 
     suffix = attachment_suffix(response.headers.get("content-type"))
-    path = Path(directory) / f"semantic-source{suffix}"
+    path = Path(directory) / f"semantic-{role}{suffix}"
     path.write_bytes(response.content)
     if not path.exists() or path.stat().st_size <= 0:
-        raise RuntimeError("Semantic judge artifact download was empty.")
+        raise RuntimeError(f"Semantic judge {role} artifact download was empty.")
     return str(path)
 
 
@@ -439,6 +447,73 @@ def run_vision_generation(
     }
 
 
+def run_media_pairwise_generation(
+    job_id: str,
+    job: dict,
+    clean_messages: list[dict],
+    source_image_job_id: str,
+    comparison_image_job_id: str,
+):
+    from mlx_vlm.generate import stream_generate as vision_stream_generate
+    from mlx_vlm.prompt_utils import apply_chat_template
+
+    started = time.time()
+    profile = str(job.get("profile", "quality"))
+    max_tokens, temperature = generation_settings(job)
+    temperature = 0.0
+
+    ensure_vision_model()
+    model = loaded_model
+    processor = loaded_processor
+    config = loaded_vlm_config
+
+    with tempfile.TemporaryDirectory(prefix="cooperative-media-pairwise-") as directory:
+        original_path = download_media_judge_artifact(
+            job_id,
+            source_image_job_id,
+            directory,
+            role="source",
+        )
+        candidate_path = download_media_judge_artifact(
+            job_id,
+            comparison_image_job_id,
+            directory,
+            role="comparison",
+        )
+        prompt = semantic_judge_prompt(clean_messages)
+        formatted_prompt = apply_chat_template(
+            processor,
+            config,
+            prompt,
+            num_images=2,
+        )
+
+        stream = vision_stream_generate(
+            model,
+            processor,
+            formatted_prompt,
+            image=[original_path, candidate_path],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        text, output_tokens, _, last_response = consume_stream(job_id, stream, started)
+
+    if not isinstance(text, str) or not text.strip():
+        raise RuntimeError("Pairwise semantic verifier returned an empty response.")
+
+    prompt_tokens = getattr(last_response, "prompt_tokens", None) if last_response else None
+
+    return {
+        "text": text.strip(),
+        "model": VISION_MODEL_ID,
+        "profile": profile,
+        "provider": "cooperative-mlx-vlm-worker",
+        "promptTokens": prompt_tokens,
+        "outputTokens": output_tokens,
+        "latencyMs": int((time.time() - started) * 1000),
+    }
+
+
 def run_media_judge_generation(
     job_id: str,
     job: dict,
@@ -507,8 +582,19 @@ def run_generation(job_id: str, job: dict):
     capability = str(job.get("capability") or "text")
     if capability == "media-judge":
         source_image_job_id = str(job.get("sourceImageJobId") or "").strip()
+        comparison_image_job_id = str(job.get("comparisonImageJobId") or "").strip()
         if not source_image_job_id:
             raise RuntimeError("Semantic media judge job is missing sourceImageJobId.")
+
+        if comparison_image_job_id:
+            return run_media_pairwise_generation(
+                job_id,
+                job,
+                clean_messages,
+                source_image_job_id,
+                comparison_image_job_id,
+            )
+
         return run_media_judge_generation(
             job_id,
             job,
@@ -544,7 +630,7 @@ def queue_loop():
     print(f"Text Fast: {FAST_MODEL_ID}")
     print(f"Text Quality: {QUALITY_MODEL_ID}")
     print(f"Vision: {VISION_MODEL_ID}")
-    print("Semantic media judge: semantic-vision-v1")
+    print("Semantic media judge: semantic-vision-v1.1 + semantic-pairwise-v1")
     print("Live token progress enabled.")
 
     TEXT_READY_MARKER.write_text(str(os.getpid()), encoding="utf-8")
