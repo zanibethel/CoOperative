@@ -4,13 +4,13 @@ import {
   latestModelRegistrySnapshot,
   scanModelCapabilities,
 } from "@/lib/inference/model-capability-registry";
-import { authenticatedUserId } from "@/lib/supabase/auth";
+import { mainCooperativeUserId } from "@/lib/ai/main-cooperative-access";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
 async function scannerActor(request: Request) {
-  const userId = await authenticatedUserId();
+  const userId = await mainCooperativeUserId();
   if (userId) {
     return {
       authorized: true as const,
