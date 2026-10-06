@@ -174,12 +174,31 @@ The current quality judge is explicitly a **heuristic image-signal judge**, not 
 
 The first upscaler is Pillow/Lanczos. That is a cheap portable component and a useful pipeline placeholder, not a learned super-resolution model. The component contract allows it to be replaced independently when a stronger local or hosted upscaler is verified.
 
+### Semantic Vision Judge v1
+
+The next quality layer is now implemented as a separate owned/local vision stage rather than being embedded inside the diffusion worker.
+
+After a successful `quality-v1` image completes:
+
+1. the image job queues an internal `media-judge` text/vision job targeted to the same owned node;
+2. the MLX vision worker securely downloads only that completed image artifact;
+3. `mlx-community/Qwen2.5-VL-3B-Instruct-4bit` returns a structured semantic report for prompt adherence, faces, hands, anatomy, skin, lighting, background integrity, and artifact severity;
+4. the control plane validates the JSON contract before accepting it;
+5. the accepted report is appended to the image job's `pipeline_trace.semanticJudge`;
+6. successful runtime evidence is recorded as `semantic-quality-judge / semantic-vision-v1`.
+
+The judge is local-only in this first version. It is created with `allow_paid_fallback=false` and `routing_preference=require-node`, so a missing local judge cannot silently spill into paid cloud inference.
+
+The source image endpoint is also job-scoped: a node can read the generated artifact only while it owns the matching running semantic-judge job.
+
+This stage does not yet mutate the image. Its first purpose is to give the repair planner a trustworthy semantic diagnosis. A failed or unparseable judge report leaves the generated image intact and records the judge stage as failed rather than pretending the inspection succeeded.
+
 Next implementation layer:
 
-1. benchmark `quality-v1` against the single-pass baseline;
-2. add a learned local super-resolution specialist;
-3. add semantic vision judging for face/anatomy/hands and region masks;
-4. expose pose/depth/inpainting specialists as independently scored capability nodes;
+1. smoke-test `semantic-vision-v1` on the same controlled benchmark image and validate its structured findings;
+2. convert semantic findings into a bounded repair plan instead of always running generic human-detail refinement;
+3. add a learned local super-resolution specialist and compare it with the current Lanczos component;
+4. add region masks / inpainting for face, hand, anatomy, skin, and background repairs;
 5. allow the planner to choose local specialists plus bounded cloud specialists within the Model Mixer ceiling.
 
 More stages should be added only when evidence shows they improve output enough to justify their time and cost.
