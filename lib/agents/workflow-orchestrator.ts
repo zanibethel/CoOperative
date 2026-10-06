@@ -18,6 +18,7 @@ import {
 } from "@/lib/unison/owned-text-routing";
 import { canAccessMainCooperative } from "@/lib/ai/main-cooperative-access";
 import { syncWorkflowMediaNode } from "@/lib/agents/workflow-media-execution";
+import { mediaContentPreferenceForUser } from "@/lib/inference/media-model-capabilities";
 import {
   adultMediaContentClass,
   planMediaRequest,
