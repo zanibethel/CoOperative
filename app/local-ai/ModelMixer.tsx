@@ -1706,9 +1706,9 @@ export default function ModelMixer({
                   </p>
                 ) : null}
               </div>
+              ) : null}
             </div>
           )}
-              ) : null}
 
           {advancedDiagnosticsOpen ? (
           <div className="model-mixer-capability-lab">
