@@ -598,6 +598,178 @@ function freeCloudWebMetadata(value: unknown) {
 }
 
 
+async function mediaResponseTrace(
+  admin: ReturnType<typeof createAdminSupabaseClient>,
+  ownerRef: string,
+  mediaJob: Record<string, any>,
+) {
+  const currentDimensions =
+    mediaJob.pricing_dimensions &&
+    typeof mediaJob.pricing_dimensions === "object" &&
+    !Array.isArray(mediaJob.pricing_dimensions)
+      ? (mediaJob.pricing_dimensions as Record<string, any>)
+      : {};
+
+  const routeTrace: Array<{
+    stage: "planning" | "render";
+    label: string;
+    provider: string | null;
+    model: string | null;
+    costClass: "code" | "local" | "free" | "paid" | "connected" | "unknown";
+    status: string | null;
+    detail: string | null;
+    chargedUsd: number | null;
+    estimatedChargeUsd: number | null;
+  }> = [];
+
+  const preparationSource =
+    typeof currentDimensions.preparationSource === "string"
+      ? currentDimensions.preparationSource
+      : null;
+  const preparationReason =
+    typeof currentDimensions.preparationReason === "string"
+      ? currentDimensions.preparationReason
+      : null;
+
+  if (preparationSource) {
+    const plannerProvider =
+      typeof currentDimensions.preparationPlannerProvider === "string"
+        ? currentDimensions.preparationPlannerProvider
+        : preparationSource === "local"
+          ? "cooperative-local"
+          : preparationSource === "free-cloud"
+            ? "openrouter-free"
+            : "code";
+    const plannerModel =
+      typeof currentDimensions.preparationPlannerModel === "string"
+        ? currentDimensions.preparationPlannerModel
+        : preparationSource === "deterministic"
+          ? "media-router"
+          : null;
+
+    routeTrace.push({
+      stage: "planning",
+      label:
+        preparationSource === "deterministic"
+          ? "Deterministic routing"
+          : "Prompt + model planning",
+      provider: plannerProvider,
+      model: plannerModel,
+      costClass:
+        preparationSource === "local"
+          ? "local"
+          : preparationSource === "free-cloud"
+            ? "free"
+            : "code",
+      status: "completed",
+      detail: preparationReason,
+      chargedUsd: 0,
+      estimatedChargeUsd: 0,
+    });
+  }
+
+  let attempts: Record<string, any>[] = [mediaJob];
+  if (typeof mediaJob.request_root_job_id === "string" && mediaJob.request_root_job_id) {
+    const { data, error } = await admin
+      .from("media_generation_jobs")
+      .select(
+        "id,status,provider,model,route_attempt,billing_mode,provider_cost_bearer,estimated_user_charge_microusd,actual_user_charge_microusd,fallback_from_job_id,execution_mode,pricing_dimensions,error,created_at,completed_at",
+      )
+      .eq("owner_ref", ownerRef)
+      .eq("request_root_job_id", mediaJob.request_root_job_id)
+      .order("route_attempt", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (error) throw error;
+    if (data?.length) attempts = data as Record<string, any>[];
+  }
+
+  for (const attempt of attempts) {
+    const dimensions =
+      attempt.pricing_dimensions &&
+      typeof attempt.pricing_dimensions === "object" &&
+      !Array.isArray(attempt.pricing_dimensions)
+        ? (attempt.pricing_dimensions as Record<string, any>)
+        : {};
+    const estimatedMicrousd =
+      typeof attempt.estimated_user_charge_microusd === "number"
+        ? Math.max(0, attempt.estimated_user_charge_microusd)
+        : null;
+    const actualMicrousd =
+      typeof attempt.actual_user_charge_microusd === "number"
+        ? Math.max(0, attempt.actual_user_charge_microusd)
+        : null;
+    const localRoute =
+      attempt.provider === "cooperative-local" ||
+      String(attempt.execution_mode || "").includes("local");
+    const freeRoute =
+      attempt.provider_cost_bearer === "free" || dimensions.freeRoute === true;
+    const connectedRoute =
+      attempt.provider_cost_bearer === "user-connected" ||
+      attempt.billing_mode === "openrouter-byok" ||
+      attempt.billing_mode === "nous-subscription";
+    const paidRoute =
+      attempt.billing_mode === "cooperative-balance" ||
+      (attempt.provider_cost_bearer === "cooperative" &&
+        Number(estimatedMicrousd || 0) > 0);
+    const costClass =
+      localRoute
+        ? "local"
+        : freeRoute
+          ? "free"
+          : connectedRoute
+            ? "connected"
+            : paidRoute
+              ? "paid"
+              : "unknown";
+    const routeAttempt = Math.max(1, Number(attempt.route_attempt || 1));
+
+    routeTrace.push({
+      stage: "render",
+      label: routeAttempt > 1 ? `Render fallback ${routeAttempt}` : "Final render",
+      provider:
+        typeof attempt.provider === "string" ? attempt.provider : null,
+      model: typeof attempt.model === "string" ? attempt.model : null,
+      costClass,
+      status: typeof attempt.status === "string" ? attempt.status : null,
+      detail:
+        attempt.fallback_from_job_id
+          ? "Fallback render selected after an earlier route did not complete successfully."
+          : "Selected renderer for this request.",
+      chargedUsd:
+        actualMicrousd === null ? null : actualMicrousd / 1_000_000,
+      estimatedChargeUsd:
+        estimatedMicrousd === null ? null : estimatedMicrousd / 1_000_000,
+    });
+  }
+
+  const localFreeSteps = routeTrace.filter(
+    (step) => step.costClass === "local" || step.costClass === "free",
+  ).length;
+  const paidSteps = routeTrace.filter((step) => step.costClass === "paid").length;
+  const connectedSteps = routeTrace.filter(
+    (step) => step.costClass === "connected",
+  ).length;
+  const totalChargedUsd = routeTrace.reduce(
+    (total, step) => total + Number(step.chargedUsd || 0),
+    0,
+  );
+  const estimatedTotalChargeUsd = routeTrace.reduce(
+    (total, step) => total + Number(step.estimatedChargeUsd || 0),
+    0,
+  );
+
+  return {
+    routeTrace,
+    routeSummary: {
+      localFreeSteps,
+      paidSteps,
+      connectedSteps,
+      totalChargedUsd,
+      estimatedTotalChargeUsd,
+    },
+  };
+}
+
 export async function POST(request: Request) {
   const owner = await currentOwner();
   if (!owner) {
@@ -2620,6 +2792,12 @@ export async function POST(request: Request) {
       let mediaPreparationReason =
         "Deterministic media routing had enough information to proceed.";
       let mediaPreparationSignals: string[] = [];
+      let mediaPreparationPlanner: {
+        jobId: string;
+        provider: string;
+        model: string;
+        workerId: string | null;
+      } | null = null;
       let preparedMediaPrompt: string | null = null;
 
       if (
@@ -2663,6 +2841,7 @@ export async function POST(request: Request) {
         mediaPreparationSource = preparation.source;
         mediaPreparationReason = preparation.reason;
         mediaPreparationSignals = preparation.signals;
+        mediaPreparationPlanner = preparation.planner;
         preparedMediaPrompt = preparedPromptPreservesContentScope
           ? mediaPromptWithResolvedControls(preparation.prompt, mediaPlan)
           : deterministicPrompt;
@@ -3472,6 +3651,10 @@ export async function POST(request: Request) {
             preparationSource: mediaPreparationSource,
             preparationReason: mediaPreparationReason,
             preparationSignals: mediaPreparationSignals,
+            preparationPlannerJobId: mediaPreparationPlanner?.jobId ?? null,
+            preparationPlannerProvider: mediaPreparationPlanner?.provider ?? null,
+            preparationPlannerModel: mediaPreparationPlanner?.model ?? null,
+            preparationPlannerWorkerId: mediaPreparationPlanner?.workerId ?? null,
             directProvider:
               selectedProvider === "openrouter" && mediaPlan.kind === "image",
           },
@@ -5272,6 +5455,27 @@ export async function GET(request: Request) {
             mediaUrl,
             workerId: localImageJob.worker_id,
             error: localImageJob.error,
+            routeTrace: [
+              {
+                stage: "render",
+                label: "Local image render",
+                provider: localImageJob.result_provider || "cooperative-local",
+                model: localImageJob.result_model || "local-image-quality",
+                costClass: "local",
+                status: localImageJob.status,
+                detail:
+                  "Owned local image generation handled the render without provider spend.",
+                chargedUsd: 0,
+                estimatedChargeUsd: 0,
+              },
+            ],
+            routeSummary: {
+              localFreeSteps: 1,
+              paidSteps: 0,
+              connectedSteps: 0,
+              totalChargedUsd: 0,
+              estimatedTotalChargeUsd: 0,
+            },
             routeReason:
               localImageJob.status === "completed"
                 ? "Owned local image generation completed after the cloud provider hit an account-credit boundary."
@@ -5587,6 +5791,11 @@ export async function GET(request: Request) {
               .eq("owner_ref", ownerRef);
           }
 
+          const routeDetails = await mediaResponseTrace(admin, ownerRef, {
+            ...mediaJob,
+            status: "completed",
+          });
+
           return NextResponse.json(
             {
               jobId: mediaJob.id,
@@ -5602,6 +5811,14 @@ export async function GET(request: Request) {
                 billedMicrousd !== null
                   ? { chargedUsd: billedMicrousd / 1_000_000 }
                   : null,
+              estimatedChargeUsd:
+                typeof mediaJob.estimated_user_charge_microusd === "number"
+                  ? mediaJob.estimated_user_charge_microusd / 1_000_000
+                  : null,
+              billingMode: mediaJob.billing_mode || null,
+              providerCostBearer: mediaJob.provider_cost_bearer || null,
+              routeTrace: routeDetails.routeTrace,
+              routeSummary: routeDetails.routeSummary,
               routeReason:
                 "CoOperative called the selected OpenRouter image model directly after planning. No text-model orchestrator sat between routing and image generation.",
             },
@@ -7075,6 +7292,11 @@ export async function GET(request: Request) {
         );
       }
 
+      const routeDetails =
+        mediaJob.status === "completed" || mediaJob.status === "failed"
+          ? await mediaResponseTrace(admin, ownerRef, mediaJob)
+          : null;
+
       return NextResponse.json(
         {
           jobId: mediaJob.id,
@@ -7086,6 +7308,18 @@ export async function GET(request: Request) {
           model: mediaJob.model,
           text: mediaJob.result_text,
           mediaUrl: mediaJob.result_url,
+          funding:
+            typeof mediaJob.actual_user_charge_microusd === "number"
+              ? { chargedUsd: mediaJob.actual_user_charge_microusd / 1_000_000 }
+              : null,
+          estimatedChargeUsd:
+            typeof mediaJob.estimated_user_charge_microusd === "number"
+              ? mediaJob.estimated_user_charge_microusd / 1_000_000
+              : null,
+          billingMode: mediaJob.billing_mode || null,
+          providerCostBearer: mediaJob.provider_cost_bearer || null,
+          routeTrace: routeDetails?.routeTrace || [],
+          routeSummary: routeDetails?.routeSummary || null,
           error: mediaJob.error,
           createdAt: mediaJob.created_at,
           completedAt: mediaJob.completed_at,
