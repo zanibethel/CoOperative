@@ -4441,7 +4441,9 @@ export async function POST(request: Request) {
     ];
     const localFreeOnly = input.modelMixer?.localFreeOnly === true;
     const mixerRouteNote = input.modelMixer
-      ? ` Model Mixer ${input.modelMixer.preset}; max request spend ${input.modelMixer.maxSpendUsd.toFixed(2)}; local+free-only=${localFreeOnly ? "on" : "off"}; levels research=${input.modelMixer.agents.research}, planner=${input.modelMixer.agents.planner}, builder=${input.modelMixer.agents.builder}, verifier=${input.modelMixer.agents.verifier}, media=${input.modelMixer.agents.media}.`
+      ? localFreeOnly
+        ? ` Model Mixer ${input.modelMixer.preset}; saved spend cap ${input.modelMixer.maxSpendUsd.toFixed(2)}; effective paid cap $0.00; local+free-only=on; levels research=${input.modelMixer.agents.research}, planner=${input.modelMixer.agents.planner}, builder=${input.modelMixer.agents.builder}, verifier=${input.modelMixer.agents.verifier}, media=${input.modelMixer.agents.media}.`
+        : ` Model Mixer ${input.modelMixer.preset}; effective paid cap ${input.modelMixer.maxSpendUsd.toFixed(2)}; local+free-only=off; levels research=${input.modelMixer.agents.research}, planner=${input.modelMixer.agents.planner}, builder=${input.modelMixer.agents.builder}, verifier=${input.modelMixer.agents.verifier}, media=${input.modelMixer.agents.media}.`
       : "";
     const requestMaxSpendMicrousd = input.modelMixer
       ? Math.round(
@@ -5500,8 +5502,8 @@ export async function GET(request: Request) {
             },
             routeReason:
               localImageJob.status === "completed"
-                ? "Owned local image generation completed after the cloud provider hit an account-credit boundary."
-                : "Owned local image generation is handling the request without increasing provider spend.",
+                ? "Owned local image generation completed without provider spend."
+                : "Owned local image generation is handling the request without provider spend.",
             createdAt: localImageJob.created_at,
             completedAt: localImageJob.completed_at,
           },
