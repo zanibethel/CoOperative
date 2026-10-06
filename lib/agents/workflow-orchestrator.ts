@@ -468,6 +468,10 @@ async function planMediaNode(
 
   const capUsd = Math.max(0, workflow.max_spend_microusd / 1_000_000);
   const adultClass = adultMediaContentClass(workflow.objective);
+  const workflowUserId = userIdFromOwnerRef(workflow.owner_ref);
+  const mediaPreference = workflowUserId
+    ? await mediaContentPreferenceForUser(workflowUserId)
+    : { preference: "sfw_only" as const, adultContentAcknowledgedAt: null };
   const connectedOpenRouter =
     await businessOwnedServiceCredentialForOwner(
       workflow.owner_ref,
@@ -484,7 +488,7 @@ async function planMediaNode(
     currentCapUsd: capUsd,
     localImageAvailable: false,
     requiresReferenceImage: false,
-    contentPreference: "sfw_only",
+    contentPreference: mediaPreference.preference,
     adultOutputRequested: adultClass !== "sfw",
     adultContentClass: adultClass,
     cooperativeManagedOpenRouter: !connectedOpenRouter,
