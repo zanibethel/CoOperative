@@ -482,11 +482,11 @@ export async function recomputeAllModelTaskScores() {
       .in("status", ["completed", "failed"]),
   ]);
 
-  if (routeError) throw routeError;
-  if (benchmarkError) throw benchmarkError;
-  if (mediaError) throw mediaError;
-  if (outcomeError) throw outcomeError;
-  if (textError) throw textError;
+  if (routeError) throw new Error(`Registry score route query failed: ${JSON.stringify(routeError)}`);
+  if (benchmarkError) throw new Error(`Registry score benchmark query failed: ${JSON.stringify(benchmarkError)}`);
+  if (mediaError) throw new Error(`Registry score media runtime query failed: ${JSON.stringify(mediaError)}`);
+  if (outcomeError) throw new Error(`Registry score outcome query failed: ${JSON.stringify(outcomeError)}`);
+  if (textError) throw new Error(`Registry score text runtime query failed: ${JSON.stringify(textError)}`);
 
   const qualityMap = new Map<string, QualityAggregate>();
   for (const row of benchmarks || []) {
@@ -773,13 +773,13 @@ export async function recomputeAllModelTaskScores() {
     .from("ai_model_task_scores")
     .delete()
     .gte("calculated_at", "1970-01-01T00:00:00.000Z");
-  if (clearError) throw clearError;
+  if (clearError) throw new Error(`Registry score reset failed: ${JSON.stringify(clearError)}`);
 
   for (let index = 0; index < scoreRows.length; index += 250) {
     const { error } = await admin
       .from("ai_model_task_scores")
       .insert(scoreRows.slice(index, index + 250));
-    if (error) throw error;
+    if (error) throw new Error(`Registry score insert failed at ${index}: ${JSON.stringify(error)}`);
   }
 
   const { error: summaryError } = await admin.rpc(
@@ -788,7 +788,7 @@ export async function recomputeAllModelTaskScores() {
       p_score_version: MODEL_SCORE_VERSION,
     },
   );
-  if (summaryError) throw summaryError;
+  if (summaryError) throw new Error(`Registry score summary refresh failed: ${JSON.stringify(summaryError)}`);
 
   const byTask = new Map<string, number>();
   for (const row of scoreRows) {
