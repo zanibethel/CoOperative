@@ -8,7 +8,9 @@ import type {
   MediaRecommendationOption,
 } from "@/lib/inference/media-recommendations";
 import type { MediaRequestPlan } from "@/lib/inference/media-request";
-import { preferredOwnedTextNode } from "@/lib/unison/owned-text-routing";
+import {
+  preferredOwnedMediaPlanningNode,
+} from "@/lib/unison/owned-text-routing";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 
 type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
@@ -61,19 +63,22 @@ export function mediaPreparationSignals(input: {
     explicitTierSelected,
   } = input;
 
-  if (
-    selected.provider === "cooperative-local" ||
-    selected.providerCostEstimateUsd <= 0
-  ) {
-    return [];
-  }
-
   const eligible = options.filter(
     (option) =>
       option.executionReady &&
       option.capUsd <= requestCapUsd + 0.000001,
   );
   const signals: string[] = [];
+
+  if (
+    plan.kind === "image" &&
+    (selected.provider === "cooperative-local" ||
+      selected.providerCostEstimateUsd <= 0)
+  ) {
+    signals.push(
+      "the zero-provider-cost image route can benefit from a bounded reasoning pass before rendering",
+    );
+  }
 
   if (!explicitTierSelected && eligible.length > 1) {
     signals.push("multiple execution-ready routes fit the approved budget");
@@ -143,6 +148,7 @@ function reasoningMessages(input: {
         "You are CoOperative's bounded media preparation planner.",
         "Deterministic code has already enforced provider eligibility, content settings, capability evidence, live pricing, and the user's spend cap.",
         "Your only job is to improve model choice among the supplied eligible candidates and rewrite the user's request into a strong provider-ready generation prompt.",
+        "Think explicitly about composition, subject relationships, anatomy, hands, faces, lighting, camera/framing, background integrity, and likely generation failure modes, then encode only useful refinements into the final prompt.",
         "Do not invent a model outside the supplied candidates.",
         "Do not increase cost beyond the supplied cap.",
         "Do not weaken or broaden content-policy or capability constraints.",
@@ -219,8 +225,12 @@ async function readLocalPreparation(
   admin: AdminClient,
   jobId: string,
   startedAt: number,
+  options?: { totalWaitMs?: number; queueGraceMs?: number },
 ) {
-  while (Date.now() - startedAt < LOCAL_TOTAL_WAIT_MS) {
+  const totalWaitMs = options?.totalWaitMs ?? LOCAL_TOTAL_WAIT_MS;
+  const queueGraceMs = options?.queueGraceMs ?? LOCAL_QUEUE_GRACE_MS;
+
+  while (Date.now() - startedAt < totalWaitMs) {
     const { data, error } = await admin
       .from("text_inference_jobs")
       .select(
@@ -254,7 +264,7 @@ async function readLocalPreparation(
     }
 
     const age = Date.now() - startedAt;
-    if (age >= LOCAL_QUEUE_GRACE_MS && data.status === "queued" && !data.worker_id) {
+    if (age >= queueGraceMs && data.status === "queued" && !data.worker_id) {
       return { state: "unclaimed" as const, text: null };
     }
 
@@ -463,7 +473,12 @@ export async function prepareMediaExecutionWithReasoning(input: {
   }
 
   const messages = reasoningMessages({ ...input, signals });
-  const ownedNode = await preferredOwnedTextNode(input.admin, input.userId);
+  const ownedNode = await preferredOwnedMediaPlanningNode(
+    input.admin,
+    input.userId,
+  );
+  const specialistPlanner =
+    ownedNode?.specialization === "media-planning";
   const localJobId = crypto.randomUUID();
   const queuedAt = new Date().toISOString();
 
@@ -475,19 +490,27 @@ export async function prepareMediaExecutionWithReasoning(input: {
       client_owner_ref: input.ownerRef,
       messages,
       profile: "fast",
-      max_tokens: 1000,
+      max_tokens: specialistPlanner ? 384 : 700,
       temperature: 0.1,
-      routing_mode: "local-fast",
+      routing_mode: specialistPlanner
+        ? "cross-device-media-planning-v1"
+        : "local-fast",
       task_class: "media-planning",
-      route_reason:
-        "Deterministic code found the media request executable but not sufficiently specified to guarantee the best eligible model and provider-ready prompt before a paid generation call.",
+      route_reason: specialistPlanner
+        ? `CoOperative assigned bounded image-job reasoning to the owned media-planning specialist node ${ownedNode?.displayName || ownedNode?.id} before rendering.`
+        : "Deterministic code found the media request executable but benefits from a bounded owned/local reasoning pass before generation.",
       allow_paid_fallback: false,
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
       verification_status: "not_run",
       capability: "text",
-      routing_preference: ownedNode ? "prefer-owned" : "default",
+      routing_preference: specialistPlanner
+        ? "require-node"
+        : ownedNode
+          ? "prefer-owned"
+          : "default",
       preferred_node_id: ownedNode?.id ?? null,
+      target_node_id: specialistPlanner ? ownedNode?.id ?? null : null,
       queued_at: queuedAt,
     });
   if (localInsertError) throw localInsertError;
@@ -496,6 +519,9 @@ export async function prepareMediaExecutionWithReasoning(input: {
     input.admin,
     localJobId,
     Date.now(),
+    specialistPlanner
+      ? { totalWaitMs: 14_000, queueGraceMs: 5_000 }
+      : undefined,
   );
 
   if (localResult?.state === "completed" && localResult.text) {
