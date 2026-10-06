@@ -98,7 +98,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.11.3")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.11.4")
 
 def start_repo_recovery_worker():
     enabled = os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
@@ -142,11 +142,17 @@ def stop_local_text_worker(process):
 
     try:
         if process.poll() is None:
-            process.terminate()
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                process.kill()
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    process.kill()
                 process.wait(timeout=3)
     except Exception as exc:
         print(
@@ -176,7 +182,7 @@ def terminate_stale_local_text_workers(script: Path):
 
     try:
         result = subprocess.run(
-            [pgrep, "-f", str(script.resolve())],
+            [pgrep, "-f", script.name],
             capture_output=True,
             text=True,
             check=False,
@@ -272,6 +278,7 @@ def start_local_text_worker():
             [uv, "run", str(script)],
             cwd=str(Path(__file__).resolve().parent.parent),
             env=env,
+            start_new_session=True,
         )
     except Exception as exc:
         print("Local MLX text worker could not start: " + str(exc)[:800], flush=True)
@@ -1339,7 +1346,7 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.11.3"
+            else "image-worker-0.11.4"
         ),
         busy_provider=unison_busy,
     )
