@@ -15,7 +15,10 @@ import {
 } from "@/lib/inference/hermes-text-cloud";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { buildHostedWebResearch } from "@/lib/inference/public-web-research";
-import { preferredRegistryFreeTextModel } from "@/lib/inference/model-capability-registry";
+import {
+  availableModelRegistryRoutes,
+  preferredRegistryFreeTextModel,
+} from "@/lib/inference/model-capability-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -295,7 +298,7 @@ export async function POST(request: Request) {
     const admin = createAdminSupabaseClient();
     const { data: task, error: taskError } = await admin
       .from("agent_tasks")
-      .select("id,status,owner_ref")
+      .select("id,status,owner_ref,result")
       .eq("id", input.taskId)
       .maybeSingle();
 
@@ -311,11 +314,155 @@ export async function POST(request: Request) {
       );
     }
 
+    const taskResult =
+      task.result && typeof task.result === "object"
+        ? (task.result as Record<string, unknown>)
+        : {};
+    const modelSelection =
+      taskResult.modelSelection &&
+      typeof taskResult.modelSelection === "object" &&
+      !Array.isArray(taskResult.modelSelection)
+        ? (taskResult.modelSelection as Record<string, unknown>)
+        : null;
+    const selectedProvider =
+      modelSelection && typeof modelSelection.provider === "string"
+        ? modelSelection.provider
+        : "";
+    const selectedModel =
+      modelSelection && typeof modelSelection.model === "string"
+        ? modelSelection.model
+        : "";
+
     const ownerUserId = userIdFromOwnerRef(task.owner_ref);
     const ownedNode = ownerUserId
       ? await preferredOwnedTextNode(admin, ownerUserId)
       : null;
     const jobId = crypto.randomUUID();
+
+    if (selectedProvider === "openrouter" && selectedModel) {
+      const availability = await availableModelRegistryRoutes({
+        providers: ["openrouter"],
+        routeKinds: ["text", "multimodal-text"],
+        maxAgeHours: 36,
+      });
+      const selectedRoute = availability.routes.find(
+        (route) =>
+          route.model === selectedModel &&
+          route.free &&
+          route.executionReady,
+      );
+      const credential = selectedRoute
+        ? await freeOpenRouterCredential(task.owner_ref)
+        : null;
+
+      if (selectedRoute && credential) {
+        const now = new Date().toISOString();
+        const { error: directInsertError } = await admin
+          .from("text_inference_jobs")
+          .insert({
+            id: jobId,
+            status: "running",
+            client_owner_ref: `agent-task:${input.taskId}`,
+            agent_task_id: input.taskId,
+            messages: input.messages,
+            profile: selectedLocalProfile,
+            max_tokens: input.maxTokens,
+            temperature: input.temperature,
+            routing_mode: "workflow-free-cloud",
+            task_class: "coding",
+            route_reason:
+              "Multi-agent workflow selected this verified-free hosted coding/reasoning route from the task-specific model registry score.",
+            allow_paid_fallback: false,
+            human_approval_required: true,
+            model_registry_revision: "2026-10-05.1",
+            verification_status: "not_run",
+            capability: "text",
+            routing_preference: "default",
+            request_max_spend_microusd: 0,
+            worker_id: AGENT_FREE_TEXT_WORKER_ID,
+            claimed_at: now,
+            fallback_attempted_at: now,
+            fallback_provider: "openrouter",
+            fallback_model: selectedModel,
+            model_mixer: {
+              workflowSelected: true,
+              selectedProvider,
+              selectedModel,
+              scoreSnapshot:
+                modelSelection &&
+                typeof modelSelection.scoreSnapshot === "object"
+                  ? modelSelection.scoreSnapshot
+                  : {},
+            },
+          });
+        if (directInsertError) throw directInsertError;
+
+        await admin
+          .from("agent_tasks")
+          .update({
+            status: "waiting_llm",
+            updated_at: now,
+          })
+          .eq("id", input.taskId);
+
+        try {
+          const started = await startHermesTextTask({
+            jobId,
+            messages: hermesMessages(input.messages),
+            openRouterCredential: credential,
+            model: selectedModel,
+          });
+          const { error: startUpdateError } = await admin
+            .from("text_inference_jobs")
+            .update({
+              fallback_provider: started.provider,
+              fallback_model: started.model,
+              fallback_sandbox_name: started.sandboxName,
+              fallback_deadline_at: started.deadlineAt,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", jobId)
+            .eq("status", "running");
+          if (startUpdateError) throw startUpdateError;
+        } catch (startError) {
+          const detail =
+            startError instanceof Error
+              ? startError.message
+              : "Workflow-selected free cloud model could not start.";
+          await admin
+            .from("text_inference_jobs")
+            .update({
+              status: "failed",
+              error: detail.slice(0, 1200),
+              completed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", jobId);
+        }
+
+        return NextResponse.json(
+          {
+            jobId,
+            status: "running",
+            profile: selectedLocalProfile,
+            workflowSelected: true,
+            provider: selectedProvider,
+            model: selectedModel,
+            ownedNodePreferred: false,
+            preferredNodeId: null,
+            preferredNodeName: null,
+          },
+          { status: 202, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+    }
+
+    const selectedLocalProfile =
+      selectedProvider === "cooperative-local" && selectedModel
+        ? /qwen3-4b|fast/i.test(selectedModel)
+          ? "fast"
+          : "quality"
+        : input.profile;
     const { error } = await admin.from("text_inference_jobs").insert({
       id: jobId,
       status: "queued",
@@ -325,9 +472,15 @@ export async function POST(request: Request) {
       profile: input.profile,
       max_tokens: input.maxTokens,
       temperature: input.temperature,
-      routing_mode: input.profile === "quality" ? "local-quality" : "local-fast",
+      routing_mode:
+        selectedLocalProfile === "quality"
+          ? "workflow-local-quality"
+          : "workflow-local-fast",
       task_class: "coding",
-      route_reason: "Bounded local agent reasoning request.",
+      route_reason:
+        selectedProvider === "cooperative-local" && selectedModel
+          ? "Multi-agent workflow selected this owned/local model profile from the task-specific model registry score."
+          : "Bounded local agent reasoning request.",
       allow_paid_fallback: false,
       human_approval_required: true,
       model_registry_revision: "2026-09-30.2",
@@ -335,6 +488,19 @@ export async function POST(request: Request) {
       capability: "text",
       routing_preference: ownedNode ? "prefer-owned" : "default",
       preferred_node_id: ownedNode?.id ?? null,
+      model_mixer:
+        selectedProvider === "cooperative-local" && selectedModel
+          ? {
+              workflowSelected: true,
+              selectedProvider,
+              selectedModel,
+              scoreSnapshot:
+                modelSelection &&
+                typeof modelSelection.scoreSnapshot === "object"
+                  ? modelSelection.scoreSnapshot
+                  : {},
+            }
+          : null,
     });
     if (error) throw error;
 
