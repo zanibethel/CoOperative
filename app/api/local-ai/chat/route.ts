@@ -1746,6 +1746,7 @@ export async function POST(request: Request) {
               prompt: recentMedia.prompt,
               aspect_ratio: aspectRatioFromPrompt(recentMedia.prompt),
               profile: "quality",
+              content_mode: adultMediaContentClass(recentMedia.prompt),
               variation_mode: "balanced",
               seed:
                 Number.parseInt(localJobId.replaceAll("-", "").slice(0, 8), 16) %
@@ -2876,6 +2877,7 @@ export async function POST(request: Request) {
           prompt: generationPrompt,
           aspect_ratio: mediaPlan.aspectRatio || "4:5",
           profile: localProfile,
+          content_mode: adultContentClass,
           variation_mode: variationMode,
           reference_paths: referencePaths,
           seed:
@@ -6366,9 +6368,11 @@ export async function GET(request: Request) {
 
               if (localAvailable) {
                 const fallbackLocalModel =
-                  mediaLevel >= 2
+                  requestedAdultClass === "adult_explicit"
                     ? "local-image-quality"
-                    : "local-image-fast";
+                    : mediaLevel >= 2
+                      ? "local-image-quality"
+                      : "local-image-fast";
                 const fallbackLocalGate = await evaluateMediaExecutionContentGate({
                   userId: owner.userId,
                   ownerRef,
@@ -6434,7 +6438,11 @@ export async function GET(request: Request) {
                     client_owner_ref: ownerRef,
                     prompt: mediaJob.prompt,
                     aspect_ratio: aspectRatio || "4:5",
-                    profile: mediaLevel >= 2 ? "quality" : "fast",
+                    profile:
+                      requestedAdultClass === "adult_explicit" || mediaLevel >= 2
+                        ? "quality"
+                        : "fast",
+                    content_mode: requestedAdultClass,
                     variation_mode: "balanced",
                     seed:
                       Number.parseInt(
@@ -6453,7 +6461,7 @@ export async function GET(request: Request) {
                     capability: "image",
                     provider: "cooperative-local",
                     model:
-                      mediaLevel >= 2
+                      requestedAdultClass === "adult_explicit" || mediaLevel >= 2
                         ? "local-image-quality"
                         : "local-image-fast",
                     routeReason:
