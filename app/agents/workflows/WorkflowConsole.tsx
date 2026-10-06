@@ -34,6 +34,7 @@ type WorkflowNode = {
   score_snapshot?: Record<string, unknown> | null;
   estimated_cost_microusd: number;
   actual_cost_microusd: number;
+  budget_reserved_microusd?: number;
   result?: Record<string, unknown> | null;
   error?: string | null;
 };
@@ -78,6 +79,7 @@ export default function WorkflowConsole() {
   const [details, setDetails] = useState<Record<string, WorkflowDetail>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [approvingNodeId, setApprovingNodeId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const refreshList = useCallback(async () => {
@@ -139,6 +141,39 @@ export default function WorkflowConsole() {
     () => workflows.filter((workflow) => ACTIVE.has(workflow.status)).length,
     [workflows],
   );
+
+  async function approveMedia(workflowId: string, nodeId: string) {
+    if (approvingNodeId) return;
+    setApprovingNodeId(nodeId);
+    setError("");
+    try {
+      const response = await fetch("/api/agents/workflows/media/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflowId, nodeId }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(
+          result.error ||
+            result.detail ||
+            "Could not approve the planned media generation.",
+        );
+      }
+      await refreshOne(workflowId);
+      await refreshList();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not approve the planned media generation.",
+      );
+      await refreshOne(workflowId).catch(() => undefined);
+      await refreshList().catch(() => undefined);
+    } finally {
+      setApprovingNodeId(null);
+    }
+  }
 
   async function launch() {
     if (!objective.trim() || submitting) return;
@@ -312,17 +347,68 @@ export default function WorkflowConsole() {
                     <p><b>Parallel-ready:</b> no dependencies</p>
                   )}
                   {node.node_kind === "media" && node.result ? (
-                    <p>
-                      <b>Media phase:</b>{" "}
-                      {typeof node.result.phase === "string"
-                        ? node.result.phase.replaceAll("-", " ")
-                        : "planning"}{" "}
-                      · Planned cost{" "}
-                      {typeof node.result.estimatedCostUsd === "number"
-                        ? "$" + node.result.estimatedCostUsd.toFixed(4)
-                        : "—"}{" "}
-                      · Generation sent: no
-                    </p>
+                    <>
+                      <p>
+                        <b>Media phase:</b>{" "}
+                        {typeof node.result.phase === "string"
+                          ? node.result.phase.replaceAll("-", " ")
+                          : node.status === "completed"
+                            ? "completed"
+                            : "planning"}{" "}
+                        · Planned cost{" "}
+                        {typeof node.result.estimatedCostUsd === "number"
+                          ? "$" + node.result.estimatedCostUsd.toFixed(4)
+                          : typeof node.result.quotedBudgetUsd === "number"
+                            ? "$" + node.result.quotedBudgetUsd.toFixed(4)
+                            : "—"}{" "}
+                        · Generation sent:{" "}
+                        {node.result.generationSent === true ? "yes" : "no"}
+                      </p>
+
+                      {node.status === "needs_approval" &&
+                      node.selected_provider === "openrouter" &&
+                      node.selected_route_kind === "image" &&
+                      node.result.executionEnabled === false ? (
+                        <button
+                          className="primary"
+                          type="button"
+                          disabled={Boolean(approvingNodeId)}
+                          onClick={() =>
+                            void approveMedia(selected.workflow.id, node.id)
+                          }
+                        >
+                          {approvingNodeId === node.id
+                            ? "Generating one image…"
+                            : "Approve one image generation"}
+                        </button>
+                      ) : null}
+
+                      {typeof node.result.mediaUrl === "string" ? (
+                        <div>
+                          <p>
+                            <b>Generated result:</b>{" "}
+                            {node.result.billingMode === "cooperative-balance" &&
+                            typeof node.result.chargedCoOperativeBalanceUsd ===
+                              "number"
+                              ? "$" +
+                                node.result.chargedCoOperativeBalanceUsd.toFixed(4) +
+                                " charged to CoOperative balance"
+                              : node.result.billingMode === "openrouter-byok"
+                                ? "connected OpenRouter billing"
+                                : "free"}
+                          </p>
+                          <img
+                            src={node.result.mediaUrl}
+                            alt="Generated workflow media"
+                            style={{
+                              maxWidth: "100%",
+                              borderRadius: 12,
+                              marginTop: 8,
+                            }}
+                          />
+                        </div>
+                      ) : null}
+                    </>
                   ) : null}
                   {node.error ? <p className="error">{node.error}</p> : null}
                   {typeof node.result?.text === "string" ? (
