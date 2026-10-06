@@ -467,7 +467,15 @@ async function planMediaNode(
 
   const capUsd = Math.max(0, workflow.max_spend_microusd / 1_000_000);
   const adultClass = adultMediaContentClass(workflow.objective);
-  const catalog = await openRouterMediaCatalog(false);
+  const connectedOpenRouter =
+    await businessOwnedServiceCredentialForOwner(
+      workflow.owner_ref,
+      "openrouter-api",
+    );
+  const catalog = await openRouterMediaCatalog(
+    false,
+    connectedOpenRouter?.credential || undefined,
+  );
 
   const recommendations = await buildMediaRecommendationOptions({
     plan,
@@ -478,7 +486,7 @@ async function planMediaNode(
     contentPreference: "sfw_only",
     adultOutputRequested: adultClass !== "sfw",
     adultContentClass: adultClass,
-    cooperativeManagedOpenRouter: true,
+    cooperativeManagedOpenRouter: !connectedOpenRouter,
   });
 
   const preferredTier =
