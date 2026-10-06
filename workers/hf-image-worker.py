@@ -97,7 +97,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.11.1")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.11.2")
 
 def start_repo_recovery_worker():
     enabled = os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
@@ -155,6 +155,10 @@ def start_local_text_worker():
 
     env = os.environ.copy()
     env.setdefault("COOPERATIVE_QUEUE_URL", QUEUE_URL)
+    # Child text/vision work is part of the same physical Unison node. Always
+    # pass the canonical image-worker node id so targeted jobs cannot miss the
+    # child worker because macOS hostname aliases differ.
+    env.setdefault("UNISON_NODE_ID", WORKER_ID)
     if "UNISON_NODE_TOKEN" not in env and "INFERENCE_WORKER_TOKEN" not in env and WORKER_TOKEN:
         env["INFERENCE_WORKER_TOKEN"] = WORKER_TOKEN
 
@@ -1230,7 +1234,7 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.11.1"
+            else "image-worker-0.11.2"
         ),
         busy_provider=unison_busy,
     )
