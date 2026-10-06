@@ -10,6 +10,7 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as {
       workerId?: unknown;
       personalOnly?: unknown;
+      planningOnly?: unknown;
     };
     const workerId =
       typeof body.workerId === "string" && body.workerId.trim()
@@ -21,16 +22,29 @@ export async function POST(request: Request) {
     }
 
     const personalOnly = body.personalOnly === true;
+    const planningOnly = body.planningOnly === true;
+    if (personalOnly && planningOnly) {
+      return NextResponse.json(
+        { error: "Choose either personalOnly or planningOnly, not both." },
+        { status: 400 },
+      );
+    }
+
     const supabase = createAdminSupabaseClient();
     const { data, error } = personalOnly
       ? await supabase.rpc("claim_next_personal_text_inference_job", {
           p_worker_id: workerId,
           p_node_id: workerId,
         })
-      : await supabase.rpc("claim_next_text_inference_job", {
-          p_worker_id: workerId,
-          p_node_id: workerId,
-        });
+      : planningOnly
+        ? await supabase.rpc("claim_next_media_planning_text_inference_job", {
+            p_worker_id: workerId,
+            p_node_id: workerId,
+          })
+        : await supabase.rpc("claim_next_text_inference_job", {
+            p_worker_id: workerId,
+            p_node_id: workerId,
+          });
     if (error) throw error;
 
     const job = Array.isArray(data) ? data[0] : null;
