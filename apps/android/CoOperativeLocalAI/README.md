@@ -1,19 +1,25 @@
 # CoOperativeLocalAI Android alpha
 
-This directory is the first native Android client + private Unison node for CoOperative.
+This directory contains the native Android client, private Unison node, and on-device AI runtime for CoOperative.
 
-## Alpha 1 scope
+## Alpha 2 scope
 
-- Stable Android node identity.
-- One-time pairing through the existing `/api/unison/nodes/pair` contract.
-- Node credential encrypted with Android Keystore.
-- User-started foreground node service.
-- 20-second heartbeat through the existing `/api/unison/nodes/heartbeat` contract.
-- Hardware report: Android release, primary ABI, CPU thread count, and RAM.
-- Stable `LocalInferenceEngine` boundary for the next on-device-model phase.
-- No AccessibilityService, screen capture, microphone, camera, files, or autonomous device actions yet.
+Alpha 1 proved native pairing and heartbeats on a Samsung Galaxy S10-class device running Android 10 on arm64-v8a with 8 CPU threads and about 7.5 GB RAM.
 
-The node deliberately reports `allowText=false` and `allowImage=false` until an on-device model is actually installed and verified.
+Alpha 2 adds:
+
+- LiteRT-LM 0.17.0 on-device text inference.
+- A separately downloaded starter model: `litert-community/Qwen3-0.6B-int4`.
+- The no-think INT4 model file is about 347 MB and stays outside the APK.
+- Local model download progress.
+- A local-only self-test before CoOperative is allowed to route text work.
+- Benchmark/model evidence in the existing Unison heartbeat shape.
+- A direct local prompt box for offline validation.
+- Personal-only CoOperative text queue polling after verification.
+- No community/general Unison contribution yet.
+- No AccessibilityService, screen capture, camera, microphone, or autonomous device actions yet.
+
+The node advertises `text_generation` and sets `allowText=true` only after the model successfully initializes and returns a self-test response on that physical phone.
 
 ## Build
 
@@ -21,7 +27,9 @@ Requirements:
 
 - Android SDK 37
 - JDK 17
-- Gradle 9.6.0 or Android Studio with compatible AGP 9.4 support
+- Gradle 9.6.0
+- AGP 9.4.0
+- Kotlin 2.4.10 compatibility mode for LiteRT-LM
 
 From this directory:
 
@@ -29,31 +37,39 @@ From this directory:
 gradle :app:assembleDebug
 ```
 
-The debug APK will be written under:
+GitHub Actions builds the APK and publishes the current alpha behind:
 
 ```text
-app/build/outputs/apk/debug/app-debug.apk
+https://co-operative-mu.vercel.app/download/android
 ```
 
-GitHub Actions also builds the debug APK and uploads it as the
-`CoOperativeLocalAI-debug` artifact.
+## Phone flow
 
-## First physical-phone test
+1. Install or update CoOperativeLocalAI.
+2. Pair the phone with the existing Unison pairing flow.
+3. Start the private node.
+4. Tap **Download local model (~347 MB)**.
+5. Tap **Run local self-test**.
+6. Only after the self-test succeeds does the heartbeat expose local text capability.
+7. Use **Run locally** to confirm a prompt is answered entirely on the phone.
 
-1. Install the debug APK.
-2. Open CoOperativeLocalAI.
-3. Record the hardware block shown on the home screen.
-4. Generate a one-time Unison pairing code from the existing CoOperative owner/node flow.
-5. Enter it in the Android app and pair.
-6. Tap **Start private node**.
-7. Confirm the phone appears in Unison diagnostics and remains online while node mode is enabled.
+## Routing behavior
 
-Once the hardware report is known, select a mobile model/runtime profile. The initial intended path is a quantized small LLM using a supported Android edge runtime, implemented behind `LocalInferenceEngine`.
+The Android alpha polls only personal text jobs. It is not yet a community compute contributor.
+
+```text
+CoOperative deterministic code
+  -> verified Android local model
+  -> linked private Mac/PC nodes
+  -> eligible free/community routes
+  -> paid fallback when authorized
+```
 
 ## Security notes
 
 - Pairing codes are never stored.
-- The returned node credential is encrypted using an AES-GCM key held by Android Keystore.
+- The node credential is encrypted using an AES-GCM key held by Android Keystore.
+- Models are stored in app-private storage.
 - Cleartext HTTP is disabled.
 - Node mode is user-started and always has a visible foreground-service notification.
-- Device-assist capabilities will require explicit, separate user controls.
+- Screen observation and UI actions will be separate explicit permissions.
