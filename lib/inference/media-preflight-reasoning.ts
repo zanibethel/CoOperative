@@ -21,6 +21,12 @@ export type MediaPreparationResult = {
   confidence: number | null;
   reason: string;
   signals: string[];
+  planner: {
+    jobId: string;
+    provider: string;
+    model: string;
+    workerId: string | null;
+  } | null;
 };
 
 const LOCAL_QUEUE_GRACE_MS = 4_000;
@@ -218,7 +224,7 @@ async function readLocalPreparation(
     const { data, error } = await admin
       .from("text_inference_jobs")
       .select(
-        "id,status,result_text,error,worker_id,claimed_at,created_at,updated_at",
+        "id,status,result_text,result_model,result_provider,error,worker_id,claimed_at,created_at,updated_at",
       )
       .eq("id", jobId)
       .maybeSingle();
@@ -226,7 +232,22 @@ async function readLocalPreparation(
     if (!data) return null;
 
     if (data.status === "completed" && data.result_text) {
-      return { state: "completed" as const, text: String(data.result_text) };
+      return {
+        state: "completed" as const,
+        text: String(data.result_text),
+        provider:
+          typeof data.result_provider === "string" && data.result_provider
+            ? data.result_provider
+            : "cooperative-local",
+        model:
+          typeof data.result_model === "string" && data.result_model
+            ? data.result_model
+            : "local-text",
+        workerId:
+          typeof data.worker_id === "string" && data.worker_id
+            ? data.worker_id
+            : null,
+      };
     }
     if (data.status === "failed" || data.status === "cancelled") {
       return { state: "failed" as const, text: null };
@@ -379,7 +400,16 @@ async function runFreePreparation(input: {
       })
       .eq("id", fallbackId);
 
-    return text;
+    return {
+      text,
+      jobId: fallbackId,
+      provider: "openrouter-free",
+      model:
+        typeof payload.model === "string" && payload.model
+          ? payload.model
+          : fallbackModel,
+      workerId: FREE_WORKER_ID,
+    };
   } catch (error) {
     const failedAt = new Date().toISOString();
     const detail =
@@ -428,6 +458,7 @@ export async function prepareMediaExecutionWithReasoning(input: {
       confidence: null,
       reason: "Deterministic media routing had enough information to proceed.",
       signals,
+      planner: null,
     };
   }
 
@@ -488,6 +519,12 @@ export async function prepareMediaExecutionWithReasoning(input: {
         confidence: parsed.confidence,
         reason: parsed.reason,
         signals,
+        planner: {
+          jobId: localJobId,
+          provider: localResult.provider,
+          model: localResult.model,
+          workerId: localResult.workerId,
+        },
       };
     }
   }
@@ -504,16 +541,16 @@ export async function prepareMediaExecutionWithReasoning(input: {
     .eq("id", localJobId)
     .in("status", ["queued", "running"]);
 
-  const freeText = await runFreePreparation({
+  const freeResult = await runFreePreparation({
     admin: input.admin,
     ownerRef: input.ownerRef,
     messages,
     rootJobId: localJobId,
   });
 
-  if (freeText) {
+  if (freeResult) {
     const parsed = parsePreparation(
-      freeText,
+      freeResult.text,
       input.selected.model,
       input.deterministicPrompt,
     );
@@ -532,6 +569,12 @@ export async function prepareMediaExecutionWithReasoning(input: {
         confidence: parsed.confidence,
         reason: parsed.reason,
         signals,
+        planner: {
+          jobId: freeResult.jobId,
+          provider: freeResult.provider,
+          model: freeResult.model,
+          workerId: freeResult.workerId,
+        },
       };
     }
   }
@@ -545,5 +588,6 @@ export async function prepareMediaExecutionWithReasoning(input: {
     reason:
       "Local/free preparation did not return a valid bounded plan, so CoOperative preserved the deterministic route and prompt rather than spending more.",
     signals,
+    planner: null,
   };
 }
