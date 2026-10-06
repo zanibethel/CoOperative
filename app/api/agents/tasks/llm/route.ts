@@ -15,6 +15,7 @@ import {
 } from "@/lib/inference/hermes-text-cloud";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { buildHostedWebResearch } from "@/lib/inference/public-web-research";
+import { preferredRegistryFreeTextModel } from "@/lib/inference/model-capability-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -153,6 +154,11 @@ async function startFreeFallback(input: {
     }
   }
 
+  const fallbackModel =
+    (await preferredRegistryFreeTextModel({
+      requireReasoning: true,
+      requireStructuredOutput: false,
+    })) || "openrouter/free";
   const fallbackId = crypto.randomUUID();
   const baseReason =
     `${rootJob.route_reason || "Bounded agent reasoning request."} Owned/local reasoning was unavailable, failed, or stalled, so CoOperative is trying strict-free Hermes/OpenRouter before any paid model is suggested.`.trim();
@@ -181,7 +187,7 @@ async function startFreeFallback(input: {
     claimed_at: now,
     fallback_attempted_at: now,
     fallback_provider: "openrouter",
-    fallback_model: "openrouter/free",
+    fallback_model: fallbackModel,
   });
   if (insertError) throw insertError;
 
@@ -195,7 +201,7 @@ async function startFreeFallback(input: {
       rootJobId: rootJob.id,
       fallbackJobId: fallbackId,
       provider: "openrouter",
-      model: "openrouter/free",
+      model: fallbackModel,
       paidAuthorized: false,
     },
   });
@@ -210,6 +216,7 @@ async function startFreeFallback(input: {
       jobId: fallbackId,
       messages,
       openRouterCredential,
+      model: fallbackModel,
       webContext: webResearch?.context || null,
     });
 
