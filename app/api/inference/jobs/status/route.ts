@@ -67,6 +67,14 @@ export async function GET(request: Request) {
         seed: job.seed,
         variationMode: job.variation_mode,
         referenceMode: job.reference_mode,
+        pipelineMode: job.pipeline_mode || "single-pass",
+        pipelineTrace:
+          job.pipeline_trace && typeof job.pipeline_trace === "object"
+            ? job.pipeline_trace
+            : {},
+        requiredCapabilities: Array.isArray(job.required_capabilities)
+          ? job.required_capabilities
+          : [],
         error: job.error,
         aspectRatio: job.aspect_ratio,
         createdAt: job.created_at,
