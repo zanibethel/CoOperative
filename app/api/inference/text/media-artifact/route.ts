@@ -10,6 +10,8 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const judgeJobId = url.searchParams.get("judgeJobId") || "";
     const workerId = (url.searchParams.get("workerId") || "").slice(0, 160);
+    const artifactRole =
+      url.searchParams.get("role") === "comparison" ? "comparison" : "source";
 
     if (!judgeJobId || !workerId) {
       return NextResponse.json(
@@ -26,7 +28,7 @@ export async function GET(request: Request) {
     const { data: judgeJob, error: judgeError } = await admin
       .from("text_inference_jobs")
       .select(
-        "id,status,worker_id,target_node_id,capability,source_image_job_id",
+        "id,status,worker_id,target_node_id,capability,source_image_job_id,comparison_image_job_id",
       )
       .eq("id", judgeJobId)
       .maybeSingle();
@@ -41,7 +43,8 @@ export async function GET(request: Request) {
       judgeJob.status !== "running" ||
       judgeJob.worker_id !== workerId ||
       (judgeJob.target_node_id && judgeJob.target_node_id !== workerId) ||
-      !judgeJob.source_image_job_id
+      !judgeJob.source_image_job_id ||
+      (artifactRole === "comparison" && !judgeJob.comparison_image_job_id)
     ) {
       return NextResponse.json(
         { error: "Judge job is not authorized for this media artifact." },
@@ -49,10 +52,15 @@ export async function GET(request: Request) {
       );
     }
 
+    const requestedImageJobId =
+      artifactRole === "comparison"
+        ? judgeJob.comparison_image_job_id
+        : judgeJob.source_image_job_id;
+
     const { data: imageJob, error: imageError } = await admin
       .from("inference_jobs")
       .select("id,status,result_path")
-      .eq("id", judgeJob.source_image_job_id)
+      .eq("id", requestedImageJobId)
       .maybeSingle();
 
     if (imageError) throw imageError;
@@ -74,6 +82,7 @@ export async function GET(request: Request) {
         "Content-Type": blob.type || "image/jpeg",
         "Cache-Control": "no-store",
         "X-Cooperative-Source-Image-Job": imageJob.id,
+        "X-Cooperative-Artifact-Role": artifactRole,
       },
     });
   } catch (error) {
