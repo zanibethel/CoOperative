@@ -1480,7 +1480,11 @@ export async function syncWorkflowMediaNode(input: {
         nodeId: node.id,
       });
 
-      const outcome = classifyMediaRouteOutcome({ detail: failure });
+      const outcome = classifyMediaRouteOutcome({
+        detail: failure,
+        status: 0,
+        failureStage: "post-provider",
+      });
       await recordMediaRouteOutcome({
         ownerRef: input.ownerRef,
         sourceJobId: current.id,
