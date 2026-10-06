@@ -79,6 +79,7 @@ import {
   type MediaCatalogModel,
 } from "@/lib/inference/openrouter-media-catalog";
 import { executeOpenRouterImageDirect } from "@/lib/inference/openrouter-direct-image";
+import { resolveMediaRequestCost, type MediaCostResolution } from "@/lib/inference/model-cost-resolver";
 import { queueNextDirectOpenRouterImageFallback } from "@/lib/inference/openrouter-direct-image-routing";
 import { classifyMediaRouteOutcome } from "@/lib/inference/media-route-outcome";
 import {
@@ -87,6 +88,7 @@ import {
 } from "@/lib/inference/media-route-evidence";
 import {
   affordableVideoSuggestion,
+  nousManagedMediaCatalog,
 } from "@/lib/inference/nous-managed-media";
 import {
   bestMediaRecommendationWithinCap,
@@ -2926,12 +2928,14 @@ export async function POST(request: Request) {
       const selectedProvider: "nous" | "openrouter" | null =
         selectedRecommendation.provider;
       const selectedModel = selectedRecommendation.model;
-      const selectedUserQuoteUsd = selectedRecommendation.estimatedCostUsd;
-      const estimatedProviderCostUsd: number | null =
+      let selectedUserQuoteUsd = selectedRecommendation.estimatedCostUsd;
+      let estimatedProviderCostUsd: number | null =
         selectedRecommendation.providerCostEstimateUsd;
-      const selectedMarkupPercent = selectedRecommendation.markupPercent;
-      const selectedFree = estimatedProviderCostUsd <= 0;
-      const pricingSource = selectedRecommendation.pricingSource;
+      let selectedMarkupPercent = selectedRecommendation.markupPercent;
+      let selectedFree = estimatedProviderCostUsd <= 0;
+      let pricingSource = selectedRecommendation.pricingSource;
+      let reconciledCostResolution: MediaCostResolution | null =
+        selectedRecommendation.costResolution || null;
       const selectedResolution: string | null =
         selectedRecommendation.resolution || mediaPlan.resolution;
       const selectedAudio: boolean | null =
@@ -3019,6 +3023,146 @@ export async function POST(request: Request) {
         userOwnedOpenRouterCredential ||
         cooperativeOpenRouterCredential ||
         undefined;
+
+      // Reconcile the selected model against the current request shape and the
+      // latest pricing immediately before any balance reservation/provider call.
+      // This is the same resolver used by recommendation ranking, so the Mixer
+      // and execution path cannot disagree about MP/second/image pricing units.
+      if (selectedProvider === "nous") {
+        const latestNousCatalog = await nousManagedMediaCatalog();
+        const requestForPricing = {
+          ...mediaPlan,
+          resolution: selectedResolution,
+          audio: selectedAudio,
+        };
+
+        if (mediaPlan.kind === "image") {
+          const currentModel = latestNousCatalog.image.find(
+            (model) => model.model === selectedModel,
+          );
+          if (!currentModel) {
+            const message =
+              "That Nous image model is no longer present in the current Hermes catalog, so I did not start a generation. Refresh the media options and choose again.";
+            return NextResponse.json(
+              {
+                status: "completed",
+                execution: "code",
+                capability: mediaPlan.kind,
+                conversationId,
+                conversationTitle,
+                text: message,
+                provider: "code",
+                model: "media-cost-reconciliation-stale",
+              },
+              { status: 200, headers: { "Cache-Control": "no-store" } },
+            );
+          }
+
+          reconciledCostResolution = resolveMediaRequestCost({
+            provider: "nous",
+            model: selectedModel,
+            request: requestForPricing,
+            pricing: {
+              unit: currentModel.pricingUnit,
+              estimatedCostUsd: currentModel.estimatedCostUsd,
+              pricingSource: currentModel.pricingSource,
+            },
+            costBearer: "user-connected",
+          });
+        } else if (
+          latestNousCatalog.video &&
+          latestNousCatalog.video.model === selectedModel
+        ) {
+          reconciledCostResolution = resolveMediaRequestCost({
+            provider: "nous",
+            model: selectedModel,
+            request: requestForPricing,
+            pricing: {
+              unit: "second",
+              rates: latestNousCatalog.video.rates,
+              pricingSource: latestNousCatalog.video.pricingSource,
+            },
+            costBearer: "user-connected",
+          });
+        }
+      } else if (selectedProvider === "openrouter" && selectedMediaModel) {
+        const refreshedOpenRouterEstimate = estimateOpenRouterMediaCostUsd(
+          selectedMediaModel,
+          {
+            durationSeconds: mediaPlan.durationSeconds,
+            resolution: selectedResolution,
+            audio: selectedAudio,
+          },
+        );
+        reconciledCostResolution = resolveMediaRequestCost({
+          provider: "openrouter",
+          model: selectedModel,
+          request: {
+            ...mediaPlan,
+            resolution: selectedResolution,
+            audio: selectedAudio,
+          },
+          pricing: {
+            unit: "request",
+            estimatedCostUsd: refreshedOpenRouterEstimate,
+            pricingSource: "openrouter-live-preflight",
+            free: selectedMediaModel.free,
+          },
+          costBearer: selectedMediaModel.free
+            ? "free"
+            : cooperativeFundedPaidRoute
+              ? "cooperative"
+              : "user-connected",
+        });
+      }
+
+      if (
+        !reconciledCostResolution ||
+        !reconciledCostResolution.bounded ||
+        reconciledCostResolution.providerCostUsd === null ||
+        reconciledCostResolution.capCostUsd === null
+      ) {
+        const message =
+          "CoOperative could not reconcile this model's current provider pricing into a bounded total for the exact request, so I did not reserve funds or start the provider call. The route remains visible in the registry but is not spend-eligible until its request cost can be calculated safely.";
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-cost-reconciliation-unbounded",
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
+
+      estimatedProviderCostUsd = reconciledCostResolution.providerCostUsd;
+      selectedUserQuoteUsd = reconciledCostResolution.capCostUsd;
+      selectedMarkupPercent = reconciledCostResolution.markupPercent;
+      selectedFree = estimatedProviderCostUsd <= 0;
+      pricingSource = reconciledCostResolution.pricingSource;
+
+      if (selectedUserQuoteUsd > requestCapUsd + 0.000001) {
+        const message =
+          `The provider price for this exact request now reconciles to ${selectedUserQuoteUsd.toFixed(4)}, above the Model Mixer cap of ${requestCapUsd.toFixed(4)}. I did not reserve funds or start the provider call. Refresh the options or raise the cap explicitly.`;
+        return NextResponse.json(
+          {
+            status: "completed",
+            execution: "code",
+            capability: mediaPlan.kind,
+            conversationId,
+            conversationTitle,
+            text: message,
+            provider: "code",
+            model: "media-cost-reconciliation-cap",
+            costResolution: reconciledCostResolution,
+          },
+          { status: 200, headers: { "Cache-Control": "no-store" } },
+        );
+      }
 
       if (
         selectedProvider === "openrouter" &&
@@ -3248,6 +3392,10 @@ export async function POST(request: Request) {
               ? selectedUserQuoteUsd
               : 0,
             providerCostEstimateUsd: estimatedProviderCostUsd,
+            recommendationProviderCostUsd:
+              selectedRecommendation.providerCostEstimateUsd,
+            recommendationCapCostUsd: selectedRecommendation.estimatedCostUsd,
+            costResolution: reconciledCostResolution,
             markupPercent: cooperativeFundedPaidRoute
               ? selectedMarkupPercent
               : 0,
