@@ -2289,6 +2289,8 @@ export async function POST(request: Request) {
       const referenceModelVerifications = requiresReferenceImage
         ? await mediaReferenceModelVerificationsForOwner(ownerRef)
         : [];
+      const requestedAdultContentClass =
+        adultMediaContentClass(effectiveMediaRequestText);
       let localImageAvailable = false;
       if (mediaPlan.kind === "image") {
         const authorizedNodeIds = await activeNodeIds(admin, owner.userId);
@@ -2307,11 +2309,16 @@ export async function POST(request: Request) {
               node.policy && typeof node.policy === "object"
                 ? (node.policy as { allowImage?: unknown })
                 : {};
+            const supportsExplicitMode =
+              requestedAdultContentClass !== "adult_explicit" ||
+              (!requiresReferenceImage &&
+                capabilities.includes("adult_explicit_text_to_image"));
             const supportsRequestedImageMode = requiresReferenceImage
               ? capabilities.includes("image_to_image") ||
                 capabilities.includes("single_reference_identity")
               : capabilities.includes("image_generation");
             return (
+              supportsExplicitMode &&
               supportsRequestedImageMode &&
               policy.allowImage !== false &&
               node.state !== "paused"
@@ -2450,7 +2457,7 @@ export async function POST(request: Request) {
         });
       }
 
-      const adultContentClass = adultMediaContentClass(effectiveMediaRequestText);
+      const adultContentClass = requestedAdultContentClass;
       const adultOutputRequested = adultContentClass !== "sfw";
       const recommendationSet = await buildMediaRecommendationOptions({
         plan: mediaPlan,
@@ -6359,6 +6366,8 @@ export async function GET(request: Request) {
                 const seenAt = Date.parse(node.last_seen_at || "");
                 return (
                   capabilities.includes("image_generation") &&
+                  (requestedAdultClass !== "adult_explicit" ||
+                    capabilities.includes("adult_explicit_text_to_image")) &&
                   policy.allowImage !== false &&
                   Number.isFinite(seenAt) &&
                   seenAt >= freshAfter &&
