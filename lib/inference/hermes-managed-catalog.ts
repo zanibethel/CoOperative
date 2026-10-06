@@ -119,9 +119,16 @@ function pricingInfo(label: string | null) {
     };
   }
 
-  const amounts = [...label.matchAll(/\$\s*([0-9]+(?:\.[0-9]+)?)/g)]
-    .map((match) => Number(match[1]))
-    .filter((value) => Number.isFinite(value) && value >= 0);
+  // Capture both explicitly dollar-prefixed amounts and the upper side of
+  // compact ranges such as "$0.03-0.09/image" or "$0.04–0.06/image".
+  const amounts = [
+    ...[...label.matchAll(/\$\s*([0-9]+(?:\.[0-9]+)?)/g)].map(
+      (match) => Number(match[1]),
+    ),
+    ...[...label.matchAll(
+      /\$\s*[0-9]+(?:\.[0-9]+)?\s*[-–—]\s*([0-9]+(?:\.[0-9]+)?)/g,
+    )].map((match) => Number(match[1])),
+  ].filter((value) => Number.isFinite(value) && value >= 0);
 
   if (!amounts.length) {
     return {
@@ -136,8 +143,8 @@ function pricingInfo(label: string | null) {
       ? ("image" as const)
       : ("unknown" as const);
 
-  // Conservative for ranges / multiple listed modes. This is only a routing
-  // estimate. Final execution stays subject to provider/runtime spend gates.
+  // Use the highest advertised price in a range/mode list. Per-megapixel rows
+  // remain non-executable until request dimensions make the total cost bounded.
   return {
     estimatedCostUsd: Math.max(...amounts),
     pricingUnit,
