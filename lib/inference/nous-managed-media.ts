@@ -21,6 +21,7 @@ type LiveImageCandidate = {
   model: string;
   url: string;
   qualityLabel: string;
+  pricingUnit: "image" | "megapixel";
   parseCostUsd: (html: string) => number | null;
 };
 
@@ -72,6 +73,7 @@ const IMAGE_CANDIDATES: LiveImageCandidate[] = [
     model: "fal-ai/z-image/turbo",
     url: "https://fal.ai/models/fal-ai/z-image/turbo",
     qualityLabel: "economy",
+    pricingUnit: "megapixel",
     parseCostUsd: (html) =>
       firstNumber(html, [
         /cost\s+\$([0-9.]+)\s+per\s+megapixel/i,
@@ -83,6 +85,7 @@ const IMAGE_CANDIDATES: LiveImageCandidate[] = [
     model: "fal-ai/qwen-image",
     url: "https://fal.ai/models/fal-ai/qwen-image",
     qualityLabel: "balanced",
+    pricingUnit: "megapixel",
     parseCostUsd: (html) =>
       firstNumber(html, [
         /cost\s+\$([0-9.]+)\s+per\s+megapixel/i,
@@ -94,6 +97,7 @@ const IMAGE_CANDIDATES: LiveImageCandidate[] = [
     model: "fal-ai/gpt-image-1.5",
     url: "https://fal.ai/models/fal-ai/gpt-image-1.5",
     qualityLabel: "high",
+    pricingUnit: "image",
     parseCostUsd: (html) => {
       const mediumSquare = firstNumber(html, [
         /medium quality[^$]*\$([0-9.]+)\s+for\s+1024x1024/i,
@@ -109,6 +113,7 @@ const IMAGE_CANDIDATES: LiveImageCandidate[] = [
     model: "fal-ai/nano-banana-pro",
     url: "https://fal.ai/models/fal-ai/nano-banana-pro",
     qualityLabel: "premium",
+    pricingUnit: "image",
     parseCostUsd: (html) =>
       firstNumber(html, [
         /cost\s+\$([0-9.]+)\s+per\s+image/i,
@@ -126,7 +131,11 @@ export async function chooseNousManagedImage(
   const cap =
     maxSpendUsd === null ? Number.POSITIVE_INFINITY : Math.max(0, maxSpendUsd);
   const requestedCandidates = IMAGE_CANDIDATES
-    .filter((candidate) => candidate.minLevel <= requestedLevel)
+    .filter(
+      (candidate) =>
+        candidate.minLevel <= requestedLevel &&
+        candidate.pricingUnit === "image",
+    )
     .sort((a, b) => b.minLevel - a.minLevel);
 
   for (const candidate of requestedCandidates) {
@@ -341,6 +350,8 @@ export async function nousManagedMediaCatalog() {
                 estimatedCostUsd,
                 pricingSource: candidate.url,
                 pricingApproximate: false,
+                pricingUnit: candidate.pricingUnit,
+                executionReady: candidate.pricingUnit === "image",
                 editEndpoint: null as string | null,
                 maxReferenceImages: 0,
               };
@@ -362,6 +373,8 @@ export async function nousManagedMediaCatalog() {
       estimatedCostUsd: number;
       pricingSource: string;
       pricingApproximate: boolean;
+      pricingUnit: "image" | "megapixel" | "unknown";
+      executionReady: boolean;
       editEndpoint: string | null;
       maxReferenceImages: number;
     }
@@ -391,6 +404,8 @@ export async function nousManagedMediaCatalog() {
       estimatedCostUsd: model.estimatedCostUsd,
       pricingSource: hermesImageSource,
       pricingApproximate: true,
+      pricingUnit: model.pricingUnit,
+      executionReady: model.pricingUnit === "image",
       editEndpoint: model.editEndpoint,
       maxReferenceImages: model.maxReferenceImages,
     });
