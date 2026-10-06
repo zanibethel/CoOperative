@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { agentWorkerCanAccessOwner, authorizeAgentWorker } from "@/lib/agents/server";
+import { advanceAgentWorkflow } from "@/lib/agents/workflow-orchestrator";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -170,6 +171,29 @@ export async function POST(request: Request) {
             ? "The quality coding model struggled; a stronger paid coding model can be offered with explicit approval."
             : "The fast coding model struggled; retry with local Quality before considering paid escalation.",
         metadata: result.strongerModelRecommendation,
+      });
+    }
+
+    const { data: workflowNode, error: workflowNodeError } = await admin
+      .from("agent_workflow_nodes")
+      .select("workflow_id")
+      .eq("child_agent_task_id", taskId)
+      .maybeSingle();
+    if (workflowNodeError) throw workflowNodeError;
+
+    if (workflowNode?.workflow_id) {
+      await advanceAgentWorkflow(
+        workflowNode.workflow_id,
+        task.owner_ref,
+      ).catch((workflowError) => {
+        console.error("Could not advance agent workflow after task completion", {
+          taskId,
+          workflowId: workflowNode.workflow_id,
+          detail:
+            workflowError instanceof Error
+              ? workflowError.message.slice(0, 800)
+              : "unknown",
+        });
       });
     }
 
