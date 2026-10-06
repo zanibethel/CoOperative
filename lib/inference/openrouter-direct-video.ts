@@ -4,7 +4,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
 const OPENROUTER_VIDEO_ENDPOINT = "https://openrouter.ai/api/v1/videos";
 const MEDIA_BUCKET = "cooperative-media-library";
-const MAX_OUTPUT_BYTES = 50 * 1024 * 1024;
+const MAX_OUTPUT_BYTES = 100 * 1024 * 1024;
 
 type VideoUsage = Record<string, unknown> | null;
 
@@ -301,7 +301,7 @@ export async function pollOpenRouterVideoDirect(input: {
       providerStatus,
       usage,
       error:
-        "The generated video exceeds CoOperative's current 50 MB workflow-media storage limit. No second generation was started.",
+        "The generated video exceeds CoOperative's current 100 MB workflow-media storage limit. No second generation was started.",
       httpStatus: 0,
       failureStage: "post-provider",
     };
@@ -318,7 +318,7 @@ export async function pollOpenRouterVideoDirect(input: {
         providerStatus,
         usage,
         error:
-          "The generated video exceeds CoOperative's current 50 MB workflow-media storage limit. No second generation was started.",
+          "The generated video exceeds CoOperative's current 100 MB workflow-media storage limit. No second generation was started.",
         httpStatus: 0,
         failureStage: "post-provider",
       };
