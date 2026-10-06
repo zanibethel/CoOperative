@@ -367,6 +367,7 @@ export async function nousManagedMediaCatalog() {
     }
   >();
 
+  const hermesImageSource = hermesCatalog?.imageSource || "";
   for (const model of hermesCatalog?.image || []) {
     if (
       model.estimatedCostUsd === null ||
@@ -388,7 +389,7 @@ export async function nousManagedMediaCatalog() {
               : "premium",
       minLevel: model.qualityLevel,
       estimatedCostUsd: model.estimatedCostUsd,
-      pricingSource: hermesCatalog.imageSource,
+      pricingSource: hermesImageSource,
       pricingApproximate: true,
       editEndpoint: model.editEndpoint,
       maxReferenceImages: model.maxReferenceImages,
