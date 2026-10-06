@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { currentAgentOwnerRef } from "@/lib/agents/server";
 import { advanceAgentWorkflow } from "@/lib/agents/workflow-orchestrator";
-import { approveAndExecuteWorkflowMediaImage } from "@/lib/agents/workflow-media-execution";
+import { approveAndExecuteWorkflowMedia } from "@/lib/agents/workflow-media-execution";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
 
   try {
     const input = schema.parse(await request.json());
-    const execution = await approveAndExecuteWorkflowMediaImage({
+    const execution = await approveAndExecuteWorkflowMedia({
       ownerRef,
       workflowId: input.workflowId,
       nodeId: input.nodeId,
