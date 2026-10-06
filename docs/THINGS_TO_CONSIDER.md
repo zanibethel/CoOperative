@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-05
+Last reviewed: 2026-10-06
 
 ## Status key
 
@@ -151,3 +151,66 @@ Use a consult -> build -> update loop:
 Use `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow.
 
 Reference: https://tldr.tech/dev/2026-10-05
+
+
+---
+
+## 5. Mistral Large 4 as a registry and routing candidate
+
+**Status:** Evaluate after preview validation  
+**Added:** 2026-10-06  
+**Last reviewed:** 2026-10-06  
+**Source:** Mistral AI documentation / Reuters
+
+### Finding
+Mistral Large 4 entered public preview on 2026-10-06 as an open-weight, multimodal Mixture-of-Experts model with a 1M-token context window. Mistral documents structured outputs, function calling, document Q&A, agent/conversation endpoints, and hosted pricing. Reuters reports that the full public release is planned for 2026-10-27.
+
+### Why it may matter
+It may become useful for:
+- high-context research and synthesis;
+- multimodal/document work;
+- structured agent calls;
+- open-weight or self-hosted deployment;
+- an additional replaceable provider route.
+
+The model is too large for the current Mac/CPU-class local nodes, so near-term value is hosted/provider routing rather than default local execution.
+
+### Possible solution
+Let the existing daily model-registry scan discover provider availability. Add explicit capability evidence only from official model/provider metadata, then run the standard cost, latency, tool-call, refusal, safety, and quality eval set.
+
+### Recommendation
+Do not add it to default production routing during preview. Evaluate after availability and pricing stabilize, with a targeted recheck after the planned 2026-10-27 full release.
+
+References:
+- https://docs.mistral.ai/models/mistral-large-4-0
+- https://www.reuters.com/world/china/mistral-ceo-says-new-ai-model-beats-chinese-ones-some-areas-2026-10-06/
+
+---
+
+## 6. Verify macOS worker patch level and Screen Sharing exposure
+
+**Status:** Recommend operational verification  
+**Added:** 2026-10-06  
+**Last reviewed:** 2026-10-06  
+**Source:** Apple security advisory / TLDR Tech
+
+### Finding
+Apple documents CVE-2026-65400, a Screen Sharing authentication flaw that can let a network attacker authenticate without valid credentials. Apple lists patched releases including macOS Tahoe 26.6.1, and the fix is also included in Tahoe 26.7.
+
+### Why it may matter
+The Mac is an active CoOperative/Unison worker. A compromised worker could expose local data, model assets, secrets, or task execution even if application-level routing is correct.
+
+### Possible solution
+Add a lightweight node-security preflight/checklist:
+1. verify the worker's macOS version is at or above a fixed release;
+2. verify Screen Sharing is disabled unless explicitly needed;
+3. do not expose Screen Sharing/VNC directly to the public internet;
+4. record OS/security posture in node capability metadata without storing sensitive host details;
+5. block sensitive workloads when a node is known to be below the required patch floor.
+
+### Recommendation
+First perform a read-only check of the Mac worker's OS version and Screen Sharing exposure. Implementing automated node attestation or workload blocking requires separate approval.
+
+References:
+- https://support.apple.com/en-us/148170
+- https://support.apple.com/en-us/149042
