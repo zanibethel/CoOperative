@@ -195,6 +195,62 @@ async function readFailedSource(
     };
   }
 
+  // Owned/local image jobs use inference_jobs rather than the cloud
+  // media_generation_jobs ledger. Recovery still needs to understand these
+  // failures so the UI does not turn a real local worker error into
+  // "Failed job was not found for recovery."
+  const { data: localImageJob, error: localImageError } = await admin
+    .from("inference_jobs")
+    .select(
+      "id,status,client_owner_ref,kind,prompt,profile,content_mode,result_model,result_provider,worker_id,error",
+    )
+    .eq("id", sourceJobId)
+    .eq("client_owner_ref", ownerRef)
+    .maybeSingle();
+  if (localImageError) throw localImageError;
+
+  if (localImageJob?.kind === "image") {
+    const localModel =
+      localImageJob.result_model ||
+      (localImageJob.profile === "fast"
+        ? "local-image-fast"
+        : "local-image-quality");
+
+    const syntheticMediaJob: MediaRecoveryJob = {
+      id: localImageJob.id,
+      status: localImageJob.status,
+      owner_ref: ownerRef,
+      conversation_id: null,
+      kind: "image",
+      prompt: localImageJob.prompt || "",
+      provider: localImageJob.result_provider || "cooperative-local",
+      model: localModel,
+      model_mixer: null,
+      request_max_spend_microusd: 0,
+      media_level: localImageJob.profile === "fast" ? 0 : 2,
+      estimated_provider_cost_microusd: 0,
+      pricing_source: "owned-local",
+      pricing_dimensions: {
+        ownedLocal: true,
+        contentMode: localImageJob.content_mode || "sfw",
+        workerId: localImageJob.worker_id || null,
+      },
+      // A non-null root id prevents Recovery Agent from creating a duplicate
+      // Hermes/provider retry. The local image router owns any later reroute.
+      request_root_job_id: localImageJob.id,
+      route_attempt: 1,
+      execution_mode: "owned-local",
+      error: localImageJob.error,
+    };
+
+    return {
+      kind: "media",
+      job: syntheticMediaJob,
+      conversationId: null,
+      error: safeError(localImageJob.error),
+    };
+  }
+
   return null;
 }
 
