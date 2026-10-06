@@ -591,8 +591,8 @@ export async function buildMediaRecommendationOptions(input: {
   const adultOutputRequested = adultContentClass !== "sfw";
   const candidates: Candidate[] = [];
   const registryAvailability = await availableModelRegistryRoutes({
-    providers: ["openrouter", "nous"],
-    routeKinds: ["image", "video"],
+    providers: ["openrouter", "nous", "cooperative-local"],
+    routeKinds: ["image", "image-edit", "video"],
     includeNonExecutable: true,
     maxAgeHours: 36,
   }).catch(() => ({
