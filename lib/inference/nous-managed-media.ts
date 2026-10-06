@@ -1,5 +1,7 @@
 import "server-only";
 
+import { hermesManagedMediaCatalog } from "@/lib/inference/hermes-managed-catalog";
+
 export type NousManagedMediaKind = "image" | "video";
 
 export type NousManagedMediaChoice = {
@@ -322,8 +324,9 @@ export async function affordableVideoSuggestion(
 
 
 export async function nousManagedMediaCatalog() {
-  const image = (
-    await Promise.all(
+  const [hermesCatalog, liveCurated, pixverse] = await Promise.all([
+    hermesManagedMediaCatalog().catch(() => null),
+    Promise.all(
       IMAGE_CANDIDATES.map(async (candidate) => {
         try {
           const html = await liveText(candidate.url);
@@ -332,22 +335,95 @@ export async function nousManagedMediaCatalog() {
             ? null
             : {
                 model: candidate.model,
+                displayName: candidate.model.replace(/^fal-ai\//, ""),
                 qualityLabel: candidate.qualityLabel,
                 minLevel: candidate.minLevel,
                 estimatedCostUsd,
                 pricingSource: candidate.url,
+                pricingApproximate: false,
+                editEndpoint: null as string | null,
+                maxReferenceImages: 0,
               };
         } catch {
           return null;
         }
       }),
-    )
-  ).filter((item): item is NonNullable<typeof item> => item !== null);
+    ),
+    livePixversePricing(),
+  ]);
 
-  const pixverse = await livePixversePricing();
+  const imageByModel = new Map<
+    string,
+    {
+      model: string;
+      displayName: string;
+      qualityLabel: string;
+      minLevel: 1 | 2 | 3 | 4;
+      estimatedCostUsd: number;
+      pricingSource: string;
+      pricingApproximate: boolean;
+      editEndpoint: string | null;
+      maxReferenceImages: number;
+    }
+  >();
+
+  for (const model of hermesCatalog?.image || []) {
+    if (
+      model.estimatedCostUsd === null ||
+      !Number.isFinite(model.estimatedCostUsd) ||
+      model.estimatedCostUsd < 0
+    ) {
+      continue;
+    }
+    imageByModel.set(model.id, {
+      model: model.id,
+      displayName: model.displayName,
+      qualityLabel:
+        model.qualityLevel === 1
+          ? "economy"
+          : model.qualityLevel === 2
+            ? "balanced"
+            : model.qualityLevel === 3
+              ? "high"
+              : "premium",
+      minLevel: model.qualityLevel,
+      estimatedCostUsd: model.estimatedCostUsd,
+      pricingSource: hermesCatalog.imageSource,
+      pricingApproximate: true,
+      editEndpoint: model.editEndpoint,
+      maxReferenceImages: model.maxReferenceImages,
+    });
+  }
+
+  // Preserve the stronger live-pricing checks for the routes we already verify
+  // directly against fal. These overwrite the release-catalog estimates.
+  for (const model of liveCurated) {
+    if (!model) continue;
+    imageByModel.set(model.model, model);
+  }
+
+  const image = [...imageByModel.values()].sort(
+    (a, b) =>
+      a.estimatedCostUsd - b.estimatedCostUsd ||
+      b.minLevel - a.minLevel ||
+      a.displayName.localeCompare(b.displayName),
+  );
+
   return {
     fetchedAt: new Date().toISOString(),
-    source: "nous-managed-live" as const,
+    source: hermesCatalog
+      ? (`nous-managed+${hermesCatalog.source}` as const)
+      : ("nous-managed-live" as const),
+    hermesRelease: hermesCatalog?.release || null,
+    hermesDiscovery: hermesCatalog
+      ? {
+          source: hermesCatalog.source,
+          imageSource: hermesCatalog.imageSource,
+          videoSource: hermesCatalog.videoSource,
+          imageCount: hermesCatalog.image.length,
+          videoCount: hermesCatalog.video.length,
+        }
+      : null,
     image,
     video: pixverse
       ? {
