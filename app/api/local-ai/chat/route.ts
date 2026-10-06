@@ -141,6 +141,7 @@ const modelMixerLevelSchema = z.number().int().min(0).max(4);
 const modelMixerSchema = z.object({
   preset: z.enum(["economy", "balanced", "premium", "custom"]),
   maxSpendUsd: z.number().min(0).max(100),
+  localFreeOnly: z.boolean().default(false),
   agents: z.object({
     research: modelMixerLevelSchema,
     planner: modelMixerLevelSchema,
@@ -2383,7 +2384,10 @@ export async function POST(request: Request) {
         4,
         Math.max(0, input.modelMixer?.agents.media ?? 0),
       ) as 0 | 1 | 2 | 3 | 4;
-      const requestCapUsd = input.modelMixer?.maxSpendUsd ?? 0.05;
+      const localFreeOnly = input.modelMixer?.localFreeOnly === true;
+      const requestCapUsd = localFreeOnly
+        ? 0
+        : input.modelMixer?.maxSpendUsd ?? 0.05;
 
       if (
         mediaPlan.kind === "video" &&
@@ -2671,7 +2675,8 @@ export async function POST(request: Request) {
         (option) =>
           !capabilityBlockedRoutes.has(
             [option.provider, option.model, option.editEndpoint || ""].join("|"),
-          ),
+          ) &&
+          (!localFreeOnly || option.providerCostEstimateUsd <= 0),
       );
       const recommendationTier = requestedMediaRecommendationTier(input.message);
       const recommendationsOnly = asksForMediaRecommendationsOnly(input.message);
@@ -2704,6 +2709,16 @@ export async function POST(request: Request) {
 
       const recommendationText = () => {
         if (!eligibleRecommendationOptions.length) {
+          if (
+            localFreeOnly &&
+            recommendationSet.options.some(
+              (option) => option.providerCostEstimateUsd > 0,
+            )
+          ) {
+            return (
+              "Local + Free Only is on. I could not find an execution-ready local or zero-provider-cost route for this exact media request, so I stopped before any paid provider call. Turn the mode off only if you want paid routes considered."
+            );
+          }
           if (recommendationSet.sfwConflict) {
             return (
               "This request asks for adult media output, but NSFW output is currently off in Model Mixer. I kept the SFW output constraint and did not start a generation. Enable NSFW if you want adult-output recommendations for this request."
@@ -4424,11 +4439,14 @@ export async function POST(request: Request) {
       ...history.slice(-historyLimit),
       userMessage,
     ];
+    const localFreeOnly = input.modelMixer?.localFreeOnly === true;
     const mixerRouteNote = input.modelMixer
-      ? ` Model Mixer ${input.modelMixer.preset}; max request spend ${input.modelMixer.maxSpendUsd.toFixed(2)}; levels research=${input.modelMixer.agents.research}, planner=${input.modelMixer.agents.planner}, builder=${input.modelMixer.agents.builder}, verifier=${input.modelMixer.agents.verifier}, media=${input.modelMixer.agents.media}.`
+      ? ` Model Mixer ${input.modelMixer.preset}; max request spend ${input.modelMixer.maxSpendUsd.toFixed(2)}; local+free-only=${localFreeOnly ? "on" : "off"}; levels research=${input.modelMixer.agents.research}, planner=${input.modelMixer.agents.planner}, builder=${input.modelMixer.agents.builder}, verifier=${input.modelMixer.agents.verifier}, media=${input.modelMixer.agents.media}.`
       : "";
     const requestMaxSpendMicrousd = input.modelMixer
-      ? Math.round(input.modelMixer.maxSpendUsd * 1_000_000)
+      ? Math.round(
+          (localFreeOnly ? 0 : input.modelMixer.maxSpendUsd) * 1_000_000,
+        )
       : null;
 
     const { error: jobError } = await admin.from("text_inference_jobs").insert({
@@ -4461,6 +4479,7 @@ export async function POST(request: Request) {
       allow_paid_fallback:
         requestedCapability === "text" &&
         input.nodeRouting !== "require-node" &&
+        !localFreeOnly &&
         (requestMaxSpendMicrousd === null || requestMaxSpendMicrousd > 0),
       human_approval_required: false,
       model_registry_revision: TEXT_MODEL_REGISTRY_REVISION,
@@ -4518,7 +4537,10 @@ export async function POST(request: Request) {
           (profileExecutionPlan?.paidEligible ?? false),
         availableAiBalanceUsd: profileBalance.availableUsd,
         modelMixer: input.modelMixer || null,
-        requestMaxSpendUsd: input.modelMixer?.maxSpendUsd ?? null,
+        requestMaxSpendUsd: localFreeOnly
+          ? 0
+          : input.modelMixer?.maxSpendUsd ?? null,
+        localFreeOnly,
         aiNeeded: codeFirstDecision.aiNeeded,
         aiEscalationReason: codeFirstDecision.routeReason,
       },
@@ -4559,7 +4581,7 @@ export async function GET(request: Request) {
     let query = admin
       .from("text_inference_jobs")
       .select(
-        "id,status,profile,conversation_id,business_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,queued_at,claimed_at,created_at,completed_at,fallback_provider,fallback_model,fallback_sandbox_name,fallback_deadline_at,fallback_attempted_at,fallback_usage",
+        "id,status,profile,conversation_id,business_id,capability,attachment_ids,messages,partial_text,result_text,result_model,result_provider,prompt_tokens,output_tokens,first_token_ms,latency_ms,worker_id,routing_preference,preferred_node_id,target_node_id,route_reason,allow_paid_fallback,error,queued_at,claimed_at,created_at,completed_at,fallback_provider,fallback_model,fallback_sandbox_name,fallback_deadline_at,fallback_attempted_at,fallback_usage,model_mixer",
       )
       .eq("client_owner_ref", ownerRef);
 
@@ -5811,6 +5833,12 @@ export async function GET(request: Request) {
                 billedMicrousd !== null
                   ? { chargedUsd: billedMicrousd / 1_000_000 }
                   : null,
+              localFreeOnly:
+                mediaJob.model_mixer &&
+                typeof mediaJob.model_mixer === "object" &&
+                !Array.isArray(mediaJob.model_mixer)
+                  ? (mediaJob.model_mixer as Record<string, unknown>).localFreeOnly === true
+                  : false,
               estimatedChargeUsd:
                 typeof mediaJob.estimated_user_charge_microusd === "number"
                   ? mediaJob.estimated_user_charge_microusd / 1_000_000
@@ -7320,6 +7348,12 @@ export async function GET(request: Request) {
           providerCostBearer: mediaJob.provider_cost_bearer || null,
           routeTrace: routeDetails?.routeTrace || [],
           routeSummary: routeDetails?.routeSummary || null,
+          localFreeOnly:
+            mediaJob.model_mixer &&
+            typeof mediaJob.model_mixer === "object" &&
+            !Array.isArray(mediaJob.model_mixer)
+              ? (mediaJob.model_mixer as Record<string, unknown>).localFreeOnly === true
+              : false,
           error: mediaJob.error,
           createdAt: mediaJob.created_at,
           completedAt: mediaJob.completed_at,
@@ -7359,6 +7393,12 @@ export async function GET(request: Request) {
         targetNodeId: job.target_node_id,
         routeReason: job.route_reason,
         paidFallbackAllowed: job.allow_paid_fallback === true,
+        localFreeOnly:
+          job.model_mixer &&
+          typeof job.model_mixer === "object" &&
+          !Array.isArray(job.model_mixer)
+            ? (job.model_mixer as Record<string, unknown>).localFreeOnly === true
+            : false,
         error: job.error,
         createdAt: job.created_at,
         completedAt: job.completed_at,
