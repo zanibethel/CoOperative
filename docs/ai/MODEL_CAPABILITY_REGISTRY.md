@@ -207,3 +207,14 @@ The registry scanner persists successful live video pricing under `pricing.rates
 
 Explicit output controls are capability constraints, not preferences. For example, a native/always-on-audio video model is excluded when the request explicitly requires no audio.
 
+
+
+## Composable media component scoring
+
+The registry is also the foundation for composable multi-model rendering. Full generators and smaller specialists should be evaluated through the same evidence system rather than through a separate hard-coded component list.
+
+Portable handoffs such as images, masks, pose/depth maps, segmentation maps, prompts, embeddings, and quality reports are preferred between unrelated models. Raw latent tensors are treated as provider/model-family specific and may cross a stage boundary only when both sides advertise the same explicit compatibility key.
+
+Specialist score keys use the `media-component:<capability>` task naming convention in `ai_model_task_scores`. Local/owned image jobs from `inference_jobs` now contribute runtime reliability and latency evidence to the corresponding `cooperative-local` image route, closing the prior gap where local media success was invisible to general model scoring.
+
+See `docs/ai/COMPOSABLE_MEDIA_PIPELINE.md` and `lib/inference/media-pipeline-contract.ts`.
