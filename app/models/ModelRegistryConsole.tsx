@@ -245,6 +245,7 @@ export default function ModelRegistryConsole() {
 
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let consecutiveReadFailures = 0;
 
     const poll = async () => {
       try {
@@ -262,6 +263,8 @@ export default function ModelRegistryConsole() {
         }
         if (cancelled) return;
 
+        consecutiveReadFailures = 0;
+        setSmokeError("");
         setLastSmokeResult(result);
         if (result.status === "queued" || result.status === "running") {
           timer = setTimeout(poll, 2500);
@@ -273,10 +276,22 @@ export default function ModelRegistryConsole() {
         await refreshSmoke();
       } catch (err) {
         if (cancelled) return;
-        setSmokeError(
+        consecutiveReadFailures += 1;
+        const message =
           err instanceof Error
             ? err.message
-            : "Could not poll capability test.",
+            : "Could not poll capability test.";
+
+        if (consecutiveReadFailures <= 5) {
+          setSmokeError(
+            `Temporary status read issue (${consecutiveReadFailures}/5): ${message} Retrying without starting another generation.`,
+          );
+          timer = setTimeout(poll, 3000);
+          return;
+        }
+
+        setSmokeError(
+          `${message} The generation job was not retried or duplicated. Refresh this page to reconcile its persisted state.`,
         );
         setSmokeRunning(false);
       }
