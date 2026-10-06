@@ -1,7 +1,7 @@
 import "server-only";
 
 import { paidAiPriceQuote } from "@/lib/billing/paid-ai-pricing";
-import type { MediaRequestKind, MediaRequestPlan } from "@/lib/inference/media-request";
+import type { MediaRequestKind } from "@/lib/inference/media-request";
 
 export type MediaCostBearer = "cooperative" | "user-connected" | "free";
 export type MediaCostPricingMode =
@@ -54,13 +54,18 @@ export type MediaCostPricingInput = {
   free?: unknown;
 };
 
+export type MediaCostRequestShape = {
+  kind: MediaRequestKind;
+  aspectRatio: string | null;
+  durationSeconds: number | null;
+  resolution: string | null;
+  audio: boolean | null;
+};
+
 export type ResolveMediaRequestCostInput = {
   provider: string;
   model: string;
-  request: Pick<
-    MediaRequestPlan,
-    "kind" | "aspectRatio" | "durationSeconds" | "resolution" | "audio"
-  >;
+  request: MediaCostRequestShape;
   pricing: MediaCostPricingInput;
   costBearer?: MediaCostBearer;
   imageCount?: number;
@@ -96,7 +101,7 @@ function sourceLabel(pricing: MediaCostPricingInput) {
   return value.trim() || "registry-pricing";
 }
 
-function imageDimensions(aspectRatio: MediaRequestPlan["aspectRatio"]) {
+function imageDimensions(aspectRatio: string | null) {
   // Hermes v2026.9.24 maps image-generation aspect buckets to FAL's standard
   // presets for FLUX/Z-Image/Qwen/Recraft/Ideogram. These preset dimensions are
   // also the billing dimensions used by the request-cost resolver.
