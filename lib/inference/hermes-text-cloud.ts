@@ -11,6 +11,7 @@ export type HermesTextStartSpec = {
   jobId: string;
   messages: HermesTextContextMessage[];
   openRouterCredential: string;
+  model?: string | null;
   webContext?: string | null;
 };
 
@@ -52,7 +53,7 @@ const HERMES_INSTALLERS = [
 
 const STATUS_DIR = "/tmp/cooperative-text";
 const TEXT_TIMEOUT_MS = 3 * 60 * 1000;
-const MAIN_MODEL = "openrouter/free";
+const DEFAULT_MODEL = "openrouter/free";
 
 function clipped(value: string, max = 14000) {
   const text = value.trim();
@@ -113,7 +114,7 @@ function promptFor(
   ].join("\n");
 }
 
-function runnerScript() {
+function runnerScript(model: string) {
   return `#!/usr/bin/env bash
 set +e
 mkdir -p ${STATUS_DIR}
@@ -129,7 +130,7 @@ if [ ! -x "$HERMES_BIN" ]; then HERMES_BIN="/usr/local/bin/hermes"; fi
 "$HERMES_BIN" --usage-file ${STATUS_DIR}/usage.json chat --oneshot \
   --query-file /tmp/cooperative-text-prompt.md \
   --provider openrouter \
-  --model ${MAIN_MODEL} \
+  --model ${model} \
   --max-turns 4 \
   --run-budget 80 \
   --quiet \
@@ -164,6 +165,7 @@ export async function startHermesTextTask(
   const startedAt = new Date();
   const deadlineAt = new Date(startedAt.getTime() + TEXT_TIMEOUT_MS);
   const sandboxName = `cooperative-text-${spec.jobId.toLowerCase()}`;
+  const selectedModel = spec.model?.trim() || DEFAULT_MODEL;
 
   const sandbox = await Sandbox.create({
     name: sandboxName,
@@ -218,7 +220,7 @@ export async function startHermesTextTask(
     },
     {
       path: "/tmp/cooperative-text-run.sh",
-      content: Buffer.from(runnerScript(), "utf8"),
+      content: Buffer.from(runnerScript(selectedModel), "utf8"),
     },
   ]);
 
@@ -231,7 +233,7 @@ export async function startHermesTextTask(
   return {
     sandboxName,
     provider: "openrouter",
-    model: MAIN_MODEL,
+    model: selectedModel,
     startedAt: startedAt.toISOString(),
     deadlineAt: deadlineAt.toISOString(),
   };
