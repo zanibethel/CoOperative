@@ -9,7 +9,7 @@ import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog
 import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
 import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
-export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-06.7";
+export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-06.8";
 
 type JsonMap = Record<string, unknown>;
 
@@ -535,6 +535,7 @@ function localRegistrySnapshots(
                 "semantic-quality-judge",
                 "pairwise-quality-verifier",
                 "repair-planning",
+                "bounded-repair-executor",
                 "targeted-refinement",
                 "upscaling",
               ]
@@ -557,6 +558,10 @@ function localRegistrySnapshots(
                 autoExecute: false,
                 confidenceThreshold: 0.75,
                 protectsUncertainDimensions: true,
+                automaticCandidateExecutor: "bounded-img2img-v1",
+                automaticCandidateMaxTargets: 2,
+                promotionRequiresPairwiseVerification: true,
+                explicitReferenceRepairEnabled: false,
               }
             : null,
         pairwiseVerifier:
