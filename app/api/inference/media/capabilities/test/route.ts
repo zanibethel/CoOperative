@@ -495,6 +495,28 @@ export async function GET(request: Request) {
     let errorText = job.error || null;
     let recorded = await existingTestForJob(ownerRef, job.id);
 
+    if (!recorded && status === "completed" && mediaUrl) {
+      recorded = await recordJobOutcome({
+        ownerRef,
+        jobId: job.id,
+        provider: job.provider,
+        model: job.model,
+        kind: identity.kind,
+        scope: identity.scope,
+        outcome: "supported",
+      });
+    } else if (!recorded && status === "failed") {
+      recorded = await recordJobOutcome({
+        ownerRef,
+        jobId: job.id,
+        provider: job.provider,
+        model: job.model,
+        kind: identity.kind,
+        scope: identity.scope,
+        outcome: failureOutcome(errorText || ""),
+      });
+    }
+
     if (
       status === "running" &&
       job.sandbox_name &&
