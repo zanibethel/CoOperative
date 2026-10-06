@@ -188,9 +188,8 @@ export function planMediaRepair(
 
     if (
       finding.action === "none" &&
-      severitySupportsRepair &&
       score !== null &&
-      score < 85
+      (scoreSupportsRepair || isStrongSeverity(finding.severity))
     ) {
       consistencyIssues.push({
         code: "severity-action-conflict",
