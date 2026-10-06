@@ -16,6 +16,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: android-local-ai-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-debug-apk:
     runs-on: ubuntu-latest
@@ -30,6 +34,12 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Restore stable alpha debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: cooperative-localai-debug-keystore-v1
 
       - uses: gradle/actions/setup-gradle@v4
         with:
