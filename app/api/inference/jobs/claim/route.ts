@@ -18,8 +18,22 @@ export async function POST(request: Request) {
     }
 
     const supabase = createAdminSupabaseClient();
-    const { data, error } = await supabase.rpc("claim_next_image_inference_job", {
+    const { data: node, error: nodeError } = await supabase
+      .from("unison_nodes")
+      .select("capabilities")
+      .eq("id", workerId)
+      .maybeSingle();
+    if (nodeError) throw nodeError;
+
+    const workerCapabilities = Array.isArray(node?.capabilities)
+      ? node.capabilities.filter(
+          (value): value is string => typeof value === "string" && Boolean(value),
+        )
+      : [];
+
+    const { data, error } = await supabase.rpc("claim_next_image_inference_job_v2", {
       p_worker_id: workerId,
+      p_capabilities: workerCapabilities,
     });
     if (error) throw error;
 
@@ -57,6 +71,10 @@ export async function POST(request: Request) {
         strength: job.strength,
         variationMode: job.variation_mode || "balanced",
         seed: job.seed,
+        pipelineMode: job.pipeline_mode || "single-pass",
+        requiredCapabilities: Array.isArray(job.required_capabilities)
+          ? job.required_capabilities
+          : [],
       },
       { headers: { "Cache-Control": "no-store" } },
     );
