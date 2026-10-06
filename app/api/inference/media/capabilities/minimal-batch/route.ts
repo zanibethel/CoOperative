@@ -67,10 +67,43 @@ const TARGETS: Target[] = [
   },
 ];
 
-function authorized(request: Request) {
+async function authorized(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return false;
-  return request.headers.get("authorization") === `Bearer ${secret}`;
+  if (
+    secret &&
+    request.headers.get("authorization") === `Bearer ${secret}`
+  ) {
+    return true;
+  }
+
+  const token = request.headers.get("x-coop-batch-token")?.trim();
+  if (!token) return false;
+
+  const admin = createAdminSupabaseClient();
+  const { data, error } = await admin
+    .from("ai_model_scan_runs")
+    .select("id,status,metadata,started_at")
+    .eq("trigger_source", "owner-authorized-media-batch")
+    .eq("status", "running")
+    .contains("metadata", {
+      batchTag: BATCH_TAG,
+      batchToken: token,
+      hardCapUsd: HARD_BATCH_CAP_USD,
+    })
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return false;
+  const metadata =
+    data.metadata && typeof data.metadata === "object"
+      ? (data.metadata as Record<string, unknown>)
+      : {};
+  const expiresAt =
+    typeof metadata.expiresAt === "string"
+      ? Date.parse(metadata.expiresAt)
+      : 0;
+  return Number.isFinite(expiresAt) && expiresAt > Date.now();
 }
 
 function testType(scope: MediaSmokeScope) {
@@ -575,7 +608,7 @@ async function startNext(ownerRef: string, userId: string) {
 }
 
 export async function GET(request: Request) {
-  if (!authorized(request)) {
+  if (!(await authorized(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
@@ -597,7 +630,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!authorized(request)) {
+  if (!(await authorized(request))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
