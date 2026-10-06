@@ -6,6 +6,7 @@ import { textInferenceMessageSchema } from "@/lib/inference/contracts";
 import { persistResponseSupport } from "@/lib/ai/response-support";
 import { refreshRuntimeContextAfterOutcome } from "@/lib/ai/runtime-context-markdown";
 import { recordModelCapabilityEvidence } from "@/lib/inference/model-capability-registry";
+import { planMediaRepair } from "@/lib/inference/media-repair-planner";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -458,6 +459,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, status: "failed" });
       }
 
+      const repairPlan = planMediaRepair(report);
       const semanticCompletedAt = new Date().toISOString();
       const { error: semanticUpdateError } = await supabase
         .from("text_inference_jobs")
@@ -487,6 +489,7 @@ export async function POST(request: Request) {
         provider,
         latencyMs,
         report,
+        repairPlan,
       });
 
       await recordUnisonTextUsage(supabase, {
@@ -520,6 +523,7 @@ export async function POST(request: Request) {
         ok: true,
         status: "completed",
         semanticJudge: report,
+        repairPlan,
       });
     }
 
