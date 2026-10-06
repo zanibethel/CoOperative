@@ -257,6 +257,134 @@ async function updateSourceSemanticJudgeTrace(
   if (updateError) throw updateError;
 }
 
+async function persistPairwiseVerification(
+  supabase: AdminClient,
+  input: {
+    originalImageJobId: string;
+    candidateImageJobId: string;
+    verifierJobId: string;
+    model: string;
+    provider: string;
+    latencyMs: number | null;
+    report: PairwiseVerificationReport;
+  },
+) {
+  const decision = decidePairwiseVerification(input.report);
+
+  const { data: original, error: originalError } = await supabase
+    .from("inference_jobs")
+    .select("id,result_path,result_model,result_provider,pipeline_trace")
+    .eq("id", input.originalImageJobId)
+    .maybeSingle();
+  if (originalError) throw originalError;
+
+  const { data: candidate, error: candidateError } = await supabase
+    .from("inference_jobs")
+    .select("id,result_path,result_model,result_provider,pipeline_trace")
+    .eq("id", input.candidateImageJobId)
+    .maybeSingle();
+  if (candidateError) throw candidateError;
+
+  if (!original?.result_path || !candidate?.result_path) {
+    throw new Error("Pairwise verification requires two completed image results.");
+  }
+
+  const verification = {
+    status: "completed",
+    version: input.report.version,
+    verifierJobId: input.verifierJobId,
+    model: input.model,
+    provider: input.provider,
+    latencyMs: input.latencyMs,
+    originalImageJobId: input.originalImageJobId,
+    candidateImageJobId: input.candidateImageJobId,
+    baselineResultPath: original.result_path,
+    candidateResultPath: candidate.result_path,
+    report: input.report,
+    decision,
+  };
+
+  const candidateTrace =
+    candidate.pipeline_trace &&
+    typeof candidate.pipeline_trace === "object" &&
+    !Array.isArray(candidate.pipeline_trace)
+      ? (candidate.pipeline_trace as Record<string, unknown>)
+      : {};
+
+  const { error: candidateUpdateError } = await supabase
+    .from("inference_jobs")
+    .update({
+      parent_image_job_id: input.originalImageJobId,
+      pipeline_role: "repair-candidate",
+      verification_summary: verification,
+      pipeline_trace: {
+        ...candidateTrace,
+        pairwiseVerification: verification,
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.candidateImageJobId);
+  if (candidateUpdateError) throw candidateUpdateError;
+
+  const originalTrace =
+    original.pipeline_trace &&
+    typeof original.pipeline_trace === "object" &&
+    !Array.isArray(original.pipeline_trace)
+      ? (original.pipeline_trace as Record<string, unknown>)
+      : {};
+
+  const originalUpdate: Record<string, unknown> = {
+    verification_summary: verification,
+    pipeline_trace: {
+      ...originalTrace,
+      repairVerification: verification,
+      finalSelection: {
+        selectedImageJobId: decision.acceptCandidate
+          ? input.candidateImageJobId
+          : input.originalImageJobId,
+        reason: decision.verdict,
+      },
+    },
+    updated_at: new Date().toISOString(),
+  };
+
+  if (decision.acceptCandidate) {
+    originalUpdate.result_path = candidate.result_path;
+    originalUpdate.result_model = candidate.result_model;
+    originalUpdate.result_provider = candidate.result_provider;
+    originalUpdate.accepted_result_job_id = input.candidateImageJobId;
+  }
+
+  const { error: originalUpdateError } = await supabase
+    .from("inference_jobs")
+    .update(originalUpdate)
+    .eq("id", input.originalImageJobId);
+  if (originalUpdateError) throw originalUpdateError;
+
+  return decision;
+}
+
+function repairTargetsFromPlan(plan: unknown) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return [];
+  const targets = (plan as { targets?: unknown }).targets;
+  if (!Array.isArray(targets)) return [];
+
+  return [
+    ...new Set(
+      targets
+        .map((target) => {
+          if (!target || typeof target !== "object" || Array.isArray(target)) {
+            return null;
+          }
+          const category = (target as { category?: unknown }).category;
+          return typeof category === "string" ? category : null;
+        })
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ].slice(0, 8);
+}
+
+
 async function recordSemanticJudgeEvidence(input: {
   ownerRef: string;
   judgeJobId: string;
@@ -384,7 +512,7 @@ export async function POST(request: Request) {
     const supabase = createAdminSupabaseClient();
     const { data: job, error: jobError } = await supabase
       .from("text_inference_jobs")
-      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id,messages,capability,routing_preference,route_reason,business_id,source_image_job_id")
+      .select("id,status,client_owner_ref,conversation_id,worker_id,claimed_at,personal_use,personal_user_id,personal_conversation_id,messages,capability,routing_mode,routing_preference,route_reason,business_id,source_image_job_id,comparison_image_job_id")
       .eq("id", jobId)
       .maybeSingle();
 
