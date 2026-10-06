@@ -121,3 +121,47 @@ The console shows:
 - active concurrency.
 
 While the console is open it polls active workflows, which also reconciles completed cloud/local inference jobs and releases newly-ready downstream nodes. Repository-task completion also triggers workflow advancement directly.
+
+
+## Media execution rollout
+
+### Phase 1 — planning only
+
+Media nodes are created only when the objective contains a direct image/video generation request.
+
+The node uses the existing media router and registry scoring to persist:
+- selected provider/model;
+- media tier;
+- quoted workflow cost;
+- provider cost estimate;
+- recipe and controls;
+- performance/value/confidence evidence.
+
+No generation request is sent during planning.
+
+### Phase 2 — explicit one-shot image approval
+
+The currently enabled execution slice is intentionally narrow:
+
+- text-to-image only;
+- selected provider must be OpenRouter;
+- user must explicitly click **Approve one image generation**;
+- the exact planned route is revalidated against the live catalog, registry, policy gates, and current quote;
+- a higher live quote requires a new approval;
+- workflow budget is reserved atomically before execution;
+- connected OpenRouter credentials are used as BYOK when available;
+- otherwise a paid CoOperative-funded route must successfully reserve the profile AI balance;
+- exactly one direct image-provider request is sent;
+- no automatic retry or fallback is allowed;
+- success settles the workflow budget and any CoOperative balance reservation;
+- provider failure releases reservations and persists the failure/evidence;
+- the generated media job is linked back to the workflow node.
+
+Video, Nous/Hermes media execution, reference-image workflow execution, and automatic media retries remain disabled in this phase.
+
+The shared workflow budget reservation is enforced by database RPCs:
+- reserve_agent_workflow_node_budget
+- settle_agent_workflow_node_budget
+- release_agent_workflow_node_budget
+
+These functions lock the workflow/node rows so simultaneous approvals cannot exceed the shared request cap.
