@@ -14,7 +14,11 @@ import {
   mediaPromptWithResolvedControls,
   planMediaRequest,
 } from "@/lib/inference/media-request";
-import { evaluateMediaExecutionContentGate, recordMediaRuntimePolicyRefusal } from "@/lib/inference/media-model-capabilities";
+import {
+  evaluateMediaExecutionContentGate,
+  mediaContentPreferenceForUser,
+  recordMediaRuntimePolicyRefusal,
+} from "@/lib/inference/media-model-capabilities";
 import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog";
 import {
   buildMediaRecommendationOptions,
@@ -301,13 +305,17 @@ export async function approveAndExecuteWorkflowMediaImage(input: {
   );
 
   const adultClass = adultMediaContentClass(workflow.objective);
+  const workflowUserId = userIdFromOwnerRef(input.ownerRef);
+  const mediaPreference = workflowUserId
+    ? await mediaContentPreferenceForUser(workflowUserId)
+    : { preference: "sfw_only" as const, adultContentAcknowledgedAt: null };
   const recommendations = await buildMediaRecommendationOptions({
     plan,
     openRouterCatalog: catalog,
     currentCapUsd: remainingBudgetUsd,
     localImageAvailable: false,
     requiresReferenceImage: false,
-    contentPreference: "sfw_only",
+    contentPreference: mediaPreference.preference,
     adultOutputRequested: adultClass !== "sfw",
     adultContentClass: adultClass,
     cooperativeManagedOpenRouter: !usingConnectedCredential,
@@ -978,13 +986,17 @@ export async function approveAndStartWorkflowMediaVideo(input: {
   );
 
   const adultClass = adultMediaContentClass(workflow.objective);
+  const workflowUserId = userIdFromOwnerRef(input.ownerRef);
+  const mediaPreference = workflowUserId
+    ? await mediaContentPreferenceForUser(workflowUserId)
+    : { preference: "sfw_only" as const, adultContentAcknowledgedAt: null };
   const recommendations = await buildMediaRecommendationOptions({
     plan,
     openRouterCatalog: catalog,
     currentCapUsd: remainingBudgetUsd,
     localImageAvailable: false,
     requiresReferenceImage: false,
-    contentPreference: "sfw_only",
+    contentPreference: mediaPreference.preference,
     adultOutputRequested: adultClass !== "sfw",
     adultContentClass: adultClass,
     cooperativeManagedOpenRouter: !usingConnectedCredential,
