@@ -26,6 +26,13 @@ type RegistryRoute = {
   free: boolean;
   recommended: boolean;
   execution_ready: boolean;
+  input_modalities?: string[];
+  output_modalities?: string[];
+  capability_summary?: Record<string, unknown>;
+  pricing?: Record<string, unknown>;
+  limits?: Record<string, unknown>;
+  policy_summary?: Record<string, unknown>;
+  runtime_summary?: Record<string, unknown>;
   score_summary?: Record<string, Record<string, unknown>>;
   score_version?: string | null;
   score_updated_at?: string | null;
@@ -163,7 +170,152 @@ function smokeOutcome(test: SmokeTest | null) {
 
 function money(value: number) {
   if (!Number.isFinite(value)) return "—";
-  return `$${value.toFixed(value < 0.01 ? 4 : 2)}`;
+  return `${value.toFixed(value < 0.01 ? 4 : 2)}`;
+}
+
+function routeKey(route: {
+  provider: string;
+  model: string;
+  endpoint?: string | null;
+  kind?: string;
+  route_kind?: string;
+}) {
+  return [
+    route.provider,
+    route.model,
+    route.endpoint || "",
+    route.kind || route.route_kind || "",
+  ].join("|");
+}
+
+function providerPath(provider: string) {
+  if (provider === "nous") return "Nous → FAL hosted route";
+  if (provider === "openrouter") return "OpenRouter hosted route";
+  if (provider === "cooperative-local") return "CoOperative owned/local route";
+  return `${provider} route`;
+}
+
+function adultPolicyFromRegistry(route: RegistryRoute) {
+  const adult =
+    route.policy_summary?.adult &&
+    typeof route.policy_summary.adult === "object" &&
+    !Array.isArray(route.policy_summary.adult)
+      ? (route.policy_summary.adult as Record<string, unknown>)
+      : {};
+
+  return {
+    nonExplicit:
+      typeof adult.nonExplicit === "string" ? adult.nonExplicit : "unknown",
+    nonExplicitSource:
+      typeof adult.nonExplicitSource === "string"
+        ? adult.nonExplicitSource
+        : null,
+    explicit:
+      typeof adult.explicit === "string" ? adult.explicit : "unknown",
+    explicitSource:
+      typeof adult.explicitSource === "string" ? adult.explicitSource : null,
+  };
+}
+
+function explicitPolicyLabel(policy: string, source: string | null) {
+  if (policy === "allowed") {
+    return {
+      short: "Policy allows explicit",
+      detail:
+        "The current policy evidence allows the scope. CoOperative still requires exact-route verification before using explicit output.",
+    };
+  }
+
+  if (policy === "disallowed") {
+    if (source?.startsWith("runtime-policy-refusal:")) {
+      return {
+        short: "Observed runtime refusal",
+        detail:
+          "This exact hosted route previously refused an explicit request. This is route evidence, not a statement about the underlying model weights.",
+      };
+    }
+    if (
+      source?.includes("fal.ai") ||
+      source?.includes("nousresearch.com")
+    ) {
+      return {
+        short: "Host policy blocks explicit",
+        detail:
+          "The underlying model may or may not be technically capable. This Nous/FAL hosted route is restricted by the host/provider policy.",
+      };
+    }
+    return {
+      short: "Route policy blocks explicit",
+      detail:
+        "Current policy evidence blocks explicit output for this exact route.",
+    };
+  }
+
+  return {
+    short: "Explicit not verified",
+    detail:
+      "No exact-route evidence currently verifies explicit output. CoOperative will not probe an unknown hosted route during a real user request.",
+  };
+}
+
+function nonExplicitLabel(route: SmokeRoute | null, registry: RegistryRoute) {
+  if (route?.latestAdultNonExplicitTest?.outcome === "supported") {
+    return "Tested: supported";
+  }
+  if (route?.latestAdultNonExplicitTest?.outcome === "blocked") {
+    return "Tested: refused";
+  }
+
+  const policy = route?.policy.adultNonExplicit ||
+    adultPolicyFromRegistry(registry).nonExplicit;
+  const source = route?.policy.adultNonExplicitSource ||
+    adultPolicyFromRegistry(registry).nonExplicitSource;
+
+  if (policy === "disallowed") {
+    return source?.includes("fal.ai")
+      ? "Host policy blocks non-explicit"
+      : "Route policy blocks non-explicit";
+  }
+  if (policy === "allowed") return "Policy allows; untested";
+  return "Not tested / unknown";
+}
+
+function sfwLabel(route: SmokeRoute | null) {
+  if (!route?.latestSfwTest?.outcome) return "Not tested";
+  if (route.latestSfwTest.outcome === "supported") return "Tested: supported";
+  if (route.latestSfwTest.outcome === "blocked") return "Tested: refused";
+  if (route.latestSfwTest.outcome === "partial") return "Tested: partial";
+  return "Tested: inconclusive";
+}
+
+function mediaKind(routeKind: string): "image" | "video" | null {
+  if (routeKind === "image") return "image";
+  if (routeKind === "video") return "video";
+  return null;
+}
+
+function testUnavailableReason(
+  route: RegistryRoute,
+  smokeRoute: SmokeRoute | null,
+) {
+  if (smokeRoute) return null;
+  if (route.status !== "active") return "Route is not currently active.";
+  if (!route.execution_ready) {
+    return "Known in the registry, but not currently execution-ready.";
+  }
+  if (route.route_kind === "image-edit") {
+    return "Edit/reference route needs a standard reference fixture before one-click smoke testing can be enabled.";
+  }
+  if (!mediaKind(route.route_kind)) {
+    return "This is not an image/video generation route, so the media smoke test does not apply.";
+  }
+  if (route.provider === "cooperative-local") {
+    return "Owned/local route is visible, but this hosted smoke-test runner is not wired to the user's live local node yet.";
+  }
+  if (route.provider !== "nous" && route.provider !== "openrouter") {
+    return "No exact-route smoke-test executor is wired for this provider yet.";
+  }
+  return "The exact route cannot currently produce a bounded one-shot test price or does not have the required connected credential.";
 }
 
 export default function ModelRegistryConsole() {
@@ -181,6 +333,11 @@ export default function ModelRegistryConsole() {
   const [activeSmokeJobId, setActiveSmokeJobId] = useState<string | null>(null);
   const [lastSmokeResult, setLastSmokeResult] =
     useState<SmokeJobResponse | null>(null);
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [catalogProvider, setCatalogProvider] = useState("all");
+  const [catalogKind, setCatalogKind] = useState("all");
+  const [catalogReadiness, setCatalogReadiness] = useState("all");
+  const [catalogLimit, setCatalogLimit] = useState(75);
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/inference/models/scan", {
@@ -366,6 +523,62 @@ export default function ModelRegistryConsole() {
           (b.confidence || 0) - (a.confidence || 0),
       );
   }, [routes]);
+
+  const smokeRouteMap = useMemo(() => {
+    const map = new Map<string, SmokeRoute>();
+    for (const route of smoke?.routes || []) {
+      map.set(routeKey(route), route);
+    }
+    return map;
+  }, [smoke?.routes]);
+
+  const catalogProviders = useMemo(
+    () => [...new Set(routes.map((route) => route.provider))].sort(),
+    [routes],
+  );
+
+  const filteredCatalogRoutes = useMemo(() => {
+    const query = catalogQuery.trim().toLowerCase();
+    return routes.filter((route) => {
+      if (
+        catalogProvider !== "all" &&
+        route.provider !== catalogProvider
+      ) {
+        return false;
+      }
+      if (catalogKind !== "all" && route.route_kind !== catalogKind) {
+        return false;
+      }
+      if (
+        catalogReadiness === "ready" &&
+        !route.execution_ready
+      ) {
+        return false;
+      }
+      if (
+        catalogReadiness === "not-ready" &&
+        route.execution_ready
+      ) {
+        return false;
+      }
+      if (!query) return true;
+      return [
+        route.display_name,
+        route.model,
+        route.provider,
+        route.route_kind,
+        route.endpoint,
+      ]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query));
+    });
+  }, [
+    routes,
+    catalogQuery,
+    catalogProvider,
+    catalogKind,
+    catalogReadiness,
+  ]);
 
   const smokeCap = Number(smokeCapUsd);
   const nextPendingSmoke = useMemo(() => {
@@ -591,11 +804,13 @@ export default function ModelRegistryConsole() {
       <div className="card">
         <div className="agent-submit-row">
           <div>
-            <strong>Refusal smoke matrix</strong>
+            <strong>Media route capability tests</strong>
             <p>
-              One exact route at a time. SFW and non-explicit adult boundary tests
-              never retry or fall back. Explicit sexual generation is not used as a
-              smoke test; explicit scope is classified from current policy evidence.
+              These are exact hosted-route tests, not judgments about the underlying
+              model weights. SFW and non-explicit adult tests make one generation call
+              with no retry or fallback. Explicit scope is shown from policy/runtime
+              evidence only; CoOperative does not generate explicit material just to
+              probe a provider.
             </p>
           </div>
           <button
@@ -621,7 +836,7 @@ export default function ModelRegistryConsole() {
             <strong>{smoke?.matrix?.adultNonExplicitCoveredCount ?? "—"}</strong>
           </div>
           <div className="field">
-            <span>Explicit policy-blocked</span>
+            <span>Explicit blocked by host/route policy</span>
             <strong>{smoke?.matrix?.explicitPolicyBlockedCount ?? "—"}</strong>
           </div>
         </div>
@@ -706,15 +921,30 @@ export default function ModelRegistryConsole() {
           {(smoke?.routes || []).slice(0, 60).map((route) => (
             <div key={`${route.provider}|${route.model}|${route.kind}`}>
               <p>
-                <b>{route.label}</b> · {route.provider} · {route.kind} · test{" "}
-                {money(route.estimatedProviderCostUsd)} · SFW{" "}
-                <b>{smokeOutcome(route.latestSfwTest)}</b> · non-explicit{" "}
+                <b>{route.label}</b> · {providerPath(route.provider)} · {route.kind} ·
+                test {money(route.estimatedProviderCostUsd)}
+              </p>
+              <p>
+                SFW <b>{sfwLabel(route)}</b> · non-explicit{" "}
                 <b>
-                  {route.policy.adultNonExplicit === "disallowed"
-                    ? "policy-blocked"
-                    : smokeOutcome(route.latestAdultNonExplicitTest)}
+                  {route.latestAdultNonExplicitTest?.outcome === "supported"
+                    ? "Tested: supported"
+                    : route.latestAdultNonExplicitTest?.outcome === "blocked"
+                      ? "Tested: refused"
+                      : route.policy.adultNonExplicit === "disallowed"
+                        ? "Blocked by host/route policy"
+                        : "Not tested / unknown"}
                 </b>{" "}
-                · explicit <b>{route.policy.adultExplicit}</b>
+                · explicit{" "}
+                <b title={explicitPolicyLabel(
+                  route.policy.adultExplicit,
+                  route.policy.adultExplicitSource,
+                ).detail}>
+                  {explicitPolicyLabel(
+                    route.policy.adultExplicit,
+                    route.policy.adultExplicitSource,
+                  ).short}
+                </b>
               </p>
               <div className="agent-submit-row">
                 <button
@@ -756,6 +986,200 @@ export default function ModelRegistryConsole() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="card">
+        <strong>All model routes</strong>
+        <p>
+          Full registry browser. Every discovered route stays visible here. Image and
+          video generation routes expose exact smoke-test controls when CoOperative can
+          safely execute and price that route; otherwise the row explains what is
+          missing.
+        </p>
+
+        <label className="field">
+          <span>Search models</span>
+          <input
+            type="search"
+            placeholder="Model, provider, route kind…"
+            value={catalogQuery}
+            onChange={(event) => {
+              setCatalogQuery(event.target.value);
+              setCatalogLimit(75);
+            }}
+          />
+        </label>
+
+        <div className="row">
+          <label className="field">
+            <span>Provider</span>
+            <select
+              value={catalogProvider}
+              onChange={(event) => {
+                setCatalogProvider(event.target.value);
+                setCatalogLimit(75);
+              }}
+            >
+              <option value="all">All providers</option>
+              {catalogProviders.map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Route type</span>
+            <select
+              value={catalogKind}
+              onChange={(event) => {
+                setCatalogKind(event.target.value);
+                setCatalogLimit(75);
+              }}
+            >
+              <option value="all">All route types</option>
+              {[...new Set(routes.map((route) => route.route_kind))]
+                .sort()
+                .map((kind) => (
+                  <option key={kind} value={kind}>
+                    {kind}
+                  </option>
+                ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Readiness</span>
+            <select
+              value={catalogReadiness}
+              onChange={(event) => {
+                setCatalogReadiness(event.target.value);
+                setCatalogLimit(75);
+              }}
+            >
+              <option value="all">All</option>
+              <option value="ready">Execution-ready</option>
+              <option value="not-ready">Known, not ready</option>
+            </select>
+          </label>
+        </div>
+
+        <p>
+          Showing {Math.min(catalogLimit, filteredCatalogRoutes.length)} of{" "}
+          {filteredCatalogRoutes.length} matching routes · {routes.length} total in
+          registry.
+        </p>
+
+        <div>
+          {filteredCatalogRoutes.slice(0, catalogLimit).map((route) => {
+            const kind = mediaKind(route.route_kind);
+            const smokeRoute = kind
+              ? smokeRouteMap.get(
+                  routeKey({
+                    provider: route.provider,
+                    model: route.model,
+                    endpoint: route.endpoint,
+                    kind,
+                  }),
+                ) || null
+              : null;
+            const policy = smokeRoute?.policy || adultPolicyFromRegistry(route);
+            const explicit = explicitPolicyLabel(
+              policy.explicit,
+              policy.explicitSource,
+            );
+            const unavailable = testUnavailableReason(route, smokeRoute);
+
+            return (
+              <div key={route.id}>
+                <p>
+                  <b>{route.display_name}</b> · {providerPath(route.provider)} ·{" "}
+                  {route.route_kind} ·{" "}
+                  <b>{route.execution_ready ? "execution-ready" : "known only"}</b>
+                  {route.free ? " · free" : " · paid/usage-based"}
+                </p>
+
+                {kind ? (
+                  <>
+                    <p>
+                      SFW <b>{sfwLabel(smokeRoute)}</b> · non-explicit{" "}
+                      <b>{nonExplicitLabel(smokeRoute, route)}</b> · explicit{" "}
+                      <b title={explicit.detail}>{explicit.short}</b>
+                    </p>
+                    {smokeRoute ? (
+                      <div className="agent-submit-row">
+                        <span>
+                          One-shot test estimate{" "}
+                          {money(smokeRoute.estimatedProviderCostUsd)}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={
+                            Boolean(smokeRoute.latestSfwTest) ||
+                            smokeRunning ||
+                            Boolean(activeSmokeJobId) ||
+                            Boolean(smoke?.activeJob) ||
+                            !Number.isFinite(smokeCap) ||
+                            smokeRoute.capUsd > smokeCap
+                          }
+                          onClick={() =>
+                            void runSmoke(smokeRoute, "sfw_baseline")
+                          }
+                        >
+                          {smokeRoute.latestSfwTest
+                            ? "SFW tested"
+                            : "Test SFW"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={
+                            !smokeRoute.adultNonExplicitTestEligible ||
+                            Boolean(smokeRoute.latestAdultNonExplicitTest) ||
+                            smokeRunning ||
+                            Boolean(activeSmokeJobId) ||
+                            Boolean(smoke?.activeJob) ||
+                            !Number.isFinite(smokeCap) ||
+                            smokeRoute.capUsd > smokeCap
+                          }
+                          onClick={() =>
+                            void runSmoke(
+                              smokeRoute,
+                              "adult_non_explicit_boundary",
+                            )
+                          }
+                        >
+                          {smokeRoute.policy.adultNonExplicit === "disallowed"
+                            ? "Non-explicit blocked by policy"
+                            : smokeRoute.latestAdultNonExplicitTest
+                              ? "Boundary tested"
+                              : "Test non-explicit"}
+                        </button>
+                      </div>
+                    ) : (
+                      <p>
+                        <b>Exact smoke test unavailable:</b> {unavailable}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p>
+                    <b>Testing:</b> {unavailable}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {catalogLimit < filteredCatalogRoutes.length ? (
+          <button
+            type="button"
+            onClick={() => setCatalogLimit((value) => value + 75)}
+          >
+            Show 75 more
+          </button>
+        ) : null}
       </div>
 
       <div className="card">
