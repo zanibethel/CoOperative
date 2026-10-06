@@ -628,7 +628,36 @@ export async function approveAndExecuteWorkflowMediaImage(input: {
     const resultText =
       `Generated image with ${selected.model}.\nMEDIA_IMAGE:${mediaUrl}`;
 
-    await admin
+    const { error: pendingResultError } = await admin
+      .from("agent_workflow_nodes")
+      .update({
+        result: {
+          ...(node.result || {}),
+          executionEnabled: true,
+          generationSent: true,
+          oneShot: true,
+          noAutomaticRetry: true,
+          mediaJobId: jobId,
+          provider: selected.provider,
+          model: selected.model,
+          reconciliationPending: true,
+          pendingDirectResult: {
+            mediaUrl,
+            resultText,
+            storagePath: direct.storagePath,
+            mimeType: direct.mimeType,
+            usage: direct.usage,
+            completedAt,
+          },
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", node.id)
+      .eq("workflow_id", workflow.id)
+      .eq("status", "running");
+    if (pendingResultError) throw pendingResultError;
+
+    const { data: completedJob, error: completeJobError } = await admin
       .from("media_generation_jobs")
       .update({
         status: "completed",
@@ -670,7 +699,16 @@ export async function approveAndExecuteWorkflowMediaImage(input: {
         updated_at: completedAt,
       })
       .eq("id", jobId)
-      .eq("owner_ref", input.ownerRef);
+      .eq("owner_ref", input.ownerRef)
+      .eq("status", "running")
+      .select("id")
+      .maybeSingle();
+    if (completeJobError) throw completeJobError;
+    if (!completedJob) {
+      throw new Error(
+        "The generated image was persisted, but the media job could not be finalized yet.",
+      );
+    }
 
     if (profileReservationId) {
       await settleAiProfileFunds({
@@ -695,7 +733,7 @@ export async function approveAndExecuteWorkflowMediaImage(input: {
       actualMicrousd: currentQuoteMicrousd,
     });
 
-    await admin
+    const { error: nodeCompleteError } = await admin
       .from("agent_workflow_nodes")
       .update({
         status: "completed",
@@ -720,6 +758,8 @@ export async function approveAndExecuteWorkflowMediaImage(input: {
               ? "openrouter-byok"
               : "free",
           usage: direct.usage,
+          reconciliationPending: false,
+          pendingDirectResult: null,
         },
         error: null,
         completed_at: completedAt,
@@ -727,6 +767,7 @@ export async function approveAndExecuteWorkflowMediaImage(input: {
       })
       .eq("id", node.id)
       .eq("workflow_id", workflow.id);
+    if (nodeCompleteError) throw nodeCompleteError;
 
     return {
       ok: true as const,
@@ -1430,7 +1471,7 @@ export async function syncWorkflowMediaNode(input: {
   const { workflow, node } = state;
   if (
     node.node_kind !== "media" ||
-    node.task_type !== "video-generation" ||
+    !["image-generation", "video-generation"].includes(node.task_type) ||
     !node.child_media_job_id ||
     !["queued", "running"].includes(node.status)
   ) {
@@ -1452,6 +1493,7 @@ export async function syncWorkflowMediaNode(input: {
   let current = job;
 
   if (
+    node.task_type === "video-generation" &&
     current.status === "running" &&
     current.sandbox_name &&
     current.deadline_at
@@ -1592,6 +1634,86 @@ export async function syncWorkflowMediaNode(input: {
     }
   }
 
+  if (
+    node.task_type === "image-generation" &&
+    current.status === "running"
+  ) {
+    const nodeResult =
+      node.result && typeof node.result === "object" ? node.result : {};
+    const pending =
+      nodeResult.pendingDirectResult &&
+      typeof nodeResult.pendingDirectResult === "object" &&
+      !Array.isArray(nodeResult.pendingDirectResult)
+        ? (nodeResult.pendingDirectResult as Record<string, unknown>)
+        : null;
+
+    const mediaUrl =
+      pending && typeof pending.mediaUrl === "string"
+        ? pending.mediaUrl
+        : null;
+    const resultText =
+      pending && typeof pending.resultText === "string"
+        ? pending.resultText
+        : null;
+    const storagePath =
+      pending && typeof pending.storagePath === "string"
+        ? pending.storagePath
+        : null;
+    const mimeType =
+      pending && typeof pending.mimeType === "string"
+        ? pending.mimeType
+        : null;
+    const completedAt =
+      pending && typeof pending.completedAt === "string"
+        ? pending.completedAt
+        : new Date().toISOString();
+    const pendingUsage =
+      pending &&
+      pending.usage &&
+      typeof pending.usage === "object" &&
+      !Array.isArray(pending.usage)
+        ? pending.usage
+        : null;
+
+    if (mediaUrl && resultText && storagePath && mimeType) {
+      const pricingDimensions =
+        current.pricing_dimensions &&
+        typeof current.pricing_dimensions === "object" &&
+        !Array.isArray(current.pricing_dimensions)
+          ? (current.pricing_dimensions as Record<string, unknown>)
+          : {};
+
+      const { data: recovered, error: recoveryError } = await admin
+        .from("media_generation_jobs")
+        .update({
+          status: "completed",
+          result_url: mediaUrl,
+          result_text: resultText,
+          usage: pendingUsage,
+          pricing_dimensions: {
+            ...pricingDimensions,
+            generatedStoragePath: storagePath,
+            generatedMimeType: mimeType,
+            directProvider: true,
+            reconciliationRecovered: true,
+          },
+          error: null,
+          completed_at: completedAt,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", current.id)
+        .eq("owner_ref", input.ownerRef)
+        .eq("status", "running")
+        .select(
+          "id,status,provider,model,sandbox_name,deadline_at,result_url,result_text,usage,error,billing_mode,ai_balance_reservation_id,estimated_user_charge_microusd,estimated_provider_cost_microusd,pricing_dimensions",
+        )
+        .maybeSingle();
+
+      if (recoveryError) throw recoveryError;
+      if (recovered) current = recovered;
+    }
+  }
+
   if (current.status === "completed" && current.result_url) {
     const quotedMicrousd = Math.max(
       0,
@@ -1616,7 +1738,8 @@ export async function syncWorkflowMediaNode(input: {
           outcome: "completed",
           provider: current.provider,
           model: current.model,
-          kind: "video",
+          kind:
+            node.task_type === "video-generation" ? "video" : "image",
           oneShot: true,
         },
       });
@@ -1629,7 +1752,7 @@ export async function syncWorkflowMediaNode(input: {
       actualMicrousd: workflowActualMicrousd,
     });
 
-    await admin
+    const { error: billingUpdateError } = await admin
       .from("media_generation_jobs")
       .update({
         billed_microusd:
@@ -1659,9 +1782,10 @@ export async function syncWorkflowMediaNode(input: {
       })
       .eq("id", current.id)
       .eq("owner_ref", input.ownerRef);
+    if (billingUpdateError) throw billingUpdateError;
 
     const completedAt = new Date().toISOString();
-    await admin
+    const { error: nodeCompleteError } = await admin
       .from("agent_workflow_nodes")
       .update({
         status: "completed",
@@ -1683,6 +1807,8 @@ export async function syncWorkflowMediaNode(input: {
               : 0,
           billingMode: current.billing_mode || "free",
           usage: current.usage,
+          reconciliationPending: false,
+          pendingDirectResult: null,
         },
         error: null,
         completed_at: completedAt,
@@ -1690,6 +1816,7 @@ export async function syncWorkflowMediaNode(input: {
       })
       .eq("id", node.id)
       .eq("workflow_id", workflow.id);
+    if (nodeCompleteError) throw nodeCompleteError;
 
     return loadWorkflowMediaNode(
       input.ownerRef,
