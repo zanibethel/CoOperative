@@ -176,6 +176,43 @@ function parseFalVideoPricing(
     }
   }
 
+
+  // Other FAL pages use compact "$0.05 480p" formatting after a sentence that
+  // already establishes per-second billing.
+  const compactResolutionPrice =
+    /\$\s*([0-9]+(?:\.[0-9]+)?)\s+(360p|480p|540p|720p|768p|1080p|1440p|2160p|2k|4k)\b/gi;
+  for (const match of text.matchAll(compactResolutionPrice)) {
+    const at = match.index ?? 0;
+    const context = text.slice(Math.max(0, at - 220), at).toLowerCase();
+    if (
+      context.includes("every second") ||
+      context.includes("per second") ||
+      context.includes("second of video")
+    ) {
+      setVideoRateIfMissing(rates, match[2], Number(match[1]));
+    }
+  }
+
+  // FLUX-style copy can put the currency symbol after the amount:
+  // "0.17 $ per second ... at 720p".
+  const suffixDollarRate =
+    /([0-9]+(?:\.[0-9]+)?)\s*\$\s*per\s+second[^$]{0,100}?\b(?:at|for)\s+(360p|480p|540p|720p|768p|1080p|1440p|2160p|2k|4k)\b/gi;
+  for (const match of text.matchAll(suffixDollarRate)) {
+    setVideoRateIfMissing(rates, match[2], Number(match[1]));
+  }
+
+  // Flat routes such as native 4K Kling establish the unit before the amount:
+  // "For every second ... charged $0.42 regardless of whether audio is on".
+  if (!Object.keys(rates).length) {
+    const everySecondFlat = text.match(
+      /for\s+every\s+second[^$]{0,100}\$\s*([0-9]+(?:\.[0-9]+)?)[^.]{0,120}regardless\s+of\s+(?:whether\s+)?audio/i,
+    );
+    if (everySecondFlat) {
+      const rate = Number(everySecondFlat[1]);
+      setVideoRateIfMissing(rates, "default", rate, rate);
+    }
+  }
+
   // Flat pricing is only safe when the page explicitly says resolution/audio do
   // not change price, or the Hermes family exposes no resolution choices.
   if (!Object.keys(rates).length) {
