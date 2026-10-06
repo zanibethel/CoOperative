@@ -58,7 +58,9 @@ const semanticFindingSchema = z.object({
 });
 
 const semanticJudgeSchema = z.object({
-  version: z.literal("semantic-vision-v1").default("semantic-vision-v1"),
+  version: z
+    .enum(["semantic-vision-v1", "semantic-vision-v1.1"])
+    .default("semantic-vision-v1.1"),
   overallScore: semanticScoreSchema,
   promptAdherence: semanticScoreSchema,
   faceQuality: semanticNullableScoreSchema.default(null),
@@ -166,7 +168,7 @@ async function recordSemanticJudgeEvidence(input: {
     endpoint: "",
     routeKind: "image",
     capabilityKey: "semantic-quality-judge",
-    scope: "semantic-vision-v1",
+    scope: input.report.version,
     state: "supported",
     sourceType: "runtime-success",
     sourceRef: input.judgeJobId,
@@ -483,7 +485,7 @@ export async function POST(request: Request) {
 
       await updateSourceSemanticJudgeTrace(supabase, sourceImageJobId, {
         status: "completed",
-        version: "semantic-vision-v1",
+        version: report.version,
         judgeJobId: jobId,
         model: resultModel,
         provider,
