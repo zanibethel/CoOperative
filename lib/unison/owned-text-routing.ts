@@ -6,6 +6,7 @@ type AdminClient = ReturnType<typeof createAdminSupabaseClient>;
 export type OwnedTextNodePreference = {
   id: string;
   displayName: string | null;
+  specialization?: "media-planning";
 };
 
 export function userIdFromOwnerRef(ownerRef: string | null | undefined) {
@@ -118,7 +119,11 @@ export async function preferredOwnedMediaPlanningNode(
 
   const selected = candidates[0];
   if (selected) {
-    return { id: selected.id, displayName: selected.display_name || null };
+    return {
+      id: selected.id,
+      displayName: selected.display_name || null,
+      specialization: "media-planning",
+    };
   }
 
   return preferredOwnedTextNode(admin, userId);
