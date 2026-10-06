@@ -3069,21 +3069,23 @@ export async function POST(request: Request) {
             },
             costBearer: "user-connected",
           });
-        } else if (
-          latestNousCatalog.video &&
-          latestNousCatalog.video.model === selectedModel
-        ) {
-          reconciledCostResolution = resolveMediaRequestCost({
-            provider: "nous",
-            model: selectedModel,
-            request: requestForPricing,
-            pricing: {
-              unit: "second",
-              rates: latestNousCatalog.video.rates,
-              pricingSource: latestNousCatalog.video.pricingSource,
-            },
-            costBearer: "user-connected",
-          });
+        } else {
+          const currentVideoModel = latestNousCatalog.videoModels.find(
+            (model) => model.model === selectedModel && model.executionReady,
+          );
+          if (currentVideoModel) {
+            reconciledCostResolution = resolveMediaRequestCost({
+              provider: "nous",
+              model: selectedModel,
+              request: requestForPricing,
+              pricing: {
+                unit: "second",
+                rates: currentVideoModel.rates,
+                pricingSource: currentVideoModel.pricingSource,
+              },
+              costBearer: "user-connected",
+            });
+          }
         }
       } else if (selectedProvider === "openrouter" && selectedMediaModel) {
         const refreshedOpenRouterEstimate = estimateOpenRouterMediaCostUsd(
@@ -3316,8 +3318,7 @@ export async function POST(request: Request) {
         );
       if (
         selectedProvider === "nous" &&
-        mediaPlan.kind === "video" &&
-        selectedModel === "pixverse-v6"
+        mediaPlan.kind === "video"
       ) {
         if (selectedResolution) {
           generationPrompt += `\nBudget-approved resolution: ${selectedResolution}.`;
