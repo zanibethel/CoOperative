@@ -1298,7 +1298,7 @@ export async function latestModelRegistrySnapshot() {
     admin
       .from("ai_model_registry")
       .select(
-        "id,provider,model,endpoint,route_kind,display_name,source,status,free,recommended,execution_ready,input_modalities,output_modalities,capability_summary,pricing,limits,policy_summary,benchmark_summary,runtime_summary,first_seen_at,last_seen_at,last_changed_at",
+        "id,provider,model,endpoint,route_kind,display_name,source,status,free,recommended,execution_ready,input_modalities,output_modalities,capability_summary,pricing,limits,policy_summary,benchmark_summary,runtime_summary,score_summary,score_version,score_updated_at,first_seen_at,last_seen_at,last_changed_at",
       )
       .order("provider")
       .order("route_kind")
@@ -1331,6 +1331,9 @@ export type ModelRegistryAvailabilityRoute = {
   limits: Record<string, unknown>;
   policySummary: Record<string, unknown>;
   runtimeSummary: Record<string, unknown>;
+  scoreSummary: Record<string, unknown>;
+  scoreVersion: string | null;
+  scoreUpdatedAt: string | null;
   lastSeenAt: string;
   lastChangedAt: string;
 };
@@ -1404,7 +1407,7 @@ export async function availableModelRegistryRoutes(input?: {
   let query = admin
     .from("ai_model_registry")
     .select(
-      "id,provider,model,endpoint,route_kind,display_name,status,free,recommended,execution_ready,input_modalities,output_modalities,capability_summary,pricing,limits,policy_summary,runtime_summary,last_seen_at,last_changed_at",
+      "id,provider,model,endpoint,route_kind,display_name,status,free,recommended,execution_ready,input_modalities,output_modalities,capability_summary,pricing,limits,policy_summary,runtime_summary,score_summary,score_version,score_updated_at,last_seen_at,last_changed_at",
     )
     .gte("last_seen_at", cutoff);
   if (input?.providers?.length) {
@@ -1474,6 +1477,16 @@ export async function availableModelRegistryRoutes(input?: {
       !Array.isArray(row.runtime_summary)
         ? (row.runtime_summary as Record<string, unknown>)
         : {},
+    scoreSummary:
+      row.score_summary &&
+      typeof row.score_summary === "object" &&
+      !Array.isArray(row.score_summary)
+        ? (row.score_summary as Record<string, unknown>)
+        : {},
+    scoreVersion:
+      typeof row.score_version === "string" ? row.score_version : null,
+    scoreUpdatedAt:
+      typeof row.score_updated_at === "string" ? row.score_updated_at : null,
     lastSeenAt: row.last_seen_at,
     lastChangedAt: row.last_changed_at,
   }));
@@ -1509,6 +1522,52 @@ export async function availableModelRegistryRoutes(input?: {
     coverage,
     keys,
     routes,
+  };
+}
+
+export function registryTaskScore(
+  availability: ModelRegistryAvailability,
+  input: {
+    provider: string;
+    model: string;
+    endpoint?: string | null;
+    routeKind?: string | null;
+    taskType: string;
+  },
+) {
+  const route = availability.routes.find(
+    (candidate) =>
+      candidate.provider === input.provider &&
+      candidate.model === input.model &&
+      candidate.endpoint === (input.endpoint || "") &&
+      (!input.routeKind || candidate.routeKind === input.routeKind),
+  );
+  if (!route) return null;
+
+  const value = route.scoreSummary[input.taskType];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const row = value as Record<string, unknown>;
+  const numeric = (key: string) => {
+    const raw = row[key];
+    if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+    if (typeof raw === "string" && raw.trim()) {
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+
+  return {
+    performance: numeric("performance"),
+    costEfficiency: numeric("costEfficiency"),
+    overallValue: numeric("overallValue"),
+    confidence: numeric("confidence"),
+    quality: numeric("quality"),
+    reliability: numeric("reliability"),
+    speed: numeric("speed"),
   };
 }
 
@@ -1552,13 +1611,39 @@ export async function preferredRegistryFreeTextModel(input?: {
 
   if (!candidates.length) return null;
 
-  const explicitFreeRouter = candidates.find(
-    (route) => route.model === "openrouter/free",
-  );
-  if (explicitFreeRouter) return explicitFreeRouter.model;
+  const taskType = input?.needsVision
+    ? "vision"
+    : input?.requireReasoning
+      ? "reasoning"
+      : "general-text";
 
   const ranked = [...candidates].sort((a, b) => {
-    const score = (route: ModelRegistryAvailabilityRoute) => {
+    const aScore = registryTaskScore(availability, {
+      provider: a.provider,
+      model: a.model,
+      endpoint: a.endpoint,
+      routeKind: a.routeKind,
+      taskType,
+    });
+    const bScore = registryTaskScore(availability, {
+      provider: b.provider,
+      model: b.model,
+      endpoint: b.endpoint,
+      routeKind: b.routeKind,
+      taskType,
+    });
+
+    const aValue = aScore?.overallValue ?? 0;
+    const bValue = bScore?.overallValue ?? 0;
+    const aConfidence = aScore?.confidence ?? 0;
+    const bConfidence = bScore?.confidence ?? 0;
+
+    if (Math.abs(bValue - aValue) > 0.001) return bValue - aValue;
+    if (Math.abs(bConfidence - aConfidence) > 0.001) {
+      return bConfidence - aConfidence;
+    }
+
+    const fallbackScore = (route: ModelRegistryAvailabilityRoute) => {
       let value = 0;
       if (route.capabilitySummary.reasoning === true) value += 4;
       if (route.capabilitySummary.structuredOutput === true) value += 3;
@@ -1574,7 +1659,11 @@ export async function preferredRegistryFreeTextModel(input?: {
       value += Math.min(4, contextLength / 100_000);
       return value;
     };
-    return score(b) - score(a) || a.model.localeCompare(b.model);
+
+    return (
+      fallbackScore(b) - fallbackScore(a) ||
+      a.model.localeCompare(b.model)
+    );
   });
 
   return ranked[0]?.model || null;
