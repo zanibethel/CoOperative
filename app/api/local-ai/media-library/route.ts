@@ -272,7 +272,7 @@ export async function POST(request: Request) {
       const requestedUrl = normalizeRemoteMediaUrl(input.mediaUrl);
       const { data: recentJobs, error } = await admin
         .from("media_generation_jobs")
-        .select("id,kind,result_url,provider,model,prompt")
+        .select("id,kind,result_url,provider,model,prompt,pricing_dimensions")
         .eq("owner_ref", owner)
         .eq("status", "completed")
         .not("result_url", "is", null)
