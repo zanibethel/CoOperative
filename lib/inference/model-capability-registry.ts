@@ -9,7 +9,7 @@ import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog
 import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
 import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
-export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-05.4";
+export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-06.1";
 
 type JsonMap = Record<string, unknown>;
 
@@ -425,6 +425,120 @@ function localRegistrySnapshots(
       benchmarkSummary: {},
       runtimeSummary: {},
       metadata: { registryRevision: registry.revision },
+    });
+  }
+
+  const localImageRoutes: Array<{
+    model: string;
+    displayName: string;
+    routeKind: "image" | "image-edit";
+    inputModalities: string[];
+    defaultModelId: string;
+    explicitModelId?: string;
+    profile: "fast" | "quality";
+    referenceMode?: string;
+  }> = [
+    {
+      model: "local-image-fast",
+      displayName: "Owned Local Fast · SD 1.5",
+      routeKind: "image",
+      inputModalities: ["text"],
+      defaultModelId: "stable-diffusion-v1-5/stable-diffusion-v1-5",
+      profile: "fast",
+    },
+    {
+      model: "local-image-quality",
+      displayName: "Owned Local Quality · SSD-1B / SDXL adult mode",
+      routeKind: "image",
+      inputModalities: ["text"],
+      defaultModelId: "segmind/SSD-1B",
+      explicitModelId: "stabilityai/stable-diffusion-xl-base-1.0",
+      profile: "quality",
+    },
+    {
+      model: "local-image-fast-reference",
+      displayName: "Owned Local Fast · Reference",
+      routeKind: "image-edit",
+      inputModalities: ["text", "image"],
+      defaultModelId: "stable-diffusion-v1-5/stable-diffusion-v1-5",
+      profile: "fast",
+      referenceMode: "img2img",
+    },
+    {
+      model: "local-image-quality-reference",
+      displayName: "Owned Local Quality · Reference",
+      routeKind: "image-edit",
+      inputModalities: ["text", "image"],
+      defaultModelId: "segmind/SSD-1B",
+      profile: "quality",
+      referenceMode: "img2img",
+    },
+    {
+      model: "local-image-quality-identity",
+      displayName: "Owned Local Quality · Identity",
+      routeKind: "image-edit",
+      inputModalities: ["text", "image"],
+      defaultModelId: "stabilityai/stable-diffusion-xl-base-1.0",
+      profile: "quality",
+      referenceMode: "ip-adapter",
+    },
+  ];
+
+  for (const imageRoute of localImageRoutes) {
+    routes.push({
+      provider: "cooperative-local",
+      model: imageRoute.model,
+      endpoint: "",
+      routeKind: imageRoute.routeKind,
+      displayName: imageRoute.displayName,
+      source: "owned-image-worker",
+      status: "active",
+      free: true,
+      recommended: imageRoute.model === "local-image-quality",
+      executionReady: true,
+      inputModalities: imageRoute.inputModalities,
+      outputModalities: ["image"],
+      capabilitySummary: {
+        textToImage: imageRoute.routeKind === "image",
+        imageToImage: imageRoute.routeKind === "image-edit",
+        referenceImages: imageRoute.routeKind === "image-edit",
+        profile: imageRoute.profile,
+        runtime: "diffusers-owned-worker",
+        defaultModelId: imageRoute.defaultModelId,
+        explicitModelId: imageRoute.explicitModelId || null,
+        safetyFilterControl: "local-configurable",
+        explicitReferenceImagesAllowed: false,
+        referenceMode: imageRoute.referenceMode || null,
+      },
+      pricing: {
+        billing: "owned-local",
+        estimatedProviderCostUsd: 0,
+      },
+      limits: {
+        maxReferenceImages: imageRoute.routeKind === "image-edit" ? 1 : 0,
+      },
+      policySummary: policySummary(
+        policyMap.get(policyKey("cooperative-local", imageRoute.model)),
+      ),
+      benchmarkSummary: {},
+      runtimeSummary:
+        runtimeMap.get(policyKey("cooperative-local", imageRoute.model)) || {},
+      metadata: {
+        registryRevision: registry.revision,
+        ownedRuntime: true,
+        thirdPartyProviderBoundary: false,
+        licenseReview:
+          imageRoute.model === "local-image-quality"
+            ? {
+                defaultModel: "segmind/SSD-1B",
+                defaultLicense: "Apache-2.0",
+                explicitModel: "stabilityai/stable-diffusion-xl-base-1.0",
+                explicitLicense: "CreativeML Open RAIL++-M",
+                explicitLicenseSource:
+                  "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md",
+              }
+            : {},
+      },
     });
   }
 
