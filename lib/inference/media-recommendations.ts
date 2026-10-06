@@ -1,6 +1,6 @@
 import "server-only";
 
-import { paidAiPriceQuote } from "@/lib/billing/paid-ai-pricing";
+import { resolveMediaRequestCost, type MediaCostResolution } from "@/lib/inference/model-cost-resolver";
 import {
   estimateOpenRouterMediaCostUsd,
   recommendedForRequest,
@@ -122,6 +122,7 @@ export type MediaRecommendationOption = {
   adultCapability: AdultCapabilityState;
   adultCapabilityNote: string | null;
   scorecard: MediaRouteScorecard;
+  costResolution?: MediaCostResolution;
 };
 
 type Candidate = Omit<
@@ -582,6 +583,7 @@ export async function buildMediaRecommendationOptions(input: {
   const registryAvailability = await availableModelRegistryRoutes({
     providers: ["openrouter", "nous"],
     routeKinds: ["image", "video"],
+    includeNonExecutable: true,
     maxAgeHours: 36,
   }).catch(() => ({
     authoritative: false,
@@ -637,21 +639,39 @@ export async function buildMediaRecommendationOptions(input: {
     });
     if (estimatedCostUsd === null || !Number.isFinite(estimatedCostUsd)) continue;
 
-    const sellPrice =
-      !model.free && input.cooperativeManagedOpenRouter
-        ? paidAiPriceQuote(estimatedCostUsd)
-        : null;
-    const quotedCostUsd = sellPrice?.userQuoteUsd ?? estimatedCostUsd;
+    const costResolution = resolveMediaRequestCost({
+      provider: "openrouter",
+      model: model.id,
+      request: plan,
+      pricing: {
+        unit: "request",
+        estimatedCostUsd,
+        pricingSource: openRouterCatalog?.source || "openrouter-live",
+        free: model.free,
+      },
+      costBearer: model.free
+        ? "free"
+        : input.cooperativeManagedOpenRouter
+          ? "cooperative"
+          : "user-connected",
+    });
+    if (
+      !costResolution.bounded ||
+      costResolution.providerCostUsd === null ||
+      costResolution.capCostUsd === null
+    ) {
+      continue;
+    }
 
     candidates.push({
       provider: "openrouter",
       model: model.id,
       modelName: model.name || model.id,
-      estimatedCostUsd: quotedCostUsd,
-      providerCostEstimateUsd: estimatedCostUsd,
-      markupPercent: sellPrice?.markupPercent ?? 0,
-      capUsd: nextCent(quotedCostUsd),
-      pricingSource: openRouterCatalog?.source || "openrouter-live",
+      estimatedCostUsd: costResolution.capCostUsd,
+      providerCostEstimateUsd: costResolution.providerCostUsd,
+      markupPercent: costResolution.markupPercent,
+      capUsd: nextCent(costResolution.capCostUsd),
+      pricingSource: costResolution.pricingSource,
       resolution: plan.resolution,
       audio: plan.kind === "video" ? plan.audio : null,
       qualityLevel: openRouterQualityByModel.get(model.id) ?? (model.free ? 0 : 2),
@@ -663,6 +683,7 @@ export async function buildMediaRecommendationOptions(input: {
         ? "OpenRouter reports image input support for this generation model; CoOperative passes the attachment through a short-lived signed URL."
         : null,
       editEndpoint: null,
+      costResolution,
     });
   }
 
@@ -685,19 +706,38 @@ export async function buildMediaRecommendationOptions(input: {
 
     for (const [resolution, rates] of resolutionEntries) {
       if (!rates) continue;
-      const rate = requestedAudio ? rates.withAudio : rates.withoutAudio;
-      const estimatedCostUsd = plan.durationSeconds * rate;
-      if (!Number.isFinite(estimatedCostUsd)) continue;
+      const costResolution = resolveMediaRequestCost({
+        provider: "nous",
+        model: nousCatalog.video.model,
+        request: {
+          ...plan,
+          resolution,
+          audio: requestedAudio,
+        },
+        pricing: {
+          unit: "second",
+          rates: nousCatalog.video.rates,
+          pricingSource: nousCatalog.video.pricingSource,
+        },
+        costBearer: "user-connected",
+      });
+      if (
+        !costResolution.bounded ||
+        costResolution.providerCostUsd === null ||
+        costResolution.capCostUsd === null
+      ) {
+        continue;
+      }
 
       candidates.push({
         provider: "nous",
         model: nousCatalog.video.model,
         modelName: "PixVerse V6",
-        estimatedCostUsd,
-        providerCostEstimateUsd: estimatedCostUsd,
-        markupPercent: 0,
-        capUsd: nextCent(estimatedCostUsd),
-        pricingSource: nousCatalog.video.pricingSource,
+        estimatedCostUsd: costResolution.capCostUsd,
+        providerCostEstimateUsd: costResolution.providerCostUsd,
+        markupPercent: costResolution.markupPercent,
+        capUsd: nextCent(costResolution.capCostUsd),
+        pricingSource: costResolution.pricingSource,
         resolution,
         audio: requestedAudio,
         qualityLevel:
@@ -708,6 +748,7 @@ export async function buildMediaRecommendationOptions(input: {
         referenceBehavior: null,
         verificationNote: null,
         editEndpoint: null,
+        costResolution,
       });
     }
   }
@@ -736,22 +777,42 @@ export async function buildMediaRecommendationOptions(input: {
         ) {
           continue;
         }
+        const costResolution = resolveMediaRequestCost({
+          provider: "nous",
+          model: model.model,
+          request: plan,
+          pricing: {
+            unit: model.pricingUnit,
+            estimatedCostUsd: model.estimatedCostUsd,
+            pricingSource: model.pricingSource,
+          },
+          costBearer: "user-connected",
+        });
+        if (
+          !costResolution.bounded ||
+          costResolution.providerCostUsd === null ||
+          costResolution.capCostUsd === null
+        ) {
+          continue;
+        }
+
         candidates.push({
           provider: "nous",
           model: model.model,
-          modelName: model.model.replace(/^fal-ai\//, ""),
-          estimatedCostUsd: model.estimatedCostUsd,
-          providerCostEstimateUsd: model.estimatedCostUsd,
-          markupPercent: 0,
-          capUsd: nextCent(model.estimatedCostUsd),
-          pricingSource: model.pricingSource,
+          modelName: model.displayName || model.model.replace(/^fal-ai\//, ""),
+          estimatedCostUsd: costResolution.capCostUsd,
+          providerCostEstimateUsd: costResolution.providerCostUsd,
+          markupPercent: costResolution.markupPercent,
+          capUsd: nextCent(costResolution.capCostUsd),
+          pricingSource: costResolution.pricingSource,
           resolution: null,
           audio: null,
           qualityLevel: model.minLevel,
-          executionReady: true,
+          executionReady: costResolution.bounded,
           referenceBehavior: null,
           verificationNote: null,
           editEndpoint: null,
+          costResolution,
         });
       }
     }
