@@ -1399,14 +1399,9 @@ export async function availableModelRegistryRoutes(input?: {
   let query = admin
     .from("ai_model_registry")
     .select(
-      "id,provider,model,endpoint,route_kind,display_name,free,recommended,execution_ready,input_modalities,output_modalities,capability_summary,pricing,limits,policy_summary,runtime_summary,last_seen_at,last_changed_at",
+      "id,provider,model,endpoint,route_kind,display_name,status,free,recommended,execution_ready,input_modalities,output_modalities,capability_summary,pricing,limits,policy_summary,runtime_summary,last_seen_at,last_changed_at",
     )
-    .eq("status", "active")
     .gte("last_seen_at", cutoff);
-
-  if (!input?.includeNonExecutable) {
-    query = query.eq("execution_ready", true);
-  }
   if (input?.providers?.length) {
     query = query.in("provider", input.providers);
   }
@@ -1417,7 +1412,14 @@ export async function availableModelRegistryRoutes(input?: {
   const { data, error } = await query;
   if (error) throw error;
 
-  const routes: ModelRegistryAvailabilityRoute[] = (data || []).map((row) => ({
+  const scannedRows = data || [];
+  const eligibleRows = scannedRows.filter(
+    (row) =>
+      row.status === "active" &&
+      (input?.includeNonExecutable || row.execution_ready === true),
+  );
+
+  const routes: ModelRegistryAvailabilityRoute[] = eligibleRows.map((row) => ({
     id: row.id,
     provider: row.provider,
     model: row.model,
@@ -1481,8 +1483,8 @@ export async function availableModelRegistryRoutes(input?: {
     routes.length > 0;
 
   const coverage = new Set(
-    routes.map((route) =>
-      modelRegistryCoverageKey(route.provider, route.routeKind),
+    scannedRows.map((row) =>
+      modelRegistryCoverageKey(row.provider, row.route_kind),
     ),
   );
   const keys = new Set(
