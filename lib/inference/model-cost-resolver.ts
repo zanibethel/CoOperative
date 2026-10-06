@@ -119,7 +119,13 @@ function rateForVideoResolution(
   if (!rates || typeof rates !== "object" || Array.isArray(rates)) return null;
   const rows = rates as Record<string, unknown>;
   const key = (resolution || "").toLowerCase();
-  const row = key ? rows[key] : null;
+  let row = key ? rows[key] : null;
+
+  if (!row && rows.default) row = rows.default;
+  if (!row) {
+    const values = Object.values(rows);
+    if (values.length === 1) row = values[0];
+  }
   if (!row || typeof row !== "object" || Array.isArray(row)) return null;
 
   const record = row as Record<string, unknown>;
