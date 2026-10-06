@@ -21,7 +21,7 @@ Requirements:
 
 - Android SDK 37
 - JDK 17
-- Gradle 9.4.1 or Android Studio with compatible AGP 9.4 support
+- Gradle 9.6.0 or Android Studio with compatible AGP 9.4 support
 
 From this directory:
 
