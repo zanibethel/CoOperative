@@ -151,6 +151,12 @@ function inferEvidenceRouteKind(row: ExistingPolicyRow) {
   if (/video|pixverse/i.test(row.model) || /video/i.test(endpoint)) {
     return "video";
   }
+  if (
+    row.provider === "cooperative-local" &&
+    /(?:reference|identity)/i.test(row.model)
+  ) {
+    return "image-edit";
+  }
   if (endpoint) return "image-edit";
   if (/image|flux|banana|grok|seedream|z-image/i.test(row.model)) {
     return "image";
