@@ -14,6 +14,7 @@ import {
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
 import { classifyRecoveryFailure } from "@/lib/recovery/classifier";
+import { preferredRegistryFreeTextModel } from "@/lib/inference/model-capability-registry";
 
 type TextRecoveryJob = {
   id: string;
@@ -1162,6 +1163,12 @@ async function startRecoveryFreeReasoning(
     },
   ];
 
+  const fallbackModel =
+    (await preferredRegistryFreeTextModel({
+      requireReasoning: true,
+      requireStructuredOutput: false,
+    })) || "openrouter/free";
+
   const { error: insertError } = await admin.from("text_inference_jobs").insert({
     id: jobId,
     status: "running",
@@ -1185,7 +1192,7 @@ async function startRecoveryFreeReasoning(
     claimed_at: now,
     fallback_attempted_at: now,
     fallback_provider: "openrouter",
-    fallback_model: "openrouter/free",
+    fallback_model: fallbackModel,
   });
   if (insertError) throw insertError;
 
@@ -1198,7 +1205,7 @@ async function startRecoveryFreeReasoning(
     {
       jobId,
       provider: "openrouter",
-      model: "openrouter/free",
+      model: fallbackModel,
       paidAuthorized: false,
     },
   );
@@ -1208,6 +1215,7 @@ async function startRecoveryFreeReasoning(
       jobId,
       messages,
       openRouterCredential,
+      model: fallbackModel,
     });
     const { data: startedJob, error: updateError } = await admin
       .from("text_inference_jobs")
