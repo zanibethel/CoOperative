@@ -6,6 +6,7 @@
 #   "fastapi>=0.115.0",
 #   "httpx>=0.28.0",
 #   "pillow>=11.0.0",
+#   "peft>=0.13.1",
 #   "safetensors>=0.5.0",
 #   "torch>=2.5.0",
 #   "torchvision>=0.20.0",
@@ -19,6 +20,7 @@ import gc
 import io
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -97,7 +99,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.10.1")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.10.2")
 
 def start_repo_recovery_worker():
     enabled = os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
@@ -400,6 +402,38 @@ def ensure_explicit_profile():
     )
 
 
+def _term_is_explicitly_excluded(text: str, term: str) -> bool:
+    """
+    Treat ordinary safety exclusions like "no minors" or
+    "without non-consensual content" as exclusions rather than positive intent.
+    If the clause contains an exception/reversal, fail closed.
+    """
+    for match in re.finditer(re.escape(term), text):
+        prefix = text[max(0, match.start() - 140):match.start()]
+        clause = re.split(r"[.!?;\n]", prefix)[-1]
+        has_exclusion = re.search(
+            r"\b(?:no|without|exclude(?:d|s|ing)?|do not include|does not include|"
+            r"not involving|does not involve|no depictions? of)\b",
+            clause,
+        )
+        reverses_exclusion = re.search(
+            r"\b(?:except|unless|but|including|include|with)\b",
+            clause,
+        )
+        if has_exclusion and not reverses_exclusion:
+            return True
+    return False
+
+
+def _contains_positive_unsafe_term(text: str, terms: tuple[str, ...]) -> bool:
+    for term in terms:
+        if term not in text:
+            continue
+        if not _term_is_explicitly_excluded(text, term):
+            return True
+    return False
+
+
 def validate_content_mode(request: ImageRequest):
     if request.contentMode != "adult_explicit":
         return
@@ -418,13 +452,13 @@ def validate_content_mode(request: ImageRequest):
         "rape", "raped", "forced sex", "nonconsensual", "non-consensual",
         "against their will", "unconscious sex", "drugged sex"
     )
-    if any(term in text for term in minor_terms):
+    if _contains_positive_unsafe_term(text, minor_terms):
         raise RuntimeError(
-            "Explicit adult local generation was blocked because the prompt contains minor-age language."
+            "Explicit adult local generation was blocked because the prompt contains positive minor-age language."
         )
-    if any(term in text for term in coercion_terms):
+    if _contains_positive_unsafe_term(text, coercion_terms):
         raise RuntimeError(
-            "Explicit adult local generation was blocked because the prompt contains coercive or non-consensual sexual content."
+            "Explicit adult local generation was blocked because the prompt contains positive coercive or non-consensual sexual content."
         )
 
 def identity_scale(variation_mode: str) -> float:
@@ -762,6 +796,7 @@ def unison_capabilities():
         "owned_content_mode",
         "adult_explicit_text_to_image",
         "adult_explicit_sdxl_lora",
+        "adult_explicit_sdxl_lora_peft",
     ]
     if platform.system() == "Windows" and TEXT_READY_MARKER.exists():
         capabilities.extend(
@@ -887,7 +922,7 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.10.1"
+            else "image-worker-0.10.2"
         ),
         busy_provider=unison_busy,
     )
