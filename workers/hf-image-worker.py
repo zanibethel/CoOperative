@@ -55,6 +55,19 @@ EXPLICIT_MODEL_ID = os.getenv(
     "EXPLICIT_MODEL_ID",
     "stabilityai/stable-diffusion-xl-base-1.0",
 )
+EXPLICIT_LORA_ID = os.getenv(
+    "EXPLICIT_LORA_ID",
+    "wangkanai/sdxl-fp8-loras-nsfw",
+)
+try:
+    EXPLICIT_LORA_SCALE = float(os.getenv("EXPLICIT_LORA_SCALE", "0.8"))
+except ValueError:
+    EXPLICIT_LORA_SCALE = 0.8
+EXPLICIT_LORA_SCALE = max(0.0, min(1.5, EXPLICIT_LORA_SCALE))
+EXPLICIT_LORA_ADAPTER_NAME = os.getenv(
+    "EXPLICIT_LORA_ADAPTER_NAME",
+    "cooperative-explicit",
+)
 IP_ADAPTER_MODEL_ID = os.getenv(
     "IP_ADAPTER_MODEL_ID",
     "h94/IP-Adapter",
@@ -84,7 +97,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.10.0")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.10.1")
 
 def start_repo_recovery_worker():
     enabled = os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
@@ -340,7 +353,7 @@ def ensure_identity_profile():
 def ensure_explicit_profile():
     global loaded_profile, text_pipe, image_pipe, identity_adapter_loaded
 
-    if loaded_profile == "explicit-sdxl" and text_pipe is not None:
+    if loaded_profile == "explicit-sdxl-lora" and text_pipe is not None:
         return
 
     clear_model()
@@ -352,6 +365,25 @@ def ensure_explicit_profile():
         use_safetensors=True,
     ).to(DEVICE)
 
+    print(
+        f"Loading explicit SDXL LoRA {EXPLICIT_LORA_ID} "
+        f"at scale {EXPLICIT_LORA_SCALE:.2f}...",
+        flush=True,
+    )
+    pipe.load_lora_weights(
+        EXPLICIT_LORA_ID,
+        adapter_name=EXPLICIT_LORA_ADAPTER_NAME,
+    )
+    if not hasattr(pipe, "set_adapters"):
+        raise RuntimeError(
+            "The installed Diffusers pipeline cannot set LoRA adapter strength. "
+            "Upgrade Diffusers before using the owned explicit route."
+        )
+    pipe.set_adapters(
+        EXPLICIT_LORA_ADAPTER_NAME,
+        adapter_weights=EXPLICIT_LORA_SCALE,
+    )
+
     if hasattr(pipe, "enable_vae_slicing"):
         pipe.enable_vae_slicing()
     if hasattr(pipe, "enable_vae_tiling"):
@@ -359,9 +391,13 @@ def ensure_explicit_profile():
 
     text_pipe = pipe
     image_pipe = None
-    loaded_profile = "explicit-sdxl"
+    loaded_profile = "explicit-sdxl-lora"
     identity_adapter_loaded = False
-    print("Owned SDXL explicit-capable text-to-image pipeline loaded.", flush=True)
+    print(
+        "Owned SDXL explicit-capable text-to-image pipeline loaded "
+        f"with LoRA {EXPLICIT_LORA_ID} at scale {EXPLICIT_LORA_SCALE:.2f}.",
+        flush=True,
+    )
 
 
 def validate_content_mode(request: ImageRequest):
@@ -490,7 +526,10 @@ def run_generation(request: ImageRequest):
             references_used = 0
             reference_mode = "none"
             model_used = EXPLICIT_MODEL_ID
-            print("Local image path: owned SDXL explicit-capable text-to-image succeeded.", flush=True)
+            print(
+                "Local image path: owned SDXL + explicit LoRA text-to-image succeeded.",
+                flush=True,
+            )
         elif identity_generation:
             # Stability first: use one identity reference until multi-reference
             # IP-Adapter support is proven reliable on every local runtime.
@@ -594,6 +633,15 @@ def run_generation(request: ImageRequest):
         "variationMode": request.variationMode,
         "referenceMode": reference_mode,
         "contentMode": request.contentMode,
+        "explicitLora": (
+            {
+                "id": EXPLICIT_LORA_ID,
+                "scale": EXPLICIT_LORA_SCALE,
+                "adapterName": EXPLICIT_LORA_ADAPTER_NAME,
+            }
+            if request.contentMode == "adult_explicit"
+            else None
+        ),
     }
 
 
@@ -775,6 +823,9 @@ def health():
             "fast": FAST_MODEL_ID,
             "quality": QUALITY_MODEL_ID,
             "qualityIdentity": IDENTITY_MODEL_ID,
+            "explicitBase": EXPLICIT_MODEL_ID,
+            "explicitLora": EXPLICIT_LORA_ID,
+            "explicitLoraScale": EXPLICIT_LORA_SCALE,
         },
         "huggingFaceAuthenticated": bool(os.getenv("HF_TOKEN")),
         "asyncQueue": {
@@ -793,6 +844,9 @@ def capabilities():
         "models": {
             "fast": FAST_MODEL_ID,
             "quality": QUALITY_MODEL_ID,
+            "explicitBase": EXPLICIT_MODEL_ID,
+            "explicitLora": EXPLICIT_LORA_ID,
+            "explicitLoraScale": EXPLICIT_LORA_SCALE,
         },
         "capabilities": {
             "imageGeneration": True,
@@ -804,6 +858,9 @@ def capabilities():
             "seededVariation": True,
             "identityConditioning": "sdxl-ip-adapter-plus",
             "identityModel": IDENTITY_MODEL_ID,
+            "explicitBaseModel": EXPLICIT_MODEL_ID,
+            "explicitLora": EXPLICIT_LORA_ID,
+            "explicitLoraScale": EXPLICIT_LORA_SCALE,
             "multiReferenceIdentity": 0,
         },
     }
@@ -829,7 +886,7 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.10.0"
+            else "image-worker-0.10.1"
         ),
         busy_provider=unison_busy,
     )
