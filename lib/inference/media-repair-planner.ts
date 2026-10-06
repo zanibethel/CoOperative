@@ -85,7 +85,7 @@ export type MediaRepairPlanV1 = {
 };
 
 const UNCERTAINTY_PATTERN =
-  /\b(?:not visible|cannot (?:be )?judg|can't (?:be )?judg|unclear|not enough detail|insufficient detail|not visible enough|partially obscured|obscured)\b/i;
+  /\b(?:not visible|cannot (?:be )?judg|can't (?:be )?judg|unclear|not enough detail|insufficient detail|not visible enough|partially obscured|obscured|partially visible|not fully captured|not captured|cropped|out of frame|outside (?:the )?frame)\b/i;
 
 const SCORE_BY_CATEGORY = {
   face: (report: SemanticRepairReport) => report.faceQuality,
