@@ -89,8 +89,18 @@ function stableValue(value: unknown): unknown {
 }
 
 function fingerprint(snapshot: RouteSnapshot) {
+  const metadata = { ...snapshot.metadata };
+  delete metadata.catalogFetchedAt;
+
   return createHash("sha256")
-    .update(JSON.stringify(stableValue(snapshot)))
+    .update(
+      JSON.stringify(
+        stableValue({
+          ...snapshot,
+          metadata,
+        }),
+      ),
+    )
     .digest("hex");
 }
 
