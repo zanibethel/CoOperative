@@ -68,3 +68,58 @@ export async function preferredOwnedTextNode(
     ? { id: selected.id, displayName: selected.display_name || null }
     : null;
 }
+
+
+export async function preferredOwnedMediaPlanningNode(
+  admin: AdminClient,
+  userId: string,
+): Promise<OwnedTextNodePreference | null> {
+  const nodeIds = await activeNodeIds(admin, userId);
+  if (nodeIds.length === 0) return preferredOwnedTextNode(admin, userId);
+
+  const { data, error } = await admin
+    .from("unison_nodes")
+    .select("id,display_name,state,capabilities,policy,last_seen_at")
+    .in("id", nodeIds)
+    .order("last_seen_at", { ascending: false });
+
+  if (error) throw error;
+
+  const freshAfter = Date.now() - 90_000;
+  const statePriority: Record<string, number> = {
+    idle: 0,
+    online: 1,
+    busy: 2,
+  };
+
+  const candidates = (data || []).filter((node) => {
+    const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
+    const policy =
+      node.policy && typeof node.policy === "object"
+        ? (node.policy as { allowText?: unknown })
+        : {};
+    const seenAt = Date.parse(node.last_seen_at || "");
+
+    return (
+      capabilities.includes("text_generation") &&
+      capabilities.includes("media_prompt_planning_v1") &&
+      policy.allowText !== false &&
+      node.state !== "paused" &&
+      Number.isFinite(seenAt) &&
+      seenAt >= freshAfter
+    );
+  });
+
+  candidates.sort(
+    (a, b) =>
+      (statePriority[a.state] ?? 9) - (statePriority[b.state] ?? 9) ||
+      Date.parse(b.last_seen_at || "") - Date.parse(a.last_seen_at || ""),
+  );
+
+  const selected = candidates[0];
+  if (selected) {
+    return { id: selected.id, displayName: selected.display_name || null };
+  }
+
+  return preferredOwnedTextNode(admin, userId);
+}
