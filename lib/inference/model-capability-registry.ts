@@ -9,7 +9,7 @@ import { openRouterMediaCatalog } from "@/lib/inference/openrouter-media-catalog
 import { publicTextModelRegistry } from "@/lib/inference/text-model-registry";
 import { recomputeAllModelTaskScores } from "@/lib/inference/model-performance-scoring";
 
-export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-05.2";
+export const MODEL_CAPABILITY_SCANNER_VERSION = "2026-10-05.3";
 
 type JsonMap = Record<string, unknown>;
 
@@ -850,7 +850,8 @@ export async function scanModelCapabilities(input: {
           model.estimatedCostUsd !== null &&
           Number.isFinite(model.estimatedCostUsd) &&
           model.estimatedCostUsd >= 0 &&
-          model.pricingUnit === "image";
+          (model.pricingUnit === "image" ||
+            model.pricingUnit === "megapixel");
 
         routes.push({
           provider: "nous",
@@ -897,7 +898,9 @@ export async function scanModelCapabilities(input: {
             sourceCatalog: catalog.imageSource,
             automaticRouting:
               pricingVerifiedEnoughForAutomaticRouting
-                ? "eligible-with-runtime-gates"
+                ? model.pricingUnit === "megapixel"
+                  ? "request-cost-resolver-required"
+                  : "eligible-with-runtime-gates"
                 : "price-unbounded",
           },
         });
