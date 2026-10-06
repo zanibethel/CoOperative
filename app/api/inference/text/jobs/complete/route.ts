@@ -106,6 +106,110 @@ function extractJsonObject(text: string) {
 function parseSemanticJudgeReport(text: string): SemanticJudgeReport {
   const parsed = JSON.parse(extractJsonObject(text)) as Record<string, unknown>;
 
+  const versionAliases: Record<string, SemanticJudgeReport["version"]> = {
+    "semantic-vision-v1": "semantic-vision-v1",
+    "semantic-vision-v1.1": "semantic-vision-v1.1",
+    "semantic-vision-v1-1": "semantic-vision-v1.1",
+    "semantic-v1.1": "semantic-vision-v1.1",
+  };
+  if (typeof parsed.version === "string" && versionAliases[parsed.version]) {
+    parsed.version = versionAliases[parsed.version];
+  }
+
+  if (
+    typeof parsed.confidence === "number" &&
+    parsed.confidence > 1 &&
+    parsed.confidence <= 100
+  ) {
+    parsed.confidence = parsed.confidence / 100;
+  }
+
+  const categoryAliases: Record<string, string> = {
+    face: "face",
+    faceQuality: "face",
+    hands: "hands",
+    hand: "hands",
+    handQuality: "hands",
+    anatomy: "anatomy",
+    anatomyQuality: "anatomy",
+    skin: "skin",
+    skinRealism: "skin",
+    lighting: "lighting",
+    lightingConsistency: "lighting",
+    background: "background",
+    backgroundIntegrity: "background",
+    prompt: "prompt",
+    promptAdherence: "prompt",
+    artifact: "artifact",
+    artifactSeverity: "artifact",
+  };
+
+  const derivedAction: Record<string, string> = {
+    face: "refine-face",
+    hands: "refine-hands",
+    anatomy: "refine-anatomy",
+    skin: "refine-skin",
+    lighting: "refine-lighting",
+    background: "inpaint",
+    prompt: "regenerate",
+    artifact: "inpaint",
+  };
+
+  const allowedActions = new Set([
+    "none",
+    "refine-face",
+    "refine-hands",
+    "refine-anatomy",
+    "refine-skin",
+    "refine-lighting",
+    "inpaint",
+    "regenerate",
+    "upscale",
+  ]);
+
+  if (Array.isArray(parsed.findings)) {
+    parsed.findings = parsed.findings
+      .map((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          return value;
+        }
+
+        const finding = { ...(value as Record<string, unknown>) };
+        if (typeof finding.category === "string") {
+          finding.category =
+            categoryAliases[finding.category] || finding.category;
+        }
+
+        const category =
+          typeof finding.category === "string" ? finding.category : "";
+        const severity =
+          typeof finding.severity === "string" ? finding.severity : "";
+        const action =
+          typeof finding.action === "string" ? finding.action.trim() : "";
+
+        if (!allowedActions.has(action)) {
+          finding.action =
+            severity === "low"
+              ? "none"
+              : derivedAction[category] || "none";
+        }
+
+        if (
+          typeof finding.description === "string" &&
+          /^(?:short factual finding|grounded visible finding)$/i.test(
+            finding.description.trim(),
+          )
+        ) {
+          throw new Error(
+            "Semantic vision judge returned a placeholder finding description.",
+          );
+        }
+
+        return finding;
+      })
+      .slice(0, 16);
+  }
+
   if (Array.isArray(parsed.suggestedActions)) {
     parsed.suggestedActions = parsed.suggestedActions
       .map((value) => {
