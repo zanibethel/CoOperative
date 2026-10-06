@@ -57,9 +57,6 @@ export async function submitOpenRouterVideoDirect(input: {
   const body: Record<string, unknown> = {
     model: input.model,
     prompt: input.prompt,
-    provider: {
-      allow_fallbacks: false,
-    },
   };
   if (input.durationSeconds !== null) body.duration = input.durationSeconds;
   if (input.resolution) body.resolution = input.resolution;

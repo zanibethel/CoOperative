@@ -60,7 +60,7 @@ type NodeRow = {
   child_media_job_id?: string | null;
 };
 
-const WORKFLOW_VIDEO_EXECUTION_ENABLED = true;
+const WORKFLOW_VIDEO_EXECUTION_ENABLED = false;
 
 function microusd(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 0;

@@ -167,26 +167,25 @@ The shared workflow budget reservation is enforced by database RPCs:
 These functions lock the workflow/node rows so simultaneous approvals cannot exceed the shared request cap.
 
 
-### Phase 3 — explicit one-shot OpenRouter video approval
+### Phase 3 — direct OpenRouter video plumbing prepared, execution disabled
 
-The enabled video slice remains intentionally narrow:
+The direct text-to-video implementation is present but **workflow video spend remains disabled**.
 
-- text-to-video only;
-- selected provider must be OpenRouter;
-- user must explicitly click **Approve one video generation**;
-- exact provider/model/tier and the persisted duration, resolution, audio, aspect ratio, workflow mode, quality intent, and content constraint are revalidated against the live catalog, registry, policy gates, and current quote;
-- a higher live quote updates the node and requires a second approval;
-- the shared workflow budget is reserved atomically before the provider request;
-- connected OpenRouter credentials are treated as BYOK;
-- otherwise an eligible paid CoOperative-funded route must reserve the profile AI balance;
-- CoOperative submits exactly one request to OpenRouter's native asynchronous video endpoint;
-- the request sends one model and disables OpenRouter provider fallback;
-- no automatic generation retry or model/provider substitution is allowed;
-- polling may repeat because it only reads the already-created provider job and cannot start another generation;
-- successful video bytes are copied into the private CoOperative media library and exposed through the authenticated media-output route;
-- success settles the workflow budget and any CoOperative balance reservation;
-- provider failure releases reservations, records route evidence, and marks the node failed;
-- child_media_job_id and the OpenRouter provider job ID are persisted for recovery and audit.
+Prepared behavior:
+- exact planned OpenRouter model/recipe revalidation;
+- current quote re-check and second approval when the quote increases;
+- atomic shared-workflow budget reservation;
+- connected OpenRouter BYOK vs CoOperative-funded balance handling;
+- one native asynchronous `POST /api/v1/videos` submission;
+- persisted CoOperative media job ID plus OpenRouter provider job ID;
+- safe status polling and authenticated content download;
+- private CoOperative media-library persistence with a 100 MB clip limit;
+- no CoOperative generation retry or model substitution after a submitted attempt.
+
+Why execution is still gated:
+- OpenRouter's current video documentation defines the request `provider` object as **provider-specific passthrough configuration**, not the provider-routing preference object documented for chat/image;
+- therefore CoOperative cannot currently claim that `provider.allow_fallbacks=false` disables serving-provider fallback for `POST /api/v1/videos`;
+- the owner-approved Phase 3 contract requires no automatic provider/model fallback, so the server gate and video approval button remain disabled until a documented provider pin/routing control exists or the owner explicitly approves OpenRouter-managed serving-provider routing.
 
 Nous/PixVerse workflow video execution remains planning-only. Reference-image/image-to-video workflow execution remains disabled.
 

@@ -586,7 +586,7 @@ async function planMediaNode(
         reason:
           plan.kind === "image"
             ? "Route selected and persisted for review. Planning sent no generation request and spent nothing. Eligible OpenRouter text-to-image routes require a separate explicit one-shot approval."
-            : "Route selected and persisted for review. Planning sent no generation request and spent nothing. Eligible OpenRouter text-to-video routes require a separate explicit one-shot approval.",
+            : "Route selected and persisted for review. Planning sent no generation request and spent nothing. Direct OpenRouter video execution is prepared but remains disabled until the video API exposes a documented provider-routing pin that satisfies the no-provider-fallback requirement.",
       },
       attempt: node.attempt + 1,
       completed_at: now,

@@ -316,22 +316,25 @@ If a paid attempt may already have incurred cost, do not automatically repeat it
 
 ## 15A. Workflow one-shot video execution
 
-The owner workflow console may execute a planned **OpenRouter text-to-video** route only after explicit approval.
+Direct OpenRouter text-to-video plumbing is implemented, but **workflow video execution is currently disabled**.
 
-Execution rules:
-- revalidate the exact planned OpenRouter model and recipe against the live catalog/registry immediately before spending;
-- re-check current price and require a new approval when the quote increased;
-- reserve the shared workflow budget atomically before submission;
-- use the connected OpenRouter credential as BYOK when present, otherwise reserve CoOperative-funded AI balance for an eligible paid route;
-- submit exactly one native OpenRouter video generation request;
-- send only the selected model and disable OpenRouter provider fallback;
-- do not automatically resubmit, retry generation, or substitute another model/provider after failure;
-- provider-status polling and output download may retry because they cannot create a second generation;
-- persist both the CoOperative media job ID and provider job ID;
-- release reservations on a confirmed provider failure;
-- if submission transport is uncertain, do not submit again automatically and keep the reservation held for reconciliation.
+The prepared adapter:
+- pins one OpenRouter model slug and one exact persisted recipe;
+- revalidates current capability and price before any spend;
+- reserves shared workflow budget and, when applicable, CoOperative-funded AI balance;
+- submits at most one native OpenRouter video generation request;
+- never automatically resubmits generation or substitutes another model after failure;
+- persists the provider job ID so polling can resume without creating another generation;
+- stores completed clips in the private CoOperative media library with a 100 MB limit.
 
-This slice does not enable Nous/PixVerse workflow video execution or reference-image/image-to-video workflow execution.
+Current blocker:
+- OpenRouter's documented `provider` field for `POST /api/v1/videos` is provider-specific passthrough configuration;
+- current public video documentation does not document the chat/image-style `allow_fallbacks` provider-routing control for this endpoint;
+- therefore CoOperative cannot truthfully guarantee that OpenRouter will not change its underlying serving provider while keeping the same requested video model.
+
+Owner policy still requires no automatic provider/model fallback for this rollout. Until OpenRouter exposes documented provider pinning for video, or the owner explicitly accepts OpenRouter-managed serving-provider routing, the workflow video execution server gate and UI approval action must remain off.
+
+This does not enable Nous/PixVerse workflow video execution or reference-image/image-to-video workflow execution.
 
 ## 16. Execution truthfulness
 
