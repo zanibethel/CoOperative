@@ -167,14 +167,26 @@ The shared workflow budget reservation is enforced by database RPCs:
 These functions lock the workflow/node rows so simultaneous approvals cannot exceed the shared request cap.
 
 
-### Next planned phase — one-shot video approval (disabled)
+### Phase 3 — explicit one-shot OpenRouter video approval
 
-Video planning remains available so provider/model/recipe/cost evidence can be inspected, but **video execution is not enabled in the current rollout**.
+The enabled video slice remains intentionally narrow:
 
-The next phase is intended to reuse the same shared workflow budget reservation model with:
-- explicit approval;
-- exact route and price revalidation;
-- no automatic retry;
-- no automatic provider/model fallback.
+- text-to-video only;
+- selected provider must be OpenRouter;
+- user must explicitly click **Approve one video generation**;
+- exact provider/model/tier and the persisted duration, resolution, audio, aspect ratio, workflow mode, quality intent, and content constraint are revalidated against the live catalog, registry, policy gates, and current quote;
+- a higher live quote updates the node and requires a second approval;
+- the shared workflow budget is reserved atomically before the provider request;
+- connected OpenRouter credentials are treated as BYOK;
+- otherwise an eligible paid CoOperative-funded route must reserve the profile AI balance;
+- CoOperative submits exactly one request to OpenRouter's native asynchronous video endpoint;
+- the request sends one model and disables OpenRouter provider fallback;
+- no automatic generation retry or model/provider substitution is allowed;
+- polling may repeat because it only reads the already-created provider job and cannot start another generation;
+- successful video bytes are copied into the private CoOperative media library and exposed through the authenticated media-output route;
+- success settles the workflow budget and any CoOperative balance reservation;
+- provider failure releases reservations, records route evidence, and marks the node failed;
+- child_media_job_id and the OpenRouter provider job ID are persisted for recovery and audit.
 
-Nous/Hermes media execution and reference-image workflow execution also remain disabled.
+Nous/PixVerse workflow video execution remains planning-only. Reference-image/image-to-video workflow execution remains disabled.
+

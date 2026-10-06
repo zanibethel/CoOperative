@@ -1,7 +1,7 @@
 # CoOperative Media Routing Policy
 
 Status: Canonical owner-approved product policy  
-Last updated: 2026-10-03
+Last updated: 2026-10-05
 
 This document is the durable source of truth for CoOperative media-request interpretation, recommendation, budget, provider-routing, reference-image, retry, and UI behavior.
 
@@ -313,6 +313,25 @@ Preserve the correct attachment and request constraints.
 Do not duplicate an active paid generation.
 
 If a paid attempt may already have incurred cost, do not automatically repeat it unless the applicable budget/approval policy permits the second charge.
+
+## 15A. Workflow one-shot video execution
+
+The owner workflow console may execute a planned **OpenRouter text-to-video** route only after explicit approval.
+
+Execution rules:
+- revalidate the exact planned OpenRouter model and recipe against the live catalog/registry immediately before spending;
+- re-check current price and require a new approval when the quote increased;
+- reserve the shared workflow budget atomically before submission;
+- use the connected OpenRouter credential as BYOK when present, otherwise reserve CoOperative-funded AI balance for an eligible paid route;
+- submit exactly one native OpenRouter video generation request;
+- send only the selected model and disable OpenRouter provider fallback;
+- do not automatically resubmit, retry generation, or substitute another model/provider after failure;
+- provider-status polling and output download may retry because they cannot create a second generation;
+- persist both the CoOperative media job ID and provider job ID;
+- release reservations on a confirmed provider failure;
+- if submission transport is uncertain, do not submit again automatically and keep the reservation held for reconciliation.
+
+This slice does not enable Nous/PixVerse workflow video execution or reference-image/image-to-video workflow execution.
 
 ## 16. Execution truthfulness
 
