@@ -938,7 +938,10 @@ export async function buildMediaRecommendationOptions(input: {
         candidates.push({
           provider: "cooperative-local",
           model: "local-image-quality",
-          modelName: "Owned local image generator",
+          modelName:
+            adultContentClass === "adult_explicit"
+              ? "Owned Local Quality · SDXL adult mode"
+              : "Owned Local Quality · SSD-1B",
           estimatedCostUsd: 0,
           providerCostEstimateUsd: 0,
           markupPercent: 0,
@@ -946,10 +949,13 @@ export async function buildMediaRecommendationOptions(input: {
           pricingSource: "owned-local",
           resolution: null,
           audio: null,
-          qualityLevel: 1,
+          qualityLevel: adultContentClass === "adult_explicit" ? 4 : 2,
           executionReady: true,
           referenceBehavior: null,
-          verificationNote: null,
+          verificationNote:
+            adultContentClass === "adult_explicit"
+              ? "Owned text-only route. The server-derived explicit content mode switches the worker to local SDXL and rejects reference/identity inputs."
+              : "Owned local quality image execution is already wired.",
           editEndpoint: null,
         });
       }
