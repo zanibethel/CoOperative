@@ -10,6 +10,10 @@ import {
 import { authenticatedUserId } from "@/lib/supabase/auth";
 import { businessOwnedServiceCredentialForOwner } from "@/lib/integrations/business-service-credentials";
 import { nousManagedMediaCatalog } from "@/lib/inference/nous-managed-media";
+import {
+  availableModelRegistryRoutes,
+  registryRouteEligible,
+} from "@/lib/inference/model-capability-registry";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -41,17 +45,55 @@ export async function GET() {
           "nous-portal",
         ),
       ]);
-    const [catalog, nousCatalog] = await Promise.all([
+    const [catalog, nousCatalog, registryAvailability] = await Promise.all([
       openRouterMediaCatalog(
         false,
         openRouterService?.credential || undefined,
       ),
       nousManagedMediaCatalog(),
+      availableModelRegistryRoutes({
+        providers: ["openrouter", "nous"],
+        routeKinds: ["image", "video"],
+        maxAgeHours: 36,
+      }),
     ]);
+
+    const openRouterImage = catalog.image.filter((model) =>
+      registryRouteEligible(registryAvailability, {
+        provider: "openrouter",
+        model: model.id,
+        routeKind: "image",
+      }),
+    );
+    const openRouterVideo = catalog.video.filter((model) =>
+      registryRouteEligible(registryAvailability, {
+        provider: "openrouter",
+        model: model.id,
+        routeKind: "video",
+      }),
+    );
+    const nousImage = nousCatalog.image.filter((model) =>
+      registryRouteEligible(registryAvailability, {
+        provider: "nous",
+        model: model.model,
+        routeKind: "image",
+      }),
+    );
+    const nousVideo =
+      nousCatalog.video &&
+      registryRouteEligible(registryAvailability, {
+        provider: "nous",
+        model: nousCatalog.video.model,
+        routeKind: "video",
+      })
+        ? nousCatalog.video
+        : null;
 
     return NextResponse.json(
       {
-        source: catalog.source,
+        source: registryAvailability.authoritative
+          ? "cooperative-model-registry+live-provider-catalog"
+          : catalog.source,
         fetchedAt: catalog.fetchedAt,
         configured: {
           nous:
@@ -64,20 +106,29 @@ export async function GET() {
         routingPriority: ["nous", "local-or-free", "openrouter-paid"] as const,
         paidAiEligible: balance.funded,
         availableAiBalanceUsd: balance.availableUsd,
-        nous: nousCatalog,
+        registry: {
+          authoritative: registryAvailability.authoritative,
+          latestCompletedScanAt: registryAvailability.latestCompletedScanAt,
+          availableRouteCount: registryAvailability.routes.length,
+        },
+        nous: {
+          ...nousCatalog,
+          image: nousImage,
+          video: nousVideo,
+        },
         image: {
           bands: mediaLevelBands(
-            catalog.image.some((model) => model.recommended)
-              ? catalog.image.filter((model) => model.recommended)
-              : catalog.image,
+            openRouterImage.some((model) => model.recommended)
+              ? openRouterImage.filter((model) => model.recommended)
+              : openRouterImage,
           ),
-          recommended: tierRows(catalog.image),
-          models: catalog.image,
+          recommended: tierRows(openRouterImage),
+          models: openRouterImage,
         },
         video: {
-          bands: mediaLevelBands(catalog.video),
-          recommended: tierRows(catalog.video),
-          models: catalog.video,
+          bands: mediaLevelBands(openRouterVideo),
+          recommended: tierRows(openRouterVideo),
+          models: openRouterVideo,
         },
       },
       {
