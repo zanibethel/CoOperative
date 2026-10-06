@@ -74,7 +74,7 @@ export async function GET(request: Request) {
       const normalized = normalizeRemoteMediaUrl(mediaUrl);
       const { data, error } = await admin
         .from("media_generation_jobs")
-        .select("id,kind,result_url,model")
+        .select("id,kind,result_url,model,pricing_dimensions")
         .eq("owner_ref", ownerRef)
         .eq("status", "completed")
         .not("result_url", "is", null)
