@@ -1084,10 +1084,11 @@ export default function ModelRegistryConsole() {
                   }),
                 ) || null
               : null;
-            const policy = smokeRoute?.policy || adultPolicyFromRegistry(route);
+            const registryPolicy = adultPolicyFromRegistry(route);
             const explicit = explicitPolicyLabel(
-              policy.explicit,
-              policy.explicitSource,
+              smokeRoute?.policy.adultExplicit || registryPolicy.explicit,
+              smokeRoute?.policy.adultExplicitSource ||
+                registryPolicy.explicitSource,
             );
             const unavailable = testUnavailableReason(route, smokeRoute);
 
