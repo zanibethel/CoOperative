@@ -18,6 +18,7 @@ type SourceMediaJob = {
   provider: string | null;
   model: string | null;
   prompt: string | null;
+  pricing_dimensions: Record<string, unknown> | null;
 };
 
 const saveSchema = z.object({
@@ -258,7 +259,7 @@ export async function POST(request: Request) {
     if (input.jobId) {
       const { data, error } = await admin
         .from("media_generation_jobs")
-        .select("id,kind,result_url,provider,model,prompt")
+        .select("id,kind,result_url,provider,model,prompt,pricing_dimensions")
         .eq("id", input.jobId)
         .eq("owner_ref", owner)
         .eq("status", "completed")
@@ -309,36 +310,74 @@ export async function POST(request: Request) {
       );
     }
 
-    const remoteUrl = normalizeRemoteMediaUrl(job.result_url);
-    const response = await fetch(remoteUrl, {
-      signal: AbortSignal.timeout(30_000),
-      cache: "no-store",
-    });
-    if (!response.ok) {
-      throw new Error(`Media provider returned HTTP ${response.status} while saving.`);
+    const dimensions =
+      job.pricing_dimensions &&
+      typeof job.pricing_dimensions === "object" &&
+      !Array.isArray(job.pricing_dimensions)
+        ? job.pricing_dimensions
+        : {};
+    const generatedStoragePath =
+      typeof dimensions.generatedStoragePath === "string"
+        ? dimensions.generatedStoragePath
+        : "";
+    const generatedMimeType =
+      typeof dimensions.generatedMimeType === "string"
+        ? dimensions.generatedMimeType
+        : "";
+
+    let bytes: Uint8Array;
+    let mimeType: string;
+
+    if (generatedStoragePath) {
+      const { data: blob, error: downloadError } = await admin.storage
+        .from(LIBRARY_BUCKET)
+        .download(generatedStoragePath);
+      if (downloadError || !blob) {
+        throw downloadError || new Error("Stored generated media is unavailable.");
+      }
+      bytes = new Uint8Array(await blob.arrayBuffer());
+      mimeType = (
+        generatedMimeType ||
+        blob.type ||
+        (job.kind === "video" ? "video/mp4" : "image/jpeg")
+      )
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
+    } else {
+      const remoteUrl = normalizeRemoteMediaUrl(job.result_url);
+      const response = await fetch(remoteUrl, {
+        signal: AbortSignal.timeout(30_000),
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        throw new Error(`Media provider returned HTTP ${response.status} while saving.`);
+      }
+
+      const contentLength = Number(response.headers.get("content-length") || 0);
+      if (contentLength > MAX_LIBRARY_BYTES) {
+        return NextResponse.json(
+          { error: "Media is larger than the 50 MB CoOperative Cloud limit." },
+          { status: 413 },
+        );
+      }
+
+      bytes = new Uint8Array(await response.arrayBuffer());
+      mimeType = (
+        response.headers.get("content-type") ||
+        (job.kind === "video" ? "video/mp4" : "image/jpeg")
+      )
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
     }
 
-    const contentLength = Number(response.headers.get("content-length") || 0);
-    if (contentLength > MAX_LIBRARY_BYTES) {
-      return NextResponse.json(
-        { error: "Media is larger than the 50 MB CoOperative Cloud limit." },
-        { status: 413 },
-      );
-    }
-
-    const bytes = new Uint8Array(await response.arrayBuffer());
     if (!bytes.byteLength || bytes.byteLength > MAX_LIBRARY_BYTES) {
       return NextResponse.json(
         { error: "Media is empty or larger than the 50 MB CoOperative Cloud limit." },
         { status: 413 },
       );
     }
-
-    const fallbackMime = job.kind === "video" ? "video/mp4" : "image/jpeg";
-    const mimeType = (response.headers.get("content-type") || fallbackMime)
-      .split(";")[0]
-      .trim()
-      .toLowerCase();
     if (!allowedMimeType(mimeType, job.kind)) {
       return NextResponse.json(
         { error: `Unsupported saved-media type: ${mimeType || "unknown"}.` },
