@@ -796,29 +796,31 @@ The route is split by server-derived content mode:
 
 - `sfw` and normal quality generation use `segmind/SSD-1B`.
 - `adult_non_explicit` remains on the owned quality path and may use the normal quality model.
-- `adult_explicit` switches the worker to `stabilityai/stable-diffusion-xl-base-1.0`, loads `wangkanai/sdxl-fp8-loras-nsfw`, and is text-to-image only.
+- `adult_explicit` switches the worker to `stablediffusionapi/duchaiten-real3d-nsfw-xl`, a Diffusers-native SDXL checkpoint, and is text-to-image only.
 
 The client never chooses `content_mode` directly. CoOperative derives it from the authenticated request immediately before the local job is queued. The database stores only `sfw`, `adult_non_explicit`, or `adult_explicit`.
 
-Explicit local execution is fail-closed at the node boundary. A worker may claim an `adult_explicit` image job only when its fresh Unison heartbeat advertises `adult_explicit_text_to_image`. Older workers therefore cannot accidentally claim a job they do not understand.
+Explicit local execution is fail-closed at the node boundary. A worker may claim an `adult_explicit` image job only when its fresh Unison heartbeat advertises `adult_explicit_owned_checkpoint`. Older workers therefore cannot accidentally claim a job they do not understand.
 
-Explicit SDXL adapter configuration is environment-overridable without a code change:
+The default explicit path does not depend on a LoRA. An optional adapter can still be configured later without a code change:
 
-- `EXPLICIT_LORA_ID` defaults to `wangkanai/sdxl-fp8-loras-nsfw`.
-- `EXPLICIT_LORA_SCALE` defaults to `0.8` and is clamped to `0.0..1.5`.
+- `EXPLICIT_MODEL_ID` defaults to `stablediffusionapi/duchaiten-real3d-nsfw-xl`.
+- `EXPLICIT_LORA_ID` defaults to empty; no adapter is loaded unless explicitly configured.
+- `EXPLICIT_LORA_WEIGHT_NAME` can name a specific weight file when a repository contains multiple adapters.
+- `EXPLICIT_LORA_SCALE` defaults to `0.8` when an optional adapter is configured and is clamped to `0.0..1.5`.
 - `EXPLICIT_LORA_ADAPTER_NAME` defaults to `cooperative-explicit`.
-- The worker loads the adapter only for `adult_explicit` jobs and advertises `adult_explicit_sdxl_lora` in its Unison heartbeat.
-- The explicit route fails if the adapter cannot be loaded or its strength cannot be applied; it does not silently fall back to unadapted SDXL.
+- If an optional adapter is configured, the route fails if the adapter cannot be loaded or its strength cannot be applied.
+
+Do not restore `wangkanai/sdxl-fp8-loras-nsfw` as the default adapter without first verifying real weight files. The repository was discovered during runtime testing to contain documentation/scaffolding but no usable LoRA weight artifact, which caused Diffusers to fail while looking for `pytorch_lora_weights.bin`.
 
 The owned explicit route does not accept reference or identity inputs. The worker rejects explicit requests containing reference images, and the registry marks `local-image-fast-reference`, `local-image-quality-reference`, and `local-image-quality-identity` as explicit-disallowed by CoOperative policy. This keeps sexualized identity/reference transformations out of the owned route.
 
-The worker also rejects obvious minor-age and coercive/non-consensual sexual prompt language before inference. These local application-level safeguards are independent of any model's own checker.
+The worker also rejects obvious positive minor-age and coercive/non-consensual sexual prompt language before inference. Explicit safety exclusions such as "no minors" or "without non-consensual content" are treated as exclusions rather than positive intent. These local application-level safeguards are independent of any model's own checker.
 
 Model/license and runtime capability are separate evidence dimensions. The registry records:
 
 - `segmind/SSD-1B` as the default owned quality model with Apache-2.0 license metadata.
-- `stabilityai/stable-diffusion-xl-base-1.0` as the explicit-mode base model with CreativeML Open RAIL++-M license metadata.
-- `wangkanai/sdxl-fp8-loras-nsfw` as the explicit-mode LoRA adapter with OpenRAIL++ metadata and a default adapter strength of `0.8`.
+- `stablediffusionapi/duchaiten-real3d-nsfw-xl` as the default explicit-mode checkpoint with CreativeML Open RAIL-M metadata.
 - `safetyFilterControl=local-configurable` and `thirdPartyProviderBoundary=false`.
 - explicit scope as permitted by the owned runtime/license boundary, while controlled generation quality/effectiveness remains a separate benchmark question.
 
