@@ -390,7 +390,7 @@ function resultMeta(result: JobResult) {
   const details = [
     result.provider,
     result.model,
-    result.capability === "vision" ? "vision" : "text",
+    result.capability || "text",
     result.workerId ? `worker ${result.workerId}` : null,
     typeof result.firstTokenMs === "number"
       ? `${(result.firstTokenMs / 1000).toFixed(1)}s first token`
