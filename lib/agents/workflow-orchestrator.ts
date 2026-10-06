@@ -524,8 +524,9 @@ async function startAgentTask(workflow: Workflow, node: Node, nodes: Node[]) {
   const taskId = crypto.randomUUID();
   const now = new Date().toISOString();
   const userId = userIdFromOwnerRef(workflow.owner_ref);
-  const ownerAuthoritative =
-    Boolean(userId) && (await canAccessMainCooperative(userId));
+  const ownerAuthoritative = userId
+    ? await canAccessMainCooperative(userId)
+    : false;
   const builder = nodes.find((item) => item.node_key === "builder");
   const builderResult = builder?.result || {};
   const baseBranch =
