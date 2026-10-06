@@ -268,6 +268,51 @@ async function reconcileExpiredCapabilityTests(ownerRef: string) {
   }
 }
 
+
+async function reconcileFinishedCapabilityTests(ownerRef: string) {
+  const admin = createAdminSupabaseClient();
+  const { data: jobs, error } = await admin
+    .from("media_generation_jobs")
+    .select(
+      "id,status,kind,provider,model,result_url,error,pricing_dimensions,completed_at",
+    )
+    .eq("owner_ref", ownerRef)
+    .in("status", ["completed", "failed"])
+    .contains("pricing_dimensions", { capabilityTest: true })
+    .order("completed_at", { ascending: false })
+    .limit(25);
+
+  if (error) throw error;
+
+  for (const job of jobs || []) {
+    const existing = await existingTestForJob(ownerRef, job.id);
+    if (existing) continue;
+
+    const pricingDimensions =
+      job.pricing_dimensions && typeof job.pricing_dimensions === "object"
+        ? (job.pricing_dimensions as Record<string, unknown>)
+        : {};
+    const identity = smokeIdentityFromPricingDimensions(
+      pricingDimensions,
+      job.kind,
+    );
+    const outcome: MediaCapabilityTestOutcome =
+      job.status === "completed" && Boolean(job.result_url)
+        ? "supported"
+        : failureOutcome(job.error || "");
+
+    await recordJobOutcome({
+      ownerRef,
+      jobId: job.id,
+      provider: job.provider,
+      model: job.model,
+      kind: identity.kind,
+      scope: identity.scope,
+      outcome,
+    });
+  }
+}
+
 export async function GET(request: Request) {
   const userId = await authenticatedUserId();
   if (!userId) {
@@ -283,6 +328,7 @@ export async function GET(request: Request) {
     await reconcileExpiredCapabilityTests(ownerRef);
 
     if (!jobId) {
+      await reconcileFinishedCapabilityTests(ownerRef);
       await ensureMediaCapabilityRouteCatalog();
 
       const [routes, benchmarkEvidence, preference] = await Promise.all([
