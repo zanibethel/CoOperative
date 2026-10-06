@@ -25,7 +25,7 @@ export const maxDuration = 300;
 
 const BATCH_TAG = "minimal-media-verification-2026-10-06";
 const HARD_BATCH_CAP_USD = 0.30;
-const MAX_TESTS = 5;
+const MAX_TESTS = 9;
 
 type Target = {
   id: string;
@@ -112,6 +112,17 @@ function testType(scope: MediaSmokeScope) {
 
 function failureOutcome(text: string): MediaCapabilityTestOutcome {
   const value = text.toLowerCase();
+
+  // Hermes may successfully generate media but return only a sandbox-local
+  // MEDIA:/tmp/... artifact path. That is useful capability evidence, but not
+  // a durable deliverable, so record it as partial and never auto-retry it.
+  if (
+    /media:\s*\/tmp\//i.test(text) &&
+    /(?:generation succeeded|image generated|video generated|media:)/i.test(text)
+  ) {
+    return "partial";
+  }
+
   return /(?:content|safety|moderation|policy|nsfw|nudity|sexual).{0,90}(?:block|filter|reject|deny|prohibit|not allowed)|(?:block|filter|reject|deny|prohibit).{0,90}(?:content|safety|moderation|policy|nsfw|nudity|sexual)/i.test(
     value,
   )
