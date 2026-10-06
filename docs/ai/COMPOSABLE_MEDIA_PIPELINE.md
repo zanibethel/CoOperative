@@ -193,12 +193,36 @@ The source image endpoint is also job-scoped: a node can read the generated arti
 
 This stage does not yet mutate the image. Its first purpose is to give the repair planner a trustworthy semantic diagnosis. A failed or unparseable judge report leaves the generated image intact and records the judge stage as failed rather than pretending the inspection succeeded.
 
+### Repair Planner v1
+
+Semantic reports now flow through a deterministic control-plane planner before any image mutation is allowed.
+
+`repair-planner-v1`:
+
+- cross-checks category score, severity, visibility language, requested action, overall confidence, prompt adherence, and artifact severity;
+- protects dimensions that the judge says are not visible or cannot be judged, even when the model also emitted a numeric score;
+- derives a bounded repair action when the judge reports a medium/high defect but incorrectly returns `action: none`;
+- blocks automatic mutation when confidence is below the threshold or when score/severity evidence contradicts itself;
+- separates low-strength detail repairs from cases that actually require regeneration;
+- leaves background/artifact inpainting planned but non-executable until region masks and an inpainting specialist are available;
+- protects high-scoring outputs from unnecessary extra diffusion passes.
+
+The plan is persisted inside `pipeline_trace.semanticJudge.repairPlan` with one of four decisions:
+
+- `accept`
+- `repair`
+- `regenerate`
+- `review`
+
+`autoRepairEligible` means the evidence is strong enough for a future bounded repair executor. `autoExecute` remains hard-coded to `false` in this phase so the planner cannot silently mutate an image before the repair executor and before/after verifier are proven.
+
 Next implementation layer:
 
-1. smoke-test `semantic-vision-v1` on the same controlled benchmark image and validate its structured findings;
-2. convert semantic findings into a bounded repair plan instead of always running generic human-detail refinement;
-3. add a learned local super-resolution specialist and compare it with the current Lanczos component;
-4. add region masks / inpainting for face, hand, anatomy, skin, and background repairs;
-5. allow the planner to choose local specialists plus bounded cloud specialists within the Model Mixer ceiling.
+1. smoke-test `repair-planner-v1` against the controlled semantic report and confirm contradictions are handled deterministically;
+2. add a bounded whole-image repair executor for face/hands/anatomy/skin/lighting targets;
+3. semantic re-check the repaired candidate and keep it only when the targeted dimensions improve without unacceptable regressions;
+4. add a learned local super-resolution specialist and compare it with the current Lanczos component;
+5. add region masks / inpainting for face, hand, anatomy, skin, and background repairs;
+6. allow the planner to choose local specialists plus bounded cloud specialists within the Model Mixer ceiling.
 
 More stages should be added only when evidence shows they improve output enough to justify their time and cost.
