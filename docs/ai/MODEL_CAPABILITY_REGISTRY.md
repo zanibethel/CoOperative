@@ -172,3 +172,18 @@ Execution readiness is deliberately stricter than discovery:
 
 A provider-side rejection or missing managed proxy does not finalize the user request. Runtime evidence is recorded for the exact route and normal fallback routing continues within the user's approved capability, content-policy, and spend constraints.
 
+## Request cost resolver and execution reconciliation
+
+Media model ranking and execution share `lib/inference/model-cost-resolver.ts`. Provider catalog unit prices are never compared directly to the Model Mixer spend cap.
+
+The resolver normalizes each candidate to the total cost of the current request. Supported pricing shapes include free, fixed/request-level estimates, per-image, per-megapixel, per-second, and per-second-by-resolution/audio. Unsupported or incomplete pricing remains unbounded and cannot authorize a paid provider call.
+
+For Hermes/FAL image routes priced per megapixel, the resolver maps the current Hermes aspect bucket to the pinned release's native image preset, converts pixels to 1024×1024 billing megapixels, and rounds conservatively so CoOperative does not under-quote the provider cost. The generic registry score uses one billing megapixel only as a low-confidence representative ranking cost; the actual request price is always recalculated from the request controls.
+
+Cost reconciliation happens twice:
+
+1. Recommendation/Mixer ranking resolves provider cost for the request and derives the effective cap cost. When CoOperative bears the paid provider cost, `paidAiPriceQuote()` applies the configured markup to produce the user-facing quote. BYOK or subscription-backed routes use provider cost for cap enforcement but do not create a CoOperative user charge.
+2. Immediately before funds are reserved or a provider call begins, CoOperative reloads current pricing for the selected route and runs the same resolver again. If the price is unbounded, stale, or above the approved request cap, execution stops without reserving funds or calling the provider.
+
+The existing `media_generation_jobs` ledger remains authoritative. Its `pricing_dimensions` payload stores both the recommendation-time estimate and the execution-time `costResolution` breakdown, while the existing estimated/actual provider cost, user charge, and margin columns support later quote-versus-actual reconciliation. No parallel billing ledger is introduced.
+
