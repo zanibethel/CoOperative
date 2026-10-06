@@ -1298,6 +1298,8 @@ export async function scanModelCapabilities(input: {
     successfulCoverage.add("cooperative-local:text");
     successfulCoverage.add("cooperative-local:vision");
     successfulCoverage.add("cooperative-local:text-runtime");
+    successfulCoverage.add("cooperative-local:image");
+    successfulCoverage.add("cooperative-local:image-edit");
     const localRoutes = localRegistrySnapshots(policyMap, runtimeMap);
     routes.push(...localRoutes);
     sources.push({
