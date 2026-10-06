@@ -311,6 +311,19 @@ export default function WorkflowConsole() {
                   ) : (
                     <p><b>Parallel-ready:</b> no dependencies</p>
                   )}
+                  {node.node_kind === "media" && node.result ? (
+                    <p>
+                      <b>Media phase:</b>{" "}
+                      {typeof node.result.phase === "string"
+                        ? node.result.phase.replaceAll("-", " ")
+                        : "planning"}{" "}
+                      · Planned cost{" "}
+                      {typeof node.result.estimatedCostUsd === "number"
+                        ? "$" + node.result.estimatedCostUsd.toFixed(4)
+                        : "—"}{" "}
+                      · Generation sent: no
+                    </p>
+                  ) : null}
                   {node.error ? <p className="error">{node.error}</p> : null}
                   {typeof node.result?.text === "string" ? (
                     <details>
