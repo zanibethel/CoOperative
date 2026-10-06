@@ -223,6 +223,7 @@ type JobResult = {
   providerCostBearer?: string | null;
   routeTrace?: RouteTraceStep[];
   routeSummary?: RouteSummary | null;
+  localFreeOnly?: boolean;
 };
 
 type RecoveryEvent = {
@@ -276,6 +277,7 @@ const ACTIVE_JOB_KEY = "cooperative.local-ai.active-job";
 const PENDING_PAID_RESUME_KEY = "cooperative.local-ai.pending-paid-resume-job";
 const PENDING_MEDIA_RESUME_KEY = "cooperative.local-ai.pending-media-resume-job";
 const ACTIVE_BUSINESS_KEY = "cooperative.local-ai.active-business";
+const MODEL_MIXER_LOCAL_FREE_ONLY_KEY = "cooperative.model-mixer.local-free-only";
 const MAX_ATTACHMENTS = 4;
 const MAX_UPLOAD_BYTES = 3 * 1024 * 1024;
 const MAX_IMAGE_EDGE = 1800;
@@ -2206,6 +2208,16 @@ export default function LocalAiChat() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageScrollRef = useRef<HTMLDivElement | null>(null);
 
+  useEffect(() => {
+    const saved = window.localStorage.getItem(MODEL_MIXER_LOCAL_FREE_ONLY_KEY);
+    if (saved !== "true") return;
+    setModelMixer((current) => ({
+      ...current,
+      preset: "custom",
+      localFreeOnly: true,
+    }));
+  }, []);
+
   const refreshOwnedNodes = useCallback(async () => {
     const response = await fetch("/api/local-ai/nodes", { cache: "no-store" });
     const result = (await response.json()) as NodesResult;
@@ -2904,10 +2916,11 @@ export default function LocalAiChat() {
     setResponseDetails(null);
     setError("");
     setStatus("Ready");
-    setModelMixer({
+    setModelMixer((current) => ({
       ...DEFAULT_MODEL_MIXER_SETTINGS,
+      localFreeOnly: current.localFreeOnly,
       agents: { ...DEFAULT_MODEL_MIXER_SETTINGS.agents },
-    });
+    }));
   }
 
   async function switchConversation(id: string) {
@@ -3201,6 +3214,7 @@ export default function LocalAiChat() {
           modelMixer: {
             preset: modelMixer.preset,
             maxSpendUsd: modelMixer.maxSpendUsd,
+            localFreeOnly: modelMixer.localFreeOnly,
             agents: modelMixer.agents,
           },
         }),
@@ -3992,6 +4006,11 @@ export default function LocalAiChat() {
                       {formatRouteUsd(responseDetails.routeSummary.totalChargedUsd)}
                     </strong>
                   </span>
+                  {responseDetails.localFreeOnly ? (
+                    <span>
+                      No-paid <strong>ON</strong>
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -4088,7 +4107,13 @@ export default function LocalAiChat() {
         settings={modelMixer}
         paidAiEligible={Boolean(aiBalance?.paidAiEligible)}
         refreshKey={serviceConnectionRevision}
-        onChange={setModelMixer}
+        onChange={(next) => {
+          setModelMixer(next);
+          window.localStorage.setItem(
+            MODEL_MIXER_LOCAL_FREE_ONLY_KEY,
+            next.localFreeOnly ? "true" : "false",
+          );
+        }}
         onClose={() => setModelMixerOpen(false)}
       />
     </section>
