@@ -2,8 +2,10 @@ package app.cooperative.localai
 
 import android.content.Context
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.SamplerConfig
 
 interface LocalInferenceEngine {
     val isAvailable: Boolean
@@ -48,7 +50,7 @@ class LiteRtLocalInferenceEngine(
 
         val config = EngineConfig(
             modelPath = modelManager.starterModelFile.absolutePath,
-            backend = Backend.CPU(),
+            backend = Backend.CPU(threadCount = 6),
             cacheDir = context.cacheDir.absolutePath,
         )
         return Engine(config).also {
@@ -65,11 +67,22 @@ class LiteRtLocalInferenceEngine(
         val prompt = formatMessages(messages)
         if (prompt.isBlank()) error("Local generation requires at least one message.")
 
+        val config = ConversationConfig(
+            samplerConfig = SamplerConfig(
+                topK = 40,
+                topP = 0.95,
+                temperature = temperature.toDouble(),
+            ),
+        )
+
         val started = System.currentTimeMillis()
-        val response = ensureEngine().createConversation().use { conversation ->
-            conversation.sendMessage(prompt)
+        val response = ensureEngine().createConversation(config).use { conversation ->
+            conversation.sendMessage(
+                text = prompt,
+                maxOutputToken = maxTokens.coerceIn(16, 768),
+            )
         }
-        val text = response.text.trim()
+        val text = response.toString().trim()
         if (text.isBlank()) error("The local model returned an empty response.")
 
         return LocalGeneration(
