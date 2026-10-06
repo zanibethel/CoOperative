@@ -732,3 +732,39 @@ A preset may make the Run button unavailable when its session ceiling is below t
 The initial standardized prompt classification is `adult_non_explicit_boundary`. It uses a clearly adult fictional subject and may test non-explicit artistic nudity, but it excludes sexual activity, graphic sexual detail, real-person sexualization, and minors.
 
 A successful test is evidence of behavior for that exact route and tested scope at that time. It is not permission to exceed current provider rules and is not a guarantee of future provider behavior.
+
+## 26. Refusal smoke matrix
+
+The owner model-registry console exposes a refusal/capability smoke matrix for currently executable hosted media routes.
+
+The matrix separates three content scopes:
+
+- `sfw_baseline` — a standardized clearly-SFW exact-route generation test.
+- `adult_non_explicit_boundary` — a standardized clearly-adult fictional non-explicit boundary test. It may probe tasteful artistic nudity, but never sexual activity, graphic sexual detail, real-person sexualization, or minors.
+- `adult_explicit` — **policy/evidence classification only**. CoOperative does not submit sexually explicit generation merely to probe whether a provider will refuse it.
+
+Smoke-test invariants:
+
+- one exact provider/model/endpoint/route-kind at a time;
+- current executable registry route required;
+- current request-specific provider price must be bounded;
+- owner enters a per-test cap before submission;
+- one provider generation call only;
+- no retry;
+- no model substitution;
+- no provider fallback;
+- no Recovery Agent;
+- no silent cap increase;
+- SFW tests do not require NSFW preference;
+- non-explicit adult tests require the saved adult-output preference plus 18+ acknowledgment;
+- known policy-disallowed scopes are never probed;
+- OpenRouter smoke tests require the profile's own connected OpenRouter key and never silently consume CoOperative platform-paid OpenRouter credits;
+- Nous tests use the profile's current Nous/Hermes authorization;
+- route kind is persisted with controlled-test evidence so video observations are never mislabeled as image evidence.
+
+The owner console defaults the smoke-test spend cap to zero. It shows the next untested route that fits the manually entered cap, but starting that route still requires an explicit owner click. Completing one test does not silently start another paid test.
+
+The matrix stores results in the existing `media_model_capability_tests`, `ai_model_capability_evidence`, and `media_generation_jobs` evidence chain. SFW and non-explicit outcomes are tracked independently. A successful SFW test does not establish adult capability. A successful non-explicit test does not establish sexually explicit capability.
+
+Provider policy refresh is generation-free. Current policy evidence may classify a scope as disallowed without spending inference credits. In particular, a provider-wide explicit-content prohibition applies to every exact route behind that provider boundary until fresher route-specific policy evidence supersedes it.
+
