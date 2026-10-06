@@ -364,6 +364,58 @@ async function persistPairwiseVerification(
   return decision;
 }
 
+async function persistPairwiseFailure(
+  supabase: AdminClient,
+  input: {
+    originalImageJobId: string | null;
+    candidateImageJobId: string | null;
+    verifierJobId: string;
+    error: string;
+  },
+) {
+  const failure = {
+    status: "failed",
+    version: "semantic-pairwise-v1",
+    verifierJobId: input.verifierJobId,
+    error: input.error.slice(0, 800),
+  };
+
+  for (const [jobId, traceKey] of [
+    [input.originalImageJobId, "repairVerification"],
+    [input.candidateImageJobId, "pairwiseVerification"],
+  ] as const) {
+    if (!jobId) continue;
+
+    const { data: imageJob, error: imageError } = await supabase
+      .from("inference_jobs")
+      .select("pipeline_trace")
+      .eq("id", jobId)
+      .maybeSingle();
+
+    if (imageError || !imageJob) continue;
+
+    const trace =
+      imageJob.pipeline_trace &&
+      typeof imageJob.pipeline_trace === "object" &&
+      !Array.isArray(imageJob.pipeline_trace)
+        ? (imageJob.pipeline_trace as Record<string, unknown>)
+        : {};
+
+    await supabase
+      .from("inference_jobs")
+      .update({
+        pipeline_trace: {
+          ...trace,
+          [traceKey]: failure,
+        },
+        verification_summary: failure,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", jobId);
+  }
+}
+
+
 function repairTargetsFromPlan(plan: unknown) {
   if (!plan || typeof plan !== "object" || Array.isArray(plan)) return [];
   const targets = (plan as { targets?: unknown }).targets;
@@ -561,26 +613,49 @@ export async function POST(request: Request) {
           latencyMs: null,
         });
 
-        await updateSourceSemanticJudgeTrace(
-          supabase,
-          typeof job.source_image_job_id === "string"
-            ? job.source_image_job_id
-            : null,
-          {
-            status: "failed",
-            version: "semantic-vision-v1",
-            judgeJobId: jobId,
-            error: body.error.slice(0, 800),
-          },
-        ).catch((traceError) => {
-          console.error("Could not persist semantic judge failure trace", {
-            judgeJobId: jobId,
-            detail:
-              traceError instanceof Error
-                ? traceError.message.slice(0, 500)
-                : "unknown",
+        if (job.routing_mode === "semantic-pairwise-v1") {
+          await persistPairwiseFailure(supabase, {
+            originalImageJobId:
+              typeof job.source_image_job_id === "string"
+                ? job.source_image_job_id
+                : null,
+            candidateImageJobId:
+              typeof job.comparison_image_job_id === "string"
+                ? job.comparison_image_job_id
+                : null,
+            verifierJobId: jobId,
+            error: body.error,
+          }).catch((traceError) => {
+            console.error("Could not persist pairwise verifier failure", {
+              verifierJobId: jobId,
+              detail:
+                traceError instanceof Error
+                  ? traceError.message.slice(0, 500)
+                  : "unknown",
+            });
           });
-        });
+        } else {
+          await updateSourceSemanticJudgeTrace(
+            supabase,
+            typeof job.source_image_job_id === "string"
+              ? job.source_image_job_id
+              : null,
+            {
+              status: "failed",
+              version: "semantic-vision-v1.1",
+              judgeJobId: jobId,
+              error: body.error.slice(0, 800),
+            },
+          ).catch((traceError) => {
+            console.error("Could not persist semantic judge failure trace", {
+              judgeJobId: jobId,
+              detail:
+                traceError instanceof Error
+                  ? traceError.message.slice(0, 500)
+                  : "unknown",
+            });
+          });
+        }
 
         return NextResponse.json({ ok: true, status: "failed" });
       }
