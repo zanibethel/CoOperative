@@ -849,7 +849,8 @@ export async function scanModelCapabilities(input: {
         const pricingVerifiedEnoughForAutomaticRouting =
           model.estimatedCostUsd !== null &&
           Number.isFinite(model.estimatedCostUsd) &&
-          model.estimatedCostUsd >= 0;
+          model.estimatedCostUsd >= 0 &&
+          model.pricingUnit === "image";
 
         routes.push({
           provider: "nous",
@@ -1058,7 +1059,7 @@ export async function scanModelCapabilities(input: {
           status: "active",
           free: false,
           recommended: true,
-          executionReady: true,
+          executionReady: model.executionReady !== false,
           inputModalities: ["text"],
           outputModalities: ["image"],
           capabilitySummary: {
@@ -1072,6 +1073,7 @@ export async function scanModelCapabilities(input: {
           },
           pricing: {
             estimatedCostUsd: model.estimatedCostUsd,
+            unit: model.pricingUnit || "unknown",
             pricingSource: model.pricingSource,
             approximate: model.pricingApproximate === true,
           },
