@@ -282,7 +282,7 @@ async function reconcileActive(ownerRef: string) {
   };
 }
 
-async function conclusiveCoverage(ownerRef: string) {
+async function capabilityCoverage(ownerRef: string) {
   const admin = createAdminSupabaseClient();
   const { data: tests, error } = await admin
     .from("media_model_capability_tests")
@@ -290,13 +290,14 @@ async function conclusiveCoverage(ownerRef: string) {
       "provider,model,test_type,outcome,prompt_classification,source_job_id,tested_at",
     )
     .eq("owner_ref", ownerRef)
-    .in("outcome", ["supported", "blocked"])
     .in("test_type", ["sfw_smoke", "adult_content"])
     .order("tested_at", { ascending: false })
     .limit(500);
   if (error) throw error;
 
-  const jobIds = [...new Set((tests || []).map((row) => row.source_job_id).filter(Boolean))];
+  const jobIds = [
+    ...new Set((tests || []).map((row) => row.source_job_id).filter(Boolean)),
+  ];
   const kindByJob = new Map<string, string>();
   if (jobIds.length) {
     const { data: jobs, error: jobsError } = await admin
@@ -318,13 +319,14 @@ async function conclusiveCoverage(ownerRef: string) {
           ? ("adult_non_explicit_boundary" as const)
           : null,
     outcome: row.outcome,
+    conclusive: row.outcome === "supported" || row.outcome === "blocked",
   }));
 }
 
 async function plan(ownerRef: string, userId: string) {
   const [routes, coverage, preference, jobs] = await Promise.all([
     mediaCapabilitySmokeRoutes(ownerRef),
-    conclusiveCoverage(ownerRef),
+    capabilityCoverage(ownerRef),
     mediaContentPreferenceForUser(userId),
     batchJobs(ownerRef),
   ]);
@@ -341,7 +343,8 @@ async function plan(ownerRef: string, userId: string) {
       (row) =>
         row.provider === target.provider &&
         row.kind === target.kind &&
-        row.scope === target.scope,
+        row.scope === target.scope &&
+        row.conclusive,
     );
 
     if (alreadyCovered) {
@@ -369,16 +372,15 @@ async function plan(ownerRef: string, userId: string) {
         (route) =>
           route.provider === target.provider &&
           route.kind === target.kind &&
-          (target.scope !== "adult_non_explicit_boundary" ||
-            coverage.every(
-              (row) =>
-                !(
-                  row.provider === route.provider &&
-                  row.model === route.model &&
-                  row.kind === route.kind &&
-                  row.scope === target.scope
-                ),
-            )),
+          coverage.every(
+            (row) =>
+              !(
+                row.provider === route.provider &&
+                row.model === route.model &&
+                row.kind === route.kind &&
+                row.scope === target.scope
+              ),
+          ),
       )
       .sort(
         (a, b) =>
