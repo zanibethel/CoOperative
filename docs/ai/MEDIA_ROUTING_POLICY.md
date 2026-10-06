@@ -788,3 +788,30 @@ Share, Save to Photos, export, and Save to CoOperative Cloud must prefer `genera
 
 This handoff does not start a second inference call and does not change provider billing. Persistent sandboxes may be reopened to recover an already-generated artifact after a transport-path bug, and that recovery is recorded separately from model capability. A successful recovery may upgrade an SFW smoke observation from partial to supported without spending additional inference credits.
 
+## 28. Owned local adult-capable image route
+
+CoOperative has one intentionally narrow owned/local adult-capable text-to-image route: `cooperative-local / local-image-quality`.
+
+The route is split by server-derived content mode:
+
+- `sfw` and normal quality generation use `segmind/SSD-1B`.
+- `adult_non_explicit` remains on the owned quality path and may use the normal quality model.
+- `adult_explicit` switches the worker to `stabilityai/stable-diffusion-xl-base-1.0` and is text-to-image only.
+
+The client never chooses `content_mode` directly. CoOperative derives it from the authenticated request immediately before the local job is queued. The database stores only `sfw`, `adult_non_explicit`, or `adult_explicit`.
+
+Explicit local execution is fail-closed at the node boundary. A worker may claim an `adult_explicit` image job only when its fresh Unison heartbeat advertises `adult_explicit_text_to_image`. Older workers therefore cannot accidentally claim a job they do not understand.
+
+The owned explicit route does not accept reference or identity inputs. The worker rejects explicit requests containing reference images, and the registry marks `local-image-fast-reference`, `local-image-quality-reference`, and `local-image-quality-identity` as explicit-disallowed by CoOperative policy. This keeps sexualized identity/reference transformations out of the owned route.
+
+The worker also rejects obvious minor-age and coercive/non-consensual sexual prompt language before inference. These local application-level safeguards are independent of any model's own checker.
+
+Model/license and runtime capability are separate evidence dimensions. The registry records:
+
+- `segmind/SSD-1B` as the default owned quality model with Apache-2.0 license metadata.
+- `stabilityai/stable-diffusion-xl-base-1.0` as the explicit-mode model with CreativeML Open RAIL++-M license metadata.
+- `safetyFilterControl=local-configurable` and `thirdPartyProviderBoundary=false`.
+- explicit scope as permitted by the owned runtime/license boundary, while controlled generation quality/effectiveness remains a separate benchmark question.
+
+The route costs no third-party inference fee, but it is offered only while an authorized, fresh image node that advertises the required capability is online. SFW behavior remains the default and SFW prompts add an explicit negative-content constraint even though the underlying local runtime is configurable.
+
