@@ -55,12 +55,10 @@ IDENTITY_MODEL_ID = os.getenv(
 )
 EXPLICIT_MODEL_ID = os.getenv(
     "EXPLICIT_MODEL_ID",
-    "stabilityai/stable-diffusion-xl-base-1.0",
+    "stablediffusionapi/duchaiten-real3d-nsfw-xl",
 )
-EXPLICIT_LORA_ID = os.getenv(
-    "EXPLICIT_LORA_ID",
-    "wangkanai/sdxl-fp8-loras-nsfw",
-)
+EXPLICIT_LORA_ID = os.getenv("EXPLICIT_LORA_ID", "").strip()
+EXPLICIT_LORA_WEIGHT_NAME = os.getenv("EXPLICIT_LORA_WEIGHT_NAME", "").strip()
 try:
     EXPLICIT_LORA_SCALE = float(os.getenv("EXPLICIT_LORA_SCALE", "0.8"))
 except ValueError:
@@ -99,7 +97,7 @@ PRELOAD_PROFILE = os.getenv("PRELOAD_PROFILE", "fast").lower()
 if PRELOAD_PROFILE not in {"fast", "quality", "none"}:
     PRELOAD_PROFILE = "fast"
 
-app = FastAPI(title="CoOperative AI Local Image Worker", version="0.10.2")
+app = FastAPI(title="CoOperative AI Local Image Worker", version="0.10.3")
 
 def start_repo_recovery_worker():
     enabled = os.getenv("COOPERATIVE_START_REPO_AGENT", "1").strip().lower()
@@ -355,11 +353,16 @@ def ensure_identity_profile():
 def ensure_explicit_profile():
     global loaded_profile, text_pipe, image_pipe, identity_adapter_loaded
 
-    if loaded_profile == "explicit-sdxl-lora" and text_pipe is not None:
+    expected_profile = (
+        "explicit-owned-model-lora"
+        if EXPLICIT_LORA_ID
+        else "explicit-owned-model"
+    )
+    if loaded_profile == expected_profile and text_pipe is not None:
         return
 
     clear_model()
-    print(f"Loading owned explicit-capable base model {EXPLICIT_MODEL_ID}...", flush=True)
+    print(f"Loading owned explicit-capable model {EXPLICIT_MODEL_ID}...", flush=True)
 
     pipe = AutoPipelineForText2Image.from_pretrained(
         EXPLICIT_MODEL_ID,
@@ -367,24 +370,24 @@ def ensure_explicit_profile():
         use_safetensors=True,
     ).to(DEVICE)
 
-    print(
-        f"Loading explicit SDXL LoRA {EXPLICIT_LORA_ID} "
-        f"at scale {EXPLICIT_LORA_SCALE:.2f}...",
-        flush=True,
-    )
-    pipe.load_lora_weights(
-        EXPLICIT_LORA_ID,
-        adapter_name=EXPLICIT_LORA_ADAPTER_NAME,
-    )
-    if not hasattr(pipe, "set_adapters"):
-        raise RuntimeError(
-            "The installed Diffusers pipeline cannot set LoRA adapter strength. "
-            "Upgrade Diffusers before using the owned explicit route."
+    if EXPLICIT_LORA_ID:
+        print(
+            f"Loading optional explicit adapter {EXPLICIT_LORA_ID} "
+            f"at scale {EXPLICIT_LORA_SCALE:.2f}...",
+            flush=True,
         )
-    pipe.set_adapters(
-        EXPLICIT_LORA_ADAPTER_NAME,
-        adapter_weights=EXPLICIT_LORA_SCALE,
-    )
+        lora_kwargs = {"adapter_name": EXPLICIT_LORA_ADAPTER_NAME}
+        if EXPLICIT_LORA_WEIGHT_NAME:
+            lora_kwargs["weight_name"] = EXPLICIT_LORA_WEIGHT_NAME
+        pipe.load_lora_weights(EXPLICIT_LORA_ID, **lora_kwargs)
+        if not hasattr(pipe, "set_adapters"):
+            raise RuntimeError(
+                "The installed Diffusers pipeline cannot set LoRA adapter strength."
+            )
+        pipe.set_adapters(
+            EXPLICIT_LORA_ADAPTER_NAME,
+            adapter_weights=EXPLICIT_LORA_SCALE,
+        )
 
     if hasattr(pipe, "enable_vae_slicing"):
         pipe.enable_vae_slicing()
@@ -393,13 +396,19 @@ def ensure_explicit_profile():
 
     text_pipe = pipe
     image_pipe = None
-    loaded_profile = "explicit-sdxl-lora"
+    loaded_profile = expected_profile
     identity_adapter_loaded = False
-    print(
-        "Owned SDXL explicit-capable text-to-image pipeline loaded "
-        f"with LoRA {EXPLICIT_LORA_ID} at scale {EXPLICIT_LORA_SCALE:.2f}.",
-        flush=True,
-    )
+    if EXPLICIT_LORA_ID:
+        print(
+            "Owned explicit checkpoint loaded with optional LoRA "
+            f"{EXPLICIT_LORA_ID} at scale {EXPLICIT_LORA_SCALE:.2f}.",
+            flush=True,
+        )
+    else:
+        print(
+            "Owned explicit checkpoint loaded without a separate LoRA adapter.",
+            flush=True,
+        )
 
 
 def _term_is_explicitly_excluded(text: str, term: str) -> bool:
@@ -561,7 +570,7 @@ def run_generation(request: ImageRequest):
             reference_mode = "none"
             model_used = EXPLICIT_MODEL_ID
             print(
-                "Local image path: owned SDXL + explicit LoRA text-to-image succeeded.",
+                "Local image path: owned explicit checkpoint text-to-image succeeded.",
                 flush=True,
             )
         elif identity_generation:
@@ -670,10 +679,11 @@ def run_generation(request: ImageRequest):
         "explicitLora": (
             {
                 "id": EXPLICIT_LORA_ID,
+                "weightName": EXPLICIT_LORA_WEIGHT_NAME or None,
                 "scale": EXPLICIT_LORA_SCALE,
                 "adapterName": EXPLICIT_LORA_ADAPTER_NAME,
             }
-            if request.contentMode == "adult_explicit"
+            if request.contentMode == "adult_explicit" and EXPLICIT_LORA_ID
             else None
         ),
     }
@@ -795,8 +805,7 @@ def unison_capabilities():
         "single_reference_identity",
         "owned_content_mode",
         "adult_explicit_text_to_image",
-        "adult_explicit_sdxl_lora",
-        "adult_explicit_sdxl_lora_peft",
+        "adult_explicit_owned_checkpoint",
     ]
     if platform.system() == "Windows" and TEXT_READY_MARKER.exists():
         capabilities.extend(
@@ -860,8 +869,9 @@ def health():
             "quality": QUALITY_MODEL_ID,
             "qualityIdentity": IDENTITY_MODEL_ID,
             "explicitBase": EXPLICIT_MODEL_ID,
-            "explicitLora": EXPLICIT_LORA_ID,
-            "explicitLoraScale": EXPLICIT_LORA_SCALE,
+            "explicitLora": EXPLICIT_LORA_ID or None,
+            "explicitLoraWeightName": EXPLICIT_LORA_WEIGHT_NAME or None,
+            "explicitLoraScale": EXPLICIT_LORA_SCALE if EXPLICIT_LORA_ID else None,
         },
         "huggingFaceAuthenticated": bool(os.getenv("HF_TOKEN")),
         "asyncQueue": {
@@ -881,8 +891,9 @@ def capabilities():
             "fast": FAST_MODEL_ID,
             "quality": QUALITY_MODEL_ID,
             "explicitBase": EXPLICIT_MODEL_ID,
-            "explicitLora": EXPLICIT_LORA_ID,
-            "explicitLoraScale": EXPLICIT_LORA_SCALE,
+            "explicitLora": EXPLICIT_LORA_ID or None,
+            "explicitLoraWeightName": EXPLICIT_LORA_WEIGHT_NAME or None,
+            "explicitLoraScale": EXPLICIT_LORA_SCALE if EXPLICIT_LORA_ID else None,
         },
         "capabilities": {
             "imageGeneration": True,
@@ -922,7 +933,7 @@ if __name__ == "__main__":
             if platform.system() == "Windows" and os.getenv("UNISON_INSTALL_SCOPE", "").lower() == "machine"
             else "windows-unison-0.9.3"
             if platform.system() == "Windows"
-            else "image-worker-0.10.2"
+            else "image-worker-0.10.3"
         ),
         busy_provider=unison_busy,
     )
