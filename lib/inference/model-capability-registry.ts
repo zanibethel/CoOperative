@@ -1308,3 +1308,199 @@ export async function latestModelRegistrySnapshot() {
     routes: routes || [],
   };
 }
+
+export type ModelRegistryAvailabilityRoute = {
+  id: string;
+  provider: string;
+  model: string;
+  endpoint: string;
+  routeKind: string;
+  displayName: string;
+  free: boolean;
+  recommended: boolean;
+  executionReady: boolean;
+  inputModalities: string[];
+  outputModalities: string[];
+  capabilitySummary: Record<string, unknown>;
+  pricing: Record<string, unknown>;
+  limits: Record<string, unknown>;
+  policySummary: Record<string, unknown>;
+  runtimeSummary: Record<string, unknown>;
+  lastSeenAt: string;
+  lastChangedAt: string;
+};
+
+export type ModelRegistryAvailability = {
+  authoritative: boolean;
+  latestCompletedScanAt: string | null;
+  coverage: Set<string>;
+  keys: Set<string>;
+  routes: ModelRegistryAvailabilityRoute[];
+};
+
+export function modelRegistryRouteKey(input: {
+  provider: string;
+  model: string;
+  endpoint?: string | null;
+  routeKind: string;
+}) {
+  return [
+    input.provider,
+    input.model,
+    input.endpoint || "",
+    input.routeKind,
+  ].join("|");
+}
+
+export function modelRegistryCoverageKey(provider: string, routeKind: string) {
+  return `${provider}:${routeKind}`;
+}
+
+export function registryRouteEligible(
+  availability: ModelRegistryAvailability,
+  input: {
+    provider: string;
+    model: string;
+    endpoint?: string | null;
+    routeKind: string;
+  },
+) {
+  const coverageKey = modelRegistryCoverageKey(
+    input.provider,
+    input.routeKind,
+  );
+  if (!availability.authoritative || !availability.coverage.has(coverageKey)) {
+    return true;
+  }
+  return availability.keys.has(modelRegistryRouteKey(input));
+}
+
+export async function availableModelRegistryRoutes(input?: {
+  providers?: string[];
+  routeKinds?: string[];
+  includeNonExecutable?: boolean;
+  maxAgeHours?: number;
+}): Promise<ModelRegistryAvailability> {
+  const admin = createAdminSupabaseClient();
+  const maxAgeHours = Math.max(1, input?.maxAgeHours ?? 36);
+  const cutoff = new Date(
+    Date.now() - maxAgeHours * 60 * 60 * 1000,
+  ).toISOString();
+
+  const { data: latestRun, error: runError } = await admin
+    .from("ai_model_scan_runs")
+    .select("completed_at,status")
+    .eq("status", "completed")
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (runError) throw runError;
+
+  let query = admin
+    .from("ai_model_registry")
+    .select(
+      "id,provider,model,endpoint,route_kind,display_name,free,recommended,execution_ready,input_modalities,output_modalities,capability_summary,pricing,limits,policy_summary,runtime_summary,last_seen_at,last_changed_at",
+    )
+    .eq("status", "active")
+    .gte("last_seen_at", cutoff);
+
+  if (!input?.includeNonExecutable) {
+    query = query.eq("execution_ready", true);
+  }
+  if (input?.providers?.length) {
+    query = query.in("provider", input.providers);
+  }
+  if (input?.routeKinds?.length) {
+    query = query.in("route_kind", input.routeKinds);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const routes: ModelRegistryAvailabilityRoute[] = (data || []).map((row) => ({
+    id: row.id,
+    provider: row.provider,
+    model: row.model,
+    endpoint: row.endpoint || "",
+    routeKind: row.route_kind,
+    displayName: row.display_name,
+    free: row.free === true,
+    recommended: row.recommended === true,
+    executionReady: row.execution_ready === true,
+    inputModalities: Array.isArray(row.input_modalities)
+      ? row.input_modalities.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
+    outputModalities: Array.isArray(row.output_modalities)
+      ? row.output_modalities.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [],
+    capabilitySummary:
+      row.capability_summary &&
+      typeof row.capability_summary === "object" &&
+      !Array.isArray(row.capability_summary)
+        ? (row.capability_summary as Record<string, unknown>)
+        : {},
+    pricing:
+      row.pricing &&
+      typeof row.pricing === "object" &&
+      !Array.isArray(row.pricing)
+        ? (row.pricing as Record<string, unknown>)
+        : {},
+    limits:
+      row.limits &&
+      typeof row.limits === "object" &&
+      !Array.isArray(row.limits)
+        ? (row.limits as Record<string, unknown>)
+        : {},
+    policySummary:
+      row.policy_summary &&
+      typeof row.policy_summary === "object" &&
+      !Array.isArray(row.policy_summary)
+        ? (row.policy_summary as Record<string, unknown>)
+        : {},
+    runtimeSummary:
+      row.runtime_summary &&
+      typeof row.runtime_summary === "object" &&
+      !Array.isArray(row.runtime_summary)
+        ? (row.runtime_summary as Record<string, unknown>)
+        : {},
+    lastSeenAt: row.last_seen_at,
+    lastChangedAt: row.last_changed_at,
+  }));
+
+  const latestCompletedScanAt =
+    latestRun?.completed_at && typeof latestRun.completed_at === "string"
+      ? latestRun.completed_at
+      : null;
+  const authoritative =
+    Boolean(latestCompletedScanAt) &&
+    Date.parse(latestCompletedScanAt as string) >= Date.parse(cutoff) &&
+    routes.length > 0;
+
+  const coverage = new Set(
+    routes.map((route) =>
+      modelRegistryCoverageKey(route.provider, route.routeKind),
+    ),
+  );
+  const keys = new Set(
+    routes.map((route) =>
+      modelRegistryRouteKey({
+        provider: route.provider,
+        model: route.model,
+        endpoint: route.endpoint,
+        routeKind: route.routeKind,
+      }),
+    ),
+  );
+
+  return {
+    authoritative,
+    latestCompletedScanAt,
+    coverage,
+    keys,
+    routes,
+  };
+}
