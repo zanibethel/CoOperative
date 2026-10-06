@@ -126,5 +126,32 @@ export async function preferredOwnedMediaPlanningNode(
     };
   }
 
-  return preferredOwnedTextNode(admin, userId);
+  const fallbackCandidates = (data || []).filter((node) => {
+    const capabilities = Array.isArray(node.capabilities) ? node.capabilities : [];
+    const policy =
+      node.policy && typeof node.policy === "object"
+        ? (node.policy as { allowText?: unknown })
+        : {};
+    const seenAt = Date.parse(node.last_seen_at || "");
+
+    return (
+      capabilities.includes("text_generation") &&
+      !capabilities.includes("android_node") &&
+      policy.allowText !== false &&
+      node.state !== "paused" &&
+      Number.isFinite(seenAt) &&
+      seenAt >= freshAfter
+    );
+  });
+
+  fallbackCandidates.sort(
+    (a, b) =>
+      (statePriority[a.state] ?? 9) - (statePriority[b.state] ?? 9) ||
+      Date.parse(b.last_seen_at || "") - Date.parse(a.last_seen_at || ""),
+  );
+
+  const fallback = fallbackCandidates[0];
+  return fallback
+    ? { id: fallback.id, displayName: fallback.display_name || null }
+    : null;
 }
