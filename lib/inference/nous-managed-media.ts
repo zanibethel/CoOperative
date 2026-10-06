@@ -351,7 +351,7 @@ export async function nousManagedMediaCatalog() {
                 pricingSource: candidate.url,
                 pricingApproximate: false,
                 pricingUnit: candidate.pricingUnit,
-                executionReady: candidate.pricingUnit === "image",
+                executionReady: candidate.pricingUnit === "image" || candidate.pricingUnit === "megapixel",
                 editEndpoint: null as string | null,
                 maxReferenceImages: 0,
               };
@@ -405,7 +405,7 @@ export async function nousManagedMediaCatalog() {
       pricingSource: hermesImageSource,
       pricingApproximate: true,
       pricingUnit: model.pricingUnit,
-      executionReady: model.pricingUnit === "image",
+      executionReady: model.pricingUnit === "image" || model.pricingUnit === "megapixel",
       editEndpoint: model.editEndpoint,
       maxReferenceImages: model.maxReferenceImages,
     });
