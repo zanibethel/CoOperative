@@ -250,6 +250,16 @@ function workflowFor(
   return requiresReferenceImage ? "reference-image-edit" : "text-to-image";
 }
 
+function equivalentVideoResolution(a: string | null, b: string | null) {
+  const normalize = (value: string | null) => {
+    const normalized = (value || "").toLowerCase();
+    if (normalized === "4k") return "2160p";
+    if (normalized === "2k") return "1440p";
+    return normalized;
+  };
+  return normalize(a) === normalize(b);
+}
+
 function resolutionQuality(value: string | null) {
   switch ((value || "").toLowerCase()) {
     case "4k":
@@ -689,67 +699,110 @@ export async function buildMediaRecommendationOptions(input: {
 
   const nousCatalog = await nousManagedMediaCatalog();
 
-  if (
-    plan.kind === "video" &&
-    plan.durationSeconds &&
-    nousCatalog.video &&
-    registryRouteEligible(registryAvailability, {
-      provider: "nous",
-      model: nousCatalog.video.model,
-      routeKind: "video",
-    })
-  ) {
-    const requestedAudio = plan.audio ?? false;
-    const resolutionEntries = plan.resolution
-      ? [[plan.resolution.toLowerCase(), nousCatalog.video.rates[plan.resolution.toLowerCase()]] as const]
-      : Object.entries(nousCatalog.video.rates);
-
-    for (const [resolution, rates] of resolutionEntries) {
-      if (!rates) continue;
-      const costResolution = resolveMediaRequestCost({
-        provider: "nous",
-        model: nousCatalog.video.model,
-        request: {
-          ...plan,
-          resolution,
-          audio: requestedAudio,
-        },
-        pricing: {
-          unit: "second",
-          rates: nousCatalog.video.rates,
-          pricingSource: nousCatalog.video.pricingSource,
-        },
-        costBearer: "user-connected",
-      });
+  if (plan.kind === "video" && plan.durationSeconds) {
+    for (const model of nousCatalog.videoModels || []) {
       if (
-        !costResolution.bounded ||
-        costResolution.providerCostUsd === null ||
-        costResolution.capCostUsd === null
+        !model.executionReady ||
+        !registryRouteEligible(registryAvailability, {
+          provider: "nous",
+          model: model.model,
+          routeKind: "video",
+        })
       ) {
         continue;
       }
 
-      candidates.push({
-        provider: "nous",
-        model: nousCatalog.video.model,
-        modelName: "PixVerse V6",
-        estimatedCostUsd: costResolution.capCostUsd,
-        providerCostEstimateUsd: costResolution.providerCostUsd,
-        markupPercent: costResolution.markupPercent,
-        capUsd: nextCent(costResolution.capCostUsd),
-        pricingSource: costResolution.pricingSource,
-        resolution,
-        audio: requestedAudio,
-        qualityLevel:
-          resolution === "1080p" ? 4 :
-          resolution === "720p" ? 3 :
-          resolution === "540p" ? 2 : 1,
-        executionReady: true,
-        referenceBehavior: null,
-        verificationNote: null,
-        editEndpoint: null,
-        costResolution,
-      });
+      if (
+        model.minDurationSeconds !== null &&
+        plan.durationSeconds < model.minDurationSeconds
+      ) {
+        continue;
+      }
+      if (
+        model.maxDurationSeconds !== null &&
+        plan.durationSeconds > model.maxDurationSeconds
+      ) {
+        continue;
+      }
+      if (
+        plan.aspectRatio &&
+        model.aspectRatios.length > 0 &&
+        !model.aspectRatios.some(
+          (value) => value.toLowerCase() === plan.aspectRatio?.toLowerCase(),
+        )
+      ) {
+        continue;
+      }
+      if (
+        plan.resolution &&
+        model.resolutions.length > 0 &&
+        !model.resolutions.some((value) =>
+          equivalentVideoResolution(value, plan.resolution),
+        )
+      ) {
+        continue;
+      }
+
+      const requestedAudio =
+        model.audioMode === "native"
+          ? true
+          : plan.audio ?? false;
+      if (requestedAudio && !model.audioSupported) continue;
+
+      const pricedResolutions = Object.keys(model.rates).filter(
+        (value) => value !== "default",
+      );
+      const resolutionCandidates: Array<string | null> = plan.resolution
+        ? [plan.resolution.toLowerCase()]
+        : pricedResolutions.length
+          ? pricedResolutions
+          : model.resolutions.length
+            ? model.resolutions
+            : [null];
+
+      for (const resolution of resolutionCandidates) {
+        const costResolution = resolveMediaRequestCost({
+          provider: "nous",
+          model: model.model,
+          request: {
+            ...plan,
+            resolution,
+            audio: requestedAudio,
+          },
+          pricing: {
+            unit: "second",
+            rates: model.rates,
+            pricingSource: model.pricingSource,
+          },
+          costBearer: "user-connected",
+        });
+        if (
+          !costResolution.bounded ||
+          costResolution.providerCostUsd === null ||
+          costResolution.capCostUsd === null
+        ) {
+          continue;
+        }
+
+        candidates.push({
+          provider: "nous",
+          model: model.model,
+          modelName: model.displayName,
+          estimatedCostUsd: costResolution.capCostUsd,
+          providerCostEstimateUsd: costResolution.providerCostUsd,
+          markupPercent: costResolution.markupPercent,
+          capUsd: nextCent(costResolution.capCostUsd),
+          pricingSource: costResolution.pricingSource,
+          resolution,
+          audio: requestedAudio,
+          qualityLevel: model.minLevel,
+          executionReady: true,
+          referenceBehavior: null,
+          verificationNote: model.pricingNote,
+          editEndpoint: null,
+          costResolution,
+        });
+      }
     }
   }
 
