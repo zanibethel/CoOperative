@@ -5,6 +5,7 @@ import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+const MEDIA_BUCKET = "cooperative-media-library";
 const MAX_BYTES = 50 * 1024 * 1024;
 
 function normalizeRemoteMediaUrl(raw: string) {
@@ -53,13 +54,14 @@ export async function GET(request: Request) {
           kind: string;
           result_url: string | null;
           model: string | null;
+          pricing_dimensions: Record<string, unknown> | null;
         }
       | null = null;
 
     if (jobId) {
       const { data, error } = await admin
         .from("media_generation_jobs")
-        .select("id,kind,result_url,model")
+        .select("id,kind,result_url,model,pricing_dimensions")
         .eq("id", jobId)
         .eq("owner_ref", ownerRef)
         .eq("status", "completed")
@@ -94,28 +96,66 @@ export async function GET(request: Request) {
       );
     }
 
-    const remote = await fetch(normalizeRemoteMediaUrl(job.result_url), {
-      cache: "no-store",
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!remote.ok) {
-      throw new Error(`Media provider returned HTTP ${remote.status}.`);
+    const dimensions =
+      job.pricing_dimensions &&
+      typeof job.pricing_dimensions === "object" &&
+      !Array.isArray(job.pricing_dimensions)
+        ? job.pricing_dimensions
+        : {};
+    const generatedStoragePath =
+      typeof dimensions.generatedStoragePath === "string"
+        ? dimensions.generatedStoragePath
+        : "";
+    const generatedMimeType =
+      typeof dimensions.generatedMimeType === "string"
+        ? dimensions.generatedMimeType
+        : "";
+
+    let bytes: ArrayBuffer;
+    let mimeType: string;
+
+    if (generatedStoragePath) {
+      const { data: blob, error: downloadError } = await admin.storage
+        .from(MEDIA_BUCKET)
+        .download(generatedStoragePath);
+      if (downloadError || !blob) {
+        throw downloadError || new Error("Stored generated media is unavailable.");
+      }
+      bytes = await blob.arrayBuffer();
+      mimeType =
+        (generatedMimeType || blob.type || (job.kind === "video" ? "video/mp4" : "image/jpeg"))
+          .split(";")[0]
+          .trim();
+    } else {
+      const remote = await fetch(normalizeRemoteMediaUrl(job.result_url), {
+        cache: "no-store",
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!remote.ok) {
+        throw new Error(`Media provider returned HTTP ${remote.status}.`);
+      }
+
+      const contentLength = Number(remote.headers.get("content-length") || 0);
+      if (contentLength > MAX_BYTES) {
+        return NextResponse.json(
+          { error: "Media exceeds the 50 MB export limit." },
+          { status: 413 },
+        );
+      }
+
+      bytes = await remote.arrayBuffer();
+      mimeType =
+        (remote.headers.get("content-type") || (job.kind === "video" ? "video/mp4" : "image/jpeg"))
+          .split(";")[0]
+          .trim();
     }
 
-    const contentLength = Number(remote.headers.get("content-length") || 0);
-    if (contentLength > MAX_BYTES) {
-      return NextResponse.json({ error: "Media exceeds the 50 MB export limit." }, { status: 413 });
-    }
-
-    const bytes = await remote.arrayBuffer();
     if (!bytes.byteLength || bytes.byteLength > MAX_BYTES) {
-      return NextResponse.json({ error: "Media is empty or exceeds the 50 MB export limit." }, { status: 413 });
+      return NextResponse.json(
+        { error: "Media is empty or exceeds the 50 MB export limit." },
+        { status: 413 },
+      );
     }
-
-    const mimeType =
-      (remote.headers.get("content-type") || (job.kind === "video" ? "video/mp4" : "image/jpeg"))
-        .split(";")[0]
-        .trim();
     const extension = extensionFor(mimeType, job.kind);
     const fileName = `cooperative-${job.kind}-${job.id.slice(0, 8)}.${extension}`;
 
