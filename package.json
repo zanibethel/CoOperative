@@ -10,13 +10,16 @@
     "models:scan": "node scripts/scan-model-capabilities.mjs"
   },
   "dependencies": {
+    "@stripe/react-stripe-js": "6.12.0",
+    "@stripe/stripe-js": "10.0.0",
     "@supabase/ssr": "0.12.7",
     "@supabase/supabase-js": "2.116.0",
+    "@vercel/sandbox": "^3.3.0",
     "next": "16.3.5",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "zod": "4.6.5",
-    "@vercel/sandbox": "^3.3.0"
+    "stripe": "22.6.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/node": "20.17.30",
