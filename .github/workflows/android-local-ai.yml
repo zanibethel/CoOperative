@@ -68,7 +68,7 @@ jobs:
             "versionCode": ${VERSION_CODE},
             "versionName": "${VERSION_NAME}",
             "downloadUrl": "https://co-operative-mu.vercel.app/download/android",
-            "notes": "Fixes Android in-app update installation by validating the APK and handing it to the system installer through FileProvider. Also includes Galaxy cross-device media prompt planning."
+            "notes": "Adds Qwen3 1.7B INT4 as the Galaxy quality-reasoning tier, benchmarks GPU vs CPU on-device, routes image planning to the best verified backend, and keeps Qwen3 0.6B for lightweight work."
           }
           EOF
           if gh release view android-alpha >/dev/null 2>&1; then
