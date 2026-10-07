@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-06
+Last reviewed: 2026-10-07
 
 ## Status key
 
@@ -96,8 +96,9 @@ Reference: https://cactuscompute.com/blog/whistle
 
 ## 3. Hard AI budget caps with graceful fallback
 
-**Status:** Recommend  
+**Status:** Recommend / partial implementation evidence  
 **Added:** 2026-10-05  
+**Last reviewed:** 2026-10-07  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -123,15 +124,19 @@ Before a paid call:
 ### Recommended implementation
 Keep budget enforcement outside the model itself in deterministic routing/ledger code. Models can suggest escalation; they cannot authorize spending above the cap.
 
+### 2026-10-07 evidence update
+Strict local/free-only routing and fixed Stripe price mapping have landed, which strengthens deterministic no-paid behavior and least-privilege checkout. The broader layered cap contract is not yet proven end to end: quoted cost, reservation, provider cost, user debit, concurrency, retry/failover, and refund/release still need one reconciliation test matrix.
+
 ### Recommendation
-Implement after reviewing the existing quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
+Implement only after reviewing the complete quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
 
 ---
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
-**Status:** Recommend  
+**Status:** Implemented foundation / Recommend verification receipts  
 **Added:** 2026-10-05  
+**Last reviewed:** 2026-10-07  
 **Source:** TLDR Dev / current CoOperative persistence direction
 
 ### Finding
@@ -147,8 +152,16 @@ Use a consult -> build -> update loop:
 3. update the relevant project docs after verified implementation;
 4. keep provenance/status for external findings.
 
+### 2026-10-07 evidence update
+The versioned consideration and project-intelligence workflow is now in active use. OpenAI's Ironclad agent benchmark adds a useful lesson: successful tool calls or plausible intermediate steps are insufficient when the final workflow state is wrong. Cross-device tasks should produce an end-to-end completion receipt tied to explicit criteria.
+
+### Possible solution
+For delegated work, record the requested criteria, claimed completion, observed final state, verification source, unresolved conditions, and responsible node/model. Apply this first to cross-device media planning and other workflows where an Android/Mac specialist claims completion.
+
 ### Recommendation
-Use `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow.
+Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow. Add deterministic completion receipts to cross-device task verification before treating a claimed action as complete.
+
+Reference: https://openai.com/index/ironclad/
 
 Reference: https://tldr.tech/dev/2026-10-05
 
@@ -214,3 +227,27 @@ First perform a read-only check of the Mac worker's OS version and Screen Sharin
 References:
 - https://support.apple.com/en-us/148170
 - https://support.apple.com/en-us/149042
+
+
+---
+
+## 7. EmbeddingGemma 2 for Galaxy-node retrieval and intent routing
+
+**Status:** Evaluate on Android/Galaxy node  
+**Added:** 2026-10-07  
+**Last reviewed:** 2026-10-07  
+**Source:** Google Developers Blog / official model documentation
+
+### Finding
+Google released EmbeddingGemma 2, a 740M open-weight multimodal embedding model for text, images, video, and audio. Google reports modular active-memory use of roughly 191 MB for text-only and 567 MB for the full model on a Pixel 11 Pro, with zero-shot intent routing and MediaPipe Tasks/LiteRT deployment paths.
+
+### Why it may matter
+This is a closer fit for CoOperative's Galaxy node than a large generative model. It could support private local semantic retrieval, intent routing, media triage, and cross-device handoff while keeping raw content on-device.
+
+### Possible solution
+Add it only as a benchmark candidate behind the existing node-capability contract. Measure retrieval/intent quality, cold start, latency, active RAM, index size, battery/thermal impact, and failure behavior on the actual Galaxy hardware. Advertise the capability only after the benchmark passes.
+
+### Recommendation
+Do not make it a default router or bundle it into production yet. Run a narrow opt-in benchmark against the current text-embedding/routing baseline and require capability-specific evidence before scheduling work to the node.
+
+Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
