@@ -187,7 +187,7 @@ class MainActivity : Activity() {
 
         column.addView(sectionTitle("DEVICE ASSIST"))
         column.addView(text(
-            "Screen understanding and Android Accessibility actions are still disabled in alpha 3. " +
+            "Screen understanding and Android Accessibility actions are still disabled in this alpha. " +
                 "Local text inference and reliable app updates are being validated first; " +
                 "screen-assist permissions come next and remain separately controlled.",
             14f,
