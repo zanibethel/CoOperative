@@ -106,6 +106,7 @@ export async function POST(request: Request) {
             ? job.comparison_image_job_id
             : null,
         routingMode: job.routing_mode || "default",
+        taskClass: job.task_class || "general",
         maxTokens: job.max_tokens,
         temperature: Number(job.temperature),
         routingPreference: job.routing_preference || "default",
