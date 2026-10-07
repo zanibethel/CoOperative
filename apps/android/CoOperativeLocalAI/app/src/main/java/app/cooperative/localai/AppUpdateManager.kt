@@ -7,9 +7,13 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import androidx.core.content.FileProvider
 import org.json.JSONObject
+import java.io.File
+import java.io.FileInputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.zip.ZipFile
 import kotlin.concurrent.thread
 
 data class AppUpdateInfo(
@@ -75,6 +79,13 @@ class AppUpdateManager(
                 val manager =
                     context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
                 val fileName = "CoOperativeLocalAI-${info.versionName}.apk"
+                val updateDir =
+                    context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                        ?: error("Android external download storage is unavailable.")
+                val apkFile = File(updateDir, fileName)
+                if (apkFile.exists() && !apkFile.delete()) {
+                    error("Could not replace the previous downloaded update.")
+                }
 
                 val request = DownloadManager.Request(Uri.parse(info.downloadUrl))
                     .setTitle("CoOperativeLocalAI ${info.versionName}")
@@ -83,11 +94,7 @@ class AppUpdateManager(
                     .setNotificationVisibility(
                         DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
                     )
-                    .setDestinationInExternalFilesDir(
-                        context,
-                        Environment.DIRECTORY_DOWNLOADS,
-                        fileName,
-                    )
+                    .setDestinationUri(Uri.fromFile(apkFile))
 
                 val downloadId = manager.enqueue(request)
 
@@ -121,10 +128,9 @@ class AppUpdateManager(
 
                         when (status) {
                             DownloadManager.STATUS_SUCCESSFUL -> {
-                                val uri = manager.getUriForDownloadedFile(downloadId)
-                                    ?: error("Android could not open the downloaded APK.")
-                                savePendingApk(uri)
-                                onReady(uri)
+                                validateApk(apkFile, info)
+                                savePendingApk(apkFile)
+                                onReady(installerUri(apkFile))
                                 return@thread
                             }
 
@@ -163,27 +169,92 @@ class AppUpdateManager(
 
     fun installPendingIfAllowed(): Boolean {
         if (!canRequestPackageInstalls()) return false
-        val rawUri = preferences.getString(KEY_PENDING_APK_URI, null) ?: return false
-        preferences.edit().remove(KEY_PENDING_APK_URI).apply()
-        launchInstaller(Uri.parse(rawUri))
+        val rawPath = preferences.getString(KEY_PENDING_APK_PATH, null) ?: return false
+        val apkFile = File(rawPath)
+        if (!apkFile.isFile) {
+            preferences.edit().remove(KEY_PENDING_APK_PATH).apply()
+            return false
+        }
+
+        preferences.edit().remove(KEY_PENDING_APK_PATH).apply()
+        launchInstaller(installerUri(apkFile))
         return true
     }
 
     fun requestInstall(uri: Uri): Boolean {
-        savePendingApk(uri)
         if (!canRequestPackageInstalls()) {
             openInstallPermissionSettings()
             return false
         }
 
-        preferences.edit().remove(KEY_PENDING_APK_URI).apply()
         launchInstaller(uri)
         return true
     }
 
-    private fun savePendingApk(uri: Uri) {
-        preferences.edit().putString(KEY_PENDING_APK_URI, uri.toString()).apply()
+    private fun validateApk(
+        apkFile: File,
+        info: AppUpdateInfo,
+    ) {
+        if (!apkFile.isFile || apkFile.length() < MIN_APK_BYTES) {
+            error("Downloaded update is incomplete.")
+        }
+
+        FileInputStream(apkFile).use { input ->
+            val signature = ByteArray(4)
+            if (input.read(signature) != 4 ||
+                signature[0] != 0x50.toByte() ||
+                signature[1] != 0x4b.toByte()
+            ) {
+                error("Downloaded update is not a valid APK archive.")
+            }
+        }
+
+        ZipFile(apkFile).use { zip ->
+            if (zip.getEntry("AndroidManifest.xml") == null) {
+                error("Downloaded update is missing AndroidManifest.xml.")
+            }
+            val hasDex = zip.entries().asSequence().any { entry ->
+                entry.name == "classes.dex" ||
+                    (entry.name.startsWith("classes") && entry.name.endsWith(".dex"))
+            }
+            if (!hasDex) {
+                error("Downloaded update is missing executable app code.")
+            }
+        }
+
+        val archiveInfo = context.packageManager.getPackageArchiveInfo(
+            apkFile.absolutePath,
+            0,
+        ) ?: error("Android could not parse the downloaded APK before install.")
+
+        if (archiveInfo.packageName != context.packageName) {
+            error("Downloaded update has the wrong application package.")
+        }
+
+        val archiveVersionCode =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                archiveInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                archiveInfo.versionCode.toLong()
+            }
+        if (archiveVersionCode < info.versionCode.toLong()) {
+            error("Downloaded update version does not match update metadata.")
+        }
     }
+
+    private fun savePendingApk(file: File) {
+        preferences.edit()
+            .putString(KEY_PENDING_APK_PATH, file.absolutePath)
+            .apply()
+    }
+
+    private fun installerUri(file: File): Uri =
+        FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file,
+        )
 
     private fun launchInstaller(uri: Uri) {
         val intent = Intent(Intent.ACTION_VIEW)
@@ -195,7 +266,8 @@ class AppUpdateManager(
 
     companion object {
         private const val APK_MIME = "application/vnd.android.package-archive"
-        private const val KEY_PENDING_APK_URI = "pending_apk_uri"
+        private const val KEY_PENDING_APK_PATH = "pending_apk_path"
+        private const val MIN_APK_BYTES = 1_000_000L
 
         const val UPDATE_METADATA_URL =
             "https://github.com/zanibethel/CoOperative/releases/download/" +
