@@ -45,10 +45,15 @@ class AndroidTextWorker(
                 routingMode == "cross-device-media-planning-v1" ||
                     taskClass == "media-planning"
             val profile =
-                if (mediaPlanning && preferences.qualityModelVerified) {
-                    LocalModelProfile.QUALITY
-                } else {
-                    LocalModelProfile.FAST
+                when {
+                    mediaPlanning && preferences.qualityModelVerified ->
+                        LocalModelProfile.QUALITY
+                    preferences.localModelVerified ->
+                        LocalModelProfile.FAST
+                    preferences.qualityModelVerified ->
+                        LocalModelProfile.QUALITY
+                    else ->
+                        LocalModelProfile.FAST
                 }
             val backend =
                 if (profile == LocalModelProfile.QUALITY) {
