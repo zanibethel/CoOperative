@@ -1,6 +1,5 @@
 package app.cooperative.localai
 
-import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -75,80 +74,83 @@ class AppUpdateManager(
         onError: (Throwable) -> Unit,
     ) {
         thread(name = "CoOperativeAppUpdate") {
+            var connection: HttpURLConnection? = null
             try {
-                val manager =
-                    context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
                 val fileName = "CoOperativeLocalAI-${info.versionName}.apk"
                 val updateDir =
                     context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                         ?: error("Android external download storage is unavailable.")
                 val apkFile = File(updateDir, fileName)
-                if (apkFile.exists() && !apkFile.delete()) {
-                    error("Could not replace the previous downloaded update.")
+                val partialFile = File(updateDir, "$fileName.part")
+
+                apkFile.delete()
+                partialFile.delete()
+
+                connection =
+                    (URL(info.downloadUrl).openConnection() as HttpURLConnection).apply {
+                        instanceFollowRedirects = true
+                        connectTimeout = 20_000
+                        readTimeout = 180_000
+                        requestMethod = "GET"
+                        setRequestProperty(
+                            "User-Agent",
+                            "CoOperativeLocalAI/${BuildConfig.VERSION_NAME}",
+                        )
+                        setRequestProperty("Accept", APK_MIME)
+                        setRequestProperty("Accept-Encoding", "identity")
+                    }
+                connection.connect()
+
+                if (connection.responseCode !in 200..299) {
+                    error("Update download failed with HTTP ${connection.responseCode}.")
                 }
 
-                val request = DownloadManager.Request(Uri.parse(info.downloadUrl))
-                    .setTitle("CoOperativeLocalAI ${info.versionName}")
-                    .setDescription("Downloading CoOperativeLocalAI update")
-                    .setMimeType(APK_MIME)
-                    .setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
-                    )
-                    .setDestinationUri(Uri.fromFile(apkFile))
-
-                val downloadId = manager.enqueue(request)
-
-                while (true) {
-                    manager.query(
-                        DownloadManager.Query().setFilterById(downloadId),
-                    ).use { cursor ->
-                        if (!cursor.moveToFirst()) {
-                            error("Android Download Manager lost the update download.")
-                        }
-
-                        val status = cursor.getInt(
-                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS),
-                        )
-                        val downloaded = cursor.getLong(
-                            cursor.getColumnIndexOrThrow(
-                                DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
-                            ),
-                        )
-                        val totalRaw = cursor.getLong(
-                            cursor.getColumnIndexOrThrow(
-                                DownloadManager.COLUMN_TOTAL_SIZE_BYTES,
-                            ),
-                        )
-                        onProgress(
-                            AppDownloadProgress(
-                                downloadedBytes = downloaded.coerceAtLeast(0L),
-                                totalBytes = totalRaw.takeIf { it > 0L },
-                            ),
-                        )
-
-                        when (status) {
-                            DownloadManager.STATUS_SUCCESSFUL -> {
-                                validateApk(apkFile, info)
-                                savePendingApk(apkFile)
-                                onReady(installerUri(apkFile))
-                                return@thread
-                            }
-
-                            DownloadManager.STATUS_FAILED -> {
-                                val reason = cursor.getInt(
-                                    cursor.getColumnIndexOrThrow(
-                                        DownloadManager.COLUMN_REASON,
+                val total = connection.contentLengthLong.takeIf { it > 0L }
+                connection.inputStream.use { input ->
+                    partialFile.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(1024 * 1024)
+                        var downloaded = 0L
+                        var lastReported = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            downloaded += count
+                            if (
+                                downloaded - lastReported >= 2L * 1024L * 1024L ||
+                                (total != null && downloaded >= total)
+                            ) {
+                                onProgress(
+                                    AppDownloadProgress(
+                                        downloadedBytes = downloaded,
+                                        totalBytes = total,
                                     ),
                                 )
-                                error("Android update download failed (reason $reason).")
+                                lastReported = downloaded
                             }
                         }
+                        output.flush()
+                        onProgress(
+                            AppDownloadProgress(
+                                downloadedBytes = downloaded,
+                                totalBytes = total,
+                            ),
+                        )
                     }
-
-                    Thread.sleep(700L)
                 }
+
+                if (!partialFile.renameTo(apkFile)) {
+                    partialFile.copyTo(apkFile, overwrite = true)
+                    partialFile.delete()
+                }
+
+                validateApk(apkFile, info)
+                savePendingApk(apkFile)
+                onReady(installerUri(apkFile))
             } catch (error: Throwable) {
                 onError(error)
+            } finally {
+                connection?.disconnect()
             }
         }
     }
