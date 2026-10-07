@@ -56,7 +56,9 @@ class CooperativeApi(
             .coerceAtLeast(1L)
             .coerceAtMost(Int.MAX_VALUE.toLong())
             .toInt()
-        val verified = preferences.localModelVerified
+        val fastVerified = preferences.localModelVerified
+        val qualityVerified = preferences.qualityModelVerified
+        val verified = fastVerified || qualityVerified
 
         val capabilities = JSONArray()
             .put("android_node")
@@ -66,8 +68,12 @@ class CooperativeApi(
             capabilities
                 .put("local_text_generation")
                 .put("text_generation")
+        }
+        if (qualityVerified) {
+            capabilities
                 .put("media_prompt_planning_v1")
                 .put("cross_device_media_planning")
+                .put("quality_text_reasoning")
         }
 
         val platform = JSONObject()
@@ -84,34 +90,89 @@ class CooperativeApi(
             .put("maxMemoryMb", (memoryTotalMb * 0.55).toInt().coerceAtLeast(256))
 
         if (verified) {
+            val benchmarks = JSONArray()
+            if (fastVerified) {
+                benchmarks.put(
+                    JSONObject()
+                        .put("profile", "fast")
+                        .put("model", preferences.localModelId)
+                        .put("provider", "cooperative-android-litertlm")
+                        .put("backend", "cpu")
+                        .put("latencyMs", preferences.localModelLatencyMs)
+                        .put("recordedAt", preferences.localModelVerifiedAt),
+                )
+            }
+            if (qualityVerified) {
+                benchmarks.put(
+                    JSONObject()
+                        .put("profile", "quality")
+                        .put("model", preferences.qualityModelId)
+                        .put("provider", "cooperative-android-litertlm")
+                        .put("backend", preferences.qualityModelBackend)
+                        .put("latencyMs", preferences.qualityModelLatencyMs)
+                        .put("recordedAt", preferences.qualityModelVerifiedAt),
+                )
+            }
+
             resources.put(
                 "textModelPlan",
                 JSONObject()
-                    .put("revision", "android-alpha02")
-                    .put("backend", "litertlm-cpu")
+                    .put("revision", "android-alpha05")
+                    .put(
+                        "backend",
+                        if (qualityVerified) {
+                            "litertlm-${preferences.qualityModelBackend.ifBlank { "cpu" }}"
+                        } else {
+                            "litertlm-cpu"
+                        },
+                    )
                     .put(
                         "models",
                         JSONObject()
-                            .put("fast", preferences.localModelId)
-                            .put("quality", "")
-                            .put("heavy", "")
+                            .put(
+                                "fast",
+                                if (fastVerified) preferences.localModelId else "",
+                            )
+                            .put(
+                                "quality",
+                                if (qualityVerified) preferences.qualityModelId else "",
+                            )
+                            .put("heavy", LocalModelCatalog.HEAVY.id)
                             .put("vision", ""),
                     )
                     .put(
                         "selectionReason",
-                        "Verified on this Android device for personal text and bounded media-planning execution.",
+                        if (qualityVerified) {
+                            "Qwen3 1.7B is the verified image-planning and reasoning tier; fast Qwen3 0.6B remains available for lighter text work."
+                        } else {
+                            "Fast local text tier is verified; quality image-planning tier is not benchmarked yet."
+                        },
                     ),
             )
-            resources.put(
-                "textBenchmark",
-                JSONObject()
-                    .put("profile", "fast")
-                    .put("model", preferences.localModelId)
-                    .put("provider", "cooperative-android-litertlm")
-                    .put("outputTokens", 0)
-                    .put("latencyMs", preferences.localModelLatencyMs)
-                    .put("recordedAt", preferences.localModelVerifiedAt),
-            )
+            resources.put("textBenchmarks", benchmarks)
+            if (qualityVerified) {
+                resources.put(
+                    "textBenchmark",
+                    JSONObject()
+                        .put("profile", "quality")
+                        .put("model", preferences.qualityModelId)
+                        .put("provider", "cooperative-android-litertlm")
+                        .put("backend", preferences.qualityModelBackend)
+                        .put("latencyMs", preferences.qualityModelLatencyMs)
+                        .put("recordedAt", preferences.qualityModelVerifiedAt),
+                )
+            } else if (fastVerified) {
+                resources.put(
+                    "textBenchmark",
+                    JSONObject()
+                        .put("profile", "fast")
+                        .put("model", preferences.localModelId)
+                        .put("provider", "cooperative-android-litertlm")
+                        .put("backend", "cpu")
+                        .put("latencyMs", preferences.localModelLatencyMs)
+                        .put("recordedAt", preferences.localModelVerifiedAt),
+                )
+            }
         }
 
         val policy = JSONObject()
@@ -131,7 +192,7 @@ class CooperativeApi(
             .put("capabilities", capabilities)
             .put("resources", resources)
             .put("policy", policy)
-            .put("workerVersion", "android-local-ai-0.4.1")
+            .put("workerVersion", "android-local-ai-0.5.0")
 
         return post(
             path = "/api/unison/nodes/heartbeat",
