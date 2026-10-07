@@ -21,6 +21,7 @@ type StripeCheckoutSession = {
   currency?: string | null;
   payment_link?: StripeIdLike;
   payment_intent?: StripeIdLike;
+  metadata?: Record<string, string> | null;
 };
 
 type StripeEvent = {
@@ -85,7 +86,6 @@ function verifyStripeSignature(rawBody: string, header: string, secret: string) 
 }
 
 function microusdFromStripeAmount(amountTotal: number) {
-  // Stripe USD amounts are cents; one cent is 10,000 micro-USD.
   return Math.max(0, Math.trunc(amountTotal)) * 10_000;
 }
 
@@ -164,30 +164,10 @@ export async function POST(request: Request) {
     const paymentLinkId = stripeId(session?.payment_link || null);
     const paymentIntentId = stripeId(session?.payment_intent || null);
 
-    if (
-      !session?.id ||
-      !session.client_reference_id ||
-      !paymentLinkId
-    ) {
+    if (!session?.id || !session.client_reference_id) {
       return NextResponse.json({
         received: true,
         ignored: "unrelated session",
-      });
-    }
-
-    const { data: configuredLink, error: linkError } = await admin
-      .from("ai_balance_topup_options")
-      .select("id")
-      .eq("provider_payment_link_id", paymentLinkId)
-      .eq("provider", "stripe")
-      .eq("livemode", eventLivemode)
-      .maybeSingle();
-
-    if (linkError) throw linkError;
-    if (!configuredLink) {
-      return NextResponse.json({
-        received: true,
-        ignored: "unrelated payment link",
       });
     }
 
@@ -202,6 +182,79 @@ export async function POST(request: Request) {
       });
     }
 
+    const { data: intent, error: intentError } = await admin
+      .from("ai_balance_funding_intents")
+      .select(
+        "id,topup_option_id,amount_microusd,provider_payment_link_id,provider_session_id,status",
+      )
+      .eq("id", session.client_reference_id)
+      .maybeSingle();
+
+    if (intentError) throw intentError;
+    if (!intent) {
+      return NextResponse.json({
+        received: true,
+        ignored: "unknown funding intent",
+      });
+    }
+
+    const { data: option, error: optionError } = await admin
+      .from("ai_balance_topup_options")
+      .select("id,provider,provider_payment_link_id,livemode,active")
+      .eq("id", intent.topup_option_id)
+      .maybeSingle();
+
+    if (optionError) throw optionError;
+    if (
+      !option ||
+      option.provider !== "stripe" ||
+      option.livemode !== eventLivemode
+    ) {
+      return NextResponse.json(
+        { error: "Stripe top-up configuration mismatch." },
+        { status: 400 },
+      );
+    }
+
+    if (
+      intent.provider_session_id &&
+      intent.provider_session_id !== session.id
+    ) {
+      return NextResponse.json(
+        { error: "Stripe session does not match funding intent." },
+        { status: 400 },
+      );
+    }
+
+    if (paymentLinkId) {
+      if (
+        !option.provider_payment_link_id ||
+        option.provider_payment_link_id !== paymentLinkId ||
+        intent.provider_payment_link_id !== paymentLinkId
+      ) {
+        return NextResponse.json(
+          { error: "Stripe Payment Link does not match funding intent." },
+          { status: 400 },
+        );
+      }
+    } else {
+      const metadata = session.metadata || {};
+      if (
+        metadata.cooperative_checkout_mode !== "elements" ||
+        metadata.cooperative_purpose !== "ai-balance-topup" ||
+        metadata.cooperative_funding_intent_id !==
+          session.client_reference_id ||
+        metadata.cooperative_topup_option_id !== intent.topup_option_id ||
+        intent.provider_payment_link_id !== null ||
+        option.provider_payment_link_id !== null
+      ) {
+        return NextResponse.json(
+          { error: "Stripe Elements session metadata is invalid." },
+          { status: 400 },
+        );
+      }
+    }
+
     if (
       event.type === "checkout.session.expired" ||
       event.type === "checkout.session.async_payment_failed"
@@ -213,6 +266,7 @@ export async function POST(request: Request) {
           stripeEventId: event.id || null,
           stripeEventType: event.type,
           livemode: eventLivemode,
+          checkoutMode: paymentLinkId ? "payment-link" : "elements",
         },
       });
       if (error) throw error;
@@ -250,6 +304,12 @@ export async function POST(request: Request) {
     }
 
     const amountMicrousd = microusdFromStripeAmount(session.amount_total);
+    if (amountMicrousd !== Number(intent.amount_microusd || 0)) {
+      return NextResponse.json(
+        { error: "Stripe paid amount does not match funding intent." },
+        { status: 400 },
+      );
+    }
 
     const { data: availableMicrousd, error } = await admin.rpc(
       "complete_ai_balance_topup",
@@ -263,6 +323,7 @@ export async function POST(request: Request) {
           stripeEventId: event.id || null,
           stripeEventType: event.type,
           livemode: eventLivemode,
+          checkoutMode: paymentLinkId ? "payment-link" : "elements",
         },
       },
     );
