@@ -72,6 +72,46 @@ class NodePreferences(context: Context) {
             preferences.edit().putString(KEY_LOCAL_MODEL_VERIFIED_AT, value.take(80)).apply()
         }
 
+    var qualityModelVerified: Boolean
+        get() = preferences.getBoolean(KEY_QUALITY_MODEL_VERIFIED, false)
+        set(value) {
+            preferences.edit().putBoolean(KEY_QUALITY_MODEL_VERIFIED, value).apply()
+        }
+
+    var qualityModelId: String
+        get() = preferences.getString(KEY_QUALITY_MODEL_ID, "") ?: ""
+        set(value) {
+            preferences.edit().putString(KEY_QUALITY_MODEL_ID, value.take(240)).apply()
+        }
+
+    var qualityModelLatencyMs: Long
+        get() = preferences.getLong(KEY_QUALITY_MODEL_LATENCY_MS, 0L)
+        set(value) {
+            preferences.edit().putLong(KEY_QUALITY_MODEL_LATENCY_MS, value.coerceAtLeast(0L)).apply()
+        }
+
+    var qualityModelVerifiedAt: String
+        get() = preferences.getString(KEY_QUALITY_MODEL_VERIFIED_AT, "") ?: ""
+        set(value) {
+            preferences.edit().putString(KEY_QUALITY_MODEL_VERIFIED_AT, value.take(80)).apply()
+        }
+
+    var qualityModelBackend: String
+        get() = preferences.getString(KEY_QUALITY_MODEL_BACKEND, "") ?: ""
+        set(value) {
+            preferences.edit().putString(KEY_QUALITY_MODEL_BACKEND, value.take(24)).apply()
+        }
+
+    fun clearQualityModelVerification() {
+        preferences.edit()
+            .putBoolean(KEY_QUALITY_MODEL_VERIFIED, false)
+            .remove(KEY_QUALITY_MODEL_ID)
+            .remove(KEY_QUALITY_MODEL_LATENCY_MS)
+            .remove(KEY_QUALITY_MODEL_VERIFIED_AT)
+            .remove(KEY_QUALITY_MODEL_BACKEND)
+            .apply()
+    }
+
     fun clearLocalModelVerification() {
         preferences.edit()
             .putBoolean(KEY_LOCAL_MODEL_VERIFIED, false)
@@ -98,5 +138,10 @@ class NodePreferences(context: Context) {
         private const val KEY_LOCAL_MODEL_ID = "local_model_id"
         private const val KEY_LOCAL_MODEL_LATENCY_MS = "local_model_latency_ms"
         private const val KEY_LOCAL_MODEL_VERIFIED_AT = "local_model_verified_at"
+        private const val KEY_QUALITY_MODEL_VERIFIED = "quality_model_verified"
+        private const val KEY_QUALITY_MODEL_ID = "quality_model_id"
+        private const val KEY_QUALITY_MODEL_LATENCY_MS = "quality_model_latency_ms"
+        private const val KEY_QUALITY_MODEL_VERIFIED_AT = "quality_model_verified_at"
+        private const val KEY_QUALITY_MODEL_BACKEND = "quality_model_backend"
     }
 }
