@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import StripeElementsTestClient from "./StripeElementsTestClient";
 import { mainCooperativeIdentity } from "@/lib/ai/main-cooperative-access";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 
@@ -45,28 +46,25 @@ export default async function StripeBalanceTestPage() {
         <Link className="brand" href="/">CoOperative</Link>
         <div className="nav-links">
           <Link href="/balance">Balance</Link>
-          <div className="badge">Stripe Test</div>
+          <div className="badge">Stripe Elements Test</div>
         </div>
       </nav>
 
       <section className="hero compact-hero">
         <div className="eyebrow">Owner-only verification</div>
-        <h1>Stripe test balance</h1>
+        <h1>Stripe Checkout Sessions + Payment Element</h1>
         <p>
-          This page uses a separate test profile. Stripe test-card payments here
-          cannot create spendable production AI credits.
+          This uses a separate test profile. Test-card payments cannot create
+          spendable production AI credits.
         </p>
       </section>
 
       <section className="card">
         <strong>Isolated test balance</strong>
         <p>{usd(Math.max(0, balanceMicrousd - reservedMicrousd))}</p>
-        <form action="/api/billing/stripe/test-topup" method="post">
-          <button className="primary" type="submit">
-            Start $10 Stripe test checkout
-          </button>
-        </form>
       </section>
+
+      <StripeElementsTestClient />
 
       <section className="card">
         <strong>Recent test funding intents</strong>
