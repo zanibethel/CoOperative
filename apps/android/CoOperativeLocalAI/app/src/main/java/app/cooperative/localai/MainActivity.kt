@@ -177,7 +177,7 @@ class MainActivity : Activity() {
         column.addView(downloadQualityModelButton.withTop(dp(8)))
 
         benchmarkQualityButton = Button(this).apply {
-            text = "Benchmark quality model (GPU + CPU)"
+            text = "Verify quality model (CPU)"
             setOnClickListener { benchmarkQualityModel() }
         }
         column.addView(benchmarkQualityButton.withTop(dp(8)))
@@ -290,7 +290,14 @@ class MainActivity : Activity() {
         downloadQualityModelButton.text =
             if (qualityInstalled) "Quality model downloaded" else "Download quality model (~932 MB)"
         downloadQualityModelButton.isEnabled = !qualityInstalled
-        benchmarkQualityButton.isEnabled = qualityInstalled
+        benchmarkQualityButton.isEnabled =
+            qualityInstalled && !preferences.qualityModelVerified
+        benchmarkQualityButton.text =
+            if (preferences.qualityModelVerified) {
+                "Quality model verified"
+            } else {
+                "Verify quality model (CPU)"
+            }
         runLocalButton.isEnabled =
             preferences.localModelVerified || preferences.qualityModelVerified
     }
@@ -500,70 +507,54 @@ class MainActivity : Activity() {
         downloadQualityModelButton.isEnabled = false
         localOutputText.text = ""
         qualityModelText.text =
-            "Benchmarking Qwen3 1.7B on GPU first, then CPU…"
+            "Loading Qwen3 1.7B and verifying it on CPU…"
 
         thread(name = "CoOperativeQualityBenchmark") {
             val engine = LiteRtLocalInferenceEngine(this)
             try {
-                val results = mutableListOf<LocalGeneration>()
-                var gpuError: String? = null
-                try {
-                    results += engine.benchmark(
-                        profile = LocalModelProfile.QUALITY,
-                        backendName = "gpu",
-                    )
-                } catch (error: Throwable) {
-                    gpuError = error.message.orEmpty().take(120)
-                }
-
-                try {
-                    results += engine.benchmark(
-                        profile = LocalModelProfile.QUALITY,
-                        backendName = "cpu",
-                    )
-                } catch (_: Throwable) {
-                    // If GPU worked, CPU failure should not invalidate the quality model.
-                }
-
-                val best = results.minByOrNull { it.latencyMs }
-                    ?: error(
-                        "Qwen3 1.7B failed on both GPU and CPU" +
-                            (gpuError?.let { ": $it" } ?: "."),
-                    )
+                val result = engine.benchmark(
+                    profile = LocalModelProfile.QUALITY,
+                    backendName = "cpu",
+                )
 
                 preferences.qualityModelVerified = true
-                preferences.qualityModelId = best.modelId
-                preferences.qualityModelLatencyMs = best.latencyMs
-                preferences.qualityModelBackend = best.backend
+                preferences.qualityModelId = result.modelId
+                preferences.qualityModelLatencyMs = result.latencyMs
+                preferences.qualityModelBackend = "cpu"
                 preferences.qualityModelVerifiedAt = Instant.now().toString()
 
                 if (tokenStore.getNodeToken() != null) {
                     runCatching { api.heartbeat() }
                 }
 
-                val detail = results.joinToString(" • ") {
-                    "${it.backend.uppercase()} ${it.latencyMs} ms"
-                }
                 runOnUiThread {
                     localOutputText.text =
-                        "Quality benchmark complete: $detail\nSelected: ${best.backend.uppercase()}"
+                        "Quality model verified on CPU in ${result.latencyMs} ms.\n" +
+                            "Qwen3 1.7B is now enabled for image planning and reasoning."
                     refreshUi(
-                        "Quality reasoning verified • ${best.backend.uppercase()} selected",
+                        "Quality reasoning verified • CPU selected",
                     )
+                    benchmarkQualityButton.text = "Quality model verified"
+                    benchmarkQualityButton.isEnabled = false
                     if (preferences.nodeEnabled) startNodeService()
                 }
             } catch (error: Throwable) {
                 preferences.clearQualityModelVerification()
+                val detail = error.message.orEmpty().ifBlank {
+                    error.javaClass.simpleName
+                }.take(220)
                 runOnUiThread {
-                    refreshUi(
-                        "Quality benchmark failed: ${error.message.orEmpty().take(140)}",
-                    )
+                    qualityModelText.text =
+                        "Qwen3 1.7B verification failed: $detail"
+                    localOutputText.text =
+                        "Quality model could not start on CPU. The fast Qwen3 0.6B model remains active."
+                    benchmarkQualityButton.text = "Try quality verification again"
+                    benchmarkQualityButton.isEnabled = true
+                    downloadQualityModelButton.isEnabled = false
+                    statusText.text = "Quality verification failed • fast model still ready"
                 }
             } finally {
                 engine.close()
-                runOnUiThread {
-                    refreshUi()
-                }
             }
         }
     }
