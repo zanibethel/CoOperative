@@ -131,7 +131,7 @@ class CooperativeApi(
             .put("capabilities", capabilities)
             .put("resources", resources)
             .put("policy", policy)
-            .put("workerVersion", "android-local-ai-0.4.0")
+            .put("workerVersion", "android-local-ai-0.4.1")
 
         return post(
             path = "/api/unison/nodes/heartbeat",
