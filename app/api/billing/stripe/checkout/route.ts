@@ -47,7 +47,9 @@ export async function POST(request: Request) {
 
     const { data: option, error: optionError } = await admin
       .from("ai_balance_topup_options")
-      .select("id,label,amount_microusd,currency,provider,livemode,active")
+      .select(
+        "id,label,amount_microusd,currency,provider,provider_price_id,livemode,active",
+      )
       .eq("id", input.topUpOptionId)
       .eq("provider", "stripe")
       .eq("active", true)
@@ -65,6 +67,16 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Only USD balance top-ups are currently supported." },
         { status: 400 },
+      );
+    }
+
+    if (
+      typeof option.provider_price_id !== "string" ||
+      !option.provider_price_id.startsWith("price_")
+    ) {
+      return NextResponse.json(
+        { error: "That balance top-up option is not configured in Stripe." },
+        { status: 503 },
       );
     }
 
@@ -119,6 +131,7 @@ export async function POST(request: Request) {
               : "platform-owner-elements-test",
           checkoutMode: "elements",
           livemode: option.livemode,
+          stripePriceId: option.provider_price_id,
         },
       })
       .select("id")
@@ -146,18 +159,7 @@ export async function POST(request: Request) {
       line_items: [
         {
           quantity: 1,
-          price_data: {
-            currency: "usd",
-            unit_amount: amountMicrousd / 10_000,
-            product_data: {
-              name: `CoOperative AI Balance — ${option.label}`,
-              description:
-                "Prepaid CoOperative balance for approved paid AI execution.",
-              metadata: {
-                cooperative_topup_option_id: option.id,
-              },
-            },
-          },
+          price: option.provider_price_id,
         },
       ],
       metadata: {
@@ -180,6 +182,12 @@ export async function POST(request: Request) {
       throw new Error("Stripe did not return a Checkout client secret.");
     }
 
+    const expectedCents = amountMicrousd / 10_000;
+    if (session.currency !== "usd" || session.amount_total !== expectedCents) {
+      await stripe.checkout.sessions.expire(session.id).catch(() => undefined);
+      throw new Error("Stripe price does not match the configured top-up amount.");
+    }
+
     const { error: sessionSaveError } = await admin
       .from("ai_balance_funding_intents")
       .update({
@@ -192,6 +200,7 @@ export async function POST(request: Request) {
           checkoutMode: "elements",
           livemode: option.livemode,
           stripeSessionCreated: true,
+          stripePriceId: option.provider_price_id,
         },
         updated_at: new Date().toISOString(),
       })
