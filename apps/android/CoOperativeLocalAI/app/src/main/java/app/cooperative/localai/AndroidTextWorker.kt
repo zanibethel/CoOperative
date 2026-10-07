@@ -9,6 +9,7 @@ class AndroidTextWorker(
     private val api: CooperativeApi,
 ) : AutoCloseable {
     private val engine = LiteRtLocalInferenceEngine(context)
+    private val preferences = NodePreferences(context)
 
     fun pollOnce(): Boolean {
         if (!engine.isAvailable) return false
@@ -34,15 +35,34 @@ class AndroidTextWorker(
                 return true
             }
 
-            val maxTokens = job.optInt("maxTokens", 384).coerceIn(16, 768)
+            val maxTokens = job.optInt("maxTokens", 384).coerceIn(16, 1024)
             val temperature = job.optDouble("temperature", 0.2)
                 .toFloat()
                 .coerceIn(0f, 1.5f)
+            val routingMode = job.optString("routingMode")
+            val taskClass = job.optString("taskClass")
+            val mediaPlanning =
+                routingMode == "cross-device-media-planning-v1" ||
+                    taskClass == "media-planning"
+            val profile =
+                if (mediaPlanning && preferences.qualityModelVerified) {
+                    LocalModelProfile.QUALITY
+                } else {
+                    LocalModelProfile.FAST
+                }
+            val backend =
+                if (profile == LocalModelProfile.QUALITY) {
+                    preferences.qualityModelBackend.ifBlank { "cpu" }
+                } else {
+                    "cpu"
+                }
 
             val generation = engine.generate(
                 messages = messages,
                 maxTokens = maxTokens,
                 temperature = temperature,
+                profile = profile,
+                preferredBackend = backend,
             )
             api.completeTextJob(jobId, generation)
         } catch (error: Exception) {
