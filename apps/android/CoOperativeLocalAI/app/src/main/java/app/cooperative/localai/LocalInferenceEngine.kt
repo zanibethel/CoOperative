@@ -126,20 +126,31 @@ class LiteRtLocalInferenceEngine(
         profile: LocalModelProfile,
         backendName: String,
         maxTokens: Int = 96,
-    ): LocalGeneration =
-        generate(
-            messages = listOf(
+    ): LocalGeneration {
+        val prompt = formatMessages(
+            listOf(
                 LocalMessage(
                     role = "user",
                     content =
                         "Return one concise JSON object describing an image composition plan with subject, camera, lighting, anatomy risks, and background.",
                 ),
             ),
-            maxTokens = maxTokens,
-            temperature = 0.1f,
-            profile = profile,
-            preferredBackend = backendName,
+            profile,
         )
+
+        try {
+            return generateWithBackend(
+                prompt = prompt,
+                maxTokens = maxTokens,
+                temperature = 0.1f,
+                profile = profile,
+                backendName = backendName.lowercase(),
+            )
+        } catch (error: Throwable) {
+            closeEngine()
+            throw error
+        }
+    }
 
     private fun generateWithBackend(
         prompt: String,
