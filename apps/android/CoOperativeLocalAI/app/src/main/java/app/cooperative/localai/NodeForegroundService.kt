@@ -65,10 +65,13 @@ class NodeForegroundService : Service() {
         while (running.get()) {
             val status = try {
                 api.heartbeat()
-                if (preferences.localModelVerified) {
-                    "Online • local text + media planning ready"
-                } else {
-                    "Online • node only"
+                when {
+                    preferences.qualityModelVerified ->
+                        "Online • quality reasoning + media planning ready"
+                    preferences.localModelVerified ->
+                        "Online • local text ready"
+                    else ->
+                        "Online • node only"
                 }
             } catch (error: Exception) {
                 val detail = error.message.orEmpty().take(100)
@@ -97,7 +100,10 @@ class NodeForegroundService : Service() {
 
         while (running.get()) {
             try {
-                if (!preferences.localModelVerified) {
+                if (
+                    !preferences.localModelVerified &&
+                    !preferences.qualityModelVerified
+                ) {
                     textWorker?.close()
                     textWorker = null
                     Thread.sleep(5_000L)
