@@ -137,7 +137,7 @@ class CooperativeApi(
                                 "quality",
                                 if (qualityVerified) preferences.qualityModelId else "",
                             )
-                            .put("heavy", LocalModelCatalog.HEAVY.id)
+                            .put("heavy", "")
                             .put("vision", ""),
                     )
                     .put(
