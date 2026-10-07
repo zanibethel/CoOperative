@@ -36,6 +36,9 @@ class MainActivity : Activity() {
     private lateinit var localModelText: TextView
     private lateinit var downloadModelButton: Button
     private lateinit var selfTestButton: Button
+    private lateinit var qualityModelText: TextView
+    private lateinit var downloadQualityModelButton: Button
+    private lateinit var benchmarkQualityButton: Button
     private lateinit var localPromptInput: EditText
     private lateinit var runLocalButton: Button
     private lateinit var localOutputText: TextView
@@ -160,10 +163,24 @@ class MainActivity : Activity() {
         column.addView(downloadModelButton.withTop(dp(10)))
 
         selfTestButton = Button(this).apply {
-            text = "Run local self-test"
+            text = "Run fast-model self-test"
             setOnClickListener { runSelfTest() }
         }
         column.addView(selfTestButton.withTop(dp(8)))
+
+        qualityModelText = text("", 14f, color = Color.LTGRAY).withTop(dp(18))
+        column.addView(qualityModelText)
+
+        downloadQualityModelButton = Button(this).apply {
+            setOnClickListener { downloadQualityModel() }
+        }
+        column.addView(downloadQualityModelButton.withTop(dp(8)))
+
+        benchmarkQualityButton = Button(this).apply {
+            text = "Benchmark quality model (GPU + CPU)"
+            setOnClickListener { benchmarkQualityModel() }
+        }
+        column.addView(benchmarkQualityButton.withTop(dp(8)))
 
         localPromptInput = EditText(this).apply {
             hint = "Ask the local model something"
@@ -207,7 +224,10 @@ class MainActivity : Activity() {
         val state = when {
             message != null -> message
             !paired -> "Not paired"
-            enabled && preferences.localModelVerified -> "Paired • node enabled • local AI ready"
+            enabled && preferences.qualityModelVerified ->
+                "Paired • node enabled • quality reasoning ready"
+            enabled && preferences.localModelVerified ->
+                "Paired • node enabled • local AI ready"
             enabled -> "Paired • node enabled"
             else -> "Paired • node stopped"
         }
@@ -255,7 +275,24 @@ class MainActivity : Activity() {
         downloadModelButton.isEnabled = !installed
 
         selfTestButton.isEnabled = installed
-        runLocalButton.isEnabled = preferences.localModelVerified
+
+        val qualityInstalled = modelManager.isInstalled(LocalModelProfile.QUALITY)
+        qualityModelText.text = when {
+            preferences.qualityModelVerified ->
+                "Quality: Qwen3 1.7B INT4 • ${preferences.qualityModelBackend.uppercase()} • " +
+                    "${preferences.qualityModelLatencyMs} ms benchmark"
+            qualityInstalled ->
+                "Quality: Qwen3 1.7B INT4 (~932 MB) downloaded. Benchmark GPU + CPU to enable image-job reasoning."
+            else ->
+                "Quality node model: Qwen3 1.7B INT4 (~932 MB). Used for image planning, prompt refinement, and repair reasoning."
+        }
+
+        downloadQualityModelButton.text =
+            if (qualityInstalled) "Quality model downloaded" else "Download quality model (~932 MB)"
+        downloadQualityModelButton.isEnabled = !qualityInstalled
+        benchmarkQualityButton.isEnabled = qualityInstalled
+        runLocalButton.isEnabled =
+            preferences.localModelVerified || preferences.qualityModelVerified
     }
 
     private fun checkForUpdates() {
@@ -423,6 +460,114 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun downloadQualityModel() {
+        downloadQualityModelButton.isEnabled = false
+        benchmarkQualityButton.isEnabled = false
+        localOutputText.text = ""
+        qualityModelText.text = "Starting Qwen3 1.7B quality-model download…"
+
+        thread(name = "CoOperativeQualityModelDownload") {
+            try {
+                modelManager.downloadModel(LocalModelProfile.QUALITY) { progress ->
+                    val downloadedMb = progress.downloadedBytes / (1024L * 1024L)
+                    val totalMb = progress.totalBytes?.div(1024L * 1024L)
+                    runOnUiThread {
+                        qualityModelText.text =
+                            if (totalMb != null && totalMb > 0) {
+                                "Downloading Qwen3 1.7B: $downloadedMb / $totalMb MB"
+                            } else {
+                                "Downloading Qwen3 1.7B: $downloadedMb MB"
+                            }
+                    }
+                }
+                preferences.clearQualityModelVerification()
+                runOnUiThread {
+                    refreshUi("Quality model downloaded • benchmark GPU + CPU")
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    downloadQualityModelButton.isEnabled = true
+                    refreshUi(
+                        "Quality model download failed: ${error.message.orEmpty().take(120)}",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun benchmarkQualityModel() {
+        benchmarkQualityButton.isEnabled = false
+        downloadQualityModelButton.isEnabled = false
+        localOutputText.text = ""
+        qualityModelText.text =
+            "Benchmarking Qwen3 1.7B on GPU first, then CPU…"
+
+        thread(name = "CoOperativeQualityBenchmark") {
+            val engine = LiteRtLocalInferenceEngine(this)
+            try {
+                val results = mutableListOf<LocalGeneration>()
+                var gpuError: String? = null
+                try {
+                    results += engine.benchmark(
+                        profile = LocalModelProfile.QUALITY,
+                        backendName = "gpu",
+                    )
+                } catch (error: Throwable) {
+                    gpuError = error.message.orEmpty().take(120)
+                }
+
+                try {
+                    results += engine.benchmark(
+                        profile = LocalModelProfile.QUALITY,
+                        backendName = "cpu",
+                    )
+                } catch (_: Throwable) {
+                    // If GPU worked, CPU failure should not invalidate the quality model.
+                }
+
+                val best = results.minByOrNull { it.latencyMs }
+                    ?: error(
+                        "Qwen3 1.7B failed on both GPU and CPU" +
+                            (gpuError?.let { ": $it" } ?: "."),
+                    )
+
+                preferences.qualityModelVerified = true
+                preferences.qualityModelId = best.modelId
+                preferences.qualityModelLatencyMs = best.latencyMs
+                preferences.qualityModelBackend = best.backend
+                preferences.qualityModelVerifiedAt = Instant.now().toString()
+
+                if (tokenStore.getNodeToken() != null) {
+                    runCatching { api.heartbeat() }
+                }
+
+                val detail = results.joinToString(" • ") {
+                    "${it.backend.uppercase()} ${it.latencyMs} ms"
+                }
+                runOnUiThread {
+                    localOutputText.text =
+                        "Quality benchmark complete: $detail\nSelected: ${best.backend.uppercase()}"
+                    refreshUi(
+                        "Quality reasoning verified • ${best.backend.uppercase()} selected",
+                    )
+                    if (preferences.nodeEnabled) startNodeService()
+                }
+            } catch (error: Throwable) {
+                preferences.clearQualityModelVerification()
+                runOnUiThread {
+                    refreshUi(
+                        "Quality benchmark failed: ${error.message.orEmpty().take(140)}",
+                    )
+                }
+            } finally {
+                engine.close()
+                runOnUiThread {
+                    refreshUi()
+                }
+            }
+        }
+    }
+
     private fun runSelfTest() {
         selfTestButton.isEnabled = false
         runLocalButton.isEnabled = false
@@ -463,7 +608,8 @@ class MainActivity : Activity() {
                 engine.close()
                 runOnUiThread {
                     selfTestButton.isEnabled = modelManager.isStarterModelInstalled
-                    runLocalButton.isEnabled = preferences.localModelVerified
+                    runLocalButton.isEnabled =
+                        preferences.localModelVerified || preferences.qualityModelVerified
                 }
             }
         }
@@ -482,8 +628,22 @@ class MainActivity : Activity() {
         thread(name = "CoOperativeLocalPrompt") {
             val engine = LiteRtLocalInferenceEngine(this)
             try {
+                val profile =
+                    if (preferences.qualityModelVerified) {
+                        LocalModelProfile.QUALITY
+                    } else {
+                        LocalModelProfile.FAST
+                    }
+                val backend =
+                    if (profile == LocalModelProfile.QUALITY) {
+                        preferences.qualityModelBackend.ifBlank { "cpu" }
+                    } else {
+                        "cpu"
+                    }
                 val result = engine.generate(
-                    listOf(LocalMessage(role = "user", content = prompt)),
+                    messages = listOf(LocalMessage(role = "user", content = prompt)),
+                    profile = profile,
+                    preferredBackend = backend,
                 )
                 runOnUiThread {
                     localOutputText.text = "${result.text}\n\n${result.latencyMs} ms"
@@ -496,7 +656,8 @@ class MainActivity : Activity() {
             } finally {
                 engine.close()
                 runOnUiThread {
-                    runLocalButton.isEnabled = preferences.localModelVerified
+                    runLocalButton.isEnabled =
+                        preferences.localModelVerified || preferences.qualityModelVerified
                 }
             }
         }
