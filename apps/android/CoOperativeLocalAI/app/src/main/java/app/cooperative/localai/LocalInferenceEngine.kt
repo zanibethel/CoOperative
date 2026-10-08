@@ -6,6 +6,7 @@ import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.ThinkingConfig
 
 interface LocalInferenceEngine {
     val isAvailable: Boolean
@@ -125,7 +126,7 @@ class LiteRtLocalInferenceEngine(
     fun benchmark(
         profile: LocalModelProfile,
         backendName: String,
-        maxTokens: Int = 96,
+        maxTokens: Int = 192,
     ): LocalGeneration {
         val prompt = formatMessages(
             listOf(
@@ -160,12 +161,16 @@ class LiteRtLocalInferenceEngine(
         backendName: String,
     ): LocalGeneration {
         val spec = LocalModelCatalog.spec(profile)
+        val disableThinking = profile == LocalModelProfile.QUALITY
         val config = ConversationConfig(
             samplerConfig = SamplerConfig(
                 topK = 40,
                 topP = 0.95,
                 temperature = temperature.toDouble(),
             ),
+            thinkingConfig =
+                if (disableThinking) ThinkingConfig(enableThinking = false)
+                else null,
         )
 
         val started = System.currentTimeMillis()
@@ -174,12 +179,27 @@ class LiteRtLocalInferenceEngine(
             .use { conversation ->
                 conversation.sendMessage(
                     text = prompt,
+                    extraContext =
+                        if (disableThinking) mapOf("enable_thinking" to false)
+                        else emptyMap(),
                     maxOutputToken = maxTokens.coerceIn(16, 1024),
+                    thinkingConfig =
+                        if (disableThinking) ThinkingConfig(enableThinking = false)
+                        else null,
                 )
             }
 
         val text = response.toString().trim()
-        if (text.isBlank()) error("The local model returned an empty response.")
+        if (text.isBlank()) {
+            val channelNames = response.channels.keys.sorted().joinToString(",")
+            error(
+                if (channelNames.isBlank()) {
+                    "The local model returned an empty response."
+                } else {
+                    "The local model returned no final text; channels=$channelNames."
+                },
+            )
+        }
 
         return LocalGeneration(
             text = text,
