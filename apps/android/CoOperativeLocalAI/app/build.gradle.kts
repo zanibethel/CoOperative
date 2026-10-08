@@ -13,8 +13,8 @@ android {
         applicationId = "app.cooperative.localai"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.5.2-alpha08"
+        versionCode = 9
+        versionName = "0.5.3-alpha09"
 
         buildConfigField(
             "String",
