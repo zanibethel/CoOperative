@@ -20,7 +20,7 @@ function normalizeMediaIntentText(value: string) {
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/[\u2010-\u2015]/g, "-");
 }
-const IMAGE_NOUNS = /\b(image|picture|photo|portrait|illustration|graphic|poster|thumbnail)\b/i;
+const IMAGE_NOUNS = /\b(image|picture|photo|photograph|photography|portrait|illustration|graphic|poster|thumbnail|shot)\b/i;
 const VIDEO_NOUNS = /\b(video|clip|reel|animation|movie|film)\b|\b(?:youtube|instagram|tiktok)\s+short\b/i;
 const AMBIGUOUS_MEDIA_NOUNS = /\b(ad|advertisement|commercial)\b/i;
 const DESCRIPTIVE_MEDIA_PROMPT_LEAD =
