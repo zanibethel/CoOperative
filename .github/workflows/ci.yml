@@ -27,6 +27,9 @@ jobs:
           python3 -m py_compile workers/windows-local-web-search.py
           python3 -m py_compile workers/windows-text-worker.py
 
+      - name: Paid execution guard tests
+        run: node --test tests/paid-execution-guard.test.mjs
+
       - name: Lint
         run: npm run lint
 
