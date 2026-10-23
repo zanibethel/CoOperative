@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-07
+Last reviewed: 2026-10-23
 
 ## Status key
 
@@ -96,9 +96,9 @@ Reference: https://cactuscompute.com/blog/whistle
 
 ## 3. Hard AI budget caps with graceful fallback
 
-**Status:** Recommend / partial implementation evidence  
+**Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-07  
+**Last reviewed:** 2026-10-23  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -127,16 +127,19 @@ Keep budget enforcement outside the model itself in deterministic routing/ledger
 ### 2026-10-07 evidence update
 Strict local/free-only routing and fixed Stripe price mapping have landed, which strengthens deterministic no-paid behavior and least-privilege checkout. The broader layered cap contract is not yet proven end to end: quoted cost, reservation, provider cost, user debit, concurrency, retry/failover, and refund/release still need one reconciliation test matrix.
 
+### 2026-10-23 evidence update
+Draft PR #193 adds pricing freshness, worst-case charge, minimum margin, and reconciliation primitives but is not wired to paid execution. Authoritative provider quotes, atomic reservations, idempotent retries, and persisted actual invoices remain unverified. The Oct 23 registry scan found 16 changed routes, including price changes, underscoring the need for execution-time verification.
+
 ### Recommendation
-Implement only after reviewing the complete quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
+Keep PR #193 draft. Implement only after reviewing the complete quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
 
 ---
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
-**Status:** Implemented foundation / Recommend verification receipts  
+**Status:** Implemented foundation / Recommend independent verification receipts  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-07  
+**Last reviewed:** 2026-10-23  
 **Source:** TLDR Dev / current CoOperative persistence direction
 
 ### Finding
@@ -158,8 +161,14 @@ The versioned consideration and project-intelligence workflow is now in active u
 ### Possible solution
 For delegated work, record the requested criteria, claimed completion, observed final state, verification source, unresolved conditions, and responsible node/model. Apply this first to cross-device media planning and other workflows where an Android/Mac specialist claims completion.
 
+### 2026-10-23 evidence update
+Recent agent monitoring incidents and the October 21 TLDR AI discussion of independent agent evaluation strengthen the need to verify final state outside the acting model. Preserve evidence, permission boundaries, task identity, and monitoring integrity.
+
+### Additional 2026-10-23 memory evidence
+Databricks' Oct 20 MemCurrent research reports 22.3% to 68.4% pass-rate improvement on its own enterprise benchmark, with fewer tokens and lower latency. This is vendor-run evidence, not a CoOperative result. Compare episodic/derived memory, stale-context cleanup, deletion/tenant boundaries, and cost per verified task against CoOperative's existing memory stores before considering any new backend.
+
 ### Recommendation
-Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow. Add deterministic completion receipts to cross-device task verification before treating a claimed action as complete.
+Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow. Add independent deterministic completion receipts before treating a delegated task as complete.
 
 Reference: https://openai.com/index/ironclad/
 
@@ -251,3 +260,43 @@ Add it only as a benchmark candidate behind the existing node-capability contrac
 Do not make it a default router or bundle it into production yet. Run a narrow opt-in benchmark against the current text-embedding/routing baseline and require capability-specific evidence before scheduling work to the node.
 
 Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
+
+---
+
+## 8. Provider-model registry volatility and benchmark quality
+
+**Status:** Evaluate model routes / monitor provider availability  
+**Added:** 2026-10-23  
+**Last reviewed:** 2026-10-23
+
+**Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
+
+**Possible solution:** Compare registry evidence with current official provider metadata; benchmark only available routes on verified task completion, p95 latency, policy fit, and effective cost. Treat missing promotional free routes as unavailable, not billable fallbacks.
+
+**Recommendation:** No production promotion, routing change, or automatic paid fallback without evaluation and approval.
+
+## 9. Unison effective availability versus registered state
+
+**Status:** Recommend operational audit  
+**Added:** 2026-10-23  
+**Last reviewed:** 2026-10-23
+
+**Evidence:** Six stored node registrations all report `online`, but last heartbeats are Mac Oct 15, Galaxy Oct 12 or earlier, and CARROT Oct 3. Multiple Galaxy rows may be historical registrations.
+
+**Possible solution:** Derive availability from heartbeat age, task-claim evidence, capabilities, and revocation state; separately report registration and operational health. Test worker restart, bounded retries, and idempotent task recovery.
+
+**Recommendation:** Read-only node inventory and nonproduction resilience benchmark first; changing routing or node policy requires approval.
+
+## 10. AI supply-chain and runtime patch verification
+
+**Status:** Evaluate / read-only exposure audit  
+**Added:** 2026-10-23  
+**Last reviewed:** 2026-10-23
+
+**Evidence:** LiteLLM 1.107.0 PyPI/Docker artifacts were malicious on Oct 21; Node.js released Oct 21 security patches for supported lines. No confirmed compromise of CoOperative was established.
+
+**Possible solution:** Inventory dependencies, lockfiles, containers, worker environments, CI artifacts, and actual Node versions; compare any LiteLLM use against affected artifact digests/time windows. Keep agent permissions and completion verification independent of agent self-reporting.
+
+**Recommendation:** Only if affected artifacts ran, isolate/rebuild and rotate reachable secrets per vendor guidance; otherwise monitor. Any security-policy or runtime change requires approval.
+
+**References:** https://docs.litellm.ai/blog/security-incident-oct-21-2026 ; https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
