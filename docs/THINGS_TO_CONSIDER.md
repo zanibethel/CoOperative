@@ -96,9 +96,9 @@ Reference: https://cactuscompute.com/blog/whistle
 
 ## 3. Hard AI budget caps with graceful fallback
 
-**Status:** Recommend / partial implementation evidence  
+**Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-07  
+**Last reviewed:** 2026-10-23  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -127,16 +127,19 @@ Keep budget enforcement outside the model itself in deterministic routing/ledger
 ### 2026-10-07 evidence update
 Strict local/free-only routing and fixed Stripe price mapping have landed, which strengthens deterministic no-paid behavior and least-privilege checkout. The broader layered cap contract is not yet proven end to end: quoted cost, reservation, provider cost, user debit, concurrency, retry/failover, and refund/release still need one reconciliation test matrix.
 
+### 2026-10-23 evidence update
+Draft PR #193 adds pricing freshness, worst-case charge, minimum margin, and reconciliation primitives but is not wired to paid execution. Authoritative provider quotes, atomic reservations, idempotent retries, and persisted actual invoices remain unverified. The Oct 23 registry scan found 16 changed routes, including price changes, underscoring the need for execution-time verification.
+
 ### Recommendation
-Implement only after reviewing the complete quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
+Keep PR #193 draft. Implement only after reviewing the complete quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
 
 ---
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
-**Status:** Implemented foundation / Recommend verification receipts  
+**Status:** Implemented foundation / Recommend independent verification receipts  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-07  
+**Last reviewed:** 2026-10-23  
 **Source:** TLDR Dev / current CoOperative persistence direction
 
 ### Finding
@@ -158,8 +161,11 @@ The versioned consideration and project-intelligence workflow is now in active u
 ### Possible solution
 For delegated work, record the requested criteria, claimed completion, observed final state, verification source, unresolved conditions, and responsible node/model. Apply this first to cross-device media planning and other workflows where an Android/Mac specialist claims completion.
 
+### 2026-10-23 evidence update
+Recent agent monitoring incidents and the October 21 TLDR AI discussion of independent agent evaluation strengthen the need to verify final state outside the acting model. Preserve evidence, permission boundaries, task identity, and monitoring integrity.
+
 ### Recommendation
-Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow. Add deterministic completion receipts to cross-device task verification before treating a claimed action as complete.
+Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow. Add independent deterministic completion receipts before treating a delegated task as complete.
 
 Reference: https://openai.com/index/ironclad/
 
@@ -254,17 +260,17 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 ---
 
-## 8. Provider-model registry volatility and billing freshness
+## 8. Provider-model registry volatility and benchmark quality
 
-**Status:** Recommend verified-cost safeguards / Evaluate model routes  
+**Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
 **Last reviewed:** 2026-10-23
 
-**Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while multiple routes changed pricing. Draft PR #193 implements pricing/margin primitives but explicitly lacks live price verification, paid-route wiring, atomic reservation, and persisted invoice reconciliation.
+**Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
 
-**Possible solution:** Fail closed on missing/free promotional routes and stale quotes; reserve bounded charge atomically, reconcile actual provider invoice, handle retries idempotently. Benchmark candidate models on verified task completion and effective cost.
+**Possible solution:** Compare registry evidence with current official provider metadata; benchmark only available routes on verified task completion, p95 latency, policy fit, and effective cost. Treat missing promotional free routes as unavailable, not billable fallbacks.
 
-**Recommendation:** Keep PR #193 draft; no merge, provider-routing or pricing change until end-to-end tests and approval.
+**Recommendation:** No production promotion, routing change, or automatic paid fallback without evaluation and approval.
 
 ## 9. Unison effective availability versus registered state
 
