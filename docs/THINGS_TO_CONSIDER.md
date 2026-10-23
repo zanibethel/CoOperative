@@ -164,6 +164,9 @@ For delegated work, record the requested criteria, claimed completion, observed 
 ### 2026-10-23 evidence update
 Recent agent monitoring incidents and the October 21 TLDR AI discussion of independent agent evaluation strengthen the need to verify final state outside the acting model. Preserve evidence, permission boundaries, task identity, and monitoring integrity.
 
+### Additional 2026-10-23 memory evidence
+Databricks' Oct 20 MemCurrent research reports 22.3% to 68.4% pass-rate improvement on its own enterprise benchmark, with fewer tokens and lower latency. This is vendor-run evidence, not a CoOperative result. Compare episodic/derived memory, stale-context cleanup, deletion/tenant boundaries, and cost per verified task against CoOperative's existing memory stores before considering any new backend.
+
 ### Recommendation
 Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow. Add independent deterministic completion receipts before treating a delegated task as complete.
 
