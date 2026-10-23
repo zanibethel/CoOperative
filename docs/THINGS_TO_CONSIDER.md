@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-07
+Last reviewed: 2026-10-23
 
 ## Status key
 
@@ -251,3 +251,43 @@ Add it only as a benchmark candidate behind the existing node-capability contrac
 Do not make it a default router or bundle it into production yet. Run a narrow opt-in benchmark against the current text-embedding/routing baseline and require capability-specific evidence before scheduling work to the node.
 
 Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
+
+---
+
+## 8. Provider-model registry volatility and billing freshness
+
+**Status:** Recommend verified-cost safeguards / Evaluate model routes  
+**Added:** 2026-10-23  
+**Last reviewed:** 2026-10-23
+
+**Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while multiple routes changed pricing. Draft PR #193 implements pricing/margin primitives but explicitly lacks live price verification, paid-route wiring, atomic reservation, and persisted invoice reconciliation.
+
+**Possible solution:** Fail closed on missing/free promotional routes and stale quotes; reserve bounded charge atomically, reconcile actual provider invoice, handle retries idempotently. Benchmark candidate models on verified task completion and effective cost.
+
+**Recommendation:** Keep PR #193 draft; no merge, provider-routing or pricing change until end-to-end tests and approval.
+
+## 9. Unison effective availability versus registered state
+
+**Status:** Recommend operational audit  
+**Added:** 2026-10-23  
+**Last reviewed:** 2026-10-23
+
+**Evidence:** Six stored node registrations all report `online`, but last heartbeats are Mac Oct 15, Galaxy Oct 12 or earlier, and CARROT Oct 3. Multiple Galaxy rows may be historical registrations.
+
+**Possible solution:** Derive availability from heartbeat age, task-claim evidence, capabilities, and revocation state; separately report registration and operational health. Test worker restart, bounded retries, and idempotent task recovery.
+
+**Recommendation:** Read-only node inventory and nonproduction resilience benchmark first; changing routing or node policy requires approval.
+
+## 10. AI supply-chain and runtime patch verification
+
+**Status:** Evaluate / read-only exposure audit  
+**Added:** 2026-10-23  
+**Last reviewed:** 2026-10-23
+
+**Evidence:** LiteLLM 1.107.0 PyPI/Docker artifacts were malicious on Oct 21; Node.js released Oct 21 security patches for supported lines. No confirmed compromise of CoOperative was established.
+
+**Possible solution:** Inventory dependencies, lockfiles, containers, worker environments, CI artifacts, and actual Node versions; compare any LiteLLM use against affected artifact digests/time windows. Keep agent permissions and completion verification independent of agent self-reporting.
+
+**Recommendation:** Only if affected artifacts ran, isolate/rebuild and rotate reachable secrets per vendor guidance; otherwise monitor. Any security-policy or runtime change requires approval.
+
+**References:** https://docs.litellm.ai/blog/security-incident-oct-21-2026 ; https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
