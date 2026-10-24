@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-23
+Last reviewed: 2026-10-24
 
 ## Status key
 
@@ -98,7 +98,7 @@ Reference: https://cactuscompute.com/blog/whistle
 
 **Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-23  
+**Last reviewed:** 2026-10-24  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -130,6 +130,9 @@ Strict local/free-only routing and fixed Stripe price mapping have landed, which
 ### 2026-10-23 evidence update
 Draft PR #193 adds pricing freshness, worst-case charge, minimum margin, and reconciliation primitives but is not wired to paid execution. Authoritative provider quotes, atomic reservations, idempotent retries, and persisted actual invoices remain unverified. The Oct 23 registry scan found 16 changed routes, including price changes, underscoring the need for execution-time verification.
 
+### 2026-10-24 evidence update
+The latest model scan found 669 routes, one new and 14 changed, including multiple provider pricing changes. These registry observations are not authoritative execution-time quotes. PR #193 remains draft and not wired to paid routes; enforce verified price, reservation, minimum margin, actual-cost reconciliation, and idempotency before any deployment.
+
 ### Recommendation
 Keep PR #193 draft. Implement only after reviewing the complete quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
 
@@ -139,7 +142,7 @@ Keep PR #193 draft. Implement only after reviewing the complete quote/debit/mark
 
 **Status:** Implemented foundation / Recommend independent verification receipts  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-23  
+**Last reviewed:** 2026-10-24  
 **Source:** TLDR Dev / current CoOperative persistence direction
 
 ### Finding
@@ -166,6 +169,9 @@ Recent agent monitoring incidents and the October 21 TLDR AI discussion of indep
 
 ### Additional 2026-10-23 memory evidence
 Databricks' Oct 20 MemCurrent research reports 22.3% to 68.4% pass-rate improvement on its own enterprise benchmark, with fewer tokens and lower latency. This is vendor-run evidence, not a CoOperative result. Compare episodic/derived memory, stale-context cleanup, deletion/tenant boundaries, and cost per verified task against CoOperative's existing memory stores before considering any new backend.
+
+### 2026-10-24 evidence update
+Anthropic's Oct 22 guidance recommends comparing one progressive-disclosure agent loop against specialist subagents with end-to-end task-completion evaluations; independent verification and permission boundaries remain valid reasons to retain separate agents. METR's Oct 22 report documents historical monitor-coverage bypasses and recommends independent, tamper-resistant monitoring. 1Password's Oct 22 agent sign-in product demonstrates user-approved credential injection without exposing passwords to models, but CoOperative compatibility is not verified. Evaluate these as extensions of completion receipts, not permission to remove deterministic policy checks. Sources: https://claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop ; https://metr.org/blog/2026-10-22-red-teaming-openai-agent-monitoring/ ; https://1password.com/blog/1password-for-ai-agents
 
 ### Recommendation
 Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow. Add independent deterministic completion receipts before treating a delegated task as complete.
@@ -267,9 +273,11 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-23
+**Last reviewed:** 2026-10-24
 
 **Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
+
+**2026-10-24 evidence:** Today's scan completed with 669 discovered, one new, 14 changed, zero missing. Pricing fields changed for several OpenRouter models (including DeepSeek V4 Flash and Kimi); no provider-invoice or effective execution price is established by the scan. Continue availability and cost-per-verified-task benchmarks; never silently promote paid fallbacks.
 
 **Possible solution:** Compare registry evidence with current official provider metadata; benchmark only available routes on verified task completion, p95 latency, policy fit, and effective cost. Treat missing promotional free routes as unavailable, not billable fallbacks.
 
@@ -279,9 +287,11 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Recommend operational audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-23
+**Last reviewed:** 2026-10-24
 
 **Evidence:** Six stored node registrations all report `online`, but last heartbeats are Mac Oct 15, Galaxy Oct 12 or earlier, and CARROT Oct 3. Multiple Galaxy rows may be historical registrations.
+
+**2026-10-24 evidence:** All six node records remain stored as online, with the newest Mac heartbeat Oct 15, Galaxy Oct 12, and CARROT Oct 3. No new task-claim/heartbeat evidence was found in the reviewed registry; stored online remains an unverified operational claim.
 
 **Possible solution:** Derive availability from heartbeat age, task-claim evidence, capabilities, and revocation state; separately report registration and operational health. Test worker restart, bounded retries, and idempotent task recovery.
 
