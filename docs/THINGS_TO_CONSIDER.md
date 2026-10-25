@@ -138,7 +138,7 @@ Keep PR #193 draft. Implement only after reviewing the complete quote/debit/mark
 
 ---
 
-**2026-10-25 evidence:** The 08:00 UTC registry scan completed with 667 discovered routes (vs 669 Oct 24), one new, seven changed, and **three missing** (`openai/gpt-3.5-turbo`, `gpt-3.5-turbo-instruct`, and `gpt-3.5-turbo:batch` on OpenRouter). Price fields changed on several routes, including DeepSeek V4 Pro and Kimi. A registry snapshot is not a verified execution-time provider quote. PR #193 remains draft and unintegrated; preserve fail-closed spending.
+**2026-10-25 evidence:** The 13:00 UTC (08:00 Central) registry scan completed with 667 discovered routes (vs 669 Oct 24), one new, seven changed, and **three missing** (`openai/gpt-3.5-turbo`, `gpt-3.5-turbo-instruct`, and `gpt-3.5-turbo:batch` on OpenRouter). Price fields changed on several routes, including DeepSeek V4 Pro and Kimi. A registry snapshot is not a verified execution-time provider quote. PR #193 remains draft and unintegrated; preserve fail-closed spending.
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
