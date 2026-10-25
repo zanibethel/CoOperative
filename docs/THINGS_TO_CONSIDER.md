@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-24
+Last reviewed: 2026-10-25
 
 ## Status key
 
@@ -98,7 +98,7 @@ Reference: https://cactuscompute.com/blog/whistle
 
 **Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-24  
+**Last reviewed:** 2026-10-25  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -137,6 +137,8 @@ The latest model scan found 669 routes, one new and 14 changed, including multip
 Keep PR #193 draft. Implement only after reviewing the complete quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
 
 ---
+
+**2026-10-25 evidence:** The 08:00 UTC registry scan completed with 667 discovered routes (vs 669 Oct 24), one new, seven changed, and **three missing** (`openai/gpt-3.5-turbo`, `gpt-3.5-turbo-instruct`, and `gpt-3.5-turbo:batch` on OpenRouter). Price fields changed on several routes, including DeepSeek V4 Pro and Kimi. A registry snapshot is not a verified execution-time provider quote. PR #193 remains draft and unintegrated; preserve fail-closed spending.
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
@@ -273,13 +275,15 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-24
+**Last reviewed:** 2026-10-25
 
 **Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
 
 **2026-10-24 evidence:** Today's scan completed with 669 discovered, one new, 14 changed, zero missing. Pricing fields changed for several OpenRouter models (including DeepSeek V4 Flash and Kimi); no provider-invoice or effective execution price is established by the scan. Continue availability and cost-per-verified-task benchmarks; never silently promote paid fallbacks.
 
 **Possible solution:** Compare registry evidence with current official provider metadata; benchmark only available routes on verified task completion, p95 latency, policy fit, and effective cost. Treat missing promotional free routes as unavailable, not billable fallbacks.
+
+**2026-10-25 evidence:** Latest scan discovered 667 routes, one new, seven changed and three missing; the three missing legacy GPT-3.5 OpenRouter routes are no longer execution-ready. A newly discovered OpenRouter `liquid/lfm-2.5-2.6b` route corresponds to an existing August model, not a newly released model. Liquid documents on-device/MLX/llama.cpp support, while OpenRouter warns hosted prompts/outputs may be retained for training. Compare local privacy/latency and hosted cost/retention before any registry promotion. Sources: https://www.liquid.ai/blog/lfm2-5-2-6b ; https://openrouter.ai/liquid/lfm-2.5-2.6b%3Afree
 
 **Recommendation:** No production promotion, routing change, or automatic paid fallback without evaluation and approval.
 
@@ -301,12 +305,28 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate / read-only exposure audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-23
+**Last reviewed:** 2026-10-25
 
 **Evidence:** LiteLLM 1.107.0 PyPI/Docker artifacts were malicious on Oct 21; Node.js released Oct 21 security patches for supported lines. No confirmed compromise of CoOperative was established.
 
 **Possible solution:** Inventory dependencies, lockfiles, containers, worker environments, CI artifacts, and actual Node versions; compare any LiteLLM use against affected artifact digests/time windows. Keep agent permissions and completion verification independent of agent self-reporting.
 
+**2026-10-25 evidence:** NVIDIA OpenShell documents externally enforced sandbox network/filesystem policies and human-reviewed network-policy proposals. This is a reference for a read-only comparison against Hermes/Unison node controls, not evidence of an incident or approval to replace the current security policy. Source: https://docs.nvidia.com/openshell/latest/reference/default-policy
+
 **Recommendation:** Only if affected artifacts ran, isolate/rebuild and rotate reachable secrets per vendor guidance; otherwise monitor. Any security-policy or runtime change requires approval.
 
 **References:** https://docs.litellm.ai/blog/security-incident-oct-21-2026 ; https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
+
+---
+
+## 11. TanStack AI 1.0 interoperability and experimental harness
+
+**Status:** Evaluate / no migration approved  
+**Added:** 2026-10-25  
+**Last reviewed:** 2026-10-25
+
+**Evidence:** TanStack AI 1.0 (Oct 23) stabilizes provider-agnostic chat, tools, media, MCP, persistence, and sandbox APIs; its new agent harness is explicitly experimental/0.x. CoOperative's current package manifest does not list TanStack AI, and CreatorHub currently uses the separate `ai` package. Source: https://tanstack.com/blog/tanstack-ai-1-0
+
+**Possible solution:** In an isolated proof of concept, compare AG-UI/MCP adapter interoperability, test fixtures, approval controls, streaming and cost/latency against existing CoOperative primitives. Avoid parallel orchestrators and preserve deterministic budgets, credential boundaries, and independent completion receipts.
+
+**Recommendation:** Benchmark only; no framework migration, dependency change, or production routing adjustment without explicit approval.
