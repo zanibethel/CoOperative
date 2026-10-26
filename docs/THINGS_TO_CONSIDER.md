@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-25
+Last reviewed: 2026-10-26
 
 ## Status key
 
@@ -98,7 +98,7 @@ Reference: https://cactuscompute.com/blog/whistle
 
 **Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-25  
+**Last reviewed:** 2026-10-26  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -140,11 +140,13 @@ Keep PR #193 draft. Implement only after reviewing the complete quote/debit/mark
 
 **2026-10-25 evidence:** The 13:00 UTC (08:00 Central) registry scan completed with 667 discovered routes (vs 669 Oct 24), one new, seven changed, and **three missing** (`openai/gpt-3.5-turbo`, `gpt-3.5-turbo-instruct`, and `gpt-3.5-turbo:batch` on OpenRouter). Price fields changed on several routes, including DeepSeek V4 Pro and Kimi. A registry snapshot is not a verified execution-time provider quote. PR #193 remains draft and unintegrated; preserve fail-closed spending.
 
+**2026-10-26 evidence:** Registry scan completed at 13:01 UTC with 667 routes, zero new/missing, **23 changed** (versus seven changed Oct 25). OpenRouter `deepseek/deepseek-v4-flash-0731` registry input/output prices rose from $0.04444/$0.13332 to $0.44/$1.32 per million tokens (~9.9x); `deepseek/deepseek-v4-pro` also rose from $0.2088/$0.4176 to $0.95526/$1.91052. These are registry observations, **not** verified provider invoices or live execution quotes. Prioritize fail-closed quote freshness, max-charge reservation, minimum margin and actual-cost reconciliation in draft PR #193; no merge or production routing/pricing change.
+
 ## 4. Structured project intelligence instead of chat-memory-only state
 
 **Status:** Implemented foundation / Recommend independent verification receipts  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-24  
+**Last reviewed:** 2026-10-26  
 **Source:** TLDR Dev / current CoOperative persistence direction
 
 ### Finding
@@ -184,6 +186,8 @@ Reference: https://tldr.tech/dev/2026-10-05
 
 
 ---
+
+**2026-10-26 evidence:** Anthropic's Oct 22 formal-verification research reports machine-checked security properties for over 100 open-source libraries at RISC-V assembly level, subject to explicit single-thread/static-binary assumptions. This supports a bounded, independently checked proof/contract prototype for CoOperative's billing invariants and Unison task-authorization paths, **not** a claim that LLM-generated code is bug-free. Preserve separate final-state receipts and deterministic policy checks. Source: https://www.anthropic.com/research/formal-verification .
 
 ## 5. Mistral Large 4 as a registry and routing candidate
 
@@ -275,7 +279,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-25
+**Last reviewed:** 2026-10-26
 
 **Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
 
@@ -287,11 +291,13 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Recommendation:** No production promotion, routing change, or automatic paid fallback without evaluation and approval.
 
+**2026-10-26 evidence:** The latest registry scan has 667 routes, 23 changes, zero new/missing. DeepSeek V4 Flash 0731's observed token prices increased about 10x, with other DeepSeek/Kimi/Qwen and media capability/pricing changes. Compare provider-authoritative pricing and benchmark cost per verified task; do not silently promote paid alternatives or infer real-time charges from registry fingerprints.
+
 ## 9. Unison effective availability versus registered state
 
 **Status:** Recommend operational audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-24
+**Last reviewed:** 2026-10-26
 
 **Evidence:** Six stored node registrations all report `online`, but last heartbeats are Mac Oct 15, Galaxy Oct 12 or earlier, and CARROT Oct 3. Multiple Galaxy rows may be historical registrations.
 
@@ -300,6 +306,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **Possible solution:** Derive availability from heartbeat age, task-claim evidence, capabilities, and revocation state; separately report registration and operational health. Test worker restart, bounded retries, and idempotent task recovery.
 
 **Recommendation:** Read-only node inventory and nonproduction resilience benchmark first; changing routing or node policy requires approval.
+
+**2026-10-26 evidence:** All six stored registrations remain `online` without fresh heartbeats: Mac last Oct 15, Galaxy Oct 12 or earlier, CARROT Oct 3. Operational availability is unverified. Continue read-only effective-health and task-claim audit before changing node selection.
 
 ## 10. AI supply-chain and runtime patch verification
 
