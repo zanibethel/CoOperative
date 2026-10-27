@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-26
+Last reviewed: 2026-10-27
 
 ## Status key
 
@@ -191,33 +191,36 @@ Reference: https://tldr.tech/dev/2026-10-05
 
 ## 5. Mistral Large 4 as a registry and routing candidate
 
-**Status:** Evaluate after preview validation  
+**Status:** Evaluate — API preview available; full/open-weight release unconfirmed; no CoOperative execution benchmark  
 **Added:** 2026-10-06  
-**Last reviewed:** 2026-10-06  
-**Source:** Mistral AI documentation / Reuters
+**Last reviewed:** 2026-10-27  
+**Evidence:** Mistral release/docs, Hugging Face release page, OpenRouter live catalog/telemetry, CoOperative Supabase registry/task scores
 
-### Finding
-Mistral Large 4 entered public preview on 2026-10-06 as an open-weight, multimodal Mixture-of-Experts model with a 1M-token context window. Mistral documents structured outputs, function calling, document Q&A, agent/conversation endpoints, and hosted pricing. Reuters reports that the full public release is planned for 2026-10-27.
+### Release and registry finding (2026-10-27)
+Mistral's official page and docs still identify **Public Preview v26.10** (API since Oct 6), not final/general availability. Its Hugging Face release page says **Upcoming release; October 31 ETA** for open weights. Do not treat the previously reported Oct 27 target as a completed launch. The 13:00–13:01 UTC CoOperative scheduled registry scan completed successfully: **663 discovered, four new, 29 changed, eight missing** (vs 667/zero/23/zero on Oct 26). The already-known OpenRouter route `mistralai/mistral-large-4-0` remains **active, execution_ready=true, recommended=false**, with no new ML4-specific scan change. Availability metadata is not an end-to-end inference success.
 
-### Why it may matter
-It may become useful for:
-- high-context research and synthesis;
-- multimodal/document work;
-- structured agent calls;
-- open-weight or self-hosted deployment;
-- an additional replaceable provider route.
+### Capability and benchmark evidence
+- Official docs: 1.05T total / 52B active including embedding/output layers, 1.6B vision encoder, 1M context, text+image input/text output, structured JSON, tool calling, reasoning, and document Q&A. Feature **support is declared**, not validated for CoOperative's exact schemas, tool selection, prompt-injection handling, or long PDFs.
+- CoOperative registry: $1.36 input / $4.18 output per million tokens; 1,048,576-token context. A reference workload of **100k input + 10k output** costs **$0.1778** at observed list prices, before caching, retries, fees, markup, or provider price changes.
+- Same-scan OpenRouter peers for that workload: Qwen3.8 Omni Flash **$0.0197** (vision/tools/structured), GPT-6.1 Terra **$0.1500** (vision/tools/structured), DeepSeek V4 Pro **$0.1077** (text/tools/structured; no vision), Claude Sonnet 5.5 **$0.3000** (vision/tools/structured), and legacy Mistral Large 2407 **$0.2600** (no vision). These are **metadata-based cost comparisons, not measured cost per successful task**.
+- External benchmarks: OpenRouter's aggregated third-party data lists Artificial Analysis Intelligence Index **38.4**, long-context reasoning **81.3%**, and Terminal-Bench 4.0 **26.8%** for **ML4 Preview**; do not generalize to final weights or CoOperative tasks. Mistral's own Oct 6 report cites **59.9% AutomationBench** and **61.7% DeepSWE**, but these are vendor-reported results.
+- External route telemetry (OpenRouter, observed Oct 27): approximately **99.58% successful inference availability over 72h**, **99.49% over 24h**; listed standard endpoints show ~**2.4–2.75 s median latency** and **49–50 tokens/s**. This is provider aggregate telemetry, **not CoOperative p95, error-rate, or latency measurement**.
+- CoOperative `ai_model_task_scores`: ML4 coding/reasoning/general-text/vision scores have **zero quality, runtime, and latency samples**, and `benchmark_coverage=0`; derived value scores (~52.2–52.3) have low confidence (0.32) and **must not be represented as an empirical head-to-head win**. `ai_model_capability_evidence` has no ML4-specific rows.
+- Refusal/policy behavior: **unverified for CoOperative**. Mistral discusses reduced cybersecurity refusals; this does not establish alignment with CoOperative permissions, data policy, or safe/unsafe request handling. No matched refusal or adversarial tests were executed.
+- Full-weight self-hosting is not presently validated, and a ~1T-parameter model is not suitable for existing CPU/Mac/Galaxy-class Unison nodes.
 
-The model is too large for the current Mac/CPU-class local nodes, so near-term value is hosted/provider routing rather than default local execution.
-
-### Possible solution
-Let the existing daily model-registry scan discover provider availability. Add explicit capability evidence only from official model/provider metadata, then run the standard cost, latency, tool-call, refusal, safety, and quality eval set.
+### Possible solution and acceptance gate
+Run a **bounded, nonproduction, approval-gated** head-to-head against Qwen3.8 Omni Flash, DeepSeek V4 Pro, GPT-6.1 Terra and a premium vision route using identical pinned prompts/versions: (1) JSON schema and multi-tool selection correctness; (2) coding, reasoning and document-answer quality with ground truth/citations; (3) p50/p95 latency, timeout and retry reliability; (4) actual provider bill and cost per verified success; (5) benign security-task versus disallowed-task refusal consistency and prompt-injection resistance; (6) charts, screenshots, multi-page PDFs and long-context retrieval. Minimum multiple repetitions per scenario; store timestamps, route IDs, errors, actual usage and reviewer results. Do not send sensitive production data. Apply current hard-budget caps and independent verification.
 
 ### Recommendation
-Do not add it to default production routing during preview. Evaluate after availability and pricing stabilize, with a targeted recheck after the planned 2026-10-27 full release.
+**No default production route, automatic paid fallback, or provider-price/routing change.** Keep ML4 discoverable as an unpromoted preview candidate. Recheck official final release, weight license, version and provider prices; only propose a task-specific promotion after reproducible, cost-controlled CoOperative tests demonstrate value and the user explicitly approves. No production code, schema, routing or pricing was changed in this review.
 
-References:
-- https://docs.mistral.ai/models/mistral-large-4-0
-- https://www.reuters.com/world/china/mistral-ceo-says-new-ai-model-beats-chinese-ones-some-areas-2026-10-06/
+Sources:
+- https://mistral.ai/news/mistral-large-4/
+- https://docs.mistral.ai/models/mistral-large
+- https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B
+- https://openrouter.ai/mistralai/mistral-large-4-0-20261006
+- https://artificialanalysis.ai/models/mistral-large-4/
 
 ---
 
