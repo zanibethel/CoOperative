@@ -98,7 +98,7 @@ Reference: https://cactuscompute.com/blog/whistle
 
 **Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-26  
+**Last reviewed:** 2026-10-27  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -140,7 +140,11 @@ Keep PR #193 draft. Implement only after reviewing the complete quote/debit/mark
 
 **2026-10-25 evidence:** The 13:00 UTC (08:00 Central) registry scan completed with 667 discovered routes (vs 669 Oct 24), one new, seven changed, and **three missing** (`openai/gpt-3.5-turbo`, `gpt-3.5-turbo-instruct`, and `gpt-3.5-turbo:batch` on OpenRouter). Price fields changed on several routes, including DeepSeek V4 Pro and Kimi. A registry snapshot is not a verified execution-time provider quote. PR #193 remains draft and unintegrated; preserve fail-closed spending.
 
-**2026-10-26 evidence:** Registry scan completed at 13:01 UTC with 667 routes, zero new/missing, **23 changed** (versus seven changed Oct 25). OpenRouter `deepseek/deepseek-v4-flash-0731` registry input/output prices rose from $0.04444/$0.13332 to $0.44/$1.32 per million tokens (~9.9x); `deepseek/deepseek-v4-pro` also rose from $0.2088/$0.4176 to $0.95526/$1.91052. These are registry observations, **not** verified provider invoices or live execution quotes. Prioritize fail-closed quote freshness, max-charge reservation, minimum margin and actual-cost reconciliation in draft PR #193; no merge or production routing/pricing change.
+**2026-10-26 evidence:** Registry scan completed at 13:01 UTC with 667 routes, zero new/missing, **23 changed** (versus seven changed Oct 25). OpenRouter `deepseek/deepseek-v4-flash-0731` registry input/output prices rose from $0.04444/$0.13332 to $0.44/## 3. Hard AI budget caps with graceful fallback
+.32 per million tokens (~9.9x); `deepseek/deepseek-v4-pro` also rose from $0.2088/$0.4176 to $0.95526/## 3. Hard AI budget caps with graceful fallback
+.91052. These are registry observations, **not** verified provider invoices or live execution quotes. Prioritize fail-closed quote freshness, max-charge reservation, minimum margin and actual-cost reconciliation in draft PR #193; no merge or production routing/pricing change.
+
+**2026-10-27 evidence:** The completed registry scan found 8 missing routes, including a free NVIDIA Nemotron route and several Mistral batch variants; these must not silently trigger paid fallbacks. Continue the unmerged PR #193 maximum-cost reservation and provider-price reconciliation work; do not infer execution-time prices from registry fingerprints.
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
@@ -282,7 +286,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-26
+**Last reviewed:** 2026-10-27
 
 **Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
 
@@ -296,11 +300,13 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **2026-10-26 evidence:** The latest registry scan has 667 routes, 23 changes, zero new/missing. DeepSeek V4 Flash 0731's observed token prices increased about 10x, with other DeepSeek/Kimi/Qwen and media capability/pricing changes. Compare provider-authoritative pricing and benchmark cost per verified task; do not silently promote paid alternatives or infer real-time charges from registry fingerprints.
 
+**2026-10-27 evidence:** Scan completed: 663 routes discovered, 4 new, 29 changed, 8 missing (Oct 26: 667/0/23/0). Missing routes include `nvidia/nemotron-3-super-120b-a12b:free` and several Mistral batch routes; changed entries include Nous media route pricing/capabilities. Confirm actual provider prices and cost per verified task before any route promotion. The separate Mistral Large 4 preview assessment in section 5 was already reviewed today and remains unpromoted.
+
 ## 9. Unison effective availability versus registered state
 
 **Status:** Recommend operational audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-26
+**Last reviewed:** 2026-10-27
 
 **Evidence:** Six stored node registrations all report `online`, but last heartbeats are Mac Oct 15, Galaxy Oct 12 or earlier, and CARROT Oct 3. Multiple Galaxy rows may be historical registrations.
 
@@ -312,11 +318,13 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **2026-10-26 evidence:** All six stored registrations remain `online` without fresh heartbeats: Mac last Oct 15, Galaxy Oct 12 or earlier, CARROT Oct 3. Operational availability is unverified. Continue read-only effective-health and task-claim audit before changing node selection.
 
+**2026-10-27 evidence:** All six node registrations still report `online` despite stale heartbeats: Mac Oct 15, Galaxy Oct 12 or earlier, CARROT Oct 3. No fresh operational availability was demonstrated. Recommend read-only heartbeat/task-claim audit, then separately approved effective-health routing.
+
 ## 10. AI supply-chain and runtime patch verification
 
 **Status:** Evaluate / read-only exposure audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-25
+**Last reviewed:** 2026-10-27
 
 **Evidence:** LiteLLM 1.107.0 PyPI/Docker artifacts were malicious on Oct 21; Node.js released Oct 21 security patches for supported lines. No confirmed compromise of CoOperative was established.
 
@@ -329,6 +337,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **References:** https://docs.litellm.ai/blog/security-incident-oct-21-2026 ; https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
 
 ---
+
+**2026-10-27 evidence:** Forever Security's Oct 22 primary-source research (widely reported Oct 26) documents malicious `AGENTS.md`/`CLAUDE.md` instruction files planted in Downloads or untrusted directories that can redirect coding agents toward credential exposure or malware execution. No CoOperative compromise is established. Evaluate a read-only inventory of agent working directories, trusted instruction-file provenance, MCP/base-URL configuration and sandbox/approval enforcement across Hermes/Unison. Do not allow downloaded instruction files to override permissions; changes to security policy require approval. Source: https://forever.security/blog/hijacking-ai-agents-via-downloads-folder .
 
 ## 11. TanStack AI 1.0 interoperability and experimental harness
 
