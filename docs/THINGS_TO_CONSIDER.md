@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-28
+Last reviewed: 2026-10-29
 
 ## Status key
 
@@ -98,7 +98,7 @@ Reference: https://cactuscompute.com/blog/whistle
 
 **Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-28  
+**Last reviewed:** 2026-10-29  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -145,6 +145,8 @@ Keep PR #193 draft. Implement only after reviewing the complete quote/debit/mark
 **2026-10-27 evidence:** The completed registry scan found 8 missing routes, including a free NVIDIA Nemotron route and several Mistral batch variants; these must not silently trigger paid fallbacks. Continue the unmerged PR #193 maximum-cost reservation and provider-price reconciliation work; do not infer execution-time prices from registry fingerprints.
 
 **2026-10-28 evidence:** Completed scan: 664 routes, 1 new, 31 changed, 0 missing. OpenRouter DeepSeek V4 Flash observed prompt price changed $0.05 to $0.091 per 1M tokens while completion changed $0.45 to $0.182; economics depend on input/output mix. Registry snapshots are not provider-authoritative execution quotes. PR #193 remains open/draft; execution-time price verification, atomic max-cost reservation, margin floor, idempotency and actual-cost reconciliation remain unverified. No paid-route or billing changes approved.
+
+**2026-10-29 evidence:** Completed registry scan found 657 routes (664 Oct 28), 1 new, 29 changed, 8 missing. Missing legacy OpenRouter OpenAI routes and price-field changes reinforce execution-time price/availability verification. PR #193 is still draft and unmerged; no authoritative paid-call reconciliation or reservation acceptance demonstrated. Keep fail-closed margin and no silent paid fallback.
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
@@ -288,7 +290,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-28
+**Last reviewed:** 2026-10-29
 
 **Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
 
@@ -306,11 +308,13 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **2026-10-28 evidence:** Registry completed with 664 discovered, 1 new, 31 changed and 0 missing. New OpenRouter `prism-ml/ternary-bonsai-2-9b` route is unbenchmarked; its observed $0.08/$0.13 per 1M prompt/completion tokens is metadata, not a verified provider invoice. `deepseek/deepseek-v4-flash` changed prompt $0.05->$0.091 and completion $0.45->$0.182 per 1M. LFM3 launched Oct 27 but no `lfm3` route was found in the current registry; see separate local benchmark consideration #12. Do not silently promote new or changed paid routes.
 
+**2026-10-29 evidence:** Scan at 13:00–13:01 UTC: 657 routes, 1 new (`particle-ai/particle-1`), 29 changed and 8 missing (including `openai/o1`, `o1-pro`, `o3-mini`, `o4-mini` variants, `gpt-4-turbo` and Qwen3 Next thinking). Price fields changed on DeepSeek/Kimi/GLM and media models. Mistral Large 4 preview remains active but unpromoted; no new CoOperative execution benchmark. Verify provider pricing/availability and cost per verified task before any route change.
+
 ## 9. Unison effective availability versus registered state
 
 **Status:** Recommend operational audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-28
+**Last reviewed:** 2026-10-29
 
 **Evidence:** Six stored node registrations all report `online`, but last heartbeats are Mac Oct 15, Galaxy Oct 12 or earlier, and CARROT Oct 3. Multiple Galaxy rows may be historical registrations.
 
@@ -324,11 +328,13 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **2026-10-28 evidence:** All six stored registrations still say `online`, but the latest Mac heartbeat is Oct 15, Galaxy Oct 12 and CARROT Oct 3. No fresh node availability was established. Status unchanged: read-only operational audit before any node-selection or routing change.
 
+**2026-10-29 evidence:** All six registered nodes still say `online`, yet Mac last seen Oct 15, Galaxy Oct 12 or earlier and CARROT Oct 3. Effective availability remains unverified. Read-only heartbeat/capability/task-claim audit recommended before LFM3 hardware testing or local routing.
+
 ## 10. AI supply-chain and runtime patch verification
 
 **Status:** Evaluate / read-only exposure audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-28
+**Last reviewed:** 2026-10-29
 
 **Evidence:** LiteLLM 1.107.0 PyPI/Docker artifacts were malicious on Oct 21; Node.js released Oct 21 security patches for supported lines. No confirmed compromise of CoOperative was established.
 
@@ -345,6 +351,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **2026-10-27 evidence:** Forever Security's Oct 22 primary-source research (widely reported Oct 26) documents malicious `AGENTS.md`/`CLAUDE.md` instruction files planted in Downloads or untrusted directories that can redirect coding agents toward credential exposure or malware execution. No CoOperative compromise is established. Evaluate a read-only inventory of agent working directories, trusted instruction-file provenance, MCP/base-URL configuration and sandbox/approval enforcement across Hermes/Unison. Do not allow downloaded instruction files to override permissions; changes to security policy require approval. Source: https://forever.security/blog/hijacking-ai-agents-via-downloads-folder .
 
 **2026-10-28 evidence:** Cloudflare's disclosure of a GLM-5.3 Workers AI SGLang KV-cache isolation failure reports 155 cross-customer responses before remediation. This is a provider-side incident, **not evidence of CoOperative exposure**. Evaluate provider isolation assurances, sensitive-prompt routing, cache reuse, and independently enforced tenant boundaries alongside existing untrusted-instruction protections. No policy change authorized. Source: https://blog.cloudflare.com/kv-cache-exposure-remediation/ .
+
+**2026-10-29 evidence:** Next.js announced seven medium-severity fixes for Nov 3; CoOperative currently pins Next.js 16.3.5, but affected versions will not be known until advisories publish. Tailscale's Oct 26 bulletins TS-2026-014 through -017 fix SSH forwarding/DoS and Serve privilege/capability issues in 1.104.4+. No evidence CoOperative uses affected Tailscale configurations. Inventory actual dependencies, Tailscale version/SSH/Serve usage and patch readiness read-only; do not assert compromise or change runtime/security policy without approval. Sources: https://nextjs.org/blog/upcoming-nextjs-security-release-november-2026 ; https://tailscale.com/security-bulletins .
 
 ## 11. TanStack AI 1.0 interoperability and experimental harness
 
