@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-29
+Last reviewed: 2026-10-30
 
 ## Status key
 
@@ -58,7 +58,7 @@ Reference: https://www.primeintellect.ai/blog/prime-inference
 
 **Status:** Evaluate  
 **Added:** 2026-10-05  
-**Source:** Cactus / TLDR AI
+**Source:** Cactus / TLDR AI; NVIDIA Nemotron (2026-10-28)
 
 ### Finding
 Whistle is presented as a very small on-device speech-to-text model designed to run on CPU and support multiple languages.
@@ -90,6 +90,8 @@ Test on the Mac and Windows node hardware for:
 ### Recommendation
 This is a high-value prototype candidate because the integration can remain modular and reversible.
 
+**2026-10-30 evidence:** NVIDIA's open-weight Nemotron 3.5 Transcribe (Oct 28) adds 40-language, speaker-attributed, instruction-selectable transcription and up-to-one-hour audio, but its 30B-total/~4.3B-active speech architecture and GPU-oriented benchmarks are not proof it fits the existing CPU/Mac/Galaxy nodes. Compare hosted transcription or a separately provisioned GPU worker against Whistle/local STT on representative creator audio, cost per accurate minute, privacy and latency; do not install/promote automatically. Source: https://research.nvidia.com/labs/nemotron/NVIDIA-Nemotron-3.5-Transcribe/ .
+
 Reference: https://cactuscompute.com/blog/whistle
 
 ---
@@ -98,7 +100,7 @@ Reference: https://cactuscompute.com/blog/whistle
 
 **Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-29  
+**Last reviewed:** 2026-10-30  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -148,11 +150,13 @@ Keep PR #193 draft. Implement only after reviewing the complete quote/debit/mark
 
 **2026-10-29 evidence:** Completed registry scan found 657 routes (664 Oct 28), 1 new, 29 changed, 8 missing. Missing legacy OpenRouter OpenAI routes and price-field changes reinforce execution-time price/availability verification. PR #193 is still draft and unmerged; no authoritative paid-call reconciliation or reservation acceptance demonstrated. Keep fail-closed margin and no silent paid fallback.
 
+**2026-10-30 evidence:** Completed registry scan discovered 658 routes (vs 657), 2 new, 21 changed, 1 missing. The existing Mistral Large 4 OpenRouter price fell from **2026-10-29 evidence:** Completed registry scan found 657 routes (664 Oct 28), 1 new, 29 changed, 8 missing. Missing legacy OpenRouter OpenAI routes and price-field changes reinforce execution-time price/availability verification. PR #193 is still draft and unmerged; no authoritative paid-call reconciliation or reservation acceptance demonstrated. Keep fail-closed margin and no silent paid fallback..36/$4.18 to $0.70/$2.10 per million input/output tokens. This provider snapshot matches Mistral's new announced hosted list price, but is not an authoritative quote at execution time. Draft PR #193 still lacks verified end-to-end paid execution reservation/reconciliation. Recommendation unchanged: fail closed; no paid route or price policy change.
+
 ## 4. Structured project intelligence instead of chat-memory-only state
 
 **Status:** Implemented foundation / Recommend independent verification receipts  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-28  
+**Last reviewed:** 2026-10-30  
 **Source:** TLDR Dev / current CoOperative persistence direction
 
 ### Finding
@@ -188,6 +192,8 @@ Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT
 
 Reference: https://openai.com/index/ironclad/
 
+**2026-10-30 evidence:** TLDR Dev Oct 29 describes an agent repeatedly executing a successful SQL query 254 times without finishing; Vercel CI entered beta Oct 28 with vendor-reported 2–6x faster checks on Turborepo projects. For CoOperative, preserve independent end-state receipts, explicit per-tool repeat/loop budgets, and compare CI correctness/cost before any CI migration. No workflow-contract change needed. Sources: https://signup.tldr.tech/dev/2026-10-29 ; https://vercel.com/blog/introducing-vercel-ci .
+
 Reference: https://tldr.tech/dev/2026-10-05
 
 
@@ -199,9 +205,9 @@ Reference: https://tldr.tech/dev/2026-10-05
 
 ## 5. Mistral Large 4 as a registry and routing candidate
 
-**Status:** Evaluate — API preview available; full/open-weight release unconfirmed; no CoOperative execution benchmark  
+**Status:** Evaluate — full open-weight release confirmed 2026-10-29; hosted route observed, no CoOperative head-to-head benchmark  
 **Added:** 2026-10-06  
-**Last reviewed:** 2026-10-27  
+**Last reviewed:** 2026-10-30  
 **Evidence:** Mistral release/docs, Hugging Face release page, OpenRouter live catalog/telemetry, CoOperative Supabase registry/task scores
 
 ### Release and registry finding (2026-10-27)
@@ -220,8 +226,11 @@ Mistral's official page and docs still identify **Public Preview v26.10** (API s
 ### Possible solution and acceptance gate
 Run a **bounded, nonproduction, approval-gated** head-to-head against Qwen3.8 Omni Flash, DeepSeek V4 Pro, GPT-6.1 Terra and a premium vision route using identical pinned prompts/versions: (1) JSON schema and multi-tool selection correctness; (2) coding, reasoning and document-answer quality with ground truth/citations; (3) p50/p95 latency, timeout and retry reliability; (4) actual provider bill and cost per verified success; (5) benign security-task versus disallowed-task refusal consistency and prompt-injection resistance; (6) charts, screenshots, multi-page PDFs and long-context retrieval. Minimum multiple repetitions per scenario; store timestamps, route IDs, errors, actual usage and reviewer results. Do not send sensitive production data. Apply current hard-budget caps and independent verification.
 
+### 2026-10-30 release and price update
+**Resolved:** The Oct 27 preview/open-weight-release uncertainty is superseded. Mistral officially released improved Mistral Large 4 weights on **Oct 29**, with hosted list pricing **$0.70 input / $2.10 output per 1M tokens** (cached input $0.07/1M). The Oct 30 CoOperative OpenRouter scan independently observed the same $0.70/$2.10 route price, down from $1.36/$4.18; route remains active/execution-ready metadata but **recommended=false**. For 100k input + 10k output, new list estimate is **$0.091**, previously $0.1778, excluding actual usage/retries/markup. Mistral reports Terminal-Bench 4.0 **41%** (vs 26.8% preview) and coding-agent efficiency gains; these are release/vendor benchmark claims, **not** CoOperative results. The Mistral Ecosystem Open-Weight License requires a **separate commercial license for Model-as-a-Service operators**, relevant to CoOperative's resale model. The ~1T-parameter weights are not suitable for current Unison CPU/mobile nodes. Sources: https://mistral.ai/news/mistral-large-4-oss/ ; https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B .
+
 ### Recommendation
-**No default production route, automatic paid fallback, or provider-price/routing change.** Keep ML4 discoverable as an unpromoted preview candidate. Recheck official final release, weight license, version and provider prices; only propose a task-specific promotion after reproducible, cost-controlled CoOperative tests demonstrate value and the user explicitly approves. No production code, schema, routing or pricing was changed in this review.
+**No default production route, automatic paid fallback, or provider-price/routing change.** Keep ML4 discoverable as an unpromoted preview candidate. Confirm hosted route maps to the improved weight version, verify license/terms and execution-time prices; only propose a task-specific promotion after reproducible, cost-controlled CoOperative tests demonstrate value and the user explicitly approves. No production code, schema, routing or pricing was changed in this review.
 
 Sources:
 - https://mistral.ai/news/mistral-large-4/
@@ -290,7 +299,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-29
+**Last reviewed:** 2026-10-30
 
 **Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
 
@@ -309,6 +318,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **2026-10-28 evidence:** Registry completed with 664 discovered, 1 new, 31 changed and 0 missing. New OpenRouter `prism-ml/ternary-bonsai-2-9b` route is unbenchmarked; its observed $0.08/$0.13 per 1M prompt/completion tokens is metadata, not a verified provider invoice. `deepseek/deepseek-v4-flash` changed prompt $0.05->$0.091 and completion $0.45->$0.182 per 1M. LFM3 launched Oct 27 but no `lfm3` route was found in the current registry; see separate local benchmark consideration #12. Do not silently promote new or changed paid routes.
 
 **2026-10-29 evidence:** Scan at 13:00–13:01 UTC: 657 routes, 1 new (`particle-ai/particle-1`), 29 changed and 8 missing (including `openai/o1`, `o1-pro`, `o3-mini`, `o4-mini` variants, `gpt-4-turbo` and Qwen3 Next thinking). Price fields changed on DeepSeek/Kimi/GLM and media models. Mistral Large 4 preview remains active but unpromoted; no new CoOperative execution benchmark. Verify provider pricing/availability and cost per verified task before any route change.
+
+**2026-10-30 evidence:** Completed scan: **658 discovered, 2 new** (Riverflow v2.6 Pro and Mischief 1), **21 changed, 1 missing** (Solar Pro 3). Mistral Large 4 pricing changed materially; see item 5. Route metadata and cost observations do not establish tool-call correctness, actual bill or a safe fallback. Keep new routes unpromoted and use bounded, independently scored evaluations before any routing decision.
 
 ## 9. Unison effective availability versus registered state
 
@@ -334,7 +345,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate / read-only exposure audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-29
+**Last reviewed:** 2026-10-30
 
 **Evidence:** LiteLLM 1.107.0 PyPI/Docker artifacts were malicious on Oct 21; Node.js released Oct 21 security patches for supported lines. No confirmed compromise of CoOperative was established.
 
@@ -353,6 +364,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **2026-10-28 evidence:** Cloudflare's disclosure of a GLM-5.3 Workers AI SGLang KV-cache isolation failure reports 155 cross-customer responses before remediation. This is a provider-side incident, **not evidence of CoOperative exposure**. Evaluate provider isolation assurances, sensitive-prompt routing, cache reuse, and independently enforced tenant boundaries alongside existing untrusted-instruction protections. No policy change authorized. Source: https://blog.cloudflare.com/kv-cache-exposure-remediation/ .
 
 **2026-10-29 evidence:** Next.js announced seven medium-severity fixes for Nov 3; CoOperative currently pins Next.js 16.3.5, but affected versions will not be known until advisories publish. Tailscale's Oct 26 bulletins TS-2026-014 through -017 fix SSH forwarding/DoS and Serve privilege/capability issues in 1.104.4+. No evidence CoOperative uses affected Tailscale configurations. Inventory actual dependencies, Tailscale version/SSH/Serve usage and patch readiness read-only; do not assert compromise or change runtime/security policy without approval. Sources: https://nextjs.org/blog/upcoming-nextjs-security-release-november-2026 ; https://tailscale.com/security-bulletins .
+
+**2026-10-30 security evidence:** Binance disclosed an estimated $6.3B crypto theft with preliminary evidence of a compromised DevOps laptop/service-container access and unauthorized withdrawals; investigation ongoing. This is **not** a CoOperative incident. The analogous risk for Hermes/Unison is that a compromised worker or agent must not gain signing, billing, deployment or secret-management authority merely through a valid tool/session. Read-only review of credential scoping, approvals, worker revocation and independent audit receipts is recommended; no policy changes approved. Sources: https://www.binance.com/en/square/post/10-30-2026-binance-stated-that-the-security-incident-affected-approximately-6-3-billion-with-about-3-billion-frozen-382718598048399 ; https://www.coindesk.com/business/2026/10/29/potential-multi-billion-binance-hack-hitting-crypto-markets .
 
 ## 11. TanStack AI 1.0 interoperability and experimental harness
 
@@ -381,3 +394,17 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **Possible solution:** After node-health recovery, benchmark LFM3 text and relevant decision/VL variants against installed local baselines with pinned test sets. Measure schema-valid **and semantically correct** tool calls, refusal/prompt-injection behavior, document grounding, p50/p95 latency, RAM, battery/CPU, failures and verified task completion. Test license/weights and real hardware before making a capability claim.
 
 **Recommendation:** Read-only feasibility review and approval-gated local benchmark only. No model installation, default promotion, provider routing, billing, or node policy change without explicit approval.
+
+---
+
+## 13. Gemini 4 Carbon as a restricted frontier security/agent evaluation candidate
+
+**Status:** Monitor / Evaluate after general API availability  
+**Added:** 2026-10-30  
+**Last reviewed:** 2026-10-30
+
+**Evidence:** Google announced Gemini 4 Carbon Oct 28 with reported strong long-horizon coding and cybersecurity benchmarks, but **access is initially restricted to selected defenders/Fairwind partners**. Announced introductory price is $2/$10 per million input/output tokens (later $4/$20). The Oct 30 CoOperative registry scan found **no Gemini 4 Carbon route**. Vendor scores and declared safety are not CoOperative measurements. Source: https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-carbon/ .
+
+**Possible solution:** When legitimately accessible, compare against current coding/security routes on pinned non-sensitive repo tasks: patch correctness, scope/permission adherence, tool loops, prompt injection, false refusals, p95 latency, verified success and cost. Treat security benchmarks as capability evidence, not authorization for autonomous exploitation or code deployment.
+
+**Recommendation:** Monitor access; no default promotion, provider routing, paid inference or policy changes without separate approval.
