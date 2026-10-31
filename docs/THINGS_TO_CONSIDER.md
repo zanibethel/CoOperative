@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-30
+Last reviewed: 2026-10-31
 
 ## Status key
 
@@ -100,7 +100,7 @@ Reference: https://cactuscompute.com/blog/whistle
 
 **Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-30  
+**Last reviewed:** 2026-10-31  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -150,13 +150,15 @@ Keep PR #193 draft. Implement only after reviewing the complete quote/debit/mark
 
 **2026-10-29 evidence:** Completed registry scan found 657 routes (664 Oct 28), 1 new, 29 changed, 8 missing. Missing legacy OpenRouter OpenAI routes and price-field changes reinforce execution-time price/availability verification. PR #193 is still draft and unmerged; no authoritative paid-call reconciliation or reservation acceptance demonstrated. Keep fail-closed margin and no silent paid fallback.
 
-**2026-10-30 evidence:** Completed registry scan discovered 658 routes (vs 657), 2 new, 21 changed, 1 missing. The existing Mistral Large 4 OpenRouter price fell from **2026-10-29 evidence:** Completed registry scan found 657 routes (664 Oct 28), 1 new, 29 changed, 8 missing. Missing legacy OpenRouter OpenAI routes and price-field changes reinforce execution-time price/availability verification. PR #193 is still draft and unmerged; no authoritative paid-call reconciliation or reservation acceptance demonstrated. Keep fail-closed margin and no silent paid fallback..36/$4.18 to $0.70/$2.10 per million input/output tokens. This provider snapshot matches Mistral's new announced hosted list price, but is not an authoritative quote at execution time. Draft PR #193 still lacks verified end-to-end paid execution reservation/reconciliation. Recommendation unchanged: fail closed; no paid route or price policy change.
+**2026-10-30 evidence:** Completed registry scan discovered 658 routes (vs 657), 2 new, 21 changed, 1 missing. The existing Mistral Large 4 OpenRouter price fell from $1.36/$4.18 to $0.70/$2.10 per million input/output tokens. This provider snapshot matches Mistral's new announced hosted list price, but is not an authoritative quote at execution time. Draft PR #193 still lacks verified end-to-end paid execution reservation/reconciliation. Recommendation unchanged: fail closed; no paid route or price policy change.
+
+**2026-10-31 evidence:** Completed 13:00 UTC scan: 658 discovered, 0 new, 19 changed, 0 missing. OpenRouter `deepseek/deepseek-v4-pro` listed input/output prices moved from ~$0.816/$1.632 to **$1.60/$3.20 per million tokens** (~96% higher). This is registry metadata, not an execution-time quote or billed cost. Draft PR #193 still lacks verified paid-call reservation, margin and actual-cost reconciliation. Keep fail-closed economics and require approval before routing/pricing changes.
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
 **Status:** Implemented foundation / Recommend independent verification receipts  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-30  
+**Last reviewed:** 2026-10-31  
 **Source:** TLDR Dev / current CoOperative persistence direction
 
 ### Finding
@@ -202,6 +204,8 @@ Reference: https://tldr.tech/dev/2026-10-05
 **2026-10-26 evidence:** Anthropic's Oct 22 formal-verification research reports machine-checked security properties for over 100 open-source libraries at RISC-V assembly level, subject to explicit single-thread/static-binary assumptions. This supports a bounded, independently checked proof/contract prototype for CoOperative's billing invariants and Unison task-authorization paths, **not** a claim that LLM-generated code is bug-free. Preserve separate final-state receipts and deterministic policy checks. Source: https://www.anthropic.com/research/formal-verification .
 
 **2026-10-28 evaluation evidence:** Cognition's FrontierCode 2.0 (Oct 27) uses more realistic mergeability/thoroughness blockers and larger repository tasks; its vendor-run scores are not CoOperative measurements. Ubicloud's Oct 20 vLLM tool-call evaluation found 92% schema-valid calls on a tested Kimi setup versus 100% with constrained decoding; schema validity does not prove correct tool selection. Add separate acceptance dimensions for scope/regression completeness, tool schema validity, semantic tool correctness and final-state receipts before comparing routes. Existing project-intelligence workflow contract remains adequate. Sources: https://cognition.com/blog/frontier-code-2.0 ; https://www.ubicloud.com/blog/fixing-tool-call-accuracy-in-vllm .
+
+**2026-10-31 evidence:** Raindrop's Oct 29 controlled study of 2,160 eight-agent outage simulations found that merely reversing name order in a prompt shifted plan proposals ~3x, despite unchanged permissions. Meta's Oct 29 JiTTesting account adds evidence for independently evaluated, human-reviewed AI-generated regression tests. Evaluate nonproduction agent-order perturbation and deterministic task-ownership/receipt checks; never infer authority from agent rhetoric or prompt position. Sources: https://www.raindrop.ai/blog/agent-swarm-leadership/ ; https://engineering.fb.com/2026/10/29/security/catching-bugs-before-they-land-jittestings-human-on-the-loop-approach-at-full-scale/ .
 
 ## 5. Mistral Large 4 as a registry and routing candidate
 
@@ -299,7 +303,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-30
+**Last reviewed:** 2026-10-31
 
 **Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
 
@@ -320,6 +324,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **2026-10-29 evidence:** Scan at 13:00–13:01 UTC: 657 routes, 1 new (`particle-ai/particle-1`), 29 changed and 8 missing (including `openai/o1`, `o1-pro`, `o3-mini`, `o4-mini` variants, `gpt-4-turbo` and Qwen3 Next thinking). Price fields changed on DeepSeek/Kimi/GLM and media models. Mistral Large 4 preview remains active but unpromoted; no new CoOperative execution benchmark. Verify provider pricing/availability and cost per verified task before any route change.
 
 **2026-10-30 evidence:** Completed scan: **658 discovered, 2 new** (Riverflow v2.6 Pro and Mischief 1), **21 changed, 1 missing** (Solar Pro 3). Mistral Large 4 pricing changed materially; see item 5. Route metadata and cost observations do not establish tool-call correctness, actual bill or a safe fallback. Keep new routes unpromoted and use bounded, independently scored evaluations before any routing decision.
+
+**2026-10-31 evidence:** Scan completed with **658 routes, 0 new, 19 changed, 0 missing**. DeepSeek V4 Pro and other OpenRouter/N​​ous entries changed price fields; Mistral Large 4 remains active, `recommended=false`, with **zero local quality/runtime/latency samples**. Price and registry availability are not benchmarks; retain existing routing until independently verified task-success and cost tests pass.
 
 ## 9. Unison effective availability versus registered state
 
@@ -345,7 +351,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate / read-only exposure audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-30
+**Last reviewed:** 2026-10-31
 
 **Evidence:** LiteLLM 1.107.0 PyPI/Docker artifacts were malicious on Oct 21; Node.js released Oct 21 security patches for supported lines. No confirmed compromise of CoOperative was established.
 
@@ -366,6 +372,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **2026-10-29 evidence:** Next.js announced seven medium-severity fixes for Nov 3; CoOperative currently pins Next.js 16.3.5, but affected versions will not be known until advisories publish. Tailscale's Oct 26 bulletins TS-2026-014 through -017 fix SSH forwarding/DoS and Serve privilege/capability issues in 1.104.4+. No evidence CoOperative uses affected Tailscale configurations. Inventory actual dependencies, Tailscale version/SSH/Serve usage and patch readiness read-only; do not assert compromise or change runtime/security policy without approval. Sources: https://nextjs.org/blog/upcoming-nextjs-security-release-november-2026 ; https://tailscale.com/security-bulletins .
 
 **2026-10-30 security evidence:** Binance disclosed an estimated $6.3B crypto theft with preliminary evidence of a compromised DevOps laptop/service-container access and unauthorized withdrawals; investigation ongoing. This is **not** a CoOperative incident. The analogous risk for Hermes/Unison is that a compromised worker or agent must not gain signing, billing, deployment or secret-management authority merely through a valid tool/session. Read-only review of credential scoping, approvals, worker revocation and independent audit receipts is recommended; no policy changes approved. Sources: https://www.binance.com/en/square/post/10-30-2026-binance-stated-that-the-security-incident-affected-approximately-6-3-billion-with-about-3-billion-frozen-382718598048399 ; https://www.coindesk.com/business/2026/10/29/potential-multi-billion-binance-hack-hitting-crypto-markets .
+
+**2026-10-31 security evidence:** Epoch AI's Oct 29 controlled research found GLM 5.3 could exploit publicly visible Firefox patch gaps; Mozilla shipped Firefox 159.0 Oct 27 addressing a related undisclosed flaw. This is not evidence of CoOperative exposure. Read-only inventory of public patch disclosures versus deployed dependencies/agent browser versions, then independently test approved updates; do not infer that a model's refusal behavior is a security boundary. Binance's Oct 30 official follow-up also says its initial laptop theory was incomplete and **additional breach points** were found; root cause remains under investigation. Sources: https://epoch.ai/publications/open-weight-models-patch-gap ; https://www.binance.com/en/support/announcement/detail/d3306d9dca5243548c813b605e1d1751 .
 
 ## 11. TanStack AI 1.0 interoperability and experimental harness
 
