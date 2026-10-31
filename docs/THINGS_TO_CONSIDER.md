@@ -375,6 +375,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **2026-10-31 security evidence:** Epoch AI's Oct 29 controlled research found GLM 5.3 could exploit publicly visible Firefox patch gaps; Mozilla shipped Firefox 159.0 Oct 27 addressing a related undisclosed flaw. This is not evidence of CoOperative exposure. Read-only inventory of public patch disclosures versus deployed dependencies/agent browser versions, then independently test approved updates; do not infer that a model's refusal behavior is a security boundary. Binance's Oct 30 official follow-up also says its initial laptop theory was incomplete and **additional breach points** were found; root cause remains under investigation. Sources: https://epoch.ai/publications/open-weight-models-patch-gap ; https://www.binance.com/en/support/announcement/detail/d3306d9dca5243548c813b605e1d1751 .
 
+**2026-10-31 runtime verification:** Vercel project `co-operative` explicitly reports Node **24.x**, while `package.json` has no `engines.node`; Next.js is 16.3.5. Vercel's Oct 29 Node 26 LTS release makes 26 default for *new* projects and can upgrade existing projects when engine constraints allow, but this project setting does **not** establish an automatic change. Inventory deployed runtime and test 24.x/26.x compatibility before any approved update. Source: https://vercel.com/changelog/node-js-26-lts-is-now-generally-available-on-vercel .
+
 ## 11. TanStack AI 1.0 interoperability and experimental harness
 
 **Status:** Evaluate / no migration approved  
