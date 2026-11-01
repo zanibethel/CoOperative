@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-31
+Last reviewed: 2026-11-01
 
 ## Status key
 
@@ -100,7 +100,7 @@ Reference: https://cactuscompute.com/blog/whistle
 
 **Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-31  
+**Last reviewed:** 2026-11-01  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -153,6 +153,8 @@ Keep PR #193 draft. Implement only after reviewing the complete quote/debit/mark
 **2026-10-30 evidence:** Completed registry scan discovered 658 routes (vs 657), 2 new, 21 changed, 1 missing. The existing Mistral Large 4 OpenRouter price fell from $1.36/$4.18 to $0.70/$2.10 per million input/output tokens. This provider snapshot matches Mistral's new announced hosted list price, but is not an authoritative quote at execution time. Draft PR #193 still lacks verified end-to-end paid execution reservation/reconciliation. Recommendation unchanged: fail closed; no paid route or price policy change.
 
 **2026-10-31 evidence:** Completed 13:00 UTC scan: 658 discovered, 0 new, 19 changed, 0 missing. OpenRouter `deepseek/deepseek-v4-pro` listed input/output prices moved from ~$0.816/$1.632 to **$1.60/$3.20 per million tokens** (~96% higher). This is registry metadata, not an execution-time quote or billed cost. Draft PR #193 still lacks verified paid-call reservation, margin and actual-cost reconciliation. Keep fail-closed economics and require approval before routing/pricing changes.
+
+**2026-11-01 evidence:** The 13:00 UTC registry scan completed with 654 routes (658 Oct 31), 0 new, 11 updated and **4 missing**, including two free Poolside Laguna variants. Price-field changes also affect DeepSeek, GLM, Qwen and GPT-OSS entries. These are catalog observations, not execution-time invoices; missing free routes must not silently trigger paid fallback. PR #193 remains draft, without verified end-to-end paid reservation/margin/reconciliation. **Recommendation:** preserve fail-closed caps; request separate approval for implementation and deployment.
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
@@ -303,7 +305,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-31
+**Last reviewed:** 2026-11-01
 
 **Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
 
@@ -326,6 +328,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **2026-10-30 evidence:** Completed scan: **658 discovered, 2 new** (Riverflow v2.6 Pro and Mischief 1), **21 changed, 1 missing** (Solar Pro 3). Mistral Large 4 pricing changed materially; see item 5. Route metadata and cost observations do not establish tool-call correctness, actual bill or a safe fallback. Keep new routes unpromoted and use bounded, independently scored evaluations before any routing decision.
 
 **2026-10-31 evidence:** Scan completed with **658 routes, 0 new, 19 changed, 0 missing**. DeepSeek V4 Pro and other OpenRouter/N​​ous entries changed price fields; Mistral Large 4 remains active, `recommended=false`, with **zero local quality/runtime/latency samples**. Price and registry availability are not benchmarks; retain existing routing until independently verified task-success and cost tests pass.
+
+**2026-11-01 evidence:** CoOperative Supabase `ai_model_scan_runs` completed at 13:01 UTC: **654 discovered, 0 new, 11 changed, 4 missing**, versus 658/0/19/0 Oct 31. Missing OpenRouter routes: `poolside/laguna-s-2.1`, `poolside/laguna-s-2.1:free`, `poolside/laguna-xs-2.1`, `poolside/laguna-xs-2.1:free`; other changes are pricing fields. Registry availability is not successful inference. **Status:** Evaluate; preserve `recommended=false` and benchmark/quote gates; do not change routing.
 
 ## 9. Unison effective availability versus registered state
 
@@ -351,7 +355,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate / read-only exposure audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-31
+**Last reviewed:** 2026-11-01
 
 **Evidence:** LiteLLM 1.107.0 PyPI/Docker artifacts were malicious on Oct 21; Node.js released Oct 21 security patches for supported lines. No confirmed compromise of CoOperative was established.
 
@@ -376,6 +380,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **2026-10-31 security evidence:** Epoch AI's Oct 29 controlled research found GLM 5.3 could exploit publicly visible Firefox patch gaps; Mozilla shipped Firefox 159.0 Oct 27 addressing a related undisclosed flaw. This is not evidence of CoOperative exposure. Read-only inventory of public patch disclosures versus deployed dependencies/agent browser versions, then independently test approved updates; do not infer that a model's refusal behavior is a security boundary. Binance's Oct 30 official follow-up also says its initial laptop theory was incomplete and **additional breach points** were found; root cause remains under investigation. Sources: https://epoch.ai/publications/open-weight-models-patch-gap ; https://www.binance.com/en/support/announcement/detail/d3306d9dca5243548c813b605e1d1751 .
 
 **2026-10-31 runtime verification:** Vercel project `co-operative` explicitly reports Node **24.x**, while `package.json` has no `engines.node`; Next.js is 16.3.5. Vercel's Oct 29 Node 26 LTS release makes 26 default for *new* projects and can upgrade existing projects when engine constraints allow, but this project setting does **not** establish an automatic change. Inventory deployed runtime and test 24.x/26.x compatibility before any approved update. Source: https://vercel.com/changelog/node-js-26-lts-is-now-generally-available-on-vercel .
+
+**2026-11-01 security evidence:** Wiz's Oct 30 primary investigation documents at least nine October AI-developer-platform incidents targeting stored environment variables and AI keys, with observed downstream Bedrock key abuse (including ~1.7M calls over 13 hours in one case). Cisco Talos' Oct 31 VOLTA analysis describes AI-assisted profiling of stolen credentials, sessions and crypto-wallet data. Neither establishes CoOperative compromise or use of the affected vendors. **Possible solution:** read-only inventory of provider keys, CI/Vercel/Supabase secrets, worker token scope, rotation/revocation readiness and anomalous usage; validate independent cost caps and node isolation. **Recommendation:** high-priority exposure assessment; no secret/security-policy changes without approval. Sources: https://www.wiz.io/blog/black-october-for-ai-developer-platforms ; https://blog.talosintelligence.com/category/threat-spotlight/ .
 
 ## 11. TanStack AI 1.0 interoperability and experimental harness
 
