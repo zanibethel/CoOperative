@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-01
+Last reviewed: 2026-11-02
 
 ## Status key
 
@@ -100,7 +100,7 @@ Reference: https://cactuscompute.com/blog/whistle
 
 **Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-11-01  
+**Last reviewed:** 2026-11-02  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -155,6 +155,8 @@ Keep PR #193 draft. Implement only after reviewing the complete quote/debit/mark
 **2026-10-31 evidence:** Completed 13:00 UTC scan: 658 discovered, 0 new, 19 changed, 0 missing. OpenRouter `deepseek/deepseek-v4-pro` listed input/output prices moved from ~$0.816/$1.632 to **$1.60/$3.20 per million tokens** (~96% higher). This is registry metadata, not an execution-time quote or billed cost. Draft PR #193 still lacks verified paid-call reservation, margin and actual-cost reconciliation. Keep fail-closed economics and require approval before routing/pricing changes.
 
 **2026-11-01 evidence:** The 13:00 UTC registry scan completed with 654 routes (658 Oct 31), 0 new, 11 updated and **4 missing**, including two free Poolside Laguna variants. Price-field changes also affect DeepSeek, GLM, Qwen and GPT-OSS entries. These are catalog observations, not execution-time invoices; missing free routes must not silently trigger paid fallback. PR #193 remains draft, without verified end-to-end paid reservation/margin/reconciliation. **Recommendation:** preserve fail-closed caps; request separate approval for implementation and deployment.
+
+**2026-11-02 evidence:** Latest completed registry scan (13:01 UTC) has 654 routes, 0 new, 6 changed and 0 newly missing. OpenRouter-listed DeepSeek V4 Flash latest input moved **$0.0434→$0.059/1M** (~36% increase), and GPT-OSS 120B input/output moved **$0.016/$0.059→$0.028/$0.103/1M** (~75% increases). These are *catalog snapshots*, not execution-time quotes or billed charges. PR #193 remains draft/unmerged. **Recommendation unchanged:** fail closed on paid cost/margin uncertainty; no pricing/routing changes without approval.
 
 ## 4. Structured project intelligence instead of chat-memory-only state
 
@@ -305,7 +307,7 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **Status:** Evaluate model routes / monitor provider availability  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-11-01
+**Last reviewed:** 2026-11-02
 
 **Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
 
@@ -331,11 +333,13 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 **2026-11-01 evidence:** CoOperative Supabase `ai_model_scan_runs` completed at 13:01 UTC: **654 discovered, 0 new, 11 changed, 4 missing**, versus 658/0/19/0 Oct 31. Missing OpenRouter routes: `poolside/laguna-s-2.1`, `poolside/laguna-s-2.1:free`, `poolside/laguna-xs-2.1`, `poolside/laguna-xs-2.1:free`; other changes are pricing fields. Registry availability is not successful inference. **Status:** Evaluate; preserve `recommended=false` and benchmark/quote gates; do not change routing.
 
+**2026-11-02 evidence:** Scan completed at 13:01 UTC with **654 discovered, 0 new, 6 changed, 0 newly missing** (Nov 1: 654/0/11/4). Four price-field changes (DeepSeek V4 Flash latest, Gemma 4 26B, Llama 3.2 3B, GPT-OSS 120B), one Gemma capability change and Qwen 3.8 27B context metadata 1,000,000→1,024,000. **Zero newly missing does not establish restoration of yesterday's four Poolside routes.** Mistral Large 4 still has zero local quality/runtime/latency samples. **Recommendation:** verify route availability, provider prices and task outcomes before any promotion or paid fallback; status Evaluate unchanged.
+
 ## 9. Unison effective availability versus registered state
 
 **Status:** Recommend operational audit  
 **Added:** 2026-10-23  
-**Last reviewed:** 2026-10-29
+**Last reviewed:** 2026-11-02
 
 **Evidence:** Six stored node registrations all report `online`, but last heartbeats are Mac Oct 15, Galaxy Oct 12 or earlier, and CARROT Oct 3. Multiple Galaxy rows may be historical registrations.
 
@@ -350,6 +354,8 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **2026-10-28 evidence:** All six stored registrations still say `online`, but the latest Mac heartbeat is Oct 15, Galaxy Oct 12 and CARROT Oct 3. No fresh node availability was established. Status unchanged: read-only operational audit before any node-selection or routing change.
 
 **2026-10-29 evidence:** All six registered nodes still say `online`, yet Mac last seen Oct 15, Galaxy Oct 12 or earlier and CARROT Oct 3. Effective availability remains unverified. Read-only heartbeat/capability/task-claim audit recommended before LFM3 hardware testing or local routing.
+
+**2026-11-02 evidence:** All six node registrations still show stored `online` state, but latest heartbeats remain Mac Oct 15, Galaxy Oct 12, CARROT Oct 3; no effective availability established. Vercel's Oct 30 Daemon HTTP liveness checks provide a reference pattern for independently detecting stuck workers, **not evidence Unison uses Vercel Daemons**. Evaluate heartbeat expiry, independent task claims and restart tests read-only before considering any hosted-worker alternative. Source: https://vercel.com/changelog/add-liveness-checks-to-your-daemons . No node policy/routing change.
 
 ## 10. AI supply-chain and runtime patch verification
 
