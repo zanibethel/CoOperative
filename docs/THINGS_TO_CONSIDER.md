@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-03
+Last reviewed: 2026-11-04
 
 ## Status key
 
@@ -436,3 +436,6 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **Possible solution:** When legitimately accessible, compare against current coding/security routes on pinned non-sensitive repo tasks: patch correctness, scope/permission adherence, tool loops, prompt injection, false refusals, p95 latency, verified success and cost. Treat security benchmarks as capability evidence, not authorization for autonomous exploitation or code deployment.
 
 **Recommendation:** Monitor access; no default promotion, provider routing, paid inference or policy changes without separate approval.
+
+
+**2026-11-04 registry and agent-efficiency evidence (existing items 3, 4, 5, 10):** Connected scan completed 13:01 UTC: **657 routes, 4 new, 19 changed, 0 newly missing** (vs 653/1/20/2 Nov 3). New OpenRouter catalog entries: `stealth/crouton-alpha` (listed free; unknown policy/reliability), `tencent/hy4` (listed $0.417/$1.2505 per million input/output tokens), and `x-ai/grok-4.6:batch`/`grok-4.7:batch` (listed $1.60/$4.80 per million with higher-price >200K-token overrides). Metadata is not measured correctness, availability or effective invoice cost. TLDR AI Nov 3 reports Anthropic message-thread beta with claimed ~35% faster first token at 500K–1M context; treat as vendor/secondary performance evidence only. **Status:** Evaluate / no promotion. **Possible solution:** pinned nonproduction long-context, tool-call, latency, price-override and failover comparison with verified cost receipts; review existing maximum-cost reservation and minimum-margin PR #193. **Recommendation:** no default routing, paid-call activation, billing or production changes without explicit approval. Sources: https://signup.tldr.tech/ai/2026-11-03 ; connected scan `500af66d-43e9-446a-992a-457bd07f3883`.
