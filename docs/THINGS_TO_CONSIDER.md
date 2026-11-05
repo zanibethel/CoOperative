@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-04
+Last reviewed: 2026-11-05
 
 ## Status key
 
@@ -439,3 +439,6 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 
 **2026-11-04 registry and agent-efficiency evidence (existing items 3, 4, 5, 10):** Connected scan completed 13:01 UTC: **657 routes, 4 new, 19 changed, 0 newly missing** (vs 653/1/20/2 Nov 3). New OpenRouter catalog entries: `stealth/crouton-alpha` (listed free; unknown policy/reliability), `tencent/hy4` (listed $0.417/$1.2505 per million input/output tokens), and `x-ai/grok-4.6:batch`/`grok-4.7:batch` (listed $1.60/$4.80 per million with higher-price >200K-token overrides). Metadata is not measured correctness, availability or effective invoice cost. TLDR AI Nov 3 reports Anthropic message-thread beta with claimed ~35% faster first token at 500K–1M context; treat as vendor/secondary performance evidence only. **Status:** Evaluate / no promotion. **Possible solution:** pinned nonproduction long-context, tool-call, latency, price-override and failover comparison with verified cost receipts; review existing maximum-cost reservation and minimum-margin PR #193. **Recommendation:** no default routing, paid-call activation, billing or production changes without explicit approval. Sources: https://signup.tldr.tech/ai/2026-11-03 ; connected scan `500af66d-43e9-446a-992a-457bd07f3883`.
+
+
+**2026-11-05 registry and AI-platform review (existing billing/model/agent entries):** Connected scan `f86ca662-ad14-4d30-a5bb-2819e5076736` completed: **659 discovered, 4 new, 17 changed, 2 missing** (Nov 4: 657/4/19/0). New candidates: `inclusionai/ling-3.0-tiny`, `ricursiveai/ripple-65b-preview`, `openai/gpt-image-2.6-flare`, `openai/gpt-image-2.6-sunburst`; missing free `thinkingmachines/inkling` variants. Pricing fields changed on GPT-OSS, DeepSeek, GLM, Gemma, Llama and others; catalog observations are not verified invoice prices or quality benchmarks. TLDR Tech Nov 4 reports Apple Siri App Intents developer access and self-hosted inference cost claims; both require primary-source/actual-workload validation. **Status:** Evaluate; existing execution-time pricing/minimum-margin and credential-isolation requirements unchanged. **Possible solution:** nonproduction modality-specific benchmark and provider-cost receipt tests; review free-route fallback and image-output authorization separately. **Recommendation:** no automatic default routing, provider-price change, self-hosting migration or production deployment. Sources: https://tldr.tech/tech/2026-11-04 ; connected registry scan.
