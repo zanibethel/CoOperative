@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-10-07
+Last reviewed: 2026-11-06
 
 ## Status key
 
@@ -58,7 +58,7 @@ Reference: https://www.primeintellect.ai/blog/prime-inference
 
 **Status:** Evaluate  
 **Added:** 2026-10-05  
-**Source:** Cactus / TLDR AI
+**Source:** Cactus / TLDR AI; NVIDIA Nemotron (2026-10-28)
 
 ### Finding
 Whistle is presented as a very small on-device speech-to-text model designed to run on CPU and support multiple languages.
@@ -90,15 +90,17 @@ Test on the Mac and Windows node hardware for:
 ### Recommendation
 This is a high-value prototype candidate because the integration can remain modular and reversible.
 
+**2026-10-30 evidence:** NVIDIA's open-weight Nemotron 3.5 Transcribe (Oct 28) adds 40-language, speaker-attributed, instruction-selectable transcription and up-to-one-hour audio, but its 30B-total/~4.3B-active speech architecture and GPU-oriented benchmarks are not proof it fits the existing CPU/Mac/Galaxy nodes. Compare hosted transcription or a separately provisioned GPU worker against Whistle/local STT on representative creator audio, cost per accurate minute, privacy and latency; do not install/promote automatically. Source: https://research.nvidia.com/labs/nemotron/NVIDIA-Nemotron-3.5-Transcribe/ .
+
 Reference: https://cactuscompute.com/blog/whistle
 
 ---
 
 ## 3. Hard AI budget caps with graceful fallback
 
-**Status:** Recommend / partial implementation evidence  
+**Status:** Recommend / draft PR #193 incomplete  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-07  
+**Last reviewed:** 2026-11-03  
 **Source:** industry discussion / current CoOperative cost-control direction
 
 ### Finding
@@ -127,16 +129,42 @@ Keep budget enforcement outside the model itself in deterministic routing/ledger
 ### 2026-10-07 evidence update
 Strict local/free-only routing and fixed Stripe price mapping have landed, which strengthens deterministic no-paid behavior and least-privilege checkout. The broader layered cap contract is not yet proven end to end: quoted cost, reservation, provider cost, user debit, concurrency, retry/failover, and refund/release still need one reconciliation test matrix.
 
+### 2026-10-23 evidence update
+Draft PR #193 adds pricing freshness, worst-case charge, minimum margin, and reconciliation primitives but is not wired to paid execution. Authoritative provider quotes, atomic reservations, idempotent retries, and persisted actual invoices remain unverified. The Oct 23 registry scan found 16 changed routes, including price changes, underscoring the need for execution-time verification.
+
+### 2026-10-24 evidence update
+The latest model scan found 669 routes, one new and 14 changed, including multiple provider pricing changes. These registry observations are not authoritative execution-time quotes. PR #193 remains draft and not wired to paid routes; enforce verified price, reservation, minimum margin, actual-cost reconciliation, and idempotency before any deployment.
+
 ### Recommendation
-Implement only after reviewing the complete quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
+Keep PR #193 draft. Implement only after reviewing the complete quote/debit/markup path so quoted cost, reserved cost, actual provider cost, and user deduction remain reconcilable.
 
 ---
 
+**2026-10-25 evidence:** The 13:00 UTC (08:00 Central) registry scan completed with 667 discovered routes (vs 669 Oct 24), one new, seven changed, and **three missing** (`openai/gpt-3.5-turbo`, `gpt-3.5-turbo-instruct`, and `gpt-3.5-turbo:batch` on OpenRouter). Price fields changed on several routes, including DeepSeek V4 Pro and Kimi. A registry snapshot is not a verified execution-time provider quote. PR #193 remains draft and unintegrated; preserve fail-closed spending.
+
+**2026-10-26 evidence:** Registry scan completed at 13:01 UTC with 667 routes, zero new/missing, **23 changed** (versus seven changed Oct 25). OpenRouter `deepseek/deepseek-v4-flash-0731` registry input/output prices rose from $0.04444/$0.13332 to $0.44/$1.32 per million tokens (~9.9x); `deepseek/deepseek-v4-pro` also rose from $0.2088/$0.4176 to $0.95526/$1.91052. These are registry observations, **not** verified provider invoices or live execution quotes. Prioritize fail-closed quote freshness, max-charge reservation, minimum margin and actual-cost reconciliation in draft PR #193; no merge or production routing/pricing change.
+
+**2026-10-27 evidence:** The completed registry scan found 8 missing routes, including a free NVIDIA Nemotron route and several Mistral batch variants; these must not silently trigger paid fallbacks. Continue the unmerged PR #193 maximum-cost reservation and provider-price reconciliation work; do not infer execution-time prices from registry fingerprints.
+
+**2026-10-28 evidence:** Completed scan: 664 routes, 1 new, 31 changed, 0 missing. OpenRouter DeepSeek V4 Flash observed prompt price changed $0.05 to $0.091 per 1M tokens while completion changed $0.45 to $0.182; economics depend on input/output mix. Registry snapshots are not provider-authoritative execution quotes. PR #193 remains open/draft; execution-time price verification, atomic max-cost reservation, margin floor, idempotency and actual-cost reconciliation remain unverified. No paid-route or billing changes approved.
+
+**2026-10-29 evidence:** Completed registry scan found 657 routes (664 Oct 28), 1 new, 29 changed, 8 missing. Missing legacy OpenRouter OpenAI routes and price-field changes reinforce execution-time price/availability verification. PR #193 is still draft and unmerged; no authoritative paid-call reconciliation or reservation acceptance demonstrated. Keep fail-closed margin and no silent paid fallback.
+
+**2026-10-30 evidence:** Completed registry scan discovered 658 routes (vs 657), 2 new, 21 changed, 1 missing. The existing Mistral Large 4 OpenRouter price fell from $1.36/$4.18 to $0.70/$2.10 per million input/output tokens. This provider snapshot matches Mistral's new announced hosted list price, but is not an authoritative quote at execution time. Draft PR #193 still lacks verified end-to-end paid execution reservation/reconciliation. Recommendation unchanged: fail closed; no paid route or price policy change.
+
+**2026-10-31 evidence:** Completed 13:00 UTC scan: 658 discovered, 0 new, 19 changed, 0 missing. OpenRouter `deepseek/deepseek-v4-pro` listed input/output prices moved from ~$0.816/$1.632 to **$1.60/$3.20 per million tokens** (~96% higher). This is registry metadata, not an execution-time quote or billed cost. Draft PR #193 still lacks verified paid-call reservation, margin and actual-cost reconciliation. Keep fail-closed economics and require approval before routing/pricing changes.
+
+**2026-11-01 evidence:** The 13:00 UTC registry scan completed with 654 routes (658 Oct 31), 0 new, 11 updated and **4 missing**, including two free Poolside Laguna variants. Price-field changes also affect DeepSeek, GLM, Qwen and GPT-OSS entries. These are catalog observations, not execution-time invoices; missing free routes must not silently trigger paid fallback. PR #193 remains draft, without verified end-to-end paid reservation/margin/reconciliation. **Recommendation:** preserve fail-closed caps; request separate approval for implementation and deployment.
+
+**2026-11-02 evidence:** Latest completed registry scan (13:01 UTC) has 654 routes, 0 new, 6 changed and 0 newly missing. OpenRouter-listed DeepSeek V4 Flash latest input moved **$0.0434→$0.059/1M** (~36% increase), and GPT-OSS 120B input/output moved **$0.016/$0.059→$0.028/$0.103/1M** (~75% increases). These are *catalog snapshots*, not execution-time quotes or billed charges. PR #193 remains draft/unmerged. **Recommendation unchanged:** fail closed on paid cost/margin uncertainty; no pricing/routing changes without approval.
+
+**2026-11-03 evidence:** Completed 13:01 UTC registry scan: **653 routes, 1 new, 20 changed, 2 missing**. OpenRouter GPT-OSS 120B list input/output moved **$0.028/$0.103 → $0.15/$0.60 per 1M** (~5.4x/~5.8x), and Kimi latest output **$7.15 → $10.5572/1M**. These are registry observations, not billed execution prices. **Recommendation unchanged:** PR #193 remains draft; fail closed on unverified paid costs/margins, reserve worst-case charge, reconcile actual costs, and require separate approval for production pricing/routing.
+
 ## 4. Structured project intelligence instead of chat-memory-only state
 
-**Status:** Implemented foundation / Recommend verification receipts  
+**Status:** Implemented foundation / Recommend independent verification receipts  
 **Added:** 2026-10-05  
-**Last reviewed:** 2026-10-07  
+**Last reviewed:** 2026-10-31  
 **Source:** TLDR Dev / current CoOperative persistence direction
 
 ### Finding
@@ -158,45 +186,68 @@ The versioned consideration and project-intelligence workflow is now in active u
 ### Possible solution
 For delegated work, record the requested criteria, claimed completion, observed final state, verification source, unresolved conditions, and responsible node/model. Apply this first to cross-device media planning and other workflows where an Android/Mac specialist claims completion.
 
+### 2026-10-23 evidence update
+Recent agent monitoring incidents and the October 21 TLDR AI discussion of independent agent evaluation strengthen the need to verify final state outside the acting model. Preserve evidence, permission boundaries, task identity, and monitoring integrity.
+
+### Additional 2026-10-23 memory evidence
+Databricks' Oct 20 MemCurrent research reports 22.3% to 68.4% pass-rate improvement on its own enterprise benchmark, with fewer tokens and lower latency. This is vendor-run evidence, not a CoOperative result. Compare episodic/derived memory, stale-context cleanup, deletion/tenant boundaries, and cost per verified task against CoOperative's existing memory stores before considering any new backend.
+
+### 2026-10-24 evidence update
+Anthropic's Oct 22 guidance recommends comparing one progressive-disclosure agent loop against specialist subagents with end-to-end task-completion evaluations; independent verification and permission boundaries remain valid reasons to retain separate agents. METR's Oct 22 report documents historical monitor-coverage bypasses and recommends independent, tamper-resistant monitoring. 1Password's Oct 22 agent sign-in product demonstrates user-approved credential injection without exposing passwords to models, but CoOperative compatibility is not verified. Evaluate these as extensions of completion receipts, not permission to remove deterministic policy checks. Sources: https://claude.com/resources/articles/building-agents-when-to-fold-subagents-into-your-main-agent-loop ; https://metr.org/blog/2026-10-22-red-teaming-openai-agent-monitoring/ ; https://1password.com/blog/1password-for-ai-agents
+
 ### Recommendation
-Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow. Add deterministic completion receipts to cross-device task verification before treating a claimed action as complete.
+Keep `docs/THINGS_TO_CONSIDER.md` for unapproved opportunities and `docs/PROJECT_INTELLIGENCE.md` for the standard "what's new?" workflow. Add independent deterministic completion receipts before treating a delegated task as complete.
 
 Reference: https://openai.com/index/ironclad/
+
+**2026-10-30 evidence:** TLDR Dev Oct 29 describes an agent repeatedly executing a successful SQL query 254 times without finishing; Vercel CI entered beta Oct 28 with vendor-reported 2–6x faster checks on Turborepo projects. For CoOperative, preserve independent end-state receipts, explicit per-tool repeat/loop budgets, and compare CI correctness/cost before any CI migration. No workflow-contract change needed. Sources: https://signup.tldr.tech/dev/2026-10-29 ; https://vercel.com/blog/introducing-vercel-ci .
 
 Reference: https://tldr.tech/dev/2026-10-05
 
 
 ---
 
+**2026-10-26 evidence:** Anthropic's Oct 22 formal-verification research reports machine-checked security properties for over 100 open-source libraries at RISC-V assembly level, subject to explicit single-thread/static-binary assumptions. This supports a bounded, independently checked proof/contract prototype for CoOperative's billing invariants and Unison task-authorization paths, **not** a claim that LLM-generated code is bug-free. Preserve separate final-state receipts and deterministic policy checks. Source: https://www.anthropic.com/research/formal-verification .
+
+**2026-10-28 evaluation evidence:** Cognition's FrontierCode 2.0 (Oct 27) uses more realistic mergeability/thoroughness blockers and larger repository tasks; its vendor-run scores are not CoOperative measurements. Ubicloud's Oct 20 vLLM tool-call evaluation found 92% schema-valid calls on a tested Kimi setup versus 100% with constrained decoding; schema validity does not prove correct tool selection. Add separate acceptance dimensions for scope/regression completeness, tool schema validity, semantic tool correctness and final-state receipts before comparing routes. Existing project-intelligence workflow contract remains adequate. Sources: https://cognition.com/blog/frontier-code-2.0 ; https://www.ubicloud.com/blog/fixing-tool-call-accuracy-in-vllm .
+
+**2026-10-31 evidence:** Raindrop's Oct 29 controlled study of 2,160 eight-agent outage simulations found that merely reversing name order in a prompt shifted plan proposals ~3x, despite unchanged permissions. Meta's Oct 29 JiTTesting account adds evidence for independently evaluated, human-reviewed AI-generated regression tests. Evaluate nonproduction agent-order perturbation and deterministic task-ownership/receipt checks; never infer authority from agent rhetoric or prompt position. Sources: https://www.raindrop.ai/blog/agent-swarm-leadership/ ; https://engineering.fb.com/2026/10/29/security/catching-bugs-before-they-land-jittestings-human-on-the-loop-approach-at-full-scale/ .
+
 ## 5. Mistral Large 4 as a registry and routing candidate
 
-**Status:** Evaluate after preview validation  
+**Status:** Evaluate — full open-weight release confirmed 2026-10-29; hosted route observed, no CoOperative head-to-head benchmark  
 **Added:** 2026-10-06  
-**Last reviewed:** 2026-10-06  
-**Source:** Mistral AI documentation / Reuters
+**Last reviewed:** 2026-10-30  
+**Evidence:** Mistral release/docs, Hugging Face release page, OpenRouter live catalog/telemetry, CoOperative Supabase registry/task scores
 
-### Finding
-Mistral Large 4 entered public preview on 2026-10-06 as an open-weight, multimodal Mixture-of-Experts model with a 1M-token context window. Mistral documents structured outputs, function calling, document Q&A, agent/conversation endpoints, and hosted pricing. Reuters reports that the full public release is planned for 2026-10-27.
+### Release and registry finding (2026-10-27)
+Mistral's official page and docs still identify **Public Preview v26.10** (API since Oct 6), not final/general availability. Its Hugging Face release page says **Upcoming release; October 31 ETA** for open weights. Do not treat the previously reported Oct 27 target as a completed launch. The 13:00–13:01 UTC CoOperative scheduled registry scan completed successfully: **663 discovered, four new, 29 changed, eight missing** (vs 667/zero/23/zero on Oct 26). The already-known OpenRouter route `mistralai/mistral-large-4-0` remains **active, execution_ready=true, recommended=false**, with no new ML4-specific scan change. Availability metadata is not an end-to-end inference success.
 
-### Why it may matter
-It may become useful for:
-- high-context research and synthesis;
-- multimodal/document work;
-- structured agent calls;
-- open-weight or self-hosted deployment;
-- an additional replaceable provider route.
+### Capability and benchmark evidence
+- Official docs: 1.05T total / 52B active including embedding/output layers, 1.6B vision encoder, 1M context, text+image input/text output, structured JSON, tool calling, reasoning, and document Q&A. Feature **support is declared**, not validated for CoOperative's exact schemas, tool selection, prompt-injection handling, or long PDFs.
+- CoOperative registry: $1.36 input / $4.18 output per million tokens; 1,048,576-token context. A reference workload of **100k input + 10k output** costs **$0.1778** at observed list prices, before caching, retries, fees, markup, or provider price changes.
+- Same-scan OpenRouter peers for that workload: Qwen3.8 Omni Flash **$0.0197** (vision/tools/structured), GPT-6.1 Terra **$0.1500** (vision/tools/structured), DeepSeek V4 Pro **$0.1077** (text/tools/structured; no vision), Claude Sonnet 5.5 **$0.3000** (vision/tools/structured), and legacy Mistral Large 2407 **$0.2600** (no vision). These are **metadata-based cost comparisons, not measured cost per successful task**.
+- External benchmarks: OpenRouter's aggregated third-party data lists Artificial Analysis Intelligence Index **38.4**, long-context reasoning **81.3%**, and Terminal-Bench 4.0 **26.8%** for **ML4 Preview**; do not generalize to final weights or CoOperative tasks. Mistral's own Oct 6 report cites **59.9% AutomationBench** and **61.7% DeepSWE**, but these are vendor-reported results.
+- External route telemetry (OpenRouter, observed Oct 27): approximately **99.58% successful inference availability over 72h**, **99.49% over 24h**; listed standard endpoints show ~**2.4–2.75 s median latency** and **49–50 tokens/s**. This is provider aggregate telemetry, **not CoOperative p95, error-rate, or latency measurement**.
+- CoOperative `ai_model_task_scores`: ML4 coding/reasoning/general-text/vision scores have **zero quality, runtime, and latency samples**, and `benchmark_coverage=0`; derived value scores (~52.2–52.3) have low confidence (0.32) and **must not be represented as an empirical head-to-head win**. `ai_model_capability_evidence` has no ML4-specific rows.
+- Refusal/policy behavior: **unverified for CoOperative**. Mistral discusses reduced cybersecurity refusals; this does not establish alignment with CoOperative permissions, data policy, or safe/unsafe request handling. No matched refusal or adversarial tests were executed.
+- Full-weight self-hosting is not presently validated, and a ~1T-parameter model is not suitable for existing CPU/Mac/Galaxy-class Unison nodes.
 
-The model is too large for the current Mac/CPU-class local nodes, so near-term value is hosted/provider routing rather than default local execution.
+### Possible solution and acceptance gate
+Run a **bounded, nonproduction, approval-gated** head-to-head against Qwen3.8 Omni Flash, DeepSeek V4 Pro, GPT-6.1 Terra and a premium vision route using identical pinned prompts/versions: (1) JSON schema and multi-tool selection correctness; (2) coding, reasoning and document-answer quality with ground truth/citations; (3) p50/p95 latency, timeout and retry reliability; (4) actual provider bill and cost per verified success; (5) benign security-task versus disallowed-task refusal consistency and prompt-injection resistance; (6) charts, screenshots, multi-page PDFs and long-context retrieval. Minimum multiple repetitions per scenario; store timestamps, route IDs, errors, actual usage and reviewer results. Do not send sensitive production data. Apply current hard-budget caps and independent verification.
 
-### Possible solution
-Let the existing daily model-registry scan discover provider availability. Add explicit capability evidence only from official model/provider metadata, then run the standard cost, latency, tool-call, refusal, safety, and quality eval set.
+### 2026-10-30 release and price update
+**Resolved:** The Oct 27 preview/open-weight-release uncertainty is superseded. Mistral officially released improved Mistral Large 4 weights on **Oct 29**, with hosted list pricing **$0.70 input / $2.10 output per 1M tokens** (cached input $0.07/1M). The Oct 30 CoOperative OpenRouter scan independently observed the same $0.70/$2.10 route price, down from $1.36/$4.18; route remains active/execution-ready metadata but **recommended=false**. For 100k input + 10k output, new list estimate is **$0.091**, previously $0.1778, excluding actual usage/retries/markup. Mistral reports Terminal-Bench 4.0 **41%** (vs 26.8% preview) and coding-agent efficiency gains; these are release/vendor benchmark claims, **not** CoOperative results. The Mistral Ecosystem Open-Weight License requires a **separate commercial license for Model-as-a-Service operators**, relevant to CoOperative's resale model. The ~1T-parameter weights are not suitable for current Unison CPU/mobile nodes. Sources: https://mistral.ai/news/mistral-large-4-oss/ ; https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B .
 
 ### Recommendation
-Do not add it to default production routing during preview. Evaluate after availability and pricing stabilize, with a targeted recheck after the planned 2026-10-27 full release.
+**No default production route, automatic paid fallback, or provider-price/routing change.** Keep ML4 discoverable as an unpromoted preview candidate. Confirm hosted route maps to the improved weight version, verify license/terms and execution-time prices; only propose a task-specific promotion after reproducible, cost-controlled CoOperative tests demonstrate value and the user explicitly approves. No production code, schema, routing or pricing was changed in this review.
 
-References:
-- https://docs.mistral.ai/models/mistral-large-4-0
-- https://www.reuters.com/world/china/mistral-ceo-says-new-ai-model-beats-chinese-ones-some-areas-2026-10-06/
+Sources:
+- https://mistral.ai/news/mistral-large-4/
+- https://docs.mistral.ai/models/mistral-large
+- https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B
+- https://openrouter.ai/mistralai/mistral-large-4-0-20261006
+- https://artificialanalysis.ai/models/mistral-large-4/
 
 ---
 
@@ -251,3 +302,146 @@ Add it only as a benchmark candidate behind the existing node-capability contrac
 Do not make it a default router or bundle it into production yet. Run a narrow opt-in benchmark against the current text-embedding/routing baseline and require capability-specific evidence before scheduling work to the node.
 
 Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
+
+---
+
+## 8. Provider-model registry volatility and benchmark quality
+
+**Status:** Evaluate model routes / monitor provider availability  
+**Added:** 2026-10-23  
+**Last reviewed:** 2026-11-03
+
+**Evidence:** Oct 23 registry scan completed: 668 discovered routes, one new and 16 changed; `minimax/minimax-m3.1-flash:free` was marked missing/not execution-ready, while several routes changed pricing. The hard-budget entry covers financial enforcement.
+
+**2026-10-24 evidence:** Today's scan completed with 669 discovered, one new, 14 changed, zero missing. Pricing fields changed for several OpenRouter models (including DeepSeek V4 Flash and Kimi); no provider-invoice or effective execution price is established by the scan. Continue availability and cost-per-verified-task benchmarks; never silently promote paid fallbacks.
+
+**Possible solution:** Compare registry evidence with current official provider metadata; benchmark only available routes on verified task completion, p95 latency, policy fit, and effective cost. Treat missing promotional free routes as unavailable, not billable fallbacks.
+
+**2026-10-25 evidence:** Latest scan discovered 667 routes, one new, seven changed and three missing; the three missing legacy GPT-3.5 OpenRouter routes are no longer execution-ready. A newly discovered OpenRouter `liquid/lfm-2.5-2.6b` route corresponds to an existing August model, not a newly released model. Liquid documents on-device/MLX/llama.cpp support, while OpenRouter warns hosted prompts/outputs may be retained for training. Compare local privacy/latency and hosted cost/retention before any registry promotion. Sources: https://www.liquid.ai/blog/lfm2-5-2-6b ; https://openrouter.ai/liquid/lfm-2.5-2.6b%3Afree
+
+**Recommendation:** No production promotion, routing change, or automatic paid fallback without evaluation and approval.
+
+**2026-10-26 evidence:** The latest registry scan has 667 routes, 23 changes, zero new/missing. DeepSeek V4 Flash 0731's observed token prices increased about 10x, with other DeepSeek/Kimi/Qwen and media capability/pricing changes. Compare provider-authoritative pricing and benchmark cost per verified task; do not silently promote paid alternatives or infer real-time charges from registry fingerprints.
+
+**2026-10-27 evidence:** Scan completed: 663 routes discovered, 4 new, 29 changed, 8 missing (Oct 26: 667/0/23/0). Missing routes include `nvidia/nemotron-3-super-120b-a12b:free` and several Mistral batch routes; changed entries include Nous media route pricing/capabilities. Confirm actual provider prices and cost per verified task before any route promotion. The separate Mistral Large 4 preview assessment in section 5 was already reviewed today and remains unpromoted.
+
+**2026-10-28 evidence:** Registry completed with 664 discovered, 1 new, 31 changed and 0 missing. New OpenRouter `prism-ml/ternary-bonsai-2-9b` route is unbenchmarked; its observed $0.08/$0.13 per 1M prompt/completion tokens is metadata, not a verified provider invoice. `deepseek/deepseek-v4-flash` changed prompt $0.05->$0.091 and completion $0.45->$0.182 per 1M. LFM3 launched Oct 27 but no `lfm3` route was found in the current registry; see separate local benchmark consideration #12. Do not silently promote new or changed paid routes.
+
+**2026-10-29 evidence:** Scan at 13:00–13:01 UTC: 657 routes, 1 new (`particle-ai/particle-1`), 29 changed and 8 missing (including `openai/o1`, `o1-pro`, `o3-mini`, `o4-mini` variants, `gpt-4-turbo` and Qwen3 Next thinking). Price fields changed on DeepSeek/Kimi/GLM and media models. Mistral Large 4 preview remains active but unpromoted; no new CoOperative execution benchmark. Verify provider pricing/availability and cost per verified task before any route change.
+
+**2026-10-30 evidence:** Completed scan: **658 discovered, 2 new** (Riverflow v2.6 Pro and Mischief 1), **21 changed, 1 missing** (Solar Pro 3). Mistral Large 4 pricing changed materially; see item 5. Route metadata and cost observations do not establish tool-call correctness, actual bill or a safe fallback. Keep new routes unpromoted and use bounded, independently scored evaluations before any routing decision.
+
+**2026-10-31 evidence:** Scan completed with **658 routes, 0 new, 19 changed, 0 missing**. DeepSeek V4 Pro and other OpenRouter/N​​ous entries changed price fields; Mistral Large 4 remains active, `recommended=false`, with **zero local quality/runtime/latency samples**. Price and registry availability are not benchmarks; retain existing routing until independently verified task-success and cost tests pass.
+
+**2026-11-01 evidence:** CoOperative Supabase `ai_model_scan_runs` completed at 13:01 UTC: **654 discovered, 0 new, 11 changed, 4 missing**, versus 658/0/19/0 Oct 31. Missing OpenRouter routes: `poolside/laguna-s-2.1`, `poolside/laguna-s-2.1:free`, `poolside/laguna-xs-2.1`, `poolside/laguna-xs-2.1:free`; other changes are pricing fields. Registry availability is not successful inference. **Status:** Evaluate; preserve `recommended=false` and benchmark/quote gates; do not change routing.
+
+**2026-11-02 evidence:** Scan completed at 13:01 UTC with **654 discovered, 0 new, 6 changed, 0 newly missing** (Nov 1: 654/0/11/4). Four price-field changes (DeepSeek V4 Flash latest, Gemma 4 26B, Llama 3.2 3B, GPT-OSS 120B), one Gemma capability change and Qwen 3.8 27B context metadata 1,000,000→1,024,000. **Zero newly missing does not establish restoration of yesterday's four Poolside routes.** Mistral Large 4 still has zero local quality/runtime/latency samples. **Recommendation:** verify route availability, provider prices and task outcomes before any promotion or paid fallback; status Evaluate unchanged.
+
+**2026-11-03 evidence:** The 13:01 UTC scan completed with **653 discovered, 1 new, 20 changed, 2 missing** (Nov 2: 654/0/6/0). Missing OpenRouter `nousresearch/hermes-3-llama-3.1-405b` and `...-70b` were marked not execution-ready; the new `z-ai/glm-5.3-flashx-legal` advertises text/image/video input, tools/structured output, 1,048,576 context and **$0.37/$1.25 per 1M**. Capability flags and prices are catalog metadata, not measured CoOperative correctness/reliability. GPT-OSS 120B and other route prices shifted sharply. **Recommendation:** benchmark candidate with pinned tasks and provider-price checks; no default route or paid fallback. Existing Mistral Large 4 benchmark status remains unverified.
+
+## 9. Unison effective availability versus registered state
+
+**Status:** Recommend operational audit  
+**Added:** 2026-10-23  
+**Last reviewed:** 2026-11-02
+
+**Evidence:** Six stored node registrations all report `online`, but last heartbeats are Mac Oct 15, Galaxy Oct 12 or earlier, and CARROT Oct 3. Multiple Galaxy rows may be historical registrations.
+
+**2026-10-24 evidence:** All six node records remain stored as online, with the newest Mac heartbeat Oct 15, Galaxy Oct 12, and CARROT Oct 3. No new task-claim/heartbeat evidence was found in the reviewed registry; stored online remains an unverified operational claim.
+
+**Possible solution:** Derive availability from heartbeat age, task-claim evidence, capabilities, and revocation state; separately report registration and operational health. Test worker restart, bounded retries, and idempotent task recovery.
+
+**Recommendation:** Read-only node inventory and nonproduction resilience benchmark first; changing routing or node policy requires approval.
+
+**2026-10-26 evidence:** All six stored registrations remain `online` without fresh heartbeats: Mac last Oct 15, Galaxy Oct 12 or earlier, CARROT Oct 3. Operational availability is unverified. Continue read-only effective-health and task-claim audit before changing node selection.
+
+**2026-10-28 evidence:** All six stored registrations still say `online`, but the latest Mac heartbeat is Oct 15, Galaxy Oct 12 and CARROT Oct 3. No fresh node availability was established. Status unchanged: read-only operational audit before any node-selection or routing change.
+
+**2026-10-29 evidence:** All six registered nodes still say `online`, yet Mac last seen Oct 15, Galaxy Oct 12 or earlier and CARROT Oct 3. Effective availability remains unverified. Read-only heartbeat/capability/task-claim audit recommended before LFM3 hardware testing or local routing.
+
+**2026-11-02 evidence:** All six node registrations still show stored `online` state, but latest heartbeats remain Mac Oct 15, Galaxy Oct 12, CARROT Oct 3; no effective availability established. Vercel's Oct 30 Daemon HTTP liveness checks provide a reference pattern for independently detecting stuck workers, **not evidence Unison uses Vercel Daemons**. Evaluate heartbeat expiry, independent task claims and restart tests read-only before considering any hosted-worker alternative. Source: https://vercel.com/changelog/add-liveness-checks-to-your-daemons . No node policy/routing change.
+
+## 10. AI supply-chain and runtime patch verification
+
+**Status:** Evaluate / read-only exposure audit  
+**Added:** 2026-10-23  
+**Last reviewed:** 2026-11-03
+
+**Evidence:** LiteLLM 1.107.0 PyPI/Docker artifacts were malicious on Oct 21; Node.js released Oct 21 security patches for supported lines. No confirmed compromise of CoOperative was established.
+
+**Possible solution:** Inventory dependencies, lockfiles, containers, worker environments, CI artifacts, and actual Node versions; compare any LiteLLM use against affected artifact digests/time windows. Keep agent permissions and completion verification independent of agent self-reporting.
+
+**2026-10-25 evidence:** NVIDIA OpenShell documents externally enforced sandbox network/filesystem policies and human-reviewed network-policy proposals. This is a reference for a read-only comparison against Hermes/Unison node controls, not evidence of an incident or approval to replace the current security policy. Source: https://docs.nvidia.com/openshell/latest/reference/default-policy
+
+**Recommendation:** Only if affected artifacts ran, isolate/rebuild and rotate reachable secrets per vendor guidance; otherwise monitor. Any security-policy or runtime change requires approval.
+
+**References:** https://docs.litellm.ai/blog/security-incident-oct-21-2026 ; https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
+
+---
+
+**2026-10-27 evidence:** Forever Security's Oct 22 primary-source research (widely reported Oct 26) documents malicious `AGENTS.md`/`CLAUDE.md` instruction files planted in Downloads or untrusted directories that can redirect coding agents toward credential exposure or malware execution. No CoOperative compromise is established. Evaluate a read-only inventory of agent working directories, trusted instruction-file provenance, MCP/base-URL configuration and sandbox/approval enforcement across Hermes/Unison. Do not allow downloaded instruction files to override permissions; changes to security policy require approval. Source: https://forever.security/blog/hijacking-ai-agents-via-downloads-folder .
+
+**2026-10-28 evidence:** Cloudflare's disclosure of a GLM-5.3 Workers AI SGLang KV-cache isolation failure reports 155 cross-customer responses before remediation. This is a provider-side incident, **not evidence of CoOperative exposure**. Evaluate provider isolation assurances, sensitive-prompt routing, cache reuse, and independently enforced tenant boundaries alongside existing untrusted-instruction protections. No policy change authorized. Source: https://blog.cloudflare.com/kv-cache-exposure-remediation/ .
+
+**2026-10-29 evidence:** Next.js announced seven medium-severity fixes for Nov 3; CoOperative currently pins Next.js 16.3.5, but affected versions will not be known until advisories publish. Tailscale's Oct 26 bulletins TS-2026-014 through -017 fix SSH forwarding/DoS and Serve privilege/capability issues in 1.104.4+. No evidence CoOperative uses affected Tailscale configurations. Inventory actual dependencies, Tailscale version/SSH/Serve usage and patch readiness read-only; do not assert compromise or change runtime/security policy without approval. Sources: https://nextjs.org/blog/upcoming-nextjs-security-release-november-2026 ; https://tailscale.com/security-bulletins .
+
+**2026-10-30 security evidence:** Binance disclosed an estimated $6.3B crypto theft with preliminary evidence of a compromised DevOps laptop/service-container access and unauthorized withdrawals; investigation ongoing. This is **not** a CoOperative incident. The analogous risk for Hermes/Unison is that a compromised worker or agent must not gain signing, billing, deployment or secret-management authority merely through a valid tool/session. Read-only review of credential scoping, approvals, worker revocation and independent audit receipts is recommended; no policy changes approved. Sources: https://www.binance.com/en/square/post/10-30-2026-binance-stated-that-the-security-incident-affected-approximately-6-3-billion-with-about-3-billion-frozen-382718598048399 ; https://www.coindesk.com/business/2026/10/29/potential-multi-billion-binance-hack-hitting-crypto-markets .
+
+**2026-10-31 security evidence:** Epoch AI's Oct 29 controlled research found GLM 5.3 could exploit publicly visible Firefox patch gaps; Mozilla shipped Firefox 159.0 Oct 27 addressing a related undisclosed flaw. This is not evidence of CoOperative exposure. Read-only inventory of public patch disclosures versus deployed dependencies/agent browser versions, then independently test approved updates; do not infer that a model's refusal behavior is a security boundary. Binance's Oct 30 official follow-up also says its initial laptop theory was incomplete and **additional breach points** were found; root cause remains under investigation. Sources: https://epoch.ai/publications/open-weight-models-patch-gap ; https://www.binance.com/en/support/announcement/detail/d3306d9dca5243548c813b605e1d1751 .
+
+**2026-10-31 runtime verification:** Vercel project `co-operative` explicitly reports Node **24.x**, while `package.json` has no `engines.node`; Next.js is 16.3.5. Vercel's Oct 29 Node 26 LTS release makes 26 default for *new* projects and can upgrade existing projects when engine constraints allow, but this project setting does **not** establish an automatic change. Inventory deployed runtime and test 24.x/26.x compatibility before any approved update. Source: https://vercel.com/changelog/node-js-26-lts-is-now-generally-available-on-vercel .
+
+**2026-11-01 security evidence:** Wiz's Oct 30 primary investigation documents at least nine October AI-developer-platform incidents targeting stored environment variables and AI keys, with observed downstream Bedrock key abuse (including ~1.7M calls over 13 hours in one case). Cisco Talos' Oct 31 VOLTA analysis describes AI-assisted profiling of stolen credentials, sessions and crypto-wallet data. Neither establishes CoOperative compromise or use of the affected vendors. **Possible solution:** read-only inventory of provider keys, CI/Vercel/Supabase secrets, worker token scope, rotation/revocation readiness and anomalous usage; validate independent cost caps and node isolation. **Recommendation:** high-priority exposure assessment; no secret/security-policy changes without approval. Sources: https://www.wiz.io/blog/black-october-for-ai-developer-platforms ; https://blog.talosintelligence.com/category/threat-spotlight/ .
+
+**2026-11-03 evidence:** Vercel's Nov 2 announcement confirms automatic blocked-package checks before and during **new** builds, including supported lockfiles/cached installs; this does not audit already-running functions or replace pinned dependencies. Anthropic/UC Berkeley/UIUC research (arXiv 2610.37741) demonstrates pretraining-data poisoning can survive clean agent post-training and trigger unauthorized shell execution in controlled tests; no CoOperative compromise is established. **Possible solution:** read-only dependency/lockfile/worker-image inventory and adversarial, independent tool-authorization/completion tests. **Recommendation:** retain deterministic permission boundaries and require approval for policy, runtime, credential or deployment changes. Sources: https://vercel.com/changelog/blocking-malicious-npm-packages-before-and-during-installation ; https://arxiv.org/abs/2610.37741 .
+
+## 11. TanStack AI 1.0 interoperability and experimental harness
+
+**Status:** Evaluate / no migration approved  
+**Added:** 2026-10-25  
+**Last reviewed:** 2026-10-25
+
+**Evidence:** TanStack AI 1.0 (Oct 23) stabilizes provider-agnostic chat, tools, media, MCP, persistence, and sandbox APIs; its new agent harness is explicitly experimental/0.x. CoOperative's current package manifest does not list TanStack AI, and CreatorHub currently uses the separate `ai` package. Source: https://tanstack.com/blog/tanstack-ai-1-0
+
+**Possible solution:** In an isolated proof of concept, compare AG-UI/MCP adapter interoperability, test fixtures, approval controls, streaming and cost/latency against existing CoOperative primitives. Avoid parallel orchestrators and preserve deterministic budgets, credential boundaries, and independent completion receipts.
+
+**Recommendation:** Benchmark only; no framework migration, dependency change, or production routing adjustment without explicit approval.
+
+---
+
+## 12. LFM3 compact multimodal/local-agent evaluation
+
+**Status:** New / Evaluate in isolated benchmark; no route promotion  
+**Added:** 2026-10-28  
+**Last reviewed:** 2026-10-28
+
+**Evidence:** Liquid AI released open-weight LFM3 on Oct 27: 1.7B text model (256K context, about 1 GB 4-bit weights), plus ~2B-class vision, audio, omni and decision variants. Vendor benchmarks report improved tool/agent capability versus LFM2.5, but no CoOperative/Unison hardware test exists. The Oct 28 CoOperative registry scan has **no LFM3 route**; registry discovery and model release are distinct. Liquid's licensing page describes free commercial use below $10M annual revenue, subject to license terms. Sources: https://www.liquid.ai/blog/lfm3 ; https://www.liquid.ai/pricing .
+
+**Why it matters:** Candidate for local intent/tool routing, document/GUI extraction and low-cost multimodal tasks on Mac/Windows/Galaxy; avoid cloud inference for private inputs where feasible. Hardware-specific runtime and thermal performance are unknown.
+
+**Possible solution:** After node-health recovery, benchmark LFM3 text and relevant decision/VL variants against installed local baselines with pinned test sets. Measure schema-valid **and semantically correct** tool calls, refusal/prompt-injection behavior, document grounding, p50/p95 latency, RAM, battery/CPU, failures and verified task completion. Test license/weights and real hardware before making a capability claim.
+
+**Recommendation:** Read-only feasibility review and approval-gated local benchmark only. No model installation, default promotion, provider routing, billing, or node policy change without explicit approval.
+
+---
+
+## 13. Gemini 4 Carbon as a restricted frontier security/agent evaluation candidate
+
+**Status:** Monitor / Evaluate after general API availability  
+**Added:** 2026-10-30  
+**Last reviewed:** 2026-10-30
+
+**Evidence:** Google announced Gemini 4 Carbon Oct 28 with reported strong long-horizon coding and cybersecurity benchmarks, but **access is initially restricted to selected defenders/Fairwind partners**. Announced introductory price is $2/$10 per million input/output tokens (later $4/$20). The Oct 30 CoOperative registry scan found **no Gemini 4 Carbon route**. Vendor scores and declared safety are not CoOperative measurements. Source: https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-4-carbon/ .
+
+**Possible solution:** When legitimately accessible, compare against current coding/security routes on pinned non-sensitive repo tasks: patch correctness, scope/permission adherence, tool loops, prompt injection, false refusals, p95 latency, verified success and cost. Treat security benchmarks as capability evidence, not authorization for autonomous exploitation or code deployment.
+
+**Recommendation:** Monitor access; no default promotion, provider routing, paid inference or policy changes without separate approval.
+
+
+**2026-11-04 registry and agent-efficiency evidence (existing items 3, 4, 5, 10):** Connected scan completed 13:01 UTC: **657 routes, 4 new, 19 changed, 0 newly missing** (vs 653/1/20/2 Nov 3). New OpenRouter catalog entries: `stealth/crouton-alpha` (listed free; unknown policy/reliability), `tencent/hy4` (listed $0.417/$1.2505 per million input/output tokens), and `x-ai/grok-4.6:batch`/`grok-4.7:batch` (listed $1.60/$4.80 per million with higher-price >200K-token overrides). Metadata is not measured correctness, availability or effective invoice cost. TLDR AI Nov 3 reports Anthropic message-thread beta with claimed ~35% faster first token at 500K–1M context; treat as vendor/secondary performance evidence only. **Status:** Evaluate / no promotion. **Possible solution:** pinned nonproduction long-context, tool-call, latency, price-override and failover comparison with verified cost receipts; review existing maximum-cost reservation and minimum-margin PR #193. **Recommendation:** no default routing, paid-call activation, billing or production changes without explicit approval. Sources: https://signup.tldr.tech/ai/2026-11-03 ; connected scan `500af66d-43e9-446a-992a-457bd07f3883`.
+
+
+**2026-11-05 registry and AI-platform review (existing billing/model/agent entries):** Connected scan `f86ca662-ad14-4d30-a5bb-2819e5076736` completed: **659 discovered, 4 new, 17 changed, 2 missing** (Nov 4: 657/4/19/0). New candidates: `inclusionai/ling-3.0-tiny`, `ricursiveai/ripple-65b-preview`, `openai/gpt-image-2.6-flare`, `openai/gpt-image-2.6-sunburst`; missing free `thinkingmachines/inkling` variants. Pricing fields changed on GPT-OSS, DeepSeek, GLM, Gemma, Llama and others; catalog observations are not verified invoice prices or quality benchmarks. TLDR Tech Nov 4 reports Apple Siri App Intents developer access and self-hosted inference cost claims; both require primary-source/actual-workload validation. **Status:** Evaluate; existing execution-time pricing/minimum-margin and credential-isolation requirements unchanged. **Possible solution:** nonproduction modality-specific benchmark and provider-cost receipt tests; review free-route fallback and image-output authorization separately. **Recommendation:** no automatic default routing, provider-price change, self-hosting migration or production deployment. Sources: https://tldr.tech/tech/2026-11-04 ; connected registry scan.
+
+
+**2026-11-06 model-registry and AI-capex review (existing billing/model/agent items):** Connected scan completed 13:00 UTC: **659 discovered, 5 new, 14 changed, 5 missing** (Nov 5: 659/4/17/2). Route churn and price uncertainty reinforce existing execution-time provider-price checks, maximum-cost reservation, minimum-margin protection and reconciliation; no model quality or invoice cost was independently verified. TLDR AI Nov 5 highlights GPT-Image-2.6 and SWE-2 Flash, discovery candidates only; Reuters Nov 6 documents an AI-infrastructure funding/credit selloff (SoftBank and semiconductor exposure). **Status:** Existing billing Recommend / release verification pending; new model candidates Evaluate only. **Possible solution:** inspect route-level change records, verify primary provider terms and actual billing receipts, run pinned modality/tool evaluations, and maintain hard caps before any paid fallback. **Recommendation:** no route, price, production, model or security-policy changes. Sources: https://tldr.tech/ai/archives ; https://www.reuters.com/business/media-telecom/softbank-cds-softbank-cds-2026-11-06/ ; connected scan 2026-11-06.
