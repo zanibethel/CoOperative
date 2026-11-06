@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-05
+Last reviewed: 2026-11-06
 
 ## Status key
 
@@ -442,3 +442,6 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 
 **2026-11-05 registry and AI-platform review (existing billing/model/agent entries):** Connected scan `f86ca662-ad14-4d30-a5bb-2819e5076736` completed: **659 discovered, 4 new, 17 changed, 2 missing** (Nov 4: 657/4/19/0). New candidates: `inclusionai/ling-3.0-tiny`, `ricursiveai/ripple-65b-preview`, `openai/gpt-image-2.6-flare`, `openai/gpt-image-2.6-sunburst`; missing free `thinkingmachines/inkling` variants. Pricing fields changed on GPT-OSS, DeepSeek, GLM, Gemma, Llama and others; catalog observations are not verified invoice prices or quality benchmarks. TLDR Tech Nov 4 reports Apple Siri App Intents developer access and self-hosted inference cost claims; both require primary-source/actual-workload validation. **Status:** Evaluate; existing execution-time pricing/minimum-margin and credential-isolation requirements unchanged. **Possible solution:** nonproduction modality-specific benchmark and provider-cost receipt tests; review free-route fallback and image-output authorization separately. **Recommendation:** no automatic default routing, provider-price change, self-hosting migration or production deployment. Sources: https://tldr.tech/tech/2026-11-04 ; connected registry scan.
+
+
+**2026-11-06 model-registry and AI-capex review (existing billing/model/agent items):** Connected scan completed 13:00 UTC: **659 discovered, 5 new, 14 changed, 5 missing** (Nov 5: 659/4/17/2). Route churn and price uncertainty reinforce existing execution-time provider-price checks, maximum-cost reservation, minimum-margin protection and reconciliation; no model quality or invoice cost was independently verified. TLDR AI Nov 5 highlights GPT-Image-2.6 and SWE-2 Flash, discovery candidates only; Reuters Nov 6 documents an AI-infrastructure funding/credit selloff (SoftBank and semiconductor exposure). **Status:** Existing billing Recommend / release verification pending; new model candidates Evaluate only. **Possible solution:** inspect route-level change records, verify primary provider terms and actual billing receipts, run pinned modality/tool evaluations, and maintain hard caps before any paid fallback. **Recommendation:** no route, price, production, model or security-policy changes. Sources: https://tldr.tech/ai/archives ; https://www.reuters.com/business/media-telecom/softbank-cds-softbank-cds-2026-11-06/ ; connected scan 2026-11-06.
