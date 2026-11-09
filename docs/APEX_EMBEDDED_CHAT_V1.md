@@ -11,3 +11,12 @@ Successful responses return \`{answer,items,link?,source:"cooperative-code-v1"}\
 Run: \`node --test tests/apex-embed.test.mjs\`. Until a cross-deployment authenticated smoke test passes, label the integration as configured-ready rather than live-connected. This endpoint is deliberately deterministic and $0 model cost; adding a model requires separate spend caps, rate limiting, governance, and tests.
 
 Future consumer capabilities should follow the same rule: customer/store/supplier access is verified by the **calling platform**; all consequential writes require scoped server-side authorization, preview, confirmation, audit, and release-gate enforcement.
+
+## Authenticated preview handshake — November 9, 2026
+
+- The preview-only secret was installed in both Vercel projects, and Apex's preview-only endpoint URL was configured. All three variables are scoped strictly to these two feature branches, not production.
+- Apex preview made a server-to-server POST with \`{version:1,message:"hello",catalogState:"unavailable",products:[]}\` using only the encrypted server-side credential.
+- Its temporary, preview-only diagnostic returned \`{"connected":true,"status":200,"source":"cooperative-code-v1"}\`. This confirms an actual remote response, not the built-in Apex fallback.
+- The diagnostic route was deleted immediately afterward, before merge. The initial GitHub-hosted HTTP smoke test failed with 401 because GitHub Actions was not authorized to enter the protected Vercel preview; it was removed and is not evidence of a service error.
+- Both previews previously reported READY. Apex's full quality checks passed on its recent feature commits; confirm checks again after the final cleanup commit. CoOperative's focused embed test passed, while its existing broad CI remains blocked by unrelated lint errors.
+- This is evidence for cross-service connectivity and basic text protocol, **not** approval to enable live product release, checkout, supplier mutations, or production credentials. Never set production secrets or merge without the remaining review checks.
