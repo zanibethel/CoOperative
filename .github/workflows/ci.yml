@@ -27,6 +27,9 @@ jobs:
           python3 -m py_compile workers/windows-local-web-search.py
           python3 -m py_compile workers/windows-text-worker.py
 
+      - name: Embedded Apex assistant guard tests
+        run: node --test tests/apex-embed.test.mjs
+
       - name: Lint
         run: npm run lint
 
