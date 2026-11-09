@@ -20,3 +20,18 @@ Future consumer capabilities should follow the same rule: customer/store/supplie
 - The diagnostic route was deleted immediately afterward, before merge. The initial GitHub-hosted HTTP smoke test failed with 401 because GitHub Actions was not authorized to enter the protected Vercel preview; it was removed and is not evidence of a service error.
 - Both previews previously reported READY. Apex's full quality checks passed on its recent feature commits; confirm checks again after the final cleanup commit. CoOperative's focused embed test passed, while its existing broad CI remains blocked by unrelated lint errors.
 - This is evidence for cross-service connectivity and basic text protocol, **not** approval to enable live product release, checkout, supplier mutations, or production credentials. Never set production secrets or merge without the remaining review checks.
+
+## FAQ / zero-model routing update — 2026-11-09
+
+Phase 1 now provides a versioned, reviewable rule bank in \`src/lib/chat/apex-knowledge.mjs\` (mirrored in CoOperative as \`lib/runtime/embed-apex-knowledge.mjs\`). It covers 23 intent families with tested phrasings: greetings, capabilities, bot identity, account access and password recovery, supplier access, draft/product changes and inventory, supplier reports, privacy, discounts, shipping, returns, order tracking, checkout/payment readiness, stock/restock, product-use safety, pricing/tax uncertainty, catalog navigation, public hours/pickup uncertainty, support, and launch timing.
+
+**Request decision path:**
+1. Validate size, rate-limit and text; use \`answerApexKnowledge\` first. If matched, answer locally without public catalog I/O or CoOperative network requests.
+2. Otherwise use only the existing approved public catalog projection for product search and prices; never use unpublished supplier data or invent prices/stock.
+3. Remote CoOperative code-only fallback is disabled unless a server-only \`COOPERATIVE_APEX_REMOTE_FALLBACK=enabled\` flag is explicitly set. The existing remote integration still requires the shared secret and response integrity validation.
+4. Unknown or unavailable questions return a bounded, non-generative explanation and public navigation link. There is **no automatic AI/provider escalation** and no model charge by default.
+5. Rule ordering is intentional: medical/use refusals, supplier mutations, auth/privacy and transaction limits must precede broad product searches. Update both copies of the rule bank and run each repo's focused tests whenever an intent changes.
+
+**Release truth:** These written replies describe the current checkout-disabled site. Before enabling commerce or shipping, review every claim and change the FAQ along with published policies; do not ship outdated hard-coded checkout/payment claims. Future admin-managed FAQ editing would need an authorization, preview, audit and policy-approval workflow; this PR adds no unsafe public content editing.
+
+**Coverage limits:** No fixed FAQ table can anticipate every user sentence. Misses use a safe local fallback and can be added as tested rules later. Do not add external AI calls just because a pattern was missed.
