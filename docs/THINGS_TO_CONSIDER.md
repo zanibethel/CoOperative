@@ -4,7 +4,17 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-08
+Last reviewed: 2026-11-09
+
+## November 9, 2026 — Registry cost drift (existing billing/registry considerations)
+
+**Status:** Recommend (billing controls, approval gated); Evaluate (route changes)  
+**Last reviewed:** 2026-11-09
+
+**Evidence:** Connected `ai_model_scan_runs` completed 2026-11-09 13:01 UTC: 667 discovered, 0 new, 20 changed, 0 newly missing. Nineteen changes include pricing fields (DeepSeek V4 Pro/Flash, GPT-OSS 120B/20B, GLM, Qwen and other routes); registry snapshots are not provider invoices. Reuters Nov 9 reports continued AI infrastructure volatility and concern over returns on AI capital expenditure (https://www.reuters.com/business/citigroup-downgrades-us-equities-neutral-ai-concerns-2026-11-09/).
+
+**Possible solution / recommendation:** Reconcile price-delta evidence against provider-native quotes and billed usage; continue existing draft PR #193's execution-time quote, maximum-cost reservation, minimum-margin enforcement, and actual-cost reconciliation tests. No automatic route promotion or paid fallback, pricing change, or deployment. Keep existing registry and billing entries as the canonical implementation considerations.
+
 
 ## Status key
 
