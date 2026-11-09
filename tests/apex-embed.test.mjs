@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {answerApexEmbed} from "../lib/runtime/embed-apex-chat.mjs";
+import {answerApexEmbed,validateApexEmbedInput} from "../lib/runtime/embed-apex-chat.mjs";
 const id="e18368cf-0adb-432c-8dfc-4cb6e9b47ed7";
 const product={id,name:"Example Item",priceCents:1234,currency:"USD",availability:"sold_out",categoryName:"Samples"};
 test("only approved current catalog items are returned",()=>{
@@ -27,4 +27,14 @@ test("unknown names don't hallucinate products",()=>{
 test("invalid product payload is ignored",()=>{
  const r=answerApexEmbed("products",[{...product,priceCents:-1}],"connected");
  assert.equal(r.items.length,0);
+});
+
+test("strictly allows only approved public item fields and no private payload",()=>{
+ const base={version:1,message:"show Example",catalogState:"connected",products:[product]};
+ assert.equal(validateApexEmbedInput(base)?.products[0].name,"Example Item");
+ assert.equal(validateApexEmbedInput({...base,userId:"private"}),null);
+ assert.equal(validateApexEmbedInput({...base,products:[{...product,internal_source_cost_cents:42}]}),null);
+ assert.equal(validateApexEmbedInput({...base,products:[{...product,priceCents:-1}]}),null);
+ assert.equal(validateApexEmbedInput({...base,catalogState:"disabled"}),null);
+ assert.equal(validateApexEmbedInput({...base,products:[],catalogState:"disabled"})?.catalogState,"disabled");
 });
