@@ -16,6 +16,9 @@ The user can disconnect locally, causing the vault grant to be removed. Provider
 - Approved provider definitions under lib/integrations/user-oauth-providers.ts.
 - On-demand server-only token broker with user-scoped lookups, account disambiguation, and serialized refresh.
 - A self-service /connections page available to all signed-in users.
+- A GitHub App user-to-server read-only tool adapter: installation-scoped repository list, repo overview/open PRs, and UTF-8 file reads under 100 KB.
+- The owner code-first chat can list installed GitHub repositories and inspect the named repository's open PRs.
+- The Personal AI mobile chat recognizes per-user link intents without requiring a local PC and deep-links to /connections for provider authorization.
 - Chat's existing OAuth card can launch the new adapters using the service registry.
 
 ## Operator prerequisites
@@ -24,6 +27,7 @@ The user can disconnect locally, causing the vault grant to be removed. Provider
 2. Set COOP_PUBLIC_ORIGIN to the deployed HTTPS origin. The initial intended value is https://co-operative-mu.vercel.app, until a custom domain is approved.
 3. Add these secrets only to server-side Vercel settings, never NEXT_PUBLIC variables:
    - COOP_GITHUB_APP_CLIENT_ID and COOP_GITHUB_APP_CLIENT_SECRET
+   - COOP_GITHUB_APP_SLUG (public GitHub App slug; used to construct the installation link)
    - COOP_GOOGLE_OAUTH_CLIENT_ID and COOP_GOOGLE_OAUTH_CLIENT_SECRET
    - COOP_ROBLOX_OAUTH_CLIENT_ID and COOP_ROBLOX_OAUTH_CLIENT_SECRET
 4. Register the callback https://<approved-host>/api/local-ai/oauth-connect/callback with each provider.
@@ -32,7 +36,7 @@ The user can disconnect locally, causing the vault grant to be removed. Provider
 7. Register and test the Roblox OAuth app. The initial scope authorizes only identity/profile, not editing games or experiences.
 
 Run:
-- node --experimental-strip-types --test scripts/user-oauth-registry.test.mjs
+- node --experimental-strip-types --test scripts/user-oauth-registry.test.mjs scripts/github-connector-contract.test.mjs scripts/github-repository-chat.test.mjs
 - npm run lint
 - npx tsc --noEmit
 - npm run build
@@ -55,7 +59,7 @@ Do not merge or deploy until these checks and CI pass.
 
 ## Readiness and limitations
 
-- GitHub: OAuth adapter implemented; awaits application credentials, installation, and integration verification.
+- GitHub: OAuth adapter plus read-only repository tools implemented; awaits application credentials, installation, and two-user integration verification. No automated code/PR mutations yet.
 - Gmail: OAuth adapter implemented; awaits credentials, restricted scope approval, and verification.
 - Roblox: OAuth adapter implemented; awaits credentials and tests. Requires additional approved Open Cloud scopes for game operations.
 - Vercel and Supabase: connector build required; require provider-specific authorization and narrowly scoped tool adapters.
@@ -63,4 +67,14 @@ Do not merge or deploy until these checks and CI pass.
 - iCloud: no universal OAuth permission for all iCloud data. Service-specific supported workflows are necessary, such as supported Mail/Calendar/Contacts authorization.
 - For every future service: add provider metadata, implement authorization and safe scopes, verify provider requirements, add tool actions, test with two users, and promote registry status.
 
-The OAuth broker is not itself a general-purpose agent execution capability. Tool adapters (GitHub PRs, Vercel deployments, Supabase queries, Gmail reads, etc.) must explicitly enforce authenticated caller identity and approved grants, and never pass raw tokens through the model. Multi-account chat picker, provider-side revocation, audit logs, and personal chat card integration remain follow-on work.
+The OAuth broker is not itself a general-purpose agent execution capability. All tool adapters (including future GitHub PR mutations, Vercel deployments, Supabase queries, and Gmail reads) must explicitly enforce authenticated caller identity, live provider permissions, and approved grants. Never pass raw tokens through a model. Multi-account selector, provider-side revocation, audit logs, and arbitrary tool calls remain follow-on work.
+
+## GitHub smoke-test commands after provider setup
+
+- From the owner chat: 'Show my GitHub repositories' and 'Inspect GitHub repo zanibethel/CoOperative'.
+- From any signed-in account: /connections -> GitHub -> Connect -> authorize on GitHub -> Install App on selected repositories -> View installed repositories.
+- From any signed-in account with a connected GitHub App: GET /api/connections/github?mode=repositories, GET ?mode=overview&repo=owner/name, or GET ?mode=file&repo=owner/name&path=README.md. No tokens or secrets are returned in these responses.
+- From Personal AI chat: 'Connect my GitHub' should show the Connect link even when the personal compute node is offline.
+- Confirm a second user's login has no access to the first user's GitHub repo, and that a signed-in user can only discover repositories included in their own GitHub App installation.
+
+No production migration or OAuth credential configuration has been performed as part of this draft PR. Do not treat a successful Vercel preview build as evidence of successful provider authentication or two-user isolation.
