@@ -30,7 +30,6 @@ type Repository = {
   permissions?: { push?: boolean; pull?: boolean; admin?: boolean };
 };
 
-type GitHubApiError = { message?: string };
 type GhPage<T> = { total_count?: number; installations?: T[]; repositories?: T[] };
 type GithubPull = { number: number; title: string; state: string; draft: boolean; html_url: string };
 type FileResult = {
