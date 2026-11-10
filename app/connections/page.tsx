@@ -74,7 +74,7 @@ export default function ConnectionsPage() {
   }, [refresh]);
 
   useEffect(() => {
-    if (deepLinkStarted.current) return;
+    if (!initialized || deepLinkStarted.current) return;
     const params = new URLSearchParams(window.location.search);
     if (params.has("oauth")) return; // callback must never restart authorization
     const requested = params.get("provider") || "";
@@ -85,6 +85,13 @@ export default function ConnectionsPage() {
     );
     if (!provider) return;
     deepLinkStarted.current = true;
+    if (!configured[provider.providerKey]) {
+      setErrors((current) => ({
+        ...current,
+        [provider.providerKey]: "Account linking is not configured by the CoOperative operator yet.",
+      }));
+      return;
+    }
     const providerKey = provider.providerKey;
     // This is reached only after a user chooses a provider from an
     // authenticated CoOperative chat. Redirect in the same tab on mobile.
@@ -109,7 +116,7 @@ export default function ConnectionsPage() {
         setBusy(null);
       }
     })();
-  }, []);
+  }, [initialized, configured]);
 
   async function connect(providerKey: string) {
     if (busy) return;
