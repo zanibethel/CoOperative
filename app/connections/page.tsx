@@ -102,11 +102,6 @@ export default function ConnectionsPage() {
         ...previous,
         [providerKey]: error instanceof Error ? error.message : "Sign-in failed.",
       }));
-    } finally {
-      // A valid flow remains busy until its callback succeeds, fails, or expires.
-      if (!loginLinks[providerKey]) {
-        // The poller owns clearing busy for successful starts.
-      }
     }
     setBusy(null);
   }
