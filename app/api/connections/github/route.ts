@@ -26,6 +26,16 @@ export async function GET(request: Request) {
     ? rawConnectionId : undefined;
   if (rawConnectionId && !connectionId) return json({ error: "Invalid connection." }, 400);
   try {
+    if (mode === "setup") {
+      const slug = process.env.COOP_GITHUB_APP_SLUG || "";
+      const valid = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && slug.length <= 80;
+      return json({
+        installationUrl: valid
+          ? "https://github.com/apps/" + slug + "/installations/new"
+          : null,
+        requiresAppSetup: !valid,
+      });
+    }
     if (mode === "repositories") {
       const repositories = await githubInstalledRepositories(userId, connectionId);
       return json({ repositories, total: repositories.length });
