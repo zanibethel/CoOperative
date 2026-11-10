@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SERVICE_CONNECTOR_REGISTRY } from "@/lib/runtime/service-connector-registry";
 
 type GithubRepo = {
