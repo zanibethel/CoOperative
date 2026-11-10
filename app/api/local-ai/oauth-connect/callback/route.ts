@@ -16,7 +16,7 @@ export const maxDuration = 30;
 
 function returnToApp(success: boolean, providerKey?: string) {
   const origin = oauthPublicOrigin();
-  const url = new URL("/local-ai", origin);
+  const url = new URL("/connections", origin);
   url.searchParams.set("oauth", success ? "connected" : "failed");
   if (providerKey) url.searchParams.set("provider", providerKey);
   const response = NextResponse.redirect(url, 303);
