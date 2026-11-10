@@ -549,6 +549,24 @@ export default function PersonalAiMobile() {
       });
       const result = await response.json();
 
+      if (response.ok && result.status === "connection-action") {
+        const href = typeof result.authorizationPath === "string" &&
+          /^\/connections\?provider=[a-z0-9-]+$/.test(result.authorizationPath)
+          ? result.authorizationPath : null;
+        setMessages((current) => [
+          ...current,
+          {
+            id: "connection-" + Date.now(),
+            role: "assistant",
+            content: result.text || "Use Connected Accounts to manage this service.",
+            metadata: { connectionHref: href, providerName: result.providerName || "service" },
+          },
+        ]);
+        setMeta("Code-first account connection");
+        setStatus(href ? "Ready to connect" : "Provider setup required");
+        return;
+      }
+
       if (!response.ok || !result.jobId || !result.conversationId) {
         throw new Error(
           result.detail ||
@@ -872,6 +890,16 @@ export default function PersonalAiMobile() {
                       );
                     })()}
                   </div>
+                  {message.role === "assistant" &&
+                  typeof message.metadata?.connectionHref === "string" &&
+                  /^\/connections\?provider=[a-z0-9-]+$/.test(message.metadata.connectionHref) ? (
+                    <a
+                      className="personal-chat-connection-link"
+                      href={message.metadata.connectionHref}
+                    >
+                      Connect {String(message.metadata.providerName || "account")}
+                    </a>
+                  ) : null}
                   {message.role === "assistant" ? (
                     <div className="personal-chat-message-actions">
                       <button
