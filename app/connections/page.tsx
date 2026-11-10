@@ -3,6 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { SERVICE_CONNECTOR_REGISTRY } from "@/lib/runtime/service-connector-registry";
 
+type GithubRepo = {
+  fullName: string;
+  url: string;
+  private: boolean;
+  canRead: boolean;
+  canWrite: boolean;
+};
+
 type Account = {
   id: string;
   account_label: string | null;
@@ -24,6 +32,9 @@ export default function ConnectionsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loginLinks, setLoginLinks] = useState<Record<string, string>>({});
+  const [githubRepos, setGithubRepos] = useState<Record<string, GithubRepo[]>>({});
+  const [repoLoading, setRepoLoading] = useState<string | null>(null);
+
   const [initialized, setInitialized] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -106,6 +117,29 @@ export default function ConnectionsPage() {
     setBusy(null);
   }
 
+  async function showGitHubRepositories(connectionId: string) {
+    if (repoLoading) return;
+    setRepoLoading(connectionId);
+    setErrors((current) => ({ ...current, github: "" }));
+    try {
+      const response = await fetch(
+        "/api/connections/github?mode=repositories&connectionId=" +
+          encodeURIComponent(connectionId),
+        { cache: "no-store" },
+      );
+      const data = await response.json() as { repositories?: GithubRepo[]; error?: string };
+      if (!response.ok) throw new Error(data.error || "Could not read GitHub repositories.");
+      setGithubRepos((current) => ({ ...current, [connectionId]: data.repositories || [] }));
+    } catch (error) {
+      setErrors((current) => ({
+        ...current,
+        github: error instanceof Error ? error.message : "Could not read GitHub repositories.",
+      }));
+    } finally {
+      setRepoLoading(null);
+    }
+  }
+
   async function disconnect(connectionId: string, providerKey: string) {
     if (!window.confirm("Disconnect this account from CoOperative?")) return;
     setBusy(providerKey);
@@ -157,12 +191,44 @@ export default function ConnectionsPage() {
                 <span style={{ flex: 1 }}>
                   {account.account_label || "Linked account"} — {account.connection_status}
                 </span>
+                {provider.providerKey === "github" && account.connection_status === "connected" ? (
+                  <button type="button" disabled={repoLoading !== null || busy !== null}
+                    onClick={() => void showGitHubRepositories(account.id)}>
+                    {repoLoading === account.id ? "Checking…" : "View installed repositories"}
+                  </button>
+                ) : null}
                 <button type="button" disabled={busy !== null}
                   onClick={() => void disconnect(account.id, provider.providerKey)}>
                   Disconnect
                 </button>
               </div>
             ))}
+            {provider.providerKey === "github" ? Object.entries(githubRepos).map(
+              ([connectionId, repositories]) => {
+                if (!(accounts.github || []).some((account) =>
+                  account.id === connectionId && account.connection_status === "connected"
+                )) return null;
+                return (
+                  <div key={connectionId} style={{ padding: "10px 0 0 8px" }}>
+                    <p style={{ margin: "0 0 6px" }}>Available GitHub App repositories: {repositories.length}</p>
+                    {repositories.length === 0 ? (
+                      <p style={{ fontSize: 13 }}>
+                        No repositories are installed or visible to this account. Install the
+                        CoOperative GitHub App on selected repositories to enable access.
+                      </p>
+                    ) : repositories.map((repository) => (
+                      <p key={repository.fullName} style={{ margin: "6px 0", fontSize: 13 }}>
+                        <a href={repository.url} target="_blank" rel="noopener noreferrer">
+                          {repository.fullName}
+                        </a>
+                        {" — "}{repository.canWrite ? "contents write" :
+                          repository.canRead ? "contents read" : "metadata only"}
+                      </p>
+                    ))}
+                  </div>
+                );
+              },
+            ) : null}
             {loginLinks[provider.providerKey] ? (
               <p style={{ fontSize: 13 }}>
                 Login page did not open?{" "}
