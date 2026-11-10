@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   githubRepositoryListIntent, githubReposAssistantText,
+  githubRepositoryOverviewIntent, githubRepoOverviewAssistantText,
 } from "../lib/runtime/github-repository-chat.ts";
 
 test("code-first GitHub list intent matches only explicit repo listings", () => {
@@ -38,4 +39,24 @@ test("empty or metadata-only GitHub installations guide the user to connect", ()
   assert.match(githubReposAssistantText([
     { fullName: "org/no-access", private: false, canRead: false, canWrite: false },
   ]), /cannot see any installed/);
+});
+
+
+test("named GitHub repo request is distinct from list request", () => {
+  assert.equal(
+    githubRepositoryOverviewIntent("inspect GitHub repo zanibethel/CoOperative"),
+    "zanibethel/CoOperative",
+  );
+  assert.equal(githubRepositoryOverviewIntent("delete github repo zanibethel/CoOperative"), null);
+  assert.equal(githubRepositoryListIntent("inspect github repo zanibethel/CoOperative"), false);
+  const text = githubRepoOverviewAssistantText({
+    repository: {
+      fullName: "zanibethel/CoOperative", private: false, canRead: true,
+      canWrite: false, url: "https://github.com/zanibethel/CoOperative",
+    },
+    openPullRequests: [{ number: 196, title: "OAuth foundation", draft: true }],
+  });
+  assert.match(text, /#196 OAuth foundation/);
+  assert.match(text, /contents read-only/);
+  assert.match(text, /\nOpen pull requests/);
 });
