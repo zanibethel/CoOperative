@@ -108,8 +108,8 @@ import {
   connectedServiceStatusesForOwner,
 } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
-import { githubInstalledRepositories } from "@/lib/integrations/github-user-tools";
-import { githubRepositoryListIntent, githubReposAssistantText } from "@/lib/runtime/github-repository-chat";
+import { githubInstalledRepositories, githubRepositoryOverview } from "@/lib/integrations/github-user-tools";
+import { githubRepositoryListIntent, githubReposAssistantText, githubRepositoryOverviewIntent, githubRepoOverviewAssistantText } from "@/lib/runtime/github-repository-chat";
 import {
   createReferenceImageExecutionUrls,
   verifyNousReferenceImageTransport,
@@ -1145,11 +1145,18 @@ export async function POST(request: Request) {
       .limit(8);
     if (recentAssistantError) throw recentAssistantError;
 
-    if (input.attachmentIds.length === 0 && githubRepositoryListIntent(input.message)) {
+    const namedGitHubRepo = githubRepositoryOverviewIntent(input.message);
+    if (input.attachmentIds.length === 0 &&
+      (namedGitHubRepo || githubRepositoryListIntent(input.message))) {
       let assistantText: string;
       try {
-        const installed = await githubInstalledRepositories(owner.userId);
-        assistantText = githubReposAssistantText(installed);
+        if (namedGitHubRepo) {
+          const details = await githubRepositoryOverview(owner.userId, namedGitHubRepo);
+          assistantText = githubRepoOverviewAssistantText(details);
+        } else {
+          const installed = await githubInstalledRepositories(owner.userId);
+          assistantText = githubReposAssistantText(installed);
+        }
       } catch {
         assistantText =
           "I could not access your GitHub repositories with your current account authorization. " +
