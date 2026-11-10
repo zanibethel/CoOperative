@@ -1476,7 +1476,7 @@ function OAuthServiceConnectCard({
     let cancelled = false;
     const timer = window.setInterval(() => {
       void fetch(
-        `${endpoint}?sessionId=${encodeURIComponent(sessionId)}`,
+        `${endpoint}${endpoint.includes("?") ? "&" : "?"}sessionId=${encodeURIComponent(sessionId)}`,
         { cache: "no-store" },
       )
         .then(async (response) => {

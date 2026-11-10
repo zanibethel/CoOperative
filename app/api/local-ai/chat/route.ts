@@ -108,6 +108,8 @@ import {
   connectedServiceStatusesForOwner,
 } from "@/lib/integrations/business-service-credentials";
 import { freshNousRuntimeAuthForOwner } from "@/lib/integrations/nous-portal";
+import { githubInstalledRepositories, githubRepositoryOverview } from "@/lib/integrations/github-user-tools";
+import { githubRepositoryListIntent, githubReposAssistantText, githubRepositoryOverviewIntent, githubRepoOverviewAssistantText } from "@/lib/runtime/github-repository-chat";
 import {
   createReferenceImageExecutionUrls,
   verifyNousReferenceImageTransport,
@@ -1142,6 +1144,68 @@ export async function POST(request: Request) {
       .order("created_at", { ascending: false })
       .limit(8);
     if (recentAssistantError) throw recentAssistantError;
+
+    const namedGitHubRepo = githubRepositoryOverviewIntent(input.message);
+    if (input.attachmentIds.length === 0 &&
+      (namedGitHubRepo || githubRepositoryListIntent(input.message))) {
+      let assistantText: string;
+      try {
+        if (namedGitHubRepo) {
+          const details = await githubRepositoryOverview(owner.userId, namedGitHubRepo);
+          assistantText = githubRepoOverviewAssistantText(details);
+        } else {
+          const installed = await githubInstalledRepositories(owner.userId);
+          assistantText = githubReposAssistantText(installed);
+        }
+      } catch {
+        assistantText =
+          "I could not access your GitHub repositories with your current account authorization. " +
+          "Open /connections to connect your own GitHub account or choose an account if several are linked. " +
+          "No repository changes were made.";
+      }
+      const { error: githubMessageError } = await admin
+        .from("local_ai_messages")
+        .insert([
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "user",
+            content: input.message.trim(),
+            attachment_ids: [],
+            job_id: null,
+          },
+          {
+            conversation_id: conversationId,
+            owner_ref: ownerRef,
+            role: "assistant",
+            content: assistantText,
+            attachment_ids: [],
+            job_id: null,
+          },
+        ]);
+      if (githubMessageError) throw githubMessageError;
+
+      await admin.from("local_ai_conversations")
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", conversationId)
+        .eq("owner_ref", ownerRef);
+
+      return NextResponse.json(
+        {
+          status: "completed",
+          execution: "code",
+          capability: "github-repositories",
+          conversationId,
+          conversationTitle,
+          text: assistantText,
+          provider: "github",
+          model: "github-app-tools",
+          routeReason: "Deterministic user-scoped GitHub App installation discovery.",
+          aiNeeded: false,
+        },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
 
     const serviceConnectIntent = planServiceConnectIntent(
       input.message,

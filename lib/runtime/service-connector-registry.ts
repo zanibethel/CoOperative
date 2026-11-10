@@ -15,7 +15,7 @@ export type ServiceConnectorDescriptor = {
   credentialHelpUrl?: string;
 };
 
-export const SERVICE_CONNECTOR_REGISTRY_REVISION = "2026-10-04.1";
+export const SERVICE_CONNECTOR_REGISTRY_REVISION = "2026-11-10.1";
 
 export const SERVICE_CONNECTOR_REGISTRY: ServiceConnectorDescriptor[] = [
   {
@@ -63,13 +63,71 @@ export const SERVICE_CONNECTOR_REGISTRY: ServiceConnectorDescriptor[] = [
     credentialHelpUrl: "https://aistudio.google.com/app/apikey",
   },
   {
+    providerKey: "github",
+    providerName: "GitHub",
+    authKind: "oauth",
+    implementation: "available",
+    aliases: ["github", "git hub", "github repositories", "github repo"],
+    endpoint: "/api/local-ai/oauth-connect?providerKey=github",
+  },
+  {
+    providerKey: "gmail",
+    providerName: "Gmail",
+    authKind: "oauth",
+    implementation: "available",
+    aliases: ["gmail", "google mail"],
+    endpoint: "/api/local-ai/oauth-connect?providerKey=gmail",
+  },
+  {
+    providerKey: "roblox",
+    providerName: "Roblox",
+    authKind: "oauth",
+    implementation: "available",
+    aliases: ["roblox", "roblox studio", "roblox creator"],
+    endpoint: "/api/local-ai/oauth-connect?providerKey=roblox",
+  },
+  {
+    providerKey: "vercel",
+    providerName: "Vercel",
+    authKind: "oauth",
+    implementation: "build-required",
+    aliases: ["vercel", "vercel deployment", "vercel hosting"],
+  },
+  {
+    providerKey: "supabase",
+    providerName: "Supabase",
+    authKind: "oauth",
+    implementation: "build-required",
+    aliases: ["supabase", "supabase database"],
+  },
+  {
+    providerKey: "facebook",
+    providerName: "Facebook",
+    authKind: "oauth",
+    implementation: "build-required",
+    aliases: ["facebook", "facebook pages", "meta facebook"],
+  },
+  {
+    providerKey: "instagram",
+    providerName: "Instagram",
+    authKind: "oauth",
+    implementation: "build-required",
+    aliases: ["instagram", "instagram business", "instagram professional"],
+  },
+  {
+    providerKey: "icloud",
+    providerName: "iCloud",
+    authKind: "guided",
+    implementation: "build-required",
+    aliases: ["icloud", "icloud mail", "apple icloud", "icloud calendar"],
+  },
+  {
     providerKey: "google-workspace",
     providerName: "Google Workspace",
     authKind: "oauth",
     implementation: "build-required",
     aliases: [
       "google workspace",
-      "gmail",
       "google calendar",
       "google drive",
       "google docs",

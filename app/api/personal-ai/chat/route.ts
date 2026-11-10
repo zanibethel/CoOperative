@@ -3,6 +3,8 @@ import { z } from "zod";
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
 import { authenticatedUserId } from "@/lib/supabase/auth";
 import { resolveProfileExecutionPlan } from "@/lib/runtime/profile-execution-router";
+import { planServiceConnectIntent } from "@/lib/runtime/service-connect-intent";
+import { userOAuthProvider } from "@/lib/integrations/user-oauth-providers";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -111,6 +113,39 @@ export async function POST(request: Request) {
 
   try {
     const input = requestSchema.parse(await request.json());
+
+    // Per-user provider linking is code-first and must work even if the user's
+    // personal compute node is offline. No tokens or passwords enter the model.
+    const connection = planServiceConnectIntent(input.message);
+    if (connection) {
+      const supported = connection.type === "available" && connection.kind === "oauth";
+      const provider = supported ? userOAuthProvider(connection.providerKey) : null;
+      const ready = Boolean(provider &&
+        process.env[provider.clientIdEnvironment] &&
+        process.env[provider.clientSecretEnvironment] &&
+        process.env.COOP_PUBLIC_ORIGIN);
+      const providerKey = connection.providerKey;
+      const authorizationPath = ready
+        ? "/connections?provider=" + encodeURIComponent(providerKey)
+        : null;
+      return NextResponse.json(
+        {
+          status: "connection-action",
+          execution: "code",
+          aiNeeded: false,
+          providerKey,
+          providerName: connection.providerName,
+          authorizationPath,
+          text: ready
+            ? "I can link your " + connection.providerName + " account. Select Connect below and sign in directly on the provider's official site. This authorization will belong only to your CoOperative account."
+            : supported
+              ? "The CoOperative operator must finish configuring " + connection.providerName + " before its official sign-in can open. Your account is not yet linked."
+              : "A reusable " + connection.providerName + " connector is not ready for sign-in. It must be built and verified before account access can be enabled. No credentials are needed yet.",
+        },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
     const admin = createAdminSupabaseClient();
     const settings = await settingsFor(userId);
 
