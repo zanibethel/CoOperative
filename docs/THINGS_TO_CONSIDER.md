@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-09
+Last reviewed: 2026-11-10
 
 ## November 9, 2026 — Registry cost drift (existing billing/registry considerations)
 
@@ -14,6 +14,16 @@ Last reviewed: 2026-11-09
 **Evidence:** Connected `ai_model_scan_runs` completed 2026-11-09 13:01 UTC: 667 discovered, 0 new, 20 changed, 0 newly missing. Nineteen changes include pricing fields (DeepSeek V4 Pro/Flash, GPT-OSS 120B/20B, GLM, Qwen and other routes); registry snapshots are not provider invoices. Reuters Nov 9 reports continued AI infrastructure volatility and concern over returns on AI capital expenditure (https://www.reuters.com/business/citigroup-downgrades-us-equities-neutral-ai-concerns-2026-11-09/).
 
 **Possible solution / recommendation:** Reconcile price-delta evidence against provider-native quotes and billed usage; continue existing draft PR #193's execution-time quote, maximum-cost reservation, minimum-margin enforcement, and actual-cost reconciliation tests. No automatic route promotion or paid fallback, pricing change, or deployment. Keep existing registry and billing entries as the canonical implementation considerations.
+
+
+## November 10, 2026 — Registry contraction, routing benchmark and agent security
+
+**Status:** Recommend (existing billing protection, approval gated); Evaluate (routing benchmark and agent-security verification)  
+**Last reviewed:** 2026-11-10
+
+**Evidence:** Connected registry scan completed 2026-11-10 13:01 UTC: **652 routes, 6 new, 64 changed, 2 newly missing** (prior day 667/0/20/0). The route total fell 15; catalog metadata alone does not establish provider invoices or permanent delistings. OpenRouter's Nov 6 official Auto/Auto Code router announcement claims up to 4× benchmark improvement and faster routing; vendor-reported, not a CoOperative benchmark (https://openrouter.ai/blog/auto-and-auto-code-routers/). Uber's Nov 6 engineering report describes tool-boundary intent checks, prompt provenance and shadow replay (https://www.uber.com/gb/en/blog/securing-ai-agents/).
+
+**Possible solution / recommendation:** Preserve the existing billing and deterministic authorization considerations. Verify registry deltas against provider-native prices and available fallback models; complete draft PR #193 quote/reserve/margin/actual-cost tests before any paid routing changes. Evaluate OpenRouter Auto Code only in bounded shadow comparisons of correctness, total billed cost, latency and policy compliance. Evaluate tool-intent provenance/replay on privileged agent actions without granting new permissions. No production routing, pricing or security-policy changes.
 
 
 ## Status key
