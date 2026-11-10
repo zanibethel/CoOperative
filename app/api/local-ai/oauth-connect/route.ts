@@ -62,7 +62,9 @@ export async function GET(request: Request) {
   }
 
   const providerKey = params.get("providerKey") || "";
-  if (!userOAuthProvider(providerKey)) return json({ error: "Unknown provider." }, 400);
+  const provider = userOAuthProvider(providerKey);
+  if (!provider) return json({ error: "Unknown provider." }, 400);
+  const configured = Boolean(process.env[provider.clientIdEnvironment] && process.env[provider.clientSecretEnvironment] && process.env.COOP_PUBLIC_ORIGIN);
   const { data, error } = await admin.from("user_oauth_connections")
     .select("id,provider_key,account_label,granted_scopes,connection_status,expires_at,last_verified_at")
     .eq("user_id", userId).eq("provider_key", providerKey)
@@ -71,6 +73,7 @@ export async function GET(request: Request) {
   const accounts = data || [];
   return json({
     connected: accounts.some((account) => account.connection_status === "connected"),
+    configured,
     providerKey,
     accounts,
   });
