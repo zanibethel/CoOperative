@@ -29,6 +29,7 @@ const providers = SERVICE_CONNECTOR_REGISTRY.filter(
 
 export default function ConnectionsPage() {
   const [accounts, setAccounts] = useState<Record<string, Account[]>>({});
+  const [configured, setConfigured] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loginLinks, setLoginLinks] = useState<Record<string, string>>({});
@@ -41,6 +42,7 @@ export default function ConnectionsPage() {
 
   const refresh = useCallback(async () => {
     const next: Record<string, Account[]> = {};
+    const readiness: Record<string, boolean> = {};
     await Promise.all(providers.filter((p) => p.implementation === "available" && p.authKind === "oauth")
       .map(async (provider) => {
         const response = await fetch(
@@ -49,8 +51,9 @@ export default function ConnectionsPage() {
         );
         if (response.status === 401) throw new Error("Please sign in to CoOperative first.");
         if (!response.ok) throw new Error("Could not load connected accounts.");
-        const payload = await response.json() as { accounts?: Account[] };
+        const payload = await response.json() as { accounts?: Account[]; configured?: boolean };
         next[provider.providerKey] = payload.accounts || [];
+        readiness[provider.providerKey] = payload.configured === true;
       }));
     const setupResponse = await fetch("/api/connections/github?mode=setup", {
       cache: "no-store",
@@ -60,6 +63,7 @@ export default function ConnectionsPage() {
       setGithubInstallUrl(setup.installationUrl || null);
     }
     setAccounts(next);
+    setConfigured(readiness);
     setInitialized(true);
   }, []);
 
@@ -215,6 +219,7 @@ export default function ConnectionsPage() {
       {errors.general ? <p role="alert">{errors.general}</p> : null}
       {providers.map((provider) => {
         const available = provider.implementation === "available" && provider.authKind === "oauth";
+        const ready = available && configured[provider.providerKey] === true;
         const linked = (accounts[provider.providerKey] || [])
           .filter((account) => account.connection_status !== "disconnected");
         return (
@@ -224,13 +229,14 @@ export default function ConnectionsPage() {
               <div>
                 <strong>{provider.providerName}</strong>
                 <p style={{ margin: "4px 0", fontSize: 13, opacity: 0.8 }}>
-                  {available ? (linked.length ? linked.length + " account(s) linked" : "Not connected")
+                  {available ? (!ready ? "Administrator must configure provider sign-in" :
+                    linked.length ? linked.length + " account(s) linked" : "Not connected")
                     : "Connector requires provider-specific setup"}
                 </p>
               </div>
-              <button type="button" disabled={!available || busy !== null}
+              <button type="button" disabled={!ready || busy !== null}
                 onClick={() => void connect(provider.providerKey)}>
-                {busy === provider.providerKey ? "Connecting…" : available ? "Connect account" : "Coming later"}
+                {busy === provider.providerKey ? "Connecting…" : ready ? "Connect account" : available ? "Setup required" : "Coming later"}
               </button>
             </div>
             {linked.map((account) => (
