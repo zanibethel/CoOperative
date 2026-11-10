@@ -27,7 +27,7 @@ const providers: Record<UserOAuthProviderKey, UserOAuthProvider> = {
     clientSecretEnvironment: "COOP_GITHUB_APP_CLIENT_SECRET",
     // Use a GitHub App user authorization (not an overbroad OAuth App repo scope).
     // Repository access still requires a separate user-selected GitHub App installation.
-    scopes: [],
+    scopes: ["offline_access"],
     pkce: false,
     tokenEncoding: "json",
   },
