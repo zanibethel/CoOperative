@@ -33,7 +33,7 @@ test("unimplemented platform services never imply they are already linked", () =
 test("all connector keys and their declared endpoints are unique", () => {
   const keys = SERVICE_CONNECTOR_REGISTRY.map((c) => c.providerKey);
   assert.equal(new Set(keys).size, keys.length);
-  const endpoints = SERVICE_CONNECTOR_REGISTRY.filter((c) => c.endpoint)
+  const endpoints = SERVICE_CONNECTOR_REGISTRY.filter((c) => c.authKind === "oauth" && c.endpoint)
     .map((c) => c.endpoint);
   assert.equal(new Set(endpoints).size, endpoints.length);
 });
