@@ -37,6 +37,7 @@ export default function ConnectionsPage() {
   const [githubInstallUrl, setGithubInstallUrl] = useState<string | null>(null);
 
   const [initialized, setInitialized] = useState(false);
+  const deepLinkStarted = useRef(false);
 
   const refresh = useCallback(async () => {
     const next: Record<string, Account[]> = {};
@@ -67,6 +68,44 @@ export default function ConnectionsPage() {
       setErrors((current) => ({ ...current, general: String(error) }));
     });
   }, [refresh]);
+
+  useEffect(() => {
+    if (deepLinkStarted.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("oauth")) return; // callback must never restart authorization
+    const requested = params.get("provider") || "";
+    const provider = providers.find((item) =>
+      item.providerKey === requested &&
+      item.implementation === "available" &&
+      item.authKind === "oauth"
+    );
+    if (!provider) return;
+    deepLinkStarted.current = true;
+    const providerKey = provider.providerKey;
+    // This is reached only after a user chooses a provider from an
+    // authenticated CoOperative chat. Redirect in the same tab on mobile.
+    void (async () => {
+      setBusy(providerKey);
+      try {
+        const response = await fetch(
+          "/api/local-ai/oauth-connect?providerKey=" + encodeURIComponent(providerKey),
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+        );
+        const data = await response.json() as { verificationUrl?: string; error?: string };
+        if (!response.ok || !data.verificationUrl ||
+          !data.verificationUrl.startsWith("https://")) {
+          throw new Error(data.error || "Could not start provider sign-in.");
+        }
+        window.location.assign(data.verificationUrl);
+      } catch (error) {
+        setErrors((current) => ({
+          ...current,
+          [providerKey]: error instanceof Error ? error.message : "Could not start sign-in.",
+        }));
+        setBusy(null);
+      }
+    })();
+  }, []);
 
   async function connect(providerKey: string) {
     if (busy) return;
