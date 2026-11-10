@@ -43,8 +43,8 @@ export function githubRepoOverviewAssistantText(input: {
     "- #" + pull.number + " " + pull.title.slice(0, 180) + (pull.draft ? " (draft)" : ""),
   );
   return "GitHub repository: " + repo.fullName + (repo.private ? " (private)" : " (public)") +
-    "\\nAccess: " + (repo.canWrite ? "installed with contents-write permission" : "contents read-only") +
-    "\\nOpen pull requests: " + input.openPullRequests.length +
-    (lines.length ? "\\n" + lines.join("\\n") : "") +
-    "\\nThis was retrieved from your authorized GitHub App installation; no changes were made.";
+    "\nAccess: " + (repo.canWrite ? "installed with contents-write permission" : "contents read-only") +
+    "\nOpen pull requests: " + input.openPullRequests.length +
+    (lines.length ? "\n" + lines.join("\n") : "") +
+    "\nThis was retrieved from your authorized GitHub App installation; no changes were made.";
 }
