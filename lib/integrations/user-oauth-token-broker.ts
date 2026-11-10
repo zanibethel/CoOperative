@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import { createAdminSupabaseClient } from "@/lib/supabase-admin";
+import { authenticatedUserId } from "@/lib/supabase/auth";
 import {
   exchangeUserOAuthToken,
   tokenExpiry,
@@ -50,6 +51,10 @@ export async function authorizedUserOAuthAccessToken(
   providerKey: string,
   providerAccountId?: string,
 ): Promise<string> {
+  const currentUserId = await authenticatedUserId();
+  if (!currentUserId || currentUserId !== userId) {
+    throw new Error("You cannot use another user\u0027s connection.");
+  }
   const provider = userOAuthProvider(providerKey);
   if (!provider) throw new Error("Unsupported OAuth provider.");
   const admin = createAdminSupabaseClient();
