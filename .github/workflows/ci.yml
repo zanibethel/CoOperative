@@ -43,4 +43,4 @@ jobs:
         with:
           node-version: 22
       - name: Run per-user OAuth connector tests
-        run: node --experimental-strip-types --test scripts/user-oauth-registry.test.mjs scripts/github-connector-contract.test.mjs scripts/github-repository-chat.test.mjs
+        run: node --experimental-strip-types --test scripts/user-oauth-registry.test.mjs scripts/github-connector-contract.test.mjs scripts/github-repository-chat.test.mjs scripts/connector-security-contract.test.mjs
