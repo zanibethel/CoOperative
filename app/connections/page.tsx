@@ -34,6 +34,7 @@ export default function ConnectionsPage() {
   const [loginLinks, setLoginLinks] = useState<Record<string, string>>({});
   const [githubRepos, setGithubRepos] = useState<Record<string, GithubRepo[]>>({});
   const [repoLoading, setRepoLoading] = useState<string | null>(null);
+  const [githubInstallUrl, setGithubInstallUrl] = useState<string | null>(null);
 
   const [initialized, setInitialized] = useState(false);
 
@@ -50,6 +51,13 @@ export default function ConnectionsPage() {
         const payload = await response.json() as { accounts?: Account[] };
         next[provider.providerKey] = payload.accounts || [];
       }));
+    const setupResponse = await fetch("/api/connections/github?mode=setup", {
+      cache: "no-store",
+    });
+    if (setupResponse.ok) {
+      const setup = await setupResponse.json() as { installationUrl?: string | null };
+      setGithubInstallUrl(setup.installationUrl || null);
+    }
     setAccounts(next);
     setInitialized(true);
   }, []);
@@ -203,6 +211,13 @@ export default function ConnectionsPage() {
                 </button>
               </div>
             ))}
+            {provider.providerKey === "github" && githubInstallUrl ? (
+              <p style={{ fontSize: 13, marginTop: 10 }}>
+                <a href={githubInstallUrl} target="_blank" rel="noopener noreferrer">
+                  Install CoOperative GitHub App on selected repositories
+                </a>
+              </p>
+            ) : null}
             {provider.providerKey === "github" ? Object.entries(githubRepos).map(
               ([connectionId, repositories]) => {
                 if (!(accounts.github || []).some((account) =>
