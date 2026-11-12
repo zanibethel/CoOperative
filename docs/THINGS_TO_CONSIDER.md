@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-11
+Last reviewed: 2026-11-12
 
 ## November 9, 2026 — Registry cost drift (existing billing/registry considerations)
 
@@ -473,3 +473,5 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 
 
 **2026-11-11 registry / execution-cost review (existing billing and model-route items):** Connected scan `0d822af8-ce4f-4e4c-994b-e64515d06796` completed 13:01 UTC with **676 discovered routes, 8 new, 65 changed, 3 newly missing**, versus Nov 10 **652/6/64/2**. This is discovery churn, not proof of invoice-price changes or successful model quality. Reuters Nov 11 reports CoreWeave results lifting AI infrastructure sentiment but continuing capex/financing concerns. **Status:** Execution-time maximum-cost reservation, minimum-margin and actual-cost reconciliation remain Recommend / verification pending; route candidates Evaluate. **Possible solution:** compare route-level changes against primary provider terms, test bounded price-refresh/fallback and actual-bill reconciliation in nonproduction. **Recommendation:** no automatic route promotion, pricing, security-policy or production changes. Sources: connected registry scan; https://www.reuters.com/business/sp-500-nasdaq-futures-rise-after-coreweave-soothes-ai-spending-fears-2026-11-11/ .
+
+**2026-11-12 registry and model evaluation (existing billing/model-route considerations):** Connected scan `dca4964d-5108-4d64-a21c-986b2e984864` completed 13:01 UTC: **675 discovered, 1 new, 20 updated, 3 missing, 1 restored** (Nov 11: 676/8/65/3); missing OpenRouter ByteDance Seed 1.6 Flash, Seed 1.6 and Seed 2.0 Code; new Kimi K3.1 Pro batch; restored Pareto preview. **Status:** Execution-time cost reservation, minimum-margin and actual-cost reconciliation remain Recommend / production verification pending; route candidates Evaluate. **Possible solution:** compare route metadata against primary provider terms, run pinned-task tool/cost/latency evals and bounded failover tests. Nov 11 TLDR Tech links Google's Gemini 4 Carbon release and Chrome Modern Web Guidance 1.0; evaluate compatibility/agent quality in nonproduction only. **Recommendation:** no model promotion, routing, pricing, permissions or deployment changes. Sources: connected scan; https://tldr.tech/tech/2026-11-11 ; https://developer.chrome.com/blog/modern-web-guidance-1-0 .
