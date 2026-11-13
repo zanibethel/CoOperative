@@ -4,7 +4,17 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-12
+Last reviewed: 2026-11-13
+
+
+## November 13, 2026 — Registry pricing and new candidate routes
+
+**Status:** Recommend (existing execution-time billing protections); Evaluate (new routes)  
+**Last reviewed:** 2026-11-13
+
+**Evidence:** Connected registry scan completed 2026-11-13 13:01 UTC: **680 discovered (+5), 5 new, 25 updated, 0 newly missing**. New routes include Gemini 4 Hydrogen (standard/batch), Inkling 2 Small, Seedream 5.5, and Particle 1 free. Existing Ripple, Kimi, and DeepSeek routes have pricing-field changes. These are registry observations, not validated execution costs or capabilities. Reuters Nov 13 reports Cerebras raised its outlook, but that does not validate any specific inference route (https://www.reuters.com/technology/cerebras-shares-surge-profit-surprise-forecast-raise-ease-ai-spending-worries-2026-11-13/).
+
+**Possible solution / recommendation:** Keep execution-time authoritative pricing, maximum-cost reservation, margin floor, and actual-cost reconciliation as the existing approval-gated priority. Compare changed route pricing and benchmark newly discovered routes in capped nonproduction tests; do not promote routes or change prices automatically.
 
 ## November 9, 2026 — Registry cost drift (existing billing/registry considerations)
 
