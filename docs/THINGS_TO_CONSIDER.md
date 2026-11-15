@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-14
+Last reviewed: 2026-11-15
 
 
 ## November 13, 2026 — Registry pricing and new candidate routes
@@ -493,3 +493,11 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **Evidence:** Connected scan `c562e82d-bc50-466d-b1ac-937125e8581c` completed 13:01 UTC: **681 discovered, 3 new, 17 changed, 2 newly missing** (Nov 13: 680/5/25/0). New OpenRouter entries: Tencent HY World 2.1 Panorama, Recraft v4.1 Flash v2, Ling 3.2 Flash free; missing LFM 2.5 2.6B paid/free routes. Discovery and metadata are not actual billing receipts or benchmarked quality. TLDR AI Nov 13 highlights Gemini 4 Hydrogen and self-hosted Claude agents; verify primary access/terms before evaluation (https://tldr.tech/ai/archives).
 
 **Possible solution / recommendation:** Compare affected routes with official terms, verify bounded execution-time price refresh, maximum-cost reservation, minimum-margin fallback, and actual-cost reconciliation; benchmark modalities separately. No production model promotion, provider pricing/routing, security policy or deployment without approval.
+
+## 2026-11-15 — Existing billing and model-registry consideration
+
+**Status:** Billing controls Recommend / production verification pending; changed routes Evaluate. **Last reviewed:** 2026-11-15.
+
+**Evidence:** Connected scan `b9a95a47-a0f3-412b-9824-3509aea83a04` completed 13:01 UTC: **680 discovered (-1), 0 new, 16 changed, 1 newly missing** versus Nov 14 (681/3/17/2). This is registry evidence, not an actual provider invoice. TLDR AI Nov 13 covers Gemini 4 Hydrogen, self-hosted Claude agents and Perplexity Decider; vendor claims require primary documentation and pinned-task testing (https://ai.tldr.tech/p/2026-11-13-tldr-ai).
+
+**Possible solution / recommendation:** Keep execution-time price refresh, maximum-cost reservation, minimum-margin and actual-cost reconciliation as the existing approval-gated priority. Verify changed/missing routes against provider-native terms and bounded receipts; evaluate classifier/agent candidates in shadow mode only. No provider promotion, routing, pricing, security-policy or deployment changes.
