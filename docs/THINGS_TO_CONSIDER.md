@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-15
+Last reviewed: 2026-11-16
 
 
 ## November 13, 2026 — Registry pricing and new candidate routes
@@ -501,3 +501,11 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **Evidence:** Connected scan `b9a95a47-a0f3-412b-9824-3509aea83a04` completed 13:01 UTC: **680 discovered (-1), 0 new, 16 changed, 1 newly missing** versus Nov 14 (681/3/17/2). This is registry evidence, not an actual provider invoice. TLDR AI Nov 13 covers Gemini 4 Hydrogen, self-hosted Claude agents and Perplexity Decider; vendor claims require primary documentation and pinned-task testing (https://ai.tldr.tech/p/2026-11-13-tldr-ai).
 
 **Possible solution / recommendation:** Keep execution-time price refresh, maximum-cost reservation, minimum-margin and actual-cost reconciliation as the existing approval-gated priority. Verify changed/missing routes against provider-native terms and bounded receipts; evaluate classifier/agent candidates in shadow mode only. No provider promotion, routing, pricing, security-policy or deployment changes.
+
+## 2026-11-16 — Existing billing and model-registry consideration
+
+**Status:** Execution-time billing Recommend / production verification pending; changed/new routes Evaluate. **Last reviewed:** 2026-11-16.
+
+**Evidence:** Connected scan `3b6fd433-5058-4ee5-8c4e-5421ce9047d0` completed 13:01 UTC: **678 discovered (-2), 1 new (Qwen4 Max), 26 changed, 3 newly missing** (Step 3.5 Flash, Hunyuan A13B Instruct, Qwen3 VL 30B Thinking). Several changed fields are pricing, including DeepSeek, GLM, GPT-OSS and Gemma; these are registry metadata, not provider invoices. Source: connected CoOperative Supabase scan.
+
+**Possible solution / recommendation:** Validate provider-native terms, failover behavior, execution-time maximum-cost reservation, minimum margin and actual-cost reconciliation with bounded receipts. Benchmark Qwen4 Max in shadow mode only. No model promotion, routing, pricing, permissions or deployment change without approval.
