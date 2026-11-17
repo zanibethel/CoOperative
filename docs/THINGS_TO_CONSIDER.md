@@ -4,7 +4,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-16
+Last reviewed: 2026-11-17
 
 
 ## November 13, 2026 — Registry pricing and new candidate routes
@@ -509,3 +509,11 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **Evidence:** Connected scan `3b6fd433-5058-4ee5-8c4e-5421ce9047d0` completed 13:01 UTC: **678 discovered (-2), 1 new (Qwen4 Max), 26 changed, 3 newly missing** (Step 3.5 Flash, Hunyuan A13B Instruct, Qwen3 VL 30B Thinking). Several changed fields are pricing, including DeepSeek, GLM, GPT-OSS and Gemma; these are registry metadata, not provider invoices. Source: connected CoOperative Supabase scan.
 
 **Possible solution / recommendation:** Validate provider-native terms, failover behavior, execution-time maximum-cost reservation, minimum margin and actual-cost reconciliation with bounded receipts. Benchmark Qwen4 Max in shadow mode only. No model promotion, routing, pricing, permissions or deployment change without approval.
+
+## 2026-11-17 — Existing model registry and execution-time billing consideration
+
+**Status:** Billing controls Recommend / production verification pending; route changes Evaluate. **Last reviewed:** 2026-11-17.
+
+**Evidence:** Connected scan `05ad1788-9d9c-4bf7-ae70-f55896bc3f2e` completed 13:01 UTC: **681 discovered (+3), 2 new, 47 changed, 0 newly missing**. New OpenRouter routes: `bytedance/seedance-2.5-flash` and `tencent/hy4-flash`. Pricing fields changed on DeepSeek, Qwen4 Max, GLM and other entries; capability/limits changed on image/video routes. Registry metadata is not a provider invoice. TLDR AI Nov 16 highlights Qwen4-Max, Embla 1 and agent authorization concepts (https://signup.tldr.tech/ai/2026-11-16).
+
+**Possible solution / recommendation:** Revalidate provider-native pricing and modality/limits, execution-time maximum-cost reservation, minimum-margin enforcement, fallback and actual-cost reconciliation with capped receipts. Benchmark only modality-matched tasks in shadow mode. No production routing, pricing, model promotion, permission or deployment change without approval.
