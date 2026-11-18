@@ -517,3 +517,11 @@ Reference: https://developers.googleblog.com/en/introducing-embeddinggemma-2/
 **Evidence:** Connected scan `05ad1788-9d9c-4bf7-ae70-f55896bc3f2e` completed 13:01 UTC: **681 discovered (+3), 2 new, 47 changed, 0 newly missing**. New OpenRouter routes: `bytedance/seedance-2.5-flash` and `tencent/hy4-flash`. Pricing fields changed on DeepSeek, Qwen4 Max, GLM and other entries; capability/limits changed on image/video routes. Registry metadata is not a provider invoice. TLDR AI Nov 16 highlights Qwen4-Max, Embla 1 and agent authorization concepts (https://signup.tldr.tech/ai/2026-11-16).
 
 **Possible solution / recommendation:** Revalidate provider-native pricing and modality/limits, execution-time maximum-cost reservation, minimum-margin enforcement, fallback and actual-cost reconciliation with capped receipts. Benchmark only modality-matched tasks in shadow mode. No production routing, pricing, model promotion, permission or deployment change without approval.
+
+## 2026-11-18 — Existing model-registry and billing controls
+
+**Status:** Execution-time billing Recommend / production verification pending; new and changed routes Evaluate. **Last reviewed:** 2026-11-18.
+
+**Evidence:** Connected scan completed 13:01 UTC: **691 discovered (+10 versus Nov 17), 10 new, 30 changed, 0 newly missing**. These are discovery/metadata observations, not provider billing receipts. Reuters Nov 18 reports Nvidia's upbeat outlook lifting semiconductor sentiment, but equity-market reactions do not establish provider inference economics (https://www.reuters.com/business/nasdaq-futures-jump-nvidia-forecast-lifts-ai-trade-ahead-anthropic-pricing-2026-11-18/).
+
+**Possible solution / recommendation:** Reconcile changed routes against provider-native terms and test execution-time maximum-cost reservation, margin enforcement, fallback, retries and actual-cost reconciliation using capped nonproduction receipts. Benchmark new routes by modality. No provider promotion, pricing, routing, permissions or deployment without approval.
