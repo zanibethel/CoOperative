@@ -4,7 +4,17 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-17
+Last reviewed: 2026-11-19
+
+
+## November 19, 2026 — Gemini 4 Neon and execution-price drift (existing considerations)
+
+**Status:** Recommend (existing execution-time billing safeguards, approval gated); Evaluate (new route)  
+**Last reviewed:** 2026-11-19
+
+**Evidence:** Connected model scan completed 2026-11-19 13:01 UTC: **693 discovered (+2), 2 new, 15 updated, 0 newly missing**. New OpenRouter routes are `google/gemini-4-neon` and its batch variant. All 15 updates include pricing-field changes (DeepSeek, Kimi, Qwen, GLM, image/video providers). Registry metadata is not a verified provider charge. November 19 reporting also highlights new AI-enabled cybersecurity demand (https://www.reuters.com/legal/litigation/palo-altos-raised-sales-forecast-powers-cybersecurity-stock-rally-2026-11-19/).
+
+**Possible solution / recommendation:** Continue authoritative execution-time pricing, maximum-cost reservation, margin enforcement and actual-cost reconciliation. Compare Neon coding/tool results with current routes using capped, isolated tests and verified billing receipts; evaluate agent authorization and credential isolation against existing controls. Do not promote routes, expand permissions, or change production pricing without approval.
 
 
 ## November 13, 2026 — Registry pricing and new candidate routes
