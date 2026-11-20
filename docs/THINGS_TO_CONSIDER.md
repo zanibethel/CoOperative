@@ -1,10 +1,19 @@
 # Things to Consider — CoOperative
 
+## November 20, 2026 — Registry pricing/fallback and Unison worker evidence
+
+**Status:** Execution-time billing controls **Recommend / production verification pending**; new route **Evaluate**; worker health **Evaluate**. **Last reviewed:** 2026-11-20.
+
+**Evidence:** Connected scan `f5fc3754-4cc9-426e-819e-270a028b0c69` completed 13:01 UTC: **690 discovered (-3), 1 new, 36 changed, 4 newly missing** versus Nov 19 (693/2/15/0). New: `mistralai/pixtral-large-2502`; missing: North Mini Code free, Inkling 2 Small free, Grok Build 0.1 and Llama 3.2 1B Instruct. Discovery is not an execution/billing receipt. `unison_nodes` has 6 records but newest `last_seen_at` is Oct 15; worker health is not established. TLDR AI Nov 19 highlights Gemini 4 Neon, but vendor pricing/benchmark claims need primary verification (https://ai.tldr.tech/p/2026-11-19-tldr-ai).
+
+**Possible solution / recommendation:** Reconcile affected routes against official provider pricing and availability; run capped execution-time price/reservation/margin/retry/fallback/actual-cost tests, plus read-only worker-heartbeat and task-claim verification. No model promotion, permissions, routing, pricing, policy or deployment changes without approval.
+
+
 Living backlog of external findings, possible upgrades, and solution ideas that may improve CoOperative.
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-19
+Last reviewed: 2026-11-20
 
 
 ## November 19, 2026 — Gemini 4 Neon and execution-price drift (existing considerations)
