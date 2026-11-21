@@ -1,5 +1,14 @@
 # Things to Consider — CoOperative
 
+## November 21, 2026 — Existing registry/billing and worker-health considerations
+
+**Status:** Execution-time billing Recommend / production verification pending; route changes Evaluate; Unison worker connectivity Evaluate. **Last reviewed:** 2026-11-21.
+
+**Evidence:** Connected scan `bca674f6-fd9a-45fa-9def-354eca23b3b0` completed 13:01 UTC: **685 discovered (-5 vs Nov 20), 2 new, 24 changed, 7 newly missing**. This is metadata, not execution or billing proof. Six registered Unison nodes; newest stored heartbeat 2026-10-15. TLDR AI Nov 20 discusses Gemini tool retrieval, isolated Mac computer use and agent evaluation; claims require provider-native confirmation (https://signup.tldr.tech/ai/2026-11-20).
+
+**Possible solution / recommendation:** Validate missing/fallback routes, execution-time provider pricing, maximum-cost reservation, minimum-margin enforcement and actual-cost reconciliation with capped receipts; read-only worker heartbeat/claim audit. Assess tool retrieval with scoped authorization, never autonomous payment or permission expansion. No production changes without approval.
+
+
 ## November 20, 2026 — Registry pricing/fallback and Unison worker evidence
 
 **Status:** Execution-time billing controls **Recommend / production verification pending**; new route **Evaluate**; worker health **Evaluate**. **Last reviewed:** 2026-11-20.
@@ -13,7 +22,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-20
+Last reviewed: 2026-11-21
 
 
 ## November 19, 2026 — Gemini 4 Neon and execution-price drift (existing considerations)
