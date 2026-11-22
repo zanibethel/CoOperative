@@ -1,5 +1,14 @@
 # Things to Consider — CoOperative
 
+## November 22, 2026 — Existing execution-time billing and Unison health considerations
+
+**Status:** Billing controls Recommend / production verification pending; registry changes Evaluate; worker health Evaluate. **Last reviewed:** 2026-11-22.
+
+**Evidence:** Connected registry scan `358fcff2-41c6-400f-9cb3-f42cf050dbfa` completed 13:01 UTC: **685 discovered (unchanged), 0 new, 15 changed, 0 newly missing**. Metadata changes are not execution invoices. Six Unison nodes registered; latest stored heartbeat 2026-10-15. TLDR AI Nov 20 highlights tool retrieval and Stripe agent evaluations (https://tldr.tech/ai/archives); neither proves safe delegated permissions or payment integration.
+
+**Possible solution / recommendation:** Validate changed prices against provider-native terms and capped receipts, with maximum-cost reservation, minimum-margin enforcement, fallback and actual-cost reconciliation. Audit worker heartbeats and task claims read-only; keep tool discovery separate from user authorization. No routing, billing, security-policy, production or permission changes without approval.
+
+
 ## November 21, 2026 — Existing registry/billing and worker-health considerations
 
 **Status:** Execution-time billing Recommend / production verification pending; route changes Evaluate; Unison worker connectivity Evaluate. **Last reviewed:** 2026-11-21.
