@@ -1,5 +1,14 @@
 # Things to Consider — CoOperative
 
+## November 23, 2026 — Existing execution-cost, registry, and Unison health considerations
+
+**Status:** Execution-time billing safeguards Recommend / verification pending; new route Evaluate; worker connectivity Evaluate. **Last reviewed:** 2026-11-23.
+
+**Evidence:** Connected registry scan `98895ffe-35d0-4438-bdc8-056bbc3b7356` completed 13:01 UTC: **689 discovered (+4 versus Nov 22), 1 new, 14 changed, 0 newly missing**. Discovery count delta is not the same as new-route event count. No actual provider invoice, routing benchmark, or verified production margin test was obtained. Six Unison nodes are registered; latest stored heartbeat remains **2026-10-15 05:42 UTC**. Reuters Nov 23 reports a sharp AI-equity rebound after Nvidia leadership news, but share-price movements are not evidence of inference-price changes. TLDR Nov 23 full editions were not independently retrievable. Sources: connected Supabase scan; https://www.reuters.com/commentary/reuters-open-interest/global-markets-view-usa-2026-11-23/ .
+
+**Possible solution / recommendation:** Compare route-level changes with provider-native pricing and actual billed receipts; verify execution-time maximum-cost reservation, minimum margin, retries/fallback and reconciliation in capped nonproduction tests. Read-only verify worker heartbeats, task claims and OS patch state before assigning workloads. No provider promotion, routing/pricing, credentials, security policy or deployment change without approval.
+
+
 ## November 22, 2026 — Existing execution-time billing and Unison health considerations
 
 **Status:** Billing controls Recommend / production verification pending; registry changes Evaluate; worker health Evaluate. **Last reviewed:** 2026-11-22.
@@ -31,7 +40,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-21
+Last reviewed: 2026-11-23
 
 
 ## November 19, 2026 — Gemini 4 Neon and execution-price drift (existing considerations)
