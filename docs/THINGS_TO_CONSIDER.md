@@ -2,7 +2,7 @@
 
 ## November 23, 2026 — Existing execution-cost, registry, and Unison health considerations
 
-**Status:** Execution-time billing safeguards Recommend / verification pending; new route Evaluate; worker connectivity Evaluate. **Last reviewed:** 2026-11-24.
+**Status:** Execution-time billing safeguards Recommend / verification pending; new route Evaluate; worker connectivity Evaluate. **Last reviewed:** 2026-11-25.
 
 **Evidence:** Connected registry scan `98895ffe-35d0-4438-bdc8-056bbc3b7356` completed 13:01 UTC: **689 discovered (+4 versus Nov 22), 1 new, 14 changed, 0 newly missing**. Discovery count delta is not the same as new-route event count. No actual provider invoice, routing benchmark, or verified production margin test was obtained. Six Unison nodes are registered; latest stored heartbeat remains **2026-10-15 05:42 UTC**. Reuters Nov 23 reports a sharp AI-equity rebound after Nvidia leadership news, but share-price movements are not evidence of inference-price changes. TLDR Nov 23 full editions were not independently retrievable. Sources: connected Supabase scan; https://www.reuters.com/commentary/reuters-open-interest/global-markets-view-usa-2026-11-23/ .
 
@@ -10,6 +10,8 @@
 
 
 **2026-11-24 evidence (last reviewed):** Scan `017b4284-e19e-43d1-8476-a5d555188244` completed 13:01 UTC: 685 discovered (-4), 0 new, 20 changed, 4 missing; 613 scored routes. Six registered workers, latest heartbeat Oct 15 05:42 UTC. Billing and worker statuses unchanged; verify missing fallback routes and bounded actual-cost receipts. OpenAI/Cisco Shirudo (Nov 23, https://openai.com/index/introducing-shirudo/) adds an Evaluate-only Linux runtime mitigation candidate under existing runtime security consideration: signed eBPF shields, operator approval, controlled test evidence only. Consider disposable Linux VM evaluation, compatibility, privilege, rollback and overhead; not a patch substitute or applicable by default to managed hosting/Mac/Windows/Android. No production changes.
+
+**2026-11-25 evidence (last reviewed):** Scan `15c84d88-056f-4cc1-bf6f-3404f1c9aa72` completed 13:01 UTC: 682 discovered (-3), 3 new, 20 updated, 6 missing; 2,449 task-score rows. New OpenRouter Solar Mini 4.5, Solar Pro 4 Contributor and MiMo v2.6 Flash MOPD; missing Mistral Medium 3/3.1, MiMo v2.5, Dots 3 Note free and Kling v3 pro/std. Pricing metadata changed on DeepSeek/Qwen/GLM and others. Billing Recommend / verification pending; routes Evaluate only. Six registered workers, latest heartbeat Oct 15 unchanged. Verify fallback and provider-native terms with capped receipts; no production changes.
 
 ## November 22, 2026 — Existing execution-time billing and Unison health considerations
 
@@ -42,7 +44,7 @@ Living backlog of external findings, possible upgrades, and solution ideas that 
 
 These are **not approved implementation tasks**. Each item should be re-validated against the current codebase, current provider/docs state, cost, security, and product goals before implementation. Move an item forward only after explicit user approval.
 
-Last reviewed: 2026-11-23
+Last reviewed: 2026-11-25
 
 
 ## November 19, 2026 — Gemini 4 Neon and execution-price drift (existing considerations)
